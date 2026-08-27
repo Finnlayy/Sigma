@@ -1794,8 +1794,10 @@ async def ai_manifest_learn():
 
 
 from app.server.routes_quant import router as quant_router  # noqa: E402
+from app.server.routes_sigma import router as sigma_router  # noqa: E402
 
 app.include_router(quant_router)
+app.include_router(sigma_router)   # Blueprint L4: Loop A-E Routen (§7)
 
 
 # =====================================================================

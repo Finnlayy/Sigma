@@ -1,0 +1,115 @@
+# =============================================================================
+# app/tv/selectors.yaml
+# TradingView DOM-Selektoren mit Multi-Level-Fallback (Blueprint §16).
+# Reihenfolge je Element: data-name -> ARIA -> CSS -> Text.
+# Self-Healing: app/tv/selector_manager.py laedt lokal -> remote -> builtin.
+# =============================================================================
+version: "3.0"
+
+chart:
+  symbol_search_button:
+    - '[data-name="legend-source-title"]'
+    - 'button#header-toolbar-symbol-search'
+    - '[aria-label="Symbol Search"]'
+  symbol_search_input:
+    - 'input[data-role="search"]'
+    - 'input[placeholder*="Symbol"]'
+  symbol_search_first_result:
+    - 'tr[data-symbol-short]'
+    - '.itemRow-oRSs8UQo'
+  interval_button:
+    - '#header-toolbar-intervals button'
+    - '[data-name="menu-inner"] [data-value]'
+  interval_option:
+    - '[data-value="{interval}"]'
+    - 'div[role="menuitem"]:has-text("{interval}")'
+
+strategy_tester:
+  tab:
+    - 'button[data-name="backtesting"]'
+    - '[data-name="backtesting-tab"]'
+    - 'button:has-text("Strategy Tester")'
+  performance_tab:
+    - 'button[data-name="performance"]'
+    - 'button:has-text("Performance Summary")'
+  trades_tab:
+    - 'button[data-name="trades"]'
+    - 'button:has-text("List of Trades")'
+  export_button:
+    - '[data-name="export-data"]'
+    - 'button[aria-label*="Export"]'
+    - 'button:has-text("Export")'
+  export_confirm:
+    - 'button[data-name="submit-button"]'
+    - 'button:has-text("Export")'
+  deep_backtest_toggle:
+    - '[data-name="deep-backtest"]'
+  running_indicator:
+    - '[data-name="report-loading"]'
+    - '.loader-jjKtBOgs'
+
+properties:
+  settings_button:
+    - '[data-name="legend-settings-action"]'
+    - 'button[aria-label="Settings"]'
+  inputs_tab:
+    - 'button[data-name="inputs"]'
+    - 'div[data-name="tab-inputs"]'
+    - 'button:has-text("Inputs")'
+  input_field:
+    - 'div[data-name="{param}"] input'
+    - 'input[data-property-id="{param}"]'
+  ok_button:
+    - 'button[data-name="submit-button"]'
+    - 'button:has-text("Ok")'
+  defaults_button:
+    - 'button:has-text("Defaults")'
+
+pine_editor:
+  tab:
+    - 'button[data-name="scripteditor"]'
+    - 'button:has-text("Pine Editor")'
+  code_area:
+    - 'div.view-lines'
+    - 'textarea.inputarea'
+  save_button:
+    - '[data-name="save"]'
+    - 'button[aria-label*="Save"]'
+  add_to_chart_button:
+    - '[data-name="add-script-to-chart"]'
+    - 'button:has-text("Add to chart")'
+  compile_error:
+    - '.errorMessage-Q3O0kFYk'
+    - '[data-name="console-error"]'
+
+alerts:
+  create_button:
+    - '[data-name="alerts-create-button"]'
+    - 'button[aria-label="Create Alert"]'
+  manage_panel:
+    - '[data-name="alerts-panel"]'
+  alert_row:
+    - '[data-name="alert-item"]'
+  alert_toggle:
+    - '[data-name="alert-item"] input[type="checkbox"]'
+  message_field:
+    - 'textarea[data-name="alert-message"]'
+    - 'textarea[name="description"]'
+  webhook_checkbox:
+    - 'input[data-name="webhook-toggle"]'
+    - 'input[name="webhook"]'
+  webhook_url_field:
+    - 'input[data-name="webhook-url"]'
+    - 'input[name="webhookUrl"]'
+  submit_button:
+    - 'button[data-name="submit"]'
+    - 'button:has-text("Create")'
+
+account:
+  user_menu:
+    - 'button[aria-label="Open user menu"]'
+  my_scripts_link:
+    - 'a[href*="/scripts/"]'
+  script_row:
+    - '.tv-feed__item'
+    - '[data-widget-type="user-script"]'
