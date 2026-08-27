@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec on GitHub (`docs/BLUEPRINT-SIGMA.md`)  
+> **Status:** Canonical Spec Freeze (with audit hardenings §16–§17) — `docs/BLUEPRINT-SIGMA.md`  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
 > **Quelle Alpha:** `Finnlayy/Alpha` / lokaler Tree `project-alpha`
@@ -137,7 +137,9 @@ flowchart TB
 | Scraper-Client | `app/tv/scraper_client.py` | HTTP → `:8001` |
 | Symbol/Interval Map | `app/tv/symbol_map.py`, `interval_map.py` | `BTC/USD`→`KRAKEN/BTCUSD`, `15`→`15m` |
 | Strategy Tester Driver | `app/tv/strategy_tester_driver.py` | Playwright E2E |
-| Selector Map | `app/tv/selectors.yaml` | DOM-Fallbacks |
+| Selector Map | `app/tv/selectors.yaml` | DOM-Fallbacks (lokal + remote self-heal) |
+| SelectorManager | `app/tv/selector_manager.py` | Self-Healing YAML: lokal → remote → builtin; atomic; hot-reload |
+| Alert Provisioner | `app/tv/alert_provisioner.py` | TV Alert upsert/enable/disable; M8-gekoppelt |
 | TV Worker | `app/tv/worker.py` | Redis/File-Queue Consumer |
 | Login Bootstrap | `bin/sigma-tv-login` | Speichert `tv_storage_state.json` |
 | CSV Seam | [`app/backtest/tv_csv.py`](app/backtest/tv_csv.py) (existiert) | Params/Trades/Perf → `BacktestResult` |
@@ -146,7 +148,6 @@ flowchart TB
 | Webhook | Route in `app/server/main.py` | `POST /api/v1/signal/webhook` |
 | Kraken Bridge | `app/execution/KrakenCliBridge.py` | `kraken trade add-order` Subprocess |
 | Safety | `app/execution/SafetyGuard.py` | KILL_SWITCH / PAUSE / daily loss / consecutive errors |
-| Alert Provisioner | `app/tv/alert_provisioner.py` | TV Alert upsert/enable/disable; M8-gekoppelt |
 | Config | `config/autonomy-level-4.yaml` + `app/core/config.py` `SigmaConfig` | `SIGMA_*` Env |
 
 ### 3.3 Streichen / ersetzen
@@ -329,7 +330,6 @@ flowchart LR
 
 **UI:** StrategyCard zeigt gekoppelt `runner` + `m8.status` + `alert.status` + `budget_multiplier`. Autopsy/SSE wie Alpha.
 
-**Alert-Provisioner** `app/tv/alert_provisioner.py` — Jobs auf TV-Worker-Queue; idempotent Upsert `sigma:{strategy_id}`; speichert `tv_alert_id` an Strategy-Row.
 
 **Config:**
 
@@ -767,4 +767,94 @@ m8:
 - Manueller CSV-Primärpfad  
 - Windows-TS / dual host  
 - Full shadcn-Migration in v1  
-- Stummer Fallback auf lokale `BacktestEngine` in Prod  
+- Stummer Fallback auf lokale `BacktestEngine` in Prod
+
+
+## 16. Self-Healing Selector- & Config-Engine (fest)
+
+**Ja — als Ergänzung zu §3.2 aufgenommen.** Playwright darf bei fehlender/veralteter/`selectors.yaml` nicht fatal crashen.
+
+```mermaid
+flowchart TB
+  Start[Worker reads selectors.yaml]
+  Start --> Found{Found and valid?}
+  Found -->|yes| Local[Load local]
+  Found -->|no| Heal[Self-Healing Recovery]
+  Heal --> Remote[1 Remote Fetch GitHub raw CDN S3]
+  Heal --> Builtin[2 Builtin in-memory fallback]
+  Remote --> Atomic[Atomic write plus schema validate]
+  Builtin --> Atomic
+  Atomic --> Hot[Hot-reload in Driver]
+  Local --> Use[Driver get category element]
+```
+
+### 16.1 Modul `app/tv/selector_manager.py`
+
+| Verhalten | Spec |
+|-----------|------|
+| Local path | `./app/tv/selectors.yaml` (oder `SIGMA_SELECTORS_PATH`) |
+| Remote URL | `SIGMA_SELECTORS_REMOTE_URL` (z. B. GitHub raw im Sigma-Repo oder `sigma-configs`) |
+| Stufe 1 | Lokal laden + YAML parse |
+| Stufe 2 | Bei Fehlen/Parse-Error: HTTP GET remote, Schema-Check (`version` + `chart` dict), atomic `.tmp` → replace |
+| Stufe 3 | Bei Remote-Fail: `BUILTIN_DEFAULT_SELECTORS` im Code; optional lokal persistieren |
+| Circuit breaker | max 3 Downloads / 5 min, exponential backoff |
+| Integrity | optional `SIGMA_SELECTORS_SHA256`; sonst Struktur-Validation via dict schema |
+| API | `get(category, element_name) → list[str]` Fallback-Kette |
+| Live miss | Wenn alle Selektoren failen: **einmal** `download_remote_selectors()` + retry; dann `ELEMENT_NOT_FOUND` / Operator-Alert — **keine** Endlosschleife |
+
+Selector-Ketten: Text / `data-name` / ARIA / CSS — Multi-Level in YAML.
+
+Gleiches Muster darf für kritische Config-Snippets gelten (`AutoUpdatingConfigManager`), Primary Config bleibt weiterhin `config/autonomy-level-4.yaml` im Deploy.
+
+### 16.2 Driver-Nutzung
+
+`click_element_with_fallback(page, category, name)` iteriert Manager-Selektoren; bei Total-Miss Remote-Refresh einmalig; dann raise mit Code für UI/Job-Error.
+
+---
+
+## 17. Spec-Freeze Auflagen (Audit Creffektivität)
+
+Audit-Urteil: **Freeze bestätigt mit Auflagen.** Folgendes ist **verbindlich** im Spec (nicht optional):
+
+### 17.1 Webhook-Authentifizierung (Hoch)
+
+- `PineAlertPayload` enthält `secret: str` (oder Header `X-Sigma-Webhook-Secret`).
+- Core vergleicht mit `SIGMA_WEBHOOK_SECRET` (timing-safe).
+- Mismatch → 401, kein Order, Audit-Log.
+- Alert-Provisioner schreibt Secret in die TV Alert Message-Template.
+
+### 17.2 Timestamp-Normalisierung (Niedrig)
+
+- `timestamp`: wenn `> 1e11` → ms→s (`// 1000`).
+- Reject wenn Signal älter als `max(2 * interval_seconds, 120)` (Stale).
+
+### 17.3 Kraken CLI Error-Parsing (Mittel)
+
+`KrakenCliBridge` wertet **stdout/stderr Text** aus, nicht nur Exit-Code:
+
+- Match `EOrder:`, `EGeneral:`, `EAPI:` → Execution **failed**, M8/consecutive_errors erhöhen.
+- Exit 0 + Error-String im Output = trotzdem Fail.
+
+### 17.4 GA-Laufzeit-Härtung (Hoch)
+
+| Maßnahme | Default |
+|----------|---------|
+| Population | max **15** (UI darf nicht still 50 als Default setzen) |
+| Generationen | max **5** Default |
+| Param-Cache | DuckDB/File-Cache nach `cache_key` — Pflicht |
+| Early termination | keine Fitness-Verbesserung über **3** Generationen → Stop |
+| Concurrency | weiterhin **1** Playwright |
+
+Erwartete Runtime-Kommunikation in UI: ETA / Job-Progress.
+
+### 17.5 DOM / Alert-Provisioning
+
+- Multi-Fallback-Selektoren + Self-Healing (§16).
+- Bei `SELECTOR_NOT_FOUND`: Job failed + Operator-Warnung (SSE/Log), kein Spin-Loop.
+- Alert upsert idempotent nach `tv_alert_id` / Name `sigma:{id}` — orphan cleanup Job periodisch (`reconcile_alerts`).
+
+### 17.6 Audit-Stärken (beibehalten)
+
+3-Loop-Trennung; Strategy≡TV; THROTTLED lässt Alert an; CSV unter `./data/strategies/{id}/`; Scraper :8001 entkoppelt.
+
+---
