@@ -1,19 +1,32 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze (§16–§18: Self-Heal, Audit gates, Academy Loop D) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.0 (5-Loop A–E, Virtual Bots, FlexLayout Terminal, Reward/ONNX/Telegram) — `docs/BLUEPRINT-SIGMA.md`  
+> **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
 > **Quelle Alpha:** `Finnlayy/Alpha` / lokaler Tree `project-alpha`
 
-Dieses Dokument ist die verbindliche Blaupause. Die Cursor-Plan-Datei spiegelt denselben Inhalt.
+Dieses Dokument ist die verbindliche Blaupause. Der Masterprompt ist die Persona-/Axiom-Schicht für KI-Engines.
 
 ---
 
 ## 0. Was Sigma ist (und nicht ist)
 
-**Ist:** Ubuntu-natives Level-4 Quant-/Execution-Framework. **Jede Strategie ist eine TradingView-/Pine-Strategie** — Einstellungen, Backtest, Alerts, Runner-Leben hängen an TV und werden von Sigma UI + Playwright darüber gesteuert. Risk/Execution (M8, Kelly, Kraken CLI) bleibt lokal, ist aber **kein** Ersatz für die Strategiesource.
+**Ist:** Ubuntu-natives Level-4 Quant-/Execution-Framework — umgangssprachlich **„Privates Pionex auf Steroiden“**: Pionex-Style Bot-Karten mit festem Budget, angetrieben von TradingView Pine v6, ausgeführt BaFin-tauglich über **Kraken CLI**.
 
-**Ist nicht:** Alpha-Archetyp-Interpreter (`sma_cross` / `rsi_reversion`) als Primärstrategie. Lokale BacktestEngine als Strategy-Wahrheit. Yahoo-MCP als „TV Strategy“. Manuelles TV-Klicken als Betriebsvoraussetzung. Windows-TS-Portal.
+**Jede Strategie ist eine TradingView-/Pine-Strategie** — Einstellungen, Backtest, Alerts, Runner-Leben hängen an TV und werden von Sigma UI + Playwright darüber gesteuert. Risk/Execution (Virtual Bots, M8, Kelly, Kraken CLI) bleibt lokal, ist aber **kein** Ersatz für die Strategiesource.
+
+**Ist nicht:** Alpha-Archetyp-Interpreter (`sma_cross` / `rsi_reversion`) als Primärstrategie. Lokale BacktestEngine als Strategy-Wahrheit. Yahoo-MCP als „TV Strategy“. Manuelles TV-Klicken als Betriebsvoraussetzung. Windows-TS-Portal. Pionex-Live-Futures in DE (nur optionales Lab/`spot_only`).
+
+### 0.0 Produktvision
+
+| Dimension | Sigma |
+|-----------|-------|
+| Usability | Strategie wählen → Budget zuweisen → Start; isolierter Bot-PnL |
+| Power | Beliebige Pine v6; TV Strategy Tester + GA; Scout; Academy; Offline-LLM + Telegram |
+| Engine | Kraken CLI Ubuntu; Ring-Fencing; native Bracket-SL + Deadman |
+
+Strategy-Card Pflichtfelder: `RUNNING`/`PAUSED`/`QUARANTINED`, Kapital EUR, Bot-PnL, Max-Loss, XP/Strike.
 
 ### 0.1 Grundsatz: Strategy ≡ TradingView
 
@@ -63,49 +76,59 @@ Alles, was „Strategie“ heißt, bezieht sich auf TV und arbeitet darüber:
 
 ---
 
-## 2. Architektur — vier Loops (A–D)
+## 2. Architektur — fünf Loops (A–E)
 
 ```mermaid
 flowchart TB
   subgraph loopA [Loop A Live Execution]
     PineAlert[Pine Alert Webhook]
-    Safety[Safety L4 Files]
-    ONNX[ONNX plus Kelly]
-    Judge[JudgeEngine 8 Gates]
-    PaperOrLive[PaperEngine or Kraken CLI]
-    M8[M8StateEngine Vault Autopsy]
-    PineAlert --> Safety --> ONNX --> Judge --> PaperOrLive --> M8
+    Safety[Secret and Safety]
+    ONNX[SelfOpt ONNX plus Kelly]
+    Judge[Judge plus RegimeGate]
+    VBot[VirtualBot Sizing]
+    Exec[Paper or Kraken Bracket SL]
+    M8[M8 Autopsy]
+    PineAlert --> Safety --> ONNX --> Judge --> VBot --> Exec --> M8
   end
-
-  subgraph loopB [Loop B Autonomous Backtest GA]
-    Monaco[Monaco Pine Source]
-    GA[GeneticOptimizer]
-    Queue[TV Job Queue concurrency 1]
-    Driver[Playwright StrategyTesterDriver]
-    TVWeb[TradingView Web Session]
-    CSV[Result CSVs]
-    Parse[tv_csv to BacktestResult]
-    Gate[DSR Shadow Gate]
-    Monaco --> GA --> Queue --> Driver --> TVWeb --> CSV --> Parse --> Gate
-    Gate -->|PASS| Deploy[Deploy Strategy plus mark_ga_recalibration]
-    Gate -->|FAIL| GA
+  subgraph loopB [Loop B Optimization]
+    GA[Genetic Optimizer]
+    TVQ[Playwright Queue c1]
+    CSV[tv_csv BacktestResult]
+    Shadow[DSR Shadow Gate]
+    GA --> TVQ --> CSV --> Shadow
   end
-
-  subgraph loopC [Loop C Market Data]
-    Scraper[Scraper Sidecar 8001]
+  subgraph loopC [Loop C Market Feed]
+    Scraper[Scraper 8001]
     Lake[DuckDB Lake]
-    UICharts[MarketPanel Charts]
-    Scraper --> Lake --> UICharts
-    Scraper --> ONNX
+    Radar[Regime Detector]
+    Scraper --> Lake --> Radar
+  end
+  subgraph loopD [Loop D Scout Incubator]
+    Scout[Scout Daemon]
+    Paper[Pure Paper Pair Runs]
+    Feed[Feed Academy]
+    Scout --> Paper --> Feed
+  end
+  subgraph loopE [Loop E Academy SelfHeal]
+    Academy[Badges Reward Allocator]
+    Causal[Causal Autopsy]
+    Mem[Memory Watchdog]
+    Synth[Pine Synthesizer]
+    Feed --> Academy
+    M8 --> Academy
+    Academy --> Alloc[Alert Enable Disable]
   end
 ```
 
 | Loop | Trigger | Output | Autonomie |
 |------|---------|--------|-----------|
-| **A Live** | TradingView Alert HTTP POST | Order / Paper Fill + Autopsy | Vollautomatisch |
-| **B Backtest/GA** | UI „Run“ oder GA-Generation | `BacktestResult` + ShadowGate | **Vollautomatisch** (Playwright, kein Mensch) |
-| **C Feed** | Poll/On-demand | OHLCV + Indikatoren | Vollautomatisch |
-| **D Academy** | Trade Close / Cron | Badges + Allocator Alert-Steuerung | Vollautomatisch |
+| **A Live** | TV Alert HTTP POST | Order / Paper Fill + Autopsy | Vollautomatisch |
+| **B Backtest/GA** | UI Run / GA | `BacktestResult` + ShadowGate | Vollautomatisch (Playwright) |
+| **C Feed** | Poll / On-demand | OHLCV + Regime-Vektor | Vollautomatisch |
+| **D Scout** | Cron / Queue | Paper-Trades → Academy | Vollautomatisch |
+| **E Academy+Heal** | Trade Close / Cron | Badges, Reward, Allocator, Self-Heal, RAM | Vollautomatisch |
+
+**Umbenennung:** Früheres „Loop D Academy“ (§18) ist jetzt **Loop E**. **Loop D = Scout & Incubator**.
 
 ---
 
@@ -125,7 +148,7 @@ flowchart TB
 | Telemetry M-00 | [`app/core/telemetry.py`](app/core/telemetry.py) | SHADOW_ACTIVE / LIVE_APPROVED / EMERGENCY_HALT |
 | DuckDB + Lake | `app/core/duckdb_store.py` | Persistenz |
 | GeneticOptimizer | [`app/optimizer/GeneticOptimizer.py`](app/optimizer/GeneticOptimizer.py) | Orchestrierung behalten; **Eval ersetzen** |
-| Academy | [`app/optimizer/AcademyRegistry.py`](app/optimizer/AcademyRegistry.py) | **Loop D:** Profiling/Badges (kein synthetischer Primär-Backtest) |
+| Academy | [`app/optimizer/AcademyRegistry.py`](app/optimizer/AcademyRegistry.py) | **Loop E:** Profiling/Badges (kein synthetischer Primär-Backtest) |
 | React Command Center | [`src/`](src/) | Behalten, anpassen |
 | Types | [`src/types.ts`](src/types.ts) | `BacktestResult`, `TradingStrategy`, Gene |
 | Ubuntu stack Vorlage | [`stacks/ubuntu/`](stacks/ubuntu/) | Umbenennen alpha→sigma |
@@ -146,7 +169,17 @@ flowchart TB
 | CSV Seam | [`app/backtest/tv_csv.py`](app/backtest/tv_csv.py) (existiert) | Params/Trades/Perf → `BacktestResult` |
 | Backtest Facade | [`app/backtest/TvMcpBacktest.py`](app/backtest/TvMcpBacktest.py) | Umbenennen sinnvoll → `TvBacktestService`; Queue+Cache |
 | Quant Engine | `app/quant/onnx_kelly.py` | ONNX + Half-Kelly |
-| Strategy Allocator | `app/optimizer/StrategyAllocator.py` | Badge+Regime → TV Alert an/aus (Loop D) |
+| Strategy Allocator | `app/optimizer/StrategyAllocator.py` | Badge+Regime → TV Alert an/aus (Loop E) |
+| Virtual Bot Engine | `app/execution/VirtualBotEngine.py` | Budget-Ringfence, Sizing, Max-Loss, Profit Sweep |
+| Regime Detector | `app/quant/regime_detector.py` | EMA-Delta, ATR-Perzentile, Hurst; Judge+Allocator |
+| Self-Opt ONNX | `app/quant/self_optimizing_onnx.py` | Brier, Temperature, Hot-Reload |
+| Reward Shaping | `app/optimizer/reward_shaping.py` | XP/Strike → M8 Multiplier / Quarantäne |
+| Memory Watchdog | `app/core/memory_watchdog.py` | 4-Stufen RAM Guard; Idle-only |
+| Deadman Switch | `app/execution/deadman_switch_daemon.py` | Heartbeat; Limit-Cancel |
+| Telegram Operator | `app/services/telegram_bot_operator.py` | Bidirektional LLM + Fast-Path /kill |
+| Scout Daemon | `app/scout/ScoutDaemon.py` | Loop D Paper Pairing |
+| YAML Resolver | `app/tv/yaml_resolver.py` | Self-Heal selectors/param_bounds |
+| Sigma Terminal | `src/components/SigmaTerminal.tsx` | FlexLayout 11-Panel Workspace |
 | Webhook | Route in `app/server/main.py` | `POST /api/v1/signal/webhook` |
 | Kraken Bridge | `app/execution/KrakenCliBridge.py` | `kraken trade add-order` Subprocess |
 | Safety | `app/execution/SafetyGuard.py` | KILL_SWITCH / PAUSE / daily loss / consecutive errors |
@@ -541,11 +574,15 @@ Alle M8-/Academy-/Lake-/Strategy-CRUD-/Dashboard-Routen aus Alpha `main.py` + `r
 
 ---
 
-## 8. UI — Strategie-Bibliothek (Pflicht, bedienbar)
+## 8. UI — Sigma Terminal + Strategie-Bibliothek
 
-**Bewusst und fest:** Sigma hat eine **erste Klasse Strategie-Bibliothek im UI** — nicht nur einen versteckten Editor. Du verwaltest alle TV-/Pine-Strategien sauber dort; Playwright spricht TV im Hintergrund.
+**Primärshell:** Dockable FlexLayout Workspace [`SigmaTerminal.tsx`](../src/components/SigmaTerminal.tsx) (flexlayout-react, lucide, monaco, lightweight-charts). Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS`. Layout in `localStorage`.
 
-Kein Full-shadcn-Rewrite; Alpha Command Center bleibt die Shell, Bibliothek wird ausgebaut.
+**Panel-Registry (11):** VirtualBotDeck, PineStudio, MarketChart, LLMConsole, AcademyBadgeMatrix, RiskGauges, SelfOptimizingMLPanel, TelegramOperatorPanel, DeadmanSwitchPanel, RewardXPMatrixPanel, MemoryWatchdogPanel.
+
+**VirtualBotDeck (Pionex-Style):** Bot-Karten mit Budget, Equity, PnL, Max-Loss, Style-Badge, Start/Pause → VirtualBotEngine + Alert-Provisioner.
+
+Strategie-Bibliothek bleibt erste Klasse; Playwright spricht TV im Hintergrund. Kein Full-shadcn-Rewrite.
 
 ### 8.1 Bibliotheks-Oberfläche
 
@@ -863,23 +900,27 @@ Erwartete Runtime-Kommunikation in UI: ETA / Job-Progress.
 ---
 
 
-## 18. Loop D — Sigma-Akademie (Meta-Learning & Strategy Profiler)
+## 18. Loop E — Sigma-Akademie (Meta-Learning & Strategy Profiler)
 
-**Rollenwechsel:** Die Akademie ist **kein** synthetischer Drill-Backtester mehr. Sie ist das Trainings- und Auswertungszentrum für den AI-Meta-Layer (Strategy Allocator & Regime Router) und schließt die Feedback-Schleife **M8 Autopsy → Badges → Alert-Allokation**.
+> **Hinweis:** Früher als „Loop D Academy“ bezeichnet. Loop D ist jetzt Scout/Incubator (§19).
+
+**Rollenwechsel:** Die Akademie ist **kein** synthetischer Drill-Backtester mehr. Sie ist das Trainings- und Auswertungszentrum für den AI-Meta-Layer (Strategy Allocator & Regime Router) und schließt die Feedback-Schleife **M8 Autopsy → Reward → Badges → Alert-Allokation**.
 
 Damit bleibt **Strategy ≡ TradingView** unberührt: Backtests/Signale kommen weiter aus TV; die Akademie bewertet **reale** Fills und steuert nur, welche TV-Alerts der Allocator an/aus schaltet.
 
 ```mermaid
 flowchart TB
-  subgraph loopD [Loop D Academy]
+  subgraph loopE [Loop E Academy]
     Harvest[Trade Result Harvester]
     Regime[Regime and Context Profiler]
+    Reward[Reward Shaping Engine]
     Badges[Strategy Badge Scorecard]
     Train[Continuous AI Model Training]
     Alloc[Autonomous Strategy Allocator]
   end
   M8[M8 Autopsy on trade close] --> Harvest
-  Harvest --> Regime --> Badges
+  ScoutFeed[Loop D Paper Feeds] --> Harvest
+  Harvest --> Regime --> Reward --> Badges
   Badges --> Train
   Badges --> Alloc
   Alloc -->|"enable disable sigma alerts"| TVAlerts[TradingView Alerts]
@@ -984,5 +1025,56 @@ Academy-Panel (Alpha `AcademyRegistryPanel`) wird auf **Profiling/Badges/Allocat
 | P4+ | `academy_trade_history` + ingest from Autopsy |
 | P5 | Badges N≥30 + UI Tab |
 | P6 | Allocator steuert Alerts; optional ONNX retrain cron |
+
+---
+
+## 19. Loop D — Scout & Incubator
+
+Pfad: `app/scout/ScoutDaemon.py`.
+
+- Unprofilierte Library-Strategien × Symbol/TF im **reinen Paper-Modus**.
+- Ergebnisse → `academy.ingest_trade_result` (gleiche Pipeline wie Live-Autopsy).
+- Kein Live-Kapital; kein Kraken; Alert-Provisioner optional nur Shadow-Flag.
+
+---
+
+## 20. Virtual Bot Engine (Pionex-Prinzip auf Kraken)
+
+Pfad: [`app/execution/VirtualBotEngine.py`](../app/execution/VirtualBotEngine.py).
+
+- Isoliertes Budget pro Bot; Sizing nur auf `bot.current_equity`.
+- Max-Loss → `QUARANTINED` + Alert disable; andere Bots unberührt.
+- Profit Sweep → VaultEngine.
+- DuckDB `strategy_vaults`.
+- Exchange Primary: `kraken_cli` / `regulatory_region: DE_BAFIN`. Pionex `enabled: false` default.
+
+**Bracket-SL Pflicht:**
+
+```bash
+kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
+```
+
+**Deadman:** bei Timeout nur Entry-Limits cancel wenn `has_native_stop_loss`; sonst `close_all_market`.
+
+---
+
+## 21. Regime Detector, Reward, Self-Opt ONNX, Memory, Telegram
+
+| Modul | Pfad | Kern |
+|-------|------|------|
+| Regime | `app/quant/regime_detector.py` | EMA-Delta, ATR-Pctl, Hurst; Crisis ≥95 |
+| Reward | `app/optimizer/reward_shaping.py` | MFE/MAE, Time, Fee → XP/Strike → Multiplier |
+| ONNX Self-Opt | `app/quant/self_optimizing_onnx.py` | Brier, Temperature, Shadow Retrain |
+| Memory | `app/core/memory_watchdog.py` | 75/85/92/96%; Idle-only; CGroup 4G |
+| Telegram | `app/services/telegram_bot_operator.py` | Whitelist; `/kill` Fast-Path; LLM Chat |
+| YAML Heal | `app/tv/yaml_resolver.py` | Remote selectors + Hot-Reload |
+
+systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
+
+---
+
+## 22. Masterprompt
+
+KI-Persona und Axiom-Konsolidierung: [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) (Ciel Core Matrix 3.0 // Sigma L4). Bei Konflikten gilt dieses Blueprint-Dokument als kanonische System-Spezifikation; der Masterprompt steuert Antwortformat und Primordial-Rollen.
 
 ---
