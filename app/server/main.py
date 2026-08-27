@@ -23,7 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from app.core import blueprint as bp
 from app.core.config import AlphaConfig, load_config
+from app.core.l4_config import load_l4_config
 from app.core.duckdb_store import get_store
 from app.core.event_bus import EventBus, get_event_bus
 from app.core.redis_client import close_redis, get_redis
@@ -490,6 +492,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 state = AppState()
+
+
+# =====================================================================
+# BLUEPRINT / HEALTH (§7 API-Vertrag)
+# =====================================================================
+@app.get("/api/v1/health")
+async def sigma_health():
+    """§7 — status, kill_switch, scraper_ok, tv_worker_ok (+ Spec-Fingerprint)."""
+    import os as _os
+
+    kill = _os.path.exists(state.config.kill_switch_file)
+    paused = _os.path.exists(state.config.pause_signal_file)
+    tv_worker_ok = _os.path.exists(state.config.tv_jobs_dir)
+    return {
+        "status": "halted" if kill else ("paused" if paused else "ok"),
+        "kill_switch": kill,
+        "pause": paused,
+        "scraper_ok": bool(state.config.tv_scraper_url),
+        "tv_worker_ok": tv_worker_ok,
+        "live_trading": state.config.live_trading,
+        "uptime": round(time.time() - state.started_at, 1),
+        "blueprint": bp.spec_summary(),
+    }
+
+
+@app.get("/api/v1/blueprint")
+async def sigma_blueprint():
+    """Hart verdrahtete Spec (app/core/blueprint.py) + geladene L4-Config."""
+    return {
+        "spec": bp.spec_summary(),
+        "loops": {
+            loop.value: {
+                "title": s.title, "trigger": s.trigger,
+                "output": s.output, "autonomy": s.autonomy,
+            }
+            for loop, s in bp.LOOPS.items()
+        },
+        "m8_alert_matrix": {
+            st.value: {
+                "alert": pol.alert.value,
+                "accept_webhook": pol.accept_webhook,
+                "budget_multiplier": pol.budget_multiplier,
+                "note": pol.note,
+            }
+            for st, pol in bp.M8_ALERT_MATRIX.items()
+        },
+        "api_contract": dict(bp.API_ROUTES),
+        "delivery_phases": dict(bp.DELIVERY_PHASES),
+        "config": load_l4_config(),
+    }
 
 
 # =====================================================================

@@ -13,6 +13,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
+from app.core import blueprint as bp
+
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -55,6 +57,9 @@ class SigmaConfig:
     system_name: str = "Manas: Ciel Core Matrix (M8 Execution & Risk Architecture)"
     project_name: str = "Projekt:Sigma"
     spec_version: str = "sigma-hybrid-1.0"
+    blueprint_version: str = bp.BLUEPRINT_VERSION
+    masterprompt_version: str = bp.MASTERPROMPT_VERSION
+    autonomy_level: int = bp.AUTONOMY_LEVEL
     skeleton_version: str = "1.6.4"
     host_label: str = "core"  # Ubuntu only
 
@@ -139,9 +144,79 @@ class SigmaConfig:
 
     # --- Runtime ---------------------------------------------------------------------
     api_host: str = "0.0.0.0"
-    api_port: int = 8000
+    api_port: int = bp.PORT_CORE
     sse_interval_seconds: float = 2.0
     log_level: str = "INFO"
+
+    # =====================================================================
+    # Blueprint L4 hard-coded surface (docs/BLUEPRINT-SIGMA.md v3.0)
+    # Alle Defaults stammen aus app/core/blueprint.py — keine Magic Numbers.
+    # =====================================================================
+
+    # --- §1 Prozesse / Pfade ------------------------------------------------
+    install_root: str = bp.INSTALL_ROOT
+    l4_config_path: str = bp.PATH_L4_CONFIG
+    kill_switch_file: str = bp.PATH_KILL_SWITCH
+    pause_signal_file: str = bp.PATH_PAUSE
+    orders_log_path: str = bp.PATH_LOG_ORDERS
+    strategies_dir: str = bp.PATH_STRATEGIES
+
+    # --- §4 Loop A: Webhook / Safety / Sizing ---------------------------------
+    webhook_route: str = bp.WEBHOOK_ROUTE
+    webhook_secret: str = ""
+    live_trading: bool = False
+    kelly_fraction: float = bp.KELLY_FRACTION
+    max_portfolio_risk_per_trade: float = bp.MAX_PORTFOLIO_RISK_PER_TRADE
+    atr_stop_multiplier: float = bp.ATR_STOP_MULTIPLIER
+    atr_take_profit_multiplier: float = bp.ATR_TAKE_PROFIT_MULTIPLIER
+    max_open_positions: int = int(bp.RISK_GUARD["max_open_positions"])
+    max_daily_loss_usd: float = float(bp.RISK_GUARD["max_daily_loss_usd"])
+    max_consecutive_errors: int = int(bp.RISK_GUARD["max_consecutive_errors"])
+    max_spread_bps: float = float(bp.RISK_GUARD["max_spread_bps"])
+    symbol_halt_ttl_seconds: int = bp.SYMBOL_HALT_TTL_SECONDS
+    halt_action: str = bp.HALT_ACTION
+
+    # --- §5/§17.4 Loop B: TV Automation + GA-Härtung ---------------------------
+    tv_base_url: str = bp.TV_BASE_URL
+    tv_storage_state_path: str = bp.PATH_TV_STORAGE_STATE
+    tv_export_dir: str = bp.PATH_TV_EXPORTS
+    tv_jobs_dir: str = bp.PATH_TV_JOBS
+    tv_max_concurrency: int = bp.TV_MAX_CONCURRENCY
+    tv_navigation_timeout_ms: int = bp.TV_NAVIGATION_TIMEOUT_MS
+    tv_tester_run_timeout_ms: int = bp.TV_TESTER_RUN_TIMEOUT_MS
+    tv_job_total_timeout_ms: int = bp.TV_JOB_TOTAL_TIMEOUT_MS
+    ga_max_population: int = bp.GA_MAX_POPULATION
+    ga_max_generations: int = bp.GA_MAX_GENERATIONS
+    ga_early_stop_stall_generations: int = bp.GA_EARLY_STOP_STALL_GENERATIONS
+    ga_param_cache_required: bool = bp.GA_PARAM_CACHE_REQUIRED
+
+    # --- §6 Loop C: Scraper Sidecar -------------------------------------------
+    tv_scraper_url: str = bp.SCRAPER_BASE_URL
+    tv_scraper_timeout_s: float = float(bp.SCRAPER_TIMEOUT_S)
+
+    # --- §21 Quant / ONNX ------------------------------------------------------
+    onnx_model_path: str = bp.PATH_ONNX_REGIME
+    brier_drift_threshold: float = bp.BRIER_DRIFT_THRESHOLD
+    onnx_temperature: float = bp.ONNX_TEMPERATURE_DEFAULT
+
+    # --- §18 Academy / Badges ---------------------------------------------------
+    badge_min_sample: int = bp.BADGE_MIN_SAMPLE
+
+    # --- §20 Virtual Bots / Deadman ---------------------------------------------
+    exchange_primary: str = bp.VIRTUAL_BOT_EXCHANGE_PRIMARY
+    regulatory_region: str = bp.REGULATORY_REGION
+    pionex_enabled: bool = bp.PIONEX_ENABLED_DEFAULT
+    native_bracket_sl_required: bool = bp.NATIVE_BRACKET_SL_REQUIRED
+    deadman_timeout_seconds: int = bp.DEADMAN_TIMEOUT_SECONDS
+
+    # --- §16 Self-Healing Selectors ------------------------------------------------
+    selectors_path: str = bp.PATH_SELECTORS_YAML
+    selectors_remote_url: str = ""
+    selectors_sha256: str = ""
+
+    # --- §21 Memory Watchdog / LLM -----------------------------------------------
+    memory_cgroup_max: str = bp.MEMORY_CGROUP_MAX
+    ollama_url: str = bp.OLLAMA_URL
 
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -206,6 +281,33 @@ class SigmaConfig:
             self.tv_mcp_url = _env("SIGMA_TV_MCP_URL", self.tv_mcp_url)
             self.tv_mcp_timeout_s = _env_float("SIGMA_TV_MCP_TIMEOUT_S", self.tv_mcp_timeout_s)
             self.tv_mcp_concurrency = _env_int("SIGMA_TV_MCP_CONCURRENCY", self.tv_mcp_concurrency)
+
+            # --- Blueprint L4 env matrix (§9 Env-Matrix) --------------------
+            self.webhook_secret = _env(bp.WEBHOOK_SECRET_ENV, self.webhook_secret)
+            self.live_trading = _env_bool("SIGMA_LIVE_TRADING", self.live_trading)
+            self.l4_config_path = _env("SIGMA_L4_CONFIG", self.l4_config_path)
+            self.tv_scraper_url = _env("SIGMA_TV_SCRAPER_URL", self.tv_scraper_url)
+            self.tv_scraper_timeout_s = _env_float("SIGMA_TV_SCRAPER_TIMEOUT_S", self.tv_scraper_timeout_s)
+            self.tv_storage_state_path = _env("SIGMA_TV_STORAGE_STATE", self.tv_storage_state_path)
+            self.tv_export_dir = _env("SIGMA_TV_EXPORT_DIR", self.tv_export_dir)
+            self.tv_max_concurrency = _env_int("SIGMA_TV_CONCURRENCY", self.tv_max_concurrency)
+            self.onnx_model_path = _env("SIGMA_ONNX_MODEL_PATH", self.onnx_model_path)
+            self.selectors_path = _env(bp.SELECTORS_LOCAL_PATH_ENV, self.selectors_path)
+            self.selectors_remote_url = _env(bp.SELECTORS_REMOTE_URL_ENV, self.selectors_remote_url)
+            self.selectors_sha256 = _env(bp.SELECTORS_SHA256_ENV, self.selectors_sha256)
+            self.kelly_fraction = _env_float("SIGMA_KELLY_FRACTION", self.kelly_fraction)
+            self.max_daily_loss_usd = _env_float("SIGMA_MAX_DAILY_LOSS_USD", self.max_daily_loss_usd)
+            self.max_open_positions = _env_int("SIGMA_MAX_OPEN_POSITIONS", self.max_open_positions)
+            self.ga_max_population = min(
+                _env_int("SIGMA_GA_MAX_POPULATION", self.ga_max_population), bp.GA_MAX_POPULATION
+            )
+            self.ga_max_generations = min(
+                _env_int("SIGMA_GA_MAX_GENERATIONS", self.ga_max_generations), bp.GA_MAX_GENERATIONS
+            )
+            self.ollama_url = _env("SIGMA_OLLAMA_URL", self.ollama_url)
+            self.pionex_enabled = _env_bool("SIGMA_PIONEX_ENABLED", self.pionex_enabled)
+            # §17.4: Playwright bleibt serialisiert — Env darf das nicht aufweichen
+            self.tv_max_concurrency = max(1, min(self.tv_max_concurrency, bp.TV_MAX_CONCURRENCY))
 
 
 # Back-compat alias for imports still naming AlphaConfig

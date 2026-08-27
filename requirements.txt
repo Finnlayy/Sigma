@@ -8,6 +8,7 @@ numpy>=1.26
 pandas>=2.2
 httpx>=0.27
 pydantic>=2.7
+pyyaml>=6.0        # config/autonomy-level-4.yaml (Fallback: app/core/blueprint.py)
 python-multipart>=0.0.9
 
 # Security (WebAuthn) — optional, mit Fallback

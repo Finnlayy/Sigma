@@ -8,6 +8,12 @@
 
 Dieses Dokument ist die verbindliche Blaupause. Der Masterprompt ist die Persona-/Axiom-Schicht für KI-Engines.
 
+> **Maschinenspiegel (hard-coded):** Alle normativen Werte dieses Dokuments sind in
+> [`app/core/blueprint.py`](../app/core/blueprint.py) festverdrahtet und in
+> [`config/autonomy-level-4.yaml`](../config/autonomy-level-4.yaml) gespiegelt.
+> `tests/test_blueprint_spec.py` erzwingt Deckungsgleichheit Dokument ⟷ Code ⟷ YAML.
+> Runtime-Introspektion: `GET /api/v1/health`, `GET /api/v1/blueprint`.
+
 ---
 
 ## 0. Was Sigma ist (und nicht ist)
