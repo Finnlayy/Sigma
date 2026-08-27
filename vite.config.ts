@@ -25,7 +25,7 @@ export default defineConfig(() => {
       // Blueprint Sigma: React Dashboard (Vite) on :3000 — Ubuntu / local only
       host: true,
       port: 3000,
-      allowedHosts: true,
+      allowedHosts: true as const,
       proxy: {
         // Sigma Execution Core (Ubuntu, Local: 127.0.0.1:8000)
         '/api': {
@@ -37,7 +37,7 @@ export default defineConfig(() => {
     preview: {
       host: true,
       port: 3000,
-      allowedHosts: true,
+      allowedHosts: true as const,
       proxy: {
         '/api': {
           target: process.env.SIGMA_CORE_PROXY || process.env.ALPHA_CORE_PROXY || 'http://127.0.0.1:8000',

@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""
+=========================================================
+Datei:      bin/sigma-tv-login
+Zweck:      Einmaliger Login-Bootstrap für die TradingView-
+            Session (Blueprint §11 "Login Bootstrap").
+            Öffnet einen sichtbaren Chromium, der Operator
+            meldet sich inkl. 2FA an, danach wird der
+            Playwright storage_state atomar nach
+            ./data/secrets/tv_storage_state.json geschrieben
+            (chmod 0600).
+System:     Manas: Ciel Core Matrix — Projekt:Sigma
+=========================================================
+Verwendung:
+  bin/sigma-tv-login                 # interaktiv (headful)
+  bin/sigma-tv-login --check         # nur Status prüfen
+  bin/sigma-tv-login --out PATH      # abweichender Zielpfad
+  bin/sigma-tv-login --timeout 600   # Sekunden Wartezeit auf Login
+
+Hinweis: TradingView-Credentials werden NIE gespeichert oder
+geloggt — nur der Session-State (Cookies/localStorage).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from app.core import blueprint as bp
+    DEFAULT_OUT = bp.PATH_TV_STORAGE_STATE
+    LOGIN_URL = getattr(bp, "TV_LOGIN_URL", "https://www.tradingview.com/#signin")
+    CHART_URL = getattr(bp, "TV_CHART_URL", "https://www.tradingview.com/chart/")
+except Exception:  # pragma: no cover - standalone fallback
+    DEFAULT_OUT = "./data/secrets/tv_storage_state.json"
+    LOGIN_URL = "https://www.tradingview.com/#signin"
+    CHART_URL = "https://www.tradingview.com/chart/"
+
+SESSION_COOKIES = ("sessionid", "sessionid_sign")
+
+
+def _resolve(path: str) -> str:
+    return os.path.abspath(os.path.expanduser(os.environ.get("SIGMA_TV_STORAGE_STATE", path)))
+
+
+def check(path: str) -> int:
+    if not os.path.exists(path):
+        print(f"[sigma-tv-login] NO SESSION at {path} — TV driver runs in FakeDriver mode.")
+        return 1
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            state = json.load(fh)
+    except Exception as exc:
+        print(f"[sigma-tv-login] CORRUPT session file: {exc}")
+        return 2
+
+    cookies = state.get("cookies", [])
+    names = {c.get("name") for c in cookies}
+    have = [n for n in SESSION_COOKIES if n in names]
+    age_h = (time.time() - os.path.getmtime(path)) / 3600.0
+    mode = oct(os.stat(path).st_mode & 0o777)
+    print(f"[sigma-tv-login] session   : {path}")
+    print(f"[sigma-tv-login] cookies   : {len(cookies)} (auth: {', '.join(have) or 'NONE'})")
+    print(f"[sigma-tv-login] age       : {age_h:.1f}h")
+    print(f"[sigma-tv-login] perms     : {mode} (expect 0o600)")
+    if not have:
+        print("[sigma-tv-login] WARNING: no TradingView auth cookie — re-run the login.")
+        return 3
+    print("[sigma-tv-login] OK — Playwright driver will be used.")
+    return 0
+
+
+def login(path: str, timeout_s: int) -> int:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[sigma-tv-login] playwright is not installed.")
+        print("  .venv/bin/pip install playwright && .venv/bin/playwright install chromium")
+        return 4
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = f"{path}.tmp"
+
+    print("[sigma-tv-login] Launching Chromium (headful). Log in incl. 2FA, then keep the window open.")
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=False, args=["--disable-blink-features=AutomationControlled"])
+        context = browser.new_context(viewport={"width": 1600, "height": 950})
+        page = context.new_page()
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+
+        deadline = time.time() + timeout_s
+        ok = False
+        while time.time() < deadline:
+            names = {c["name"] for c in context.cookies()}
+            if all(c in names for c in SESSION_COOKIES):
+                ok = True
+                break
+            time.sleep(2.0)
+
+        if not ok:
+            print(f"[sigma-tv-login] Timed out after {timeout_s}s without an auth cookie.")
+            browser.close()
+            return 5
+
+        # Touch the chart once so chart-scoped localStorage is captured too.
+        try:
+            page.goto(CHART_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(4_000)
+        except Exception:
+            pass
+
+        context.storage_state(path=tmp)
+        browser.close()
+
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)  # atomic
+    print(f"[sigma-tv-login] Session stored -> {path} (0600)")
+    return check(path)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="TradingView session bootstrap for Sigma L4")
+    ap.add_argument("--out", default=DEFAULT_OUT, help=f"storage_state path (default {DEFAULT_OUT})")
+    ap.add_argument("--check", action="store_true", help="only report current session status")
+    ap.add_argument("--timeout", type=int, default=600, help="seconds to wait for the manual login")
+    args = ap.parse_args()
+
+    path = _resolve(args.out)
+    if args.check:
+        return check(path)
+    return login(path, args.timeout)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

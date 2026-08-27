@@ -22,6 +22,7 @@ import { GeneticOptimizerPanel } from "./components/GeneticOptimizerPanel";
 import QueueMatrixPanel from "./components/QueueMatrixPanel";
 import KrakenLedgersPanel from "./components/KrakenLedgersPanel";
 import { DataLakePanel } from "./components/DataLakePanel";
+import SigmaTerminal from "./components/SigmaTerminal";
 import { SystemHealthPanel } from "./components/quant/SystemHealthPanel";
 import { QuantitativeRegimePanel } from "./components/quant/QuantitativeRegimePanel";
 import { ExecutionRiskPanel } from "./components/quant/ExecutionRiskPanel";
@@ -29,7 +30,7 @@ import { AcademyRegistryPanel } from "./components/quant/AcademyRegistryPanel";
 
 export default function App() {
   // Page Navigation State: 'overview' | 'health' | 'regime' | 'execution' | 'academy' | 'orchestrator' | 'backtesting' | 'genetic' | 'queues' | 'ledgers' | 'datalake'
-  const [activePage, setActivePage] = useState<'overview' | 'health' | 'regime' | 'execution' | 'academy' | 'orchestrator' | 'backtesting' | 'genetic' | 'queues' | 'ledgers' | 'datalake'>('overview');
+  const [activePage, setActivePage] = useState<'terminal' | 'overview' | 'health' | 'regime' | 'execution' | 'academy' | 'orchestrator' | 'backtesting' | 'genetic' | 'queues' | 'ledgers' | 'datalake'>('overview');
 
   const [strategies, setStrategies] = useState<TradingStrategy[]>([]);
   const [selectedStrategy, setSelectedStrategy] = useState<TradingStrategy | null>(null);
@@ -367,6 +368,22 @@ export default function App() {
           {/* Primary View Switcher Tabs */}
           <nav className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800/80 shadow-inner flex-wrap gap-1">
             <button
+              id="nav-tab-terminal"
+              onClick={() => setActivePage('terminal')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-md text-xs font-mono font-medium transition-all ${
+                activePage === 'terminal'
+                  ? 'bg-sky-950/80 text-sky-300 shadow-sm border border-sky-600/70 font-bold'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+              }`}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5 text-sky-400" />
+              <span>Sigma Terminal</span>
+              <span className="bg-sky-900/60 text-sky-300 text-[9px] px-1.5 py-0.2 rounded font-bold uppercase">
+                L4
+              </span>
+            </button>
+
+            <button
               id="nav-tab-overview"
               onClick={() => setActivePage('overview')}
               className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-md text-xs font-mono font-medium transition-all ${
@@ -586,7 +603,21 @@ export default function App() {
       {/* 2. Main Body Content Switcher with Animation */}
       <main className="flex-1 overflow-y-auto p-5 sm:p-6">
         <AnimatePresence mode="wait">
-          {activePage === 'overview' ? (
+          {activePage === 'terminal' ? (
+            /* ======================================================== */
+            /* PAGE 0: SIGMA TERMINAL (Blueprint §3.2 / §8)             */
+            /* ======================================================== */
+            <motion.div
+              key="sigma-terminal-page"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="h-[calc(100vh-11rem)] min-h-[560px] overflow-hidden rounded-lg border border-zinc-800"
+            >
+              <SigmaTerminal />
+            </motion.div>
+          ) : activePage === 'overview' ? (
             /* ======================================================== */
             /* PAGE 1: OVERVIEW & TELEMETRY DASHBOARD                   */
             /* ======================================================== */
