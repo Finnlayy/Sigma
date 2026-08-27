@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze (with audit hardenings §16–§17) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze (§16–§18: Self-Heal, Audit gates, Academy Loop D) — `docs/BLUEPRINT-SIGMA.md`  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
 > **Quelle Alpha:** `Finnlayy/Alpha` / lokaler Tree `project-alpha`
@@ -63,7 +63,7 @@ Alles, was „Strategie“ heißt, bezieht sich auf TV und arbeitet darüber:
 
 ---
 
-## 2. Architektur — drei Loops (nicht einer)
+## 2. Architektur — vier Loops (A–D)
 
 ```mermaid
 flowchart TB
@@ -105,6 +105,7 @@ flowchart TB
 | **A Live** | TradingView Alert HTTP POST | Order / Paper Fill + Autopsy | Vollautomatisch |
 | **B Backtest/GA** | UI „Run“ oder GA-Generation | `BacktestResult` + ShadowGate | **Vollautomatisch** (Playwright, kein Mensch) |
 | **C Feed** | Poll/On-demand | OHLCV + Indikatoren | Vollautomatisch |
+| **D Academy** | Trade Close / Cron | Badges + Allocator Alert-Steuerung | Vollautomatisch |
 
 ---
 
@@ -124,7 +125,7 @@ flowchart TB
 | Telemetry M-00 | [`app/core/telemetry.py`](app/core/telemetry.py) | SHADOW_ACTIVE / LIVE_APPROVED / EMERGENCY_HALT |
 | DuckDB + Lake | `app/core/duckdb_store.py` | Persistenz |
 | GeneticOptimizer | [`app/optimizer/GeneticOptimizer.py`](app/optimizer/GeneticOptimizer.py) | Orchestrierung behalten; **Eval ersetzen** |
-| Academy | [`app/optimizer/AcademyRegistry.py`](app/optimizer/AcademyRegistry.py) | Drills unverändert (synthetisch) |
+| Academy | [`app/optimizer/AcademyRegistry.py`](app/optimizer/AcademyRegistry.py) | **Loop D:** Profiling/Badges (kein synthetischer Primär-Backtest) |
 | React Command Center | [`src/`](src/) | Behalten, anpassen |
 | Types | [`src/types.ts`](src/types.ts) | `BacktestResult`, `TradingStrategy`, Gene |
 | Ubuntu stack Vorlage | [`stacks/ubuntu/`](stacks/ubuntu/) | Umbenennen alpha→sigma |
@@ -145,6 +146,7 @@ flowchart TB
 | CSV Seam | [`app/backtest/tv_csv.py`](app/backtest/tv_csv.py) (existiert) | Params/Trades/Perf → `BacktestResult` |
 | Backtest Facade | [`app/backtest/TvMcpBacktest.py`](app/backtest/TvMcpBacktest.py) | Umbenennen sinnvoll → `TvBacktestService`; Queue+Cache |
 | Quant Engine | `app/quant/onnx_kelly.py` | ONNX + Half-Kelly |
+| Strategy Allocator | `app/optimizer/StrategyAllocator.py` | Badge+Regime → TV Alert an/aus (Loop D) |
 | Webhook | Route in `app/server/main.py` | `POST /api/v1/signal/webhook` |
 | Kraken Bridge | `app/execution/KrakenCliBridge.py` | `kraken trade add-order` Subprocess |
 | Safety | `app/execution/SafetyGuard.py` | KILL_SWITCH / PAUSE / daily loss / consecutive errors |
@@ -562,7 +564,8 @@ Kein Full-shadcn-Rewrite; Alpha Command Center bleibt die Shell, Bibliothek wird
 4. **Backtest** — Window, Run → TV-Job Progress → Result-Charts (wie BacktestingPanel, an Strategie gebunden)  
 5. **Optimize** — GA an diese Pine-Inputs; ShadowGate; Deploy  
 6. **Live / M8** — Start/Stop Runner, Promote/Quarantine, Vault/Autopsy für diese Instanz  
-7. **Audit** — letzte Webhooks, Orders, Reject-Gründe  
+7. **Audit** — letzte Webhooks, Orders, Reject-Gründe
+8. **Academy Badges & Profiling** — Symbol×TF×Regime Scorecard; Allocator-Hinweise (§18)  
 
 ### 8.2 Dateien / Erweiterungen
 
@@ -856,5 +859,130 @@ Erwartete Runtime-Kommunikation in UI: ETA / Job-Progress.
 ### 17.6 Audit-Stärken (beibehalten)
 
 3-Loop-Trennung; Strategy≡TV; THROTTLED lässt Alert an; CSV unter `./data/strategies/{id}/`; Scraper :8001 entkoppelt.
+
+---
+
+
+## 18. Loop D — Sigma-Akademie (Meta-Learning & Strategy Profiler)
+
+**Rollenwechsel:** Die Akademie ist **kein** synthetischer Drill-Backtester mehr. Sie ist das Trainings- und Auswertungszentrum für den AI-Meta-Layer (Strategy Allocator & Regime Router) und schließt die Feedback-Schleife **M8 Autopsy → Badges → Alert-Allokation**.
+
+Damit bleibt **Strategy ≡ TradingView** unberührt: Backtests/Signale kommen weiter aus TV; die Akademie bewertet **reale** Fills und steuert nur, welche TV-Alerts der Allocator an/aus schaltet.
+
+```mermaid
+flowchart TB
+  subgraph loopD [Loop D Academy]
+    Harvest[Trade Result Harvester]
+    Regime[Regime and Context Profiler]
+    Badges[Strategy Badge Scorecard]
+    Train[Continuous AI Model Training]
+    Alloc[Autonomous Strategy Allocator]
+  end
+  M8[M8 Autopsy on trade close] --> Harvest
+  Harvest --> Regime --> Badges
+  Badges --> Train
+  Badges --> Alloc
+  Alloc -->|"enable disable sigma alerts"| TVAlerts[TradingView Alerts]
+  Train -->|"strategy_allocator.onnx or meta-learner"| Alloc
+```
+
+### 18.1 Pipeline-Stufen
+
+| Stufe | Aufgabe | Inputs | Outputs |
+|-------|---------|--------|---------|
+| 1. Harvester | Nach jedem Close | Fill, PnL, Fees, Slippage, Autopsy-Zone | `academy_trade_history` Row |
+| 2. Regime Profiler | Kontext am Entry | Vol, ADX/ATR/Ampel (Scraper/RegimeEngine) | `regime_at_entry` |
+| 3. Badge & Scorecard | Aggregation Symbol×TF×Regime | Stats ab **N ≥ 30** Trades | Badges S/A/B/C/F + `is_allowed` |
+| 4. AI Training | Periodischer Cron | gelabelte History | `models/strategy_allocator.onnx` (oder RF Meta-Learner) |
+| 5. Strategy Allocator | Vor Start / periodisch | Badge-Profil + Live-Regime | Alert enable/disable via Provisioner |
+
+### 18.2 Badge-Beispiele (kanonisch)
+
+| Strategie | Symbol/TF | Regime | Metrik | Badge | Allocator |
+|-----------|-----------|--------|--------|-------|-----------|
+| CISD Momentum v6 | XRP 5m | TRENDING_BULL | WR 68%, PF 2.4 | `SUPER_ON_XRP_5M` (S) | Alert an bei Trend |
+| CISD Momentum v6 | XRP 10m | RANGING_CHOP | WR 32%, PF 0.7 | `POOR_ON_XRP_10M` (F) | Alert aus bei Chop |
+| FVG Mean Reversion | BTC 15m | RANGING_CHOP | WR 71%, PF 2.1 | `CHOP_MASTER_BTC_15M` (S) | Alert an bei Chop |
+| Breakout Scalper | ETH 1m | LOW_LIQUIDITY | Slippage > 35 bps | `SLIPPAGE_TRAP` (F) | außerhalb Session inaktiv |
+
+**Vergabe-Regeln (Noir):** Badge erst bei **N ≥ 30** Trades je (strategy, symbol, timeframe, regime). Darunter Status `INSUFFICIENT_SAMPLE` — kein S/F-Urteil.
+
+Rating-Heuristik (nach ausreichendem N):
+
+- **S:** winrate ≥ 0.60 und profit_factor ≥ 1.8 → `is_allowed=True`
+- **F:** winrate ≤ 0.40 oder profit_factor < 0.9 → `is_allowed=False`
+- sonst **B/A/C** nach abgestuften Schwellen → meist allowed mit Vorsicht
+
+### 18.3 DuckDB-Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS academy_trade_history (
+  id VARCHAR PRIMARY KEY,
+  strategy_id VARCHAR,
+  symbol VARCHAR,
+  timeframe VARCHAR,
+  regime VARCHAR,
+  entry_price DOUBLE,
+  exit_price DOUBLE,
+  pnl_pct DOUBLE,
+  duration_bars INTEGER,
+  autopsy_zone VARCHAR,
+  slippage_bps DOUBLE,
+  fee_usd DOUBLE,
+  ts_close TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS strategy_performance_profiles (
+  strategy_id VARCHAR,
+  symbol VARCHAR,
+  timeframe VARCHAR,
+  regime VARCHAR,
+  trade_count INTEGER,
+  win_rate DOUBLE,
+  profit_factor DOUBLE,
+  dsr DOUBLE,
+  badges JSON,
+  updated_at TIMESTAMP,
+  PRIMARY KEY (strategy_id, symbol, timeframe, regime)
+);
+```
+
+### 18.4 Modul-Pfade
+
+| Modul | Pfad | Rolle |
+|-------|------|-------|
+| Academy Registry (rewire) | [`app/optimizer/AcademyRegistry.py`](app/optimizer/AcademyRegistry.py) | `ingest_trade_result`, `update_strategy_badges`, `export_training_dataset_for_ai`, `get_profile` |
+| Strategy Allocator | `app/optimizer/StrategyAllocator.py` | Badge + Live-Regime → Alert an/aus |
+| Regime am Entry | `app/quant/RegimeEngine.py` (+ Scraper features) | `regime_at_entry` für Harvester |
+| ONNX Allocator Model | `models/strategy_allocator.onnx` | optional; Heuristik bis Modell da |
+
+**Hook:** `PaperExecutionEngine.close_position` / Live-Fill-Close → Autopsy → `academy.ingest_trade_result(...)` → periodisch `update_strategy_badges`.
+
+**Allocator-Gate vor Alert-Enable / Run:**
+
+```text
+profile = academy.get_profile(strategy_id, symbol, tf, regime)
+if profile.rating == "F" or not profile.is_allowed:
+    block start / disable alert
+```
+
+### 18.5 UI (§8 Erweiterung)
+
+Neuer Detail-Tab **„Academy Badges & Profiling“**:
+
+- Matrix Symbol × TF × Regime mit Badge-Farbe (S grün … F rot)
+- Sample-Count / „INSUFFICIENT_SAMPLE“
+- Buttons: Recalculate Badges, Export Training Dataset
+- StrategyCard: Top-Badge-Chips (z. B. `SUPER_ON_XRP_5M`)
+
+Academy-Panel (Alpha `AcademyRegistryPanel`) wird auf **Profiling/Badges/Allocator-Status** umgebaut — synthetische Drills nur noch Dev/optional, nicht Primärpfad.
+
+### 18.6 Phasen
+
+| Phase | Deliverable |
+|-------|-------------|
+| P4+ | `academy_trade_history` + ingest from Autopsy |
+| P5 | Badges N≥30 + UI Tab |
+| P6 | Allocator steuert Alerts; optional ONNX retrain cron |
 
 ---
