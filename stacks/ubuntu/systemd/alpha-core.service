@@ -1,0 +1,24 @@
+[Unit]
+Description=Projekt:Alpha — M8 Execution Core (FastAPI) [Blueprint v1.2.0]
+After=network.target alpha-redis.service
+Wants=alpha-redis.service
+
+[Service]
+Type=simple
+User=alpha
+Group=alpha
+WorkingDirectory=/srv/alpha
+EnvironmentFile=/srv/alpha/.env
+ExecStart=/srv/alpha/.venv/bin/uvicorn app.server.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/srv/alpha/data
+# Watchdog (M-17)
+WatchdogSec=30s
+
+[Install]
+WantedBy=multi-user.target

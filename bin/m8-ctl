@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""
+=========================================================
+Datei:      bin/m8-ctl
+Zweck:      Lokales Notfall-Steuerungstool für das Terminal (M8 Core)
+Knoten:     Jaune (Carrera-Engine)
+=========================================================
+Verwendung:
+  bin/m8-ctl status                     # Core-Status
+  bin/m8-ctl states                      # M8-State-Machine (Redis SCAN)
+  bin/m8-ctl vault                       # Vault-Balance & letzte Sweeps
+  bin/m8-ctl autopsies [N]               # letzte N Autopsie-Events
+  bin/m8-ctl halt <SYMBOL> [TTL]         # halt:symbol:{symbol} (TTL 300s)
+  bin/m8-ctl promote <STRATEGY_ID>       # Explicit Re-Promotion
+  bin/m8-ctl quarantine <STRATEGY_ID>    # Manuelle Quarantäne
+  bin/m8-ctl retire <STRATEGY_ID>        # Terminaler RETIRED-Status
+  bin/m8-ctl eod                         # EOD-Profit-Factor-Abrechnung
+  bin/m8-ctl cancel-all [STRATEGY_ID]    # EMERGENCY: alle offenen Positionen
+  bin/m8-ctl halt-system [REASON]        # System-EMERGENCY_HALT (M-00)
+  bin/m8-ctl resume                      # Zurück nach SHADOW_ACTIVE
+
+ALPHA_API_URL überschreibt die API-Adresse (Default http://127.0.0.1:8000).
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import urllib.request
+import urllib.error
+
+API_URL = os.environ.get("ALPHA_API_URL", "http://127.0.0.1:8000").rstrip("/")
+
+
+def call(method: str, path: str, body: dict | None = None) -> dict:
+    url = f"{API_URL}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            raw = res.read().decode()
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"raw": raw}
+    except urllib.error.HTTPError as exc:
+        try:
+            return {"error": json.loads(exc.read().decode()).get("detail", str(exc))}
+        except Exception:
+            return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": f"Core nicht erreichbar unter {API_URL} — {exc}"}
+
+
+def _print(obj) -> None:
+    print(json.dumps(obj, indent=2, ensure_ascii=False, default=str))
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    cmd = args[0] if args else "status"
+
+    if cmd == "status":
+        _print(call("GET", "/api/dashboard/init"))
+    elif cmd == "states":
+        data = call("GET", "/api/m8/states")
+        states = data.get("states", {})
+        print(f"M8 State Engine — {data.get('count', 0)} Instanzen "
+              f"(vault_sweep={data.get('vaultSweep')}, autopsy_order={data.get('autopsyOrder')})")
+        for iid, st in states.items():
+            print(f"  {st['status']:<12} mult={st['budget_multiplier']:<4} "
+                  f"budget={st['current_budget_usd']:>7.2f}/{st['base_budget_usd']:<7.2f} "
+                  f"losses={st['consecutive_losses']} lowPfDays={st['consecutive_low_pf_days']} "
+                  f"{iid}")
+    elif cmd == "vault":
+        _print(call("GET", "/api/m8/vault"))
+    elif cmd == "autopsies":
+        n = int(args[1]) if len(args) > 1 else 25
+        _print(call("GET", f"/api/m8/autopsies?limit={n}"))
+    elif cmd == "halt":
+        if len(args) < 2:
+            print("Verwendung: m8-ctl halt <SYMBOL> [TTL_Sek]"); return 1
+        body = {"symbol": args[1], "ttl": int(args[2]) if len(args) > 2 else 300}
+        _print(call("POST", "/api/m8/halt-symbol", body))
+    elif cmd == "promote":
+        if len(args) < 2:
+            print("Verwendung: m8-ctl promote <STRATEGY_ID>"); return 1
+        _print(call("POST", f"/api/m8/{args[1]}/promote", {}))
+    elif cmd == "quarantine":
+        if len(args) < 2:
+            print("Verwendung: m8-ctl quarantine <STRATEGY_ID>"); return 1
+        _print(call("POST", f"/api/m8/{args[1]}/quarantine", {"reason": "m8-ctl"}))
+    elif cmd == "retire":
+        if len(args) < 2:
+            print("Verwendung: m8-ctl retire <STRATEGY_ID>"); return 1
+        _print(call("POST", f"/api/m8/{args[1]}/retire", {}))
+    elif cmd == "eod":
+        _print(call("POST", "/api/m8/eod-run", {}))
+    elif cmd == "cancel-all":
+        body = {"strategyId": args[1] if len(args) > 1 else None,
+                "reason": "m8-ctl emergency"}
+        _print(call("POST", "/api/emergency/cancel-all", body))
+    elif cmd == "halt-system":
+        reason = args[1] if len(args) > 1 else "m8-ctl EMERGENCY_HALT"
+        _print(call("POST", "/api/quant/state-machine/set-state",
+                    {"state": "EMERGENCY_HALT", "reason": reason}))
+    elif cmd == "resume":
+        _print(call("POST", "/api/quant/state-machine/set-state",
+                    {"state": "SHADOW_ACTIVE", "reason": "m8-ctl resume"}))
+    else:
+        print(__doc__)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

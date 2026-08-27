@@ -1,0 +1,19 @@
+[Unit]
+Description=Projekt:Alpha — Redis (M8-State, AOF) [Blueprint v1.2.0]
+After=network.target
+
+[Service]
+Type=simple
+User=alpha
+Group=alpha
+ExecStart=/usr/bin/redis-server /srv/alpha/etc/redis.conf
+Restart=always
+RestartSec=3
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/redis
+
+[Install]
+WantedBy=multi-user.target

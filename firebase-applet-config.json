@@ -1,0 +1,9 @@
+{
+  "apiKey": "MOCK_REPLACE_WITH_REAL_FIREBASE_KEY",
+  "authDomain": "projekt-alpha-local.firebaseapp.com",
+  "projectId": "projekt-alpha-local",
+  "storageBucket": "projekt-alpha-local.appspot.com",
+  "messagingSenderId": "000000000000",
+  "appId": "1:000000000000:web:0000000000000000000000",
+  "firestoreDatabaseId": "(default)"
+}
