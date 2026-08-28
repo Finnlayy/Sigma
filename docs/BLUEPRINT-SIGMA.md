@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze v3.3 (Webhook Schemas, LLM Tool Contracts, Streaming) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.4 (Exact TV CSV Roundtrip Protocol) — `docs/BLUEPRINT-SIGMA.md`  
 > **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
@@ -411,7 +411,9 @@ Nur retryable Codes → max 2 Attempts. Session/Captcha → Operator-Alert, `sig
 
 ### 5.5 CSV-Verträge (kanonisch)
 
-**Parameters:**
+**Dateiname & Header:** §35 (Exact Roundtrip) — Original-Dateiname und Zeile 1 **buchstabengetreu** aus TV-Export übernehmen; Versionierung nur über `baseline/` vs `optimized/`.
+
+**Parameters (Beispiel — Header kann je Strategie abweichen, z. B. `Strategy Inputs,Default Value`):**
 
 ```csv
 Parameter,Value
@@ -467,7 +469,7 @@ riskPct,2.5,float,0.1,10,0.1
 
 - Mindestens `Parameter,Value` (wie §5.5).  
 - `Type/Min/Max/Step` wenn aus UI oder Pine-Metadaten ableitbar; sonst Defaults aus `app/tv/param_bounds.yaml` oder Library `pine_inputs_schema`.  
-- CSV landet in `./data/tv_exports/{job_id}/parameters_baseline.csv` **und** wird an die Strategy-Row gespiegelt (`parameters` + `pine_inputs_schema`).
+- CSV landet in `./data/strategies/{id}/baseline/{OriginalName}.csv` (exakter TV-Dateiname) **und** Job-Kopie unter `./data/tv_exports/{job_id}/{OriginalName}.csv`; Strategy-Row: `parameters` + `pine_inputs_schema` + `original_csv_filename` (§35).
 
 Wenn TV keinen nativen „Export Parameters“-Button hat: Playwright **scraped** die Properties-Felder und erzeugt die CSV — gleiche Seam wie manuell exportierte Parameter-CSV.
 
@@ -486,8 +488,8 @@ Baseline-Individuum = exakte Values aus der gelesenen CSV.
 
 Pro Individuum:
 
-1. `params_to_csv(genes)` → Parameter-CSV.  
-2. Driver setzt Properties in der **selben** TV-Session / Chart.  
+1. `ExactTradingViewCSVHandler.serialize_optimized_values()` → CSV mit **unverändertem Header** und Original-Dateiname.  
+2. Driver re-upload via Playwright File-Chooser (§35) oder setzt Properties in der **selben** TV-Session.  
 3. Strategy Tester Run → Trades/Performance-CSV.  
 4. `result_csv_to_backtest_result` → Fitness (IS/OOS Fenster wie bisher).  
 
@@ -517,6 +519,7 @@ GeneticOptimizerPanel: vor Run „Parameters from TradingView“ Status/Preview 
 |------|--------|
 | `app/tv/strategy_tester_driver.py` | `export_parameters`, `apply_parameters`, `run_backtest` |
 | `app/optimizer/gene_schema.py` | CSV → GeneSchema |
+| `app/optimizer/exact_csv_serializer.py` | Header/Dateiname-Freeze; baseline/optimized Export |
 | `app/optimizer/GeneticOptimizer.py` | nutzt GeneSchema + TvBacktestService |
 
 Last weiterhin serialisiert + Cache; erster Job jedes Runs = Parameter-Pull (cacheable bis Code-Hash sich ändert).
@@ -1071,6 +1074,7 @@ kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 | Kraken Paper | `app/execution/KrakenCliBridge.py` | Dual-Mode: `paper` vs `live`; Graduation |
 | Webhook Schemas | `app/server/schemas.py` | SigmaL4, Pionex, ML features; Pydantic V2 |
 | LLM Schemas | `app/llm/schemas_llm.py` | Tools, Pine patch, WebSocket stream |
+| Exact CSV | `app/optimizer/exact_csv_serializer.py` | TV filename + header freeze; roundtrip |
 
 systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
 
@@ -1654,5 +1658,109 @@ class ChatStreamMessage(BaseModel):
 | Orderbook Depth | `glint_orderbook_verifier` (§24) | Internal JIT |
 
 **Noir-Gate:** Irreversible Tools (`trigger_emergency_action`) erfordern `confirmation_confirmed: true`; UI zeigt Confirm-Card vor Ausführung.
+
+---
+
+## 35. Exact TradingView CSV Roundtrip Protocol
+
+Pfad: [`app/optimizer/exact_csv_serializer.py`](app/optimizer/exact_csv_serializer.py).
+
+TradingViews Properties-Import ist strikt: **falscher Dateiname oder abweichender Header = Schema-Mismatch**. Sigma spiegelt TV 1:1 — keine erfundenen Namen wie `parameters_optimized.csv`.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 EXACT TRADINGVIEW CSV ROUNDTRIP PROTOCOL                    │
+│                 (1:1 Dateiname, Header-Integrität & Safe Upload)            │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ 1. TV CSV Export              │             │ 2. Exact Header & Name Freeze │
+│ • z.B. `Strategy_properties.csv`│           │ • Dateiname unverändert       │
+│ • Header z.B. `Inputs,Value`  │             │ • Zeile 1 byte-identisch      │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                │                                             │
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     [3. GA mutiert nur Werte — Header bleibt]
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ 4. Playwright Re-Upload           │
+                     │ • Original-Dateiname              │
+                     │ • Pre-Upload Header-Assertion     │
+                     └───────────────────────────────────┘
+```
+
+### 35.1 Kanonische Regeln
+
+| Regel | Detail |
+|-------|--------|
+| **Dateiname** | Exakt wie TV-Export (z. B. `CISD_Scalper_v6_properties.csv`) |
+| **Header Zeile 1** | Buchstabengetreu (z. B. `Strategy Inputs,Default Value` oder `Inputs,Value`) |
+| **Delimiter** | `,` oder `;` — aus Original erkannt und beibehalten |
+| **Versionierung** | Über Ordner, **nicht** über Umbenennung |
+
+### 35.2 Verzeichnis-Layout
+
+```text
+./data/strategies/{id}/
+  ├── code.pine
+  ├── meta.json                    # original_csv_filename, exact_csv_header, delimiter
+  ├── baseline/
+  │    └── CISD_Scalper_v6_properties.csv   # Original-Download aus TV
+  └── optimized/
+       └── CISD_Scalper_v6_properties.csv   # gleicher Name + Header, optimierte Werte
+```
+
+**`meta.json` Felder:**
+
+```json
+{
+  "original_csv_filename": "CISD_Scalper_v6_properties.csv",
+  "exact_csv_header": ["Strategy Input", "Value"],
+  "delimiter": ","
+}
+```
+
+GA-Job-Artefakte: `./data/tv_exports/{job_id}/{OriginalName}.csv` (Kopie mit gleichem Dateinamen).
+
+### 35.3 `ExactTradingViewCSVHandler`
+
+```python
+class ExactTradingViewCSVHandler:
+  # __init__(original_csv_path) → liest exact_header_row, delimiter, original_filename
+  # serialize_optimized_values(optimized_params) → Zeile 1 = Original-Header
+  # save_versioned_csv(strategy_dir, params, is_baseline=False) → baseline/ oder optimized/
+```
+
+### 35.4 Pre-Upload Assertion (Noir-Gate)
+
+Vor Playwright-Re-Upload:
+
+```python
+assert new_csv.split("\n")[0] == original_csv.split("\n")[0]
+```
+
+Bei Mismatch: `CSV_HEADER_MISMATCH` — kein Upload, GA-Individuum verworfen.
+
+### 35.5 Playwright Re-Upload (`strategy_tester_driver.py`)
+
+`upload_properties_csv_to_tv(strategy_id, csv_file_path)`:
+
+1. Strategy Tester → Properties öffnen
+2. `expect_file_chooser()` → Import-Button
+3. `file_chooser.set_files(str(csv_file_path))` — **Original-Dateiname**
+4. Apply/OK bestätigen
+
+### 35.6 Integration Loop B (GA)
+
+| Schritt | Modul |
+|---------|-------|
+| Export aus TV | `StrategyTesterDriver.export_parameters` → `baseline/{OriginalName}.csv` |
+| Genraum | `GeneSchema.from_parameter_csv` (Header-Zeile überspringen) |
+| Optimierung | Werte mutieren; Header via `ExactTradingViewCSVHandler` frozen |
+| Re-Upload | `upload_properties_csv_to_tv` mit `optimized/{OriginalName}.csv` |
+| Diff UI | Baseline vs Optimized (gleicher Dateiname, verschiedene Ordner) |
 
 ---

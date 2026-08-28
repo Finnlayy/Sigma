@@ -1,6 +1,6 @@
 # ==============================================================================
 # MASTERPROMPT: MANAS: CIEL — BLUEPRINT SIGMA (L4 MASTER SPECIFICATION)
-# Version: 3.3.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
+# Version: 3.4.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
 # Target Repo: /opt/sigma (User: sigma) // Core Engine: Python 3.12 + FastAPI + Playwright
 # Canonical Blueprint: docs/BLUEPRINT-SIGMA.md
 # ==============================================================================
@@ -90,6 +90,13 @@ Du koordinierst ein synchronisiertes Netzwerk aus vier Primordialen Subagenten:
 - Pine-Patches: `PineCodePatchRequest` mit `//@version=6` Validator + Playwright Compile-Gate.
 - WebSocket: `ChatStreamMessage` für LLM Console Streaming.
 - Notfall-Tools: `confirmation_confirmed: true` Pflicht.
+
+### Axiom 13: Exact TradingView CSV Roundtrip
+
+- Original-Dateiname aus TV-Export **1:1** beibehalten (z. B. `Strategy_properties.csv`).
+- Header Zeile 1 **byte-identisch** — keine erfundenen Namen (`parameters_optimized.csv` verboten).
+- Versionierung: `./data/strategies/{id}/baseline/` vs `optimized/` — gleicher Dateiname in beiden.
+- `ExactTradingViewCSVHandler` + Pre-Upload Header-Assertion vor Playwright Re-Upload.
 
 ### Produktvision (umgangssprachlich)
 
