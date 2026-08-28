@@ -963,7 +963,14 @@ export function NetronVisualizerPanel() {
   const [data, refresh] = usePoll(() => sigmaApi.netronStatus(), 10000);
   const [nonce, setNonce] = useState(0);
   const models: any[] = data?.models ?? [];
-  const url: string = data?.url ?? 'http://localhost:8082';
+  // Im Sandbox-/Preview-Kontext läuft der Browser nicht auf dem Host des Cores:
+  // dort wird aus 3000-<id>.host ein 8082-<id>.host statt localhost:8082 (§38.4).
+  const port: number = data?.port ?? 8082;
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  const previewMatch = /^\d+-(.+)$/.exec(host);
+  const url: string = previewMatch
+    ? `${window.location.protocol}//${port}-${previewMatch[1]}`
+    : (data?.url ?? `http://localhost:${port}`);
 
   const inspect = async (tag: string) => {
     await sigmaApi.inspectModel(tag);

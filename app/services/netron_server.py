@@ -48,6 +48,7 @@ class NetronVisualizerService:
         self.version_tag: str = ""
         self.started_at: float = 0.0
         self.last_error: str = ""
+        self.external: bool = False
 
     # ------------------------------------------------------------ module --
     @property
@@ -67,6 +68,14 @@ class NetronVisualizerService:
             return self.netron is not None
         except NetronUnavailable:
             return False
+
+    def port_in_use(self) -> bool:
+        """Laeuft bereits eine Netron-Instanz (z.B. sigma-netron.service)?"""
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            return sock.connect_ex(("127.0.0.1", self.port)) == 0
 
     @property
     def url(self) -> str:
@@ -127,6 +136,12 @@ class NetronVisualizerService:
             self.last_error = str(exc)
             self.running = False
             return self.status()
+        except OSError as exc:      # Port belegt: externe Instanz uebernimmt
+            self.external = self.port_in_use()
+            self.running = self.external
+            self.last_error = (f"Port {self.port} belegt — externe Netron-Instanz "
+                               f"aktiv ({exc})" if self.external else str(exc))
+            return self.status()
         self.running = True
         self.model_path = model
         self.version_tag = self._tag_for(model)
@@ -147,6 +162,12 @@ class NetronVisualizerService:
                               browse=bp.NETRON_BROWSE)
         except NetronUnavailable as exc:
             self.last_error = str(exc)
+            return False
+        except OSError as exc:
+            self.external = self.port_in_use()
+            self.last_error = (f"Port {self.port} belegt — Model-Switch muss ueber "
+                               f"die externe Instanz laufen ({exc})"
+                               if self.external else str(exc))
             return False
         self.running = True
         self.model_path = model
@@ -171,7 +192,9 @@ class NetronVisualizerService:
     # ---------------------------------------------------------- telemetry --
     def status(self) -> Dict[str, Any]:
         return {
-            "running": self.running,
+            "running": self.running or self.port_in_use(),
+            "external_instance": self.external or (not self.running
+                                                   and self.port_in_use()),
             "available": self.available,
             "port": self.port,
             "bind": self.host,

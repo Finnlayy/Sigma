@@ -131,7 +131,10 @@ def test_models_listing_marks_active(service):
 
 def test_status_shape(service):
     status = service.status()
-    assert status["port"] == 8082 and status["running"] is False
+    # running spiegelt auch eine externe Instanz auf :8082 (sigma-netron.service)
+    assert status["port"] == 8082
+    assert status["running"] == service.port_in_use()
+    assert status["external_instance"] == service.port_in_use()
     assert status["url"].endswith(":8082")
     assert status["default_model"] == bp.NETRON_DEFAULT_MODEL
     assert len(status["models"]) == 2
@@ -147,6 +150,35 @@ def test_missing_netron_module_is_reported(models_dir):
     svc._netron = Boom()
     with pytest.raises(NetronUnavailable):
         svc.netron.start()
+
+
+def test_port_in_use_when_busy(service):
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        service.port = srv.getsockname()[1]
+        assert service.port_in_use() is True
+    assert service.port_in_use() is False
+
+
+def test_start_server_reports_external_instance(service, models_dir):
+    import socket
+
+    class Busy:
+        def start(self, *a, **k):
+            raise OSError(98, "Address already in use")
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        service.port = srv.getsockname()[1]
+        service._netron = Busy()
+        status = service.start_server("regime_classifier")
+        assert status["external_instance"] is True and status["running"] is True
+        assert "belegt" in status["last_error"]
+        assert service.load_model("glint_scorer") is False
 
 
 def test_stop(service):
