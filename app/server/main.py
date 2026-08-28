@@ -1816,6 +1816,9 @@ install_error_handlers(app)        # Unified Error Taxonomy — kein nacktes 500
 app.include_router(quant_router)
 app.include_router(sigma_router)   # Blueprint L4: Loop A-E Routen (§7)
 
+from app.server.routes_logs import router as logs_router  # §37
+app.include_router(logs_router)    # Live Process & AI Log Console
+
 
 # =====================================================================
 # SSE TELEMETRY STREAM (M-17)

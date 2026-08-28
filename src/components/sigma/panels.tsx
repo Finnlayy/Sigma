@@ -21,6 +21,7 @@ import {
   type TelegramSnapshot, type TvJob,
 } from '../../lib/sigmaApi';
 import TvLightweightChart from '../TvLightweightChart';
+import ProcessLogView from '../../pages/ProcessLogView';   // §37
 
 /* ------------------------------------------------------------------ shared */
 
@@ -977,6 +978,7 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   FlywheelBudgetPanel,
   PaperLabPanel,
   DiagnosticsErrorPanel,
+  ProcessLogView,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -1001,4 +1003,5 @@ export const PANEL_TITLES: Record<string, string> = {
   FlywheelBudgetPanel: 'Flywheel',
   PaperLabPanel: 'Paper Lab',
   DiagnosticsErrorPanel: 'Diagnostics',
+  ProcessLogView: 'Process & AI Logs',
 };

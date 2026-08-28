@@ -7,6 +7,23 @@
  * =========================================================
  */
 
+export interface LogLine {
+  subsystem: string;
+  level: string;
+  raw_line: string;
+  timestamp: number;
+}
+
+export interface LogSources {
+  stream_route: string;
+  view_route: string;
+  poll_interval_ms: number;
+  ring_buffer_lines: number;
+  masked_keys: string[];
+  levels: string[];
+  sources: { subsystem: string; path: string; exists: boolean; size_bytes: number; offset: number }[];
+}
+
 export interface SpecSummary {
   blueprint_version: string;
   masterprompt_version: string;
@@ -331,6 +348,20 @@ export const sigmaApi = {
   flywheel: () => request<any>('/api/v1/flywheel'),
   flywheelSweep: () => post<any>('/api/v1/flywheel/sweep'),
   leverage: (strategyId: string) => request<any>(`/api/v1/leverage/${encodeURIComponent(strategyId)}`),
+
+  // §37 Live Process & AI Log Console
+  logSources: () => request<LogSources>('/api/v1/logs/sources'),
+  logTail: (filter = '', limit = 200) =>
+    request<{ subsystems: string[]; lines: LogLine[] }>(
+      `/api/v1/logs/tail?limit=${limit}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`),
+  logPoll: (filter = '') =>
+    request<{ subsystems: string[]; lines: LogLine[] }>(
+      `/api/v1/logs/poll${filter ? `?filter=${encodeURIComponent(filter)}` : ''}`),
+  logStreamUrl: (filter = '') => {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const qs = filter ? `?filter=${encodeURIComponent(filter)}` : '';
+    return `${proto}//${window.location.host}/api/v1/logs/stream${qs}`;
+  },
 
   // §36 Diagnostics Error Desk
   diagnostics: (limit = 50, severity = '') =>

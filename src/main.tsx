@@ -1,6 +1,7 @@
 import React, { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import ProcessLogView from './pages/ProcessLogView';   // §37
 import './index.css';
 
 interface ErrorBoundaryProps {
@@ -73,10 +74,17 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
+// §37.4 — dedizierte Route /logs neben dem Terminal
+const isLogsRoute = window.location.pathname.replace(/\/$/, '') === '/logs';
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      {isLogsRoute ? (
+        <div className="h-screen w-screen bg-[#0e1117]"><ProcessLogView /></div>
+      ) : (
+        <App />
+      )}
     </ErrorBoundary>
   </StrictMode>,
 );
