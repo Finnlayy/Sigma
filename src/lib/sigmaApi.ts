@@ -332,6 +332,12 @@ export const sigmaApi = {
   flywheelSweep: () => post<any>('/api/v1/flywheel/sweep'),
   leverage: (strategyId: string) => request<any>(`/api/v1/leverage/${encodeURIComponent(strategyId)}`),
 
+  // §32 Kraken Paper Lab
+  paperLab: (limit = 50) => request<any>(`/api/v1/paper-lab?limit=${limit}`),
+  paperLabStrategy: (strategyId: string) => request<any>(`/api/v1/paper-lab/${encodeURIComponent(strategyId)}`),
+  promotePaperStrategy: (strategyId: string, force = false) =>
+    post<any>(`/api/v1/paper-lab/${encodeURIComponent(strategyId)}/promote`, { reason: 'operator', force }),
+
   // §31 Strategy Lifecycle — 3 Trigger-Pfade
   lifecycle: (limit = 25) => request<{ active: Record<string, string>; runs: LifecycleRun[]; trigger_paths: Record<string, string[]>; steps: string[] }>(
     `/api/v1/lifecycle?limit=${limit}`),

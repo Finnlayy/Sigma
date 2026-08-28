@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
+  Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
   Sparkles, Trophy, Zap,
 } from 'lucide-react';
@@ -824,6 +824,66 @@ export function FlywheelBudgetPanel() {
   );
 }
 
+
+/* ---------------------------------------------------- 20 PaperLabPanel §32 */
+
+export function PaperLabPanel() {
+  const [data, refresh] = usePoll(() => sigmaApi.paperLab(50), 6000);
+  const strategies: any[] = data?.strategies ?? [];
+  const grad = data?.graduation;
+  const promote = async (sid: string) => { await sigmaApi.promotePaperStrategy(sid); refresh(); };
+
+  return (
+    <PanelShell title="Kraken Paper Lab" icon={<Beaker size={13} className="text-sky-400" />}
+      actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
+      <div className="grid grid-cols-3 gap-2">
+        <Stat label="Start-Balance" value={`${data?.initial_balance_usd ?? 10000} $`} />
+        <Stat label="Min Trades" value={grad?.min_paper_trades ?? 20} />
+        <Stat label="Gates" value={`PF ${grad?.min_paper_profit_factor ?? 1.6} · WR ${grad?.min_paper_win_rate_pct ?? 55}%`} />
+      </div>
+      <div className="mt-2 space-y-2">
+        {strategies.map((row) => {
+          const stats = row.stats ?? {};
+          const ready = row.eligible && !row.graduated;
+          return (
+            <div key={row.strategy_id} className="rounded border border-zinc-800 bg-zinc-900/40 p-2">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[12px] text-zinc-100">{row.strategy_id}</span>
+                <span className={`text-[10px] font-bold ${row.graduated ? 'text-emerald-400' : 'text-sky-400'}`}>
+                  {row.graduated ? 'STUFE 3 · LIVE' : 'STUFE 2 · PAPER'}
+                </span>
+              </div>
+              <div className="mt-1 grid grid-cols-4 gap-1 font-mono text-[11px]">
+                <div><span className="text-zinc-500">n </span>{stats.trades ?? 0}</div>
+                <div><span className="text-zinc-500">wr </span>{stats.win_rate_pct ?? 0}%</div>
+                <div><span className="text-zinc-500">pf </span>{stats.profit_factor ?? '∞'}</div>
+                <div className={(stats.net_pnl_eur ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                  <span className="text-zinc-500">pnl </span>{stats.net_pnl_eur ?? 0}€
+                </div>
+              </div>
+              <div className="mt-1 flex items-center justify-between">
+                <span className="text-[10px] text-zinc-500">
+                  {row.failed_gates?.length ? `offen: ${row.failed_gates.join(', ')}` : 'alle Gates erfüllt'}
+                </span>
+                {ready && (
+                  <button onClick={() => promote(row.strategy_id)}
+                    className="rounded bg-emerald-600/80 px-2 py-0.5 text-[10px] font-semibold hover:bg-emerald-500">
+                    Zu Live befördern
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {!strategies.length && <div className="text-zinc-600">Noch keine Paper-Trades — Scout Loop D füllt das Labor.</div>}
+      </div>
+      <div className="mt-2 font-mono text-[10px] text-zinc-500">
+        {data?.commands?.futures_order ?? 'kraken futures paper order ...'}
+      </div>
+    </PanelShell>
+  );
+}
+
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
   PineStudio,
@@ -844,6 +904,7 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   RateLimiterPanel,
   ContagionRadarPanel,
   FlywheelBudgetPanel,
+  PaperLabPanel,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -866,4 +927,5 @@ export const PANEL_TITLES: Record<string, string> = {
   RateLimiterPanel: 'Rate Limiter',
   ContagionRadarPanel: 'Contagion',
   FlywheelBudgetPanel: 'Flywheel',
+  PaperLabPanel: 'Paper Lab',
 };

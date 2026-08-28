@@ -58,14 +58,51 @@ class KrakenCliBridge:
     """Dünner, auditierbarer Wrapper um die Kraken CLI."""
 
     def __init__(self, config: Optional[SigmaConfig] = None, telemetry=None,
-                 runner=None, binary: Optional[str] = None):
+                 runner=None, binary: Optional[str] = None,
+                 execution_mode: str = bp.ExecutionMode.LIVE.value,
+                 futures: bool = False):
         self.config = config or load_config()
         self.telemetry = telemetry
         self._runner = runner or _subprocess_runner
         self.binary = binary or bp.KRAKEN_CLI_BINARY
         self.orders_log = self.config.orders_log_path
+        if execution_mode not in (bp.ExecutionMode.LIVE.value,
+                                  bp.ExecutionMode.KRAKEN_PAPER.value):
+            raise ValueError(f"unsupported execution_mode {execution_mode!r}")
+        self.execution_mode = execution_mode      # §32 Dual-Mode
+        self.futures = futures
 
     # ------------------------------------------------------------------ mode
+    @property
+    def paper_mode(self) -> bool:
+        """§32 — Kraken CLI Paper-Subcommand statt Live-Order."""
+        return self.execution_mode == bp.ExecutionMode.KRAKEN_PAPER.value
+
+    def _prefix(self) -> List[str]:
+        """`kraken [futures] paper ...` bzw. `kraken trade ...` (§32.2)."""
+        if not self.paper_mode:
+            return [self.binary, "trade"]
+        return ([self.binary, "futures", "paper"] if self.futures
+                else [self.binary, "paper"])
+
+    def balance(self) -> OrderResult:
+        """Paper- bzw. Live-Kontostand ueber die CLI (§32.2)."""
+        argv = self._prefix() + ["balance"] if self.paper_mode else \
+            [self.binary, "account", "balance"]
+        if self.paper_mode and not self._cli_available():
+            return OrderResult(True, "paper", txid="SIM-BALANCE", argv=argv,
+                               stdout=f"[PAPER] balance {bp.KRAKEN_PAPER_INITIAL_BALANCE_USD}")
+        stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+        failed = bp.kraken_output_is_error(stdout, stderr, code)
+        return OrderResult(not failed, "paper" if self.paper_mode else "live",
+                           stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                           error_code=_extract_error(stdout, stderr) if failed else "")
+
+    def _cli_available(self) -> bool:
+        import shutil
+
+        return shutil.which(self.binary) is not None
+
     @property
     def live_enabled(self) -> bool:
         if not self.config.live_trading:
@@ -87,8 +124,18 @@ class KrakenCliBridge:
         if volume <= 0:
             return OrderResult(False, "sim", error_code="ZERO_VOLUME", pair=pair, side=side)
 
-        argv = [self.binary, "trade", "add-order",
-                f"--pair={pair}", f"--type={side}",
+        argv = self._prefix() + (["order", side, pair, f"{volume:g}"] if self.paper_mode
+                                 else ["add-order"])
+        if self.paper_mode:
+            argv += [f"--type={ordertype}"]
+            if price is not None:
+                argv.append(f"--price={price}")
+            if stop_price is not None:
+                argv.append(f"--stop-price={stop_price}")
+            return self._dispatch_paper(argv, pair=pair, side=side, volume=volume,
+                                        ordertype=ordertype, stop_price=stop_price,
+                                        strategy_id=strategy_id)
+        argv += [f"--pair={pair}", f"--type={side}",
                 f"--ordertype={ordertype}", f"--volume={volume:.8f}".rstrip("0").rstrip(".")]
         if price is not None and ordertype in ("limit", "stop", "take-profit"):
             argv.append(f"--price={price}")
@@ -123,6 +170,32 @@ class KrakenCliBridge:
         )
         if failed:
             logger.error("Kraken CLI order failed: %s | %s", result.error_code, stderr.strip() or stdout.strip())
+        self._audit(result, strategy_id)
+        return result
+
+    def _dispatch_paper(self, argv: List[str], *, pair: str, side: str, volume: float,
+                        ordertype: str, stop_price: Optional[float],
+                        strategy_id: str) -> OrderResult:
+        """§32 — Paper-Order: identische Struktur, 0 EUR Risiko, kein Live-Gate."""
+        has_stop = stop_price is not None
+        if not self._cli_available():
+            result = OrderResult(
+                ok=True, mode="paper", txid=f"PAPER-{uuid.uuid4().hex[:10].upper()}",
+                pair=pair, side=side, volume=volume, ordertype=ordertype,
+                has_native_stop_loss=has_stop, argv=argv,
+                stdout="[PAPER] kraken CLI nicht installiert — simulierter Paper-Fill",
+            )
+            self._audit(result, strategy_id)
+            return result
+        stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+        failed = bp.kraken_output_is_error(stdout, stderr, code)
+        result = OrderResult(
+            ok=not failed, mode="paper", txid=_extract_txid(stdout),
+            pair=pair, side=side, volume=volume, ordertype=ordertype,
+            has_native_stop_loss=has_stop and not failed,
+            stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+            error_code=_extract_error(stdout, stderr) if failed else "",
+        )
         self._audit(result, strategy_id)
         return result
 

@@ -642,6 +642,100 @@ async def telegram_message(body: TelegramIn):
 
 
 # =============================================================================
+# §32 Kraken Paper Trading Lab & Graduation
+# =============================================================================
+
+class PaperOrderIn(BaseModel):
+    strategy_id: str
+    symbol: str
+    side: str
+    volume: float
+    ordertype: str = "market"
+    price: Optional[float] = None
+    stop_price: Optional[float] = None
+
+
+class PaperFillIn(BaseModel):
+    strategy_id: str
+    symbol: str
+    side: str = "buy"
+    quantity: float = 0.0
+    entry_price: float = 0.0
+    exit_price: float = 0.0
+    pnl_eur: float = 0.0
+    fee_eur: float = 0.0
+    slippage_bps: float = 0.0
+    latency_ms: float = 0.0
+    order_id: str = ""
+
+
+class PaperPromoteIn(BaseModel):
+    reason: str = "operator"
+    force: bool = False
+
+
+@router.get("/api/v1/paper-lab")
+async def paper_lab_state(limit: int = 50):
+    """§32 — PaperLabPanel: Trades, Sim-PnL, Winrate, Graduation-Status."""
+    from app.execution.kraken_paper_engine import get_paper_engine
+
+    return get_paper_engine().panel_state(limit)
+
+
+@router.post("/api/v1/paper-lab/order")
+async def paper_lab_order(body: PaperOrderIn):
+    from app.execution.kraken_paper_engine import (PaperOnlyViolation,
+                                                   get_paper_engine)
+
+    try:
+        return get_paper_engine().submit_order(
+            body.strategy_id, body.symbol, body.side, body.volume,
+            ordertype=body.ordertype, price=body.price, stop_price=body.stop_price)
+    except PaperOnlyViolation as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": "PAPER_ONLY_VIOLATION", "reason": str(exc)})
+
+
+@router.post("/api/v1/paper-lab/fill")
+async def paper_lab_fill(body: PaperFillIn):
+    from app.execution.kraken_paper_engine import PaperTrade, get_paper_engine
+
+    return get_paper_engine().record_fill(PaperTrade(**body.model_dump()))
+
+
+@router.get("/api/v1/paper-lab/{strategy_id}")
+async def paper_lab_strategy(strategy_id: str):
+    from app.execution.kraken_paper_engine import get_paper_engine
+
+    engine = get_paper_engine()
+    return {"stats": engine.stats(strategy_id),
+            "graduation": engine.graduation_status(strategy_id),
+            "execution_mode": engine.execution_mode_for(strategy_id),
+            "trades": engine.trades(strategy_id)}
+
+
+@router.post("/api/v1/paper-lab/{strategy_id}/promote")
+async def paper_lab_promote(strategy_id: str, body: PaperPromoteIn | None = None):
+    """§32.1 — Stufe 2 -> Stufe 3, nur mit erfuellten Gates (oder force)."""
+    from app.execution.kraken_paper_engine import get_paper_engine
+
+    payload = body or PaperPromoteIn()
+    outcome = get_paper_engine().graduate(strategy_id, reason=payload.reason,
+                                          force=payload.force)
+    if not outcome["promoted"]:
+        raise HTTPException(status_code=409, detail=outcome)
+    return outcome
+
+
+@router.post("/api/v1/paper-lab/{strategy_id}/demote")
+async def paper_lab_demote(strategy_id: str, body: PaperPromoteIn | None = None):
+    from app.execution.kraken_paper_engine import get_paper_engine
+
+    return get_paper_engine().demote(strategy_id,
+                                     (body.reason if body else "risk"))
+
+
+# =============================================================================
 # §35 Exact TradingView CSV Roundtrip
 # =============================================================================
 
