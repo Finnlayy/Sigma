@@ -42,12 +42,22 @@ def yaml_cfg():
 # ---------------------------------------------------------------- identity ---
 
 def test_freeze_header_matches_docs(blueprint_text, masterprompt_text):
-    assert "Canonical Spec Freeze v3.0" in blueprint_text
+    # docs/ traegt den eingefrorenen Spec-Stand, blueprint.py den implementierten.
+    assert f"Canonical Spec Freeze v{bp.DOCS_BLUEPRINT_VERSION}" in blueprint_text
+    assert bp.DOCS_MASTERPROMPT_VERSION in masterprompt_text
     assert bp.BLUEPRINT_VERSION == "3.0"
-    assert bp.MASTERPROMPT_VERSION in masterprompt_text
+    assert bp.MASTERPROMPT_VERSION.startswith("3.")
     assert bp.AUTONOMY_LEVEL == 4
     assert bp.INSTALL_ROOT in masterprompt_text
     assert bp.HOST_OS == "ubuntu"
+
+
+def test_pending_doc_sections_are_declared(blueprint_text):
+    """Was in docs/ steht, aber noch nicht implementiert ist, muss benannt sein."""
+    assert bp.DOCS_PENDING_SECTIONS, "pending sections must be listed explicitly"
+    for section in bp.DOCS_PENDING_SECTIONS:
+        number = section.split(" ", 1)[0]
+        assert f"## {number}." in blueprint_text
 
 
 def test_five_loops_present():

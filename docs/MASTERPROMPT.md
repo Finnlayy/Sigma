@@ -1,6 +1,6 @@
 # ==============================================================================
 # MASTERPROMPT: MANAS: CIEL — BLUEPRINT SIGMA (L4 MASTER SPECIFICATION)
-# Version: 3.0.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
+# Version: 3.1.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
 # Target Repo: /opt/sigma (User: sigma) // Core Engine: Python 3.12 + FastAPI + Playwright
 # Canonical Blueprint: docs/BLUEPRINT-SIGMA.md
 # ==============================================================================
@@ -38,6 +38,36 @@ Du koordinierst ein synchronisiertes Netzwerk aus vier Primordialen Subagenten:
 
 - Das System repariert sich selbst: Fehlende YAML-Dateien (`selectors.yaml`, `param_bounds.yaml`) werden per `DynamicYamlResolver` atomar aus Remote-Repositories nachgeladen.
 - Fehlgeschlagene Kompilierungen oder toxische Codeblöcke werden über Kausale Autopsien isoliert und vom Genpool ausgeschlossen.
+
+### Axiom 4: Kraken Server-Time = Single Source of Truth
+
+- Autoritative Zeit: `GET https://api.kraken.com/0/public/Time` (`app/core/exchange_clock.py`).
+- Deadman, EOD, Scheduler und Stale-Signal-Gates nutzen `exchange_clock.now()`, nicht Host-`time.time()`.
+- Veraltete Webhooks (`STALE_SIGNAL_REJECT`) werden abgewiesen statt blind ausgeführt.
+
+### Axiom 5: Event-Driven Execution & Scheduler-Tiers
+
+- Schwere Operationen (Orderbuch-Tiefenscan, Glint-Konfluenz) nur **Just-in-Time** beim Signal/Entry — nie global alle Symbole pollen.
+- Hintergrund-Tasks in festen Cadences (`app/core/scheduler_matrix.py`): Tier 1 (15–20s) → Tier 5 (wöchentlich).
+- Kraken-Zeit synchronisiert alle Cron-Trigger (z. B. Spot-Rebalance 00:05 UTC).
+
+### Axiom 6: Closed-Loop Order ACK & Idempotenz
+
+- Jedes Signal erhält `signal_id`; Duplikate → `DUPLICATE_IGNORED`.
+- `reliable_order_dispatcher.py`: max 2 Retries bei transientem Fehler; Ghost-Fill-Check vor Retry; Telegram/UI-Receipt.
+- Kein Fire-and-Forget: jeder Alert liefert `FILLED` / `FAILED_REJECTED` + `order_id`.
+
+### Axiom 7: 50/50 Flywheel Kapitalarchitektur
+
+- **Einzahlungen:** 100% → Kraken Futures Arbeitskonto → aktive Bot-Budgets.
+- **Realisierte Gewinne:** 50% Bot-Reinvest (Compounding), 50% Spot-Tresor (physisches Asset).
+- **Einbahnstraße:** Spot → Futures niemals automatisch.
+
+### Axiom 8: Fester Hebel pro Strategie (Strategy-Bound Fixed Leverage)
+
+- `fixed_leverage` in `profile.json` — **nicht** pro Trade dynamisch.
+- Muss 1:1 mit TradingView Strategy Tester übereinstimmen.
+- Sniper-Strategien (eng SL, Squeeze) nutzen z. B. festes 5×; Swing 1×–2× — Design-Entscheidung, keine Laufzeit-Umschaltung.
 
 ### Produktvision (umgangssprachlich)
 
@@ -139,6 +169,23 @@ Live Execute Backtest&GA   Market Radar   Scout Labor    Academy &
 | `STYLE_SWING_CAMPAIGN` | 1h–4h | 1–7 Tage | 14–45 Tage; `SUITABLE_FOR_LONG_RUN_30D` |
 | `STYLE_POSITION_INVEST` | 1D | Wochen–Monate | 90d+ Makro |
 
+### E. Glint × Orderbook Confluence (`app/quant/glint_orderbook_verifier.py`)
+
+- Nur JIT beim Entry für **ein** Symbol; `max_cached_depth_age_seconds: 3`.
+- `I_depth` aus 2%-Bid/Ask-Tiefe; `LIQUIDITY_TRAP_VETO` bei Widerspruch Glint vs. OB.
+- Bestätigung → Sizing-Boost; Veto → `ORDERBOOK_WALL_REJECT`.
+
+### F. Multi-Provider Rate Limiter (`app/core/rate_limiter.py`)
+
+- TradingView-Tier-Profile (free → premium); Alert-Rotations-Queue bei Limit.
+- Kraken Token-Bucket mit Emergency-Reserve für Kill-Switch.
+- HTTP 429 → exponentieller Backoff.
+
+### G. Epidemic SIR Contagion (`app/quant/epidemic_contagion_engine.py`)
+
+- `R0 = β/γ` aus Öl-Vol, Korrelation, OB-Absorption.
+- `R0 ≥ 1.5` → Cash/Hedge; `R0 ≥ 1.0` → Futures-Sizing −50%.
+
 ---
 
 ## 4. SYSTEM-INTEGRATION & CONTROL PLANES
@@ -177,8 +224,14 @@ Panels (Factory-IDs):
 | `DeadmanSwitchPanel` | Heartbeat, Bracket-SL, Emergency Cancel |
 | `RewardXPMatrixPanel` | XP/Strikes, S/A/B/C/F |
 | `MemoryWatchdogPanel` | RAM %, DuckDB, Chromium zombies |
+| `OrderbookConfluencePanel` | Glint×OB JIT Audit, I_depth, Veto |
+| `SchedulerTelemetryPanel` | Tier 0–5 Cadence, letzter Lauf |
+| `OrderReceiptsPanel` | ACK/Retry Receipts, order_id |
+| `RateLimiterPanel` | TV-Tier, Kraken Token-Bucket |
+| `ContagionRadarPanel` | SIR R₀, Hedge/Cash-Modus |
+| `FlywheelBudgetPanel` | Futures/Spot Split, Flywheel-Ledger |
 
-Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS`.
+Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_OPS`.
 
 ### E. Prozesse & Ports
 

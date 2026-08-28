@@ -505,11 +505,22 @@ async def sigma_health():
     kill = _os.path.exists(state.config.kill_switch_file)
     paused = _os.path.exists(state.config.pause_signal_file)
     tv_worker_ok = _os.path.exists(state.config.tv_jobs_dir)
+
+    # Loop C: echter Ping gegen das Sidecar (:8001), Ergebnis 5 s gecacht.
+    scraper: dict = {"ok": False, "degraded": True}
+    try:
+        from app.tv.scraper_client import get_scraper_client
+
+        scraper = await asyncio.to_thread(get_scraper_client().health)
+    except Exception as exc:  # pragma: no cover - defensive
+        scraper = {"ok": False, "degraded": True, "error": str(exc)}
+
     return {
         "status": "halted" if kill else ("paused" if paused else "ok"),
         "kill_switch": kill,
         "pause": paused,
-        "scraper_ok": bool(state.config.tv_scraper_url),
+        "scraper_ok": bool(scraper.get("ok")),
+        "scraper": scraper,
         "tv_worker_ok": tv_worker_ok,
         "live_trading": state.config.live_trading,
         "uptime": round(time.time() - state.started_at, 1),

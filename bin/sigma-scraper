@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""
+=========================================================
+Datei:      bin/sigma-scraper
+Zweck:      Launcher für das Loop-C Scraper-Sidecar (:8001).
+            Default: Sigma-Overlay `app.scraper.main:app`
+            (Cache, Rate-Limit, Retry, Offline-Fallback).
+            `--vendor` startet stattdessen das unveränderte
+            vendored API (`api.main:app`, Blueprint §2 Tabelle).
+System:     Manas: Ciel Core Matrix — Projekt:Sigma
+=========================================================
+Verwendung:
+  bin/sigma-scraper                       # Overlay auf 127.0.0.1:8001
+  bin/sigma-scraper --host 0.0.0.0        # im LAN erreichbar
+  bin/sigma-scraper --offline             # nur deterministischer Feed
+  bin/sigma-scraper --vendor              # pures vendored FastAPI
+  bin/sigma-scraper --check               # Selbsttest ohne Server
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VENDOR = os.path.join(ROOT, "vendor", "tradingview-scraper")
+sys.path.insert(0, ROOT)
+
+
+def _check() -> int:
+    sys.path.insert(0, VENDOR)
+    from app.scraper.settings import get_settings
+    from app.scraper.vendor_bridge import get_bridge
+
+    settings = get_settings()
+    bridge = get_bridge(settings)
+    status = bridge.status()
+    print(f"[sigma-scraper] vendor path : {settings.vendor_path}")
+    print(f"[sigma-scraper] importable  : {status['importable']}")
+    if status["import_error"]:
+        print(f"[sigma-scraper] import err  : {status['import_error']}")
+        print(f"[sigma-scraper] fix         : pip install -r {VENDOR}/requirements.txt")
+    print(f"[sigma-scraper] offline     : {settings.offline}")
+    print(f"[sigma-scraper] bind        : {settings.host}:{settings.port}")
+    print(f"[sigma-scraper] synthetic   : {settings.allow_synthetic_fallback}")
+    return 0 if status["importable"] or settings.allow_synthetic_fallback else 1
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Sigma Loop C scraper sidecar")
+    ap.add_argument("--host", default=os.environ.get("SIGMA_SCRAPER_HOST", "127.0.0.1"))
+    ap.add_argument("--port", type=int, default=int(os.environ.get("SIGMA_SCRAPER_PORT", "8001")))
+    ap.add_argument("--reload", action="store_true")
+    ap.add_argument("--offline", action="store_true", help="never touch the network")
+    ap.add_argument("--vendor", action="store_true", help="serve the untouched vendored api.main:app")
+    ap.add_argument("--check", action="store_true", help="report readiness and exit")
+    ap.add_argument("--log-level", default="info")
+    args = ap.parse_args()
+
+    if args.offline:
+        os.environ["SIGMA_SCRAPER_OFFLINE"] = "1"
+    os.environ.setdefault("SIGMA_SCRAPER_HOST", args.host)
+    os.environ.setdefault("SIGMA_SCRAPER_PORT", str(args.port))
+
+    if args.check:
+        return _check()
+
+    try:
+        import uvicorn
+    except ImportError:
+        print("[sigma-scraper] uvicorn missing: pip install uvicorn", file=sys.stderr)
+        return 2
+
+    if args.vendor:
+        if not os.path.isdir(VENDOR):
+            print(f"[sigma-scraper] vendor tree not found: {VENDOR}", file=sys.stderr)
+            return 3
+        os.chdir(VENDOR)          # vendor serves frontend/ relative to cwd
+        sys.path.insert(0, VENDOR)
+        target = "api.main:app"
+    else:
+        sys.path.insert(0, VENDOR)
+        target = "app.scraper.main:app"
+
+    print(f"[sigma-scraper] {target} -> http://{args.host}:{args.port}")
+    uvicorn.run(target, host=args.host, port=args.port,
+                reload=args.reload, log_level=args.log_level)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

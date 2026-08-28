@@ -8,12 +8,13 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, Bot, Brain, Code2, Cpu, Gauge, HeartPulse,
+  Activity, AlertTriangle, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
   Sparkles, Trophy, Zap,
 } from 'lucide-react';
 import {
   sigmaApi, m8Color, ratingColor,
+  type FeedMeta, type MoverRow, type ScraperHealth,
   type BadgeRow, type BotCard, type Candle, type DeadmanSnapshot, type MemorySnapshot,
   type MlSnapshot, type RegimeVector, type RewardRow, type SafetySnapshot,
   type TelegramSnapshot, type TvJob,
@@ -62,6 +63,24 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
     {children}
   </button>
 );
+
+/** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
+function FeedBadge({ feed }: { feed?: FeedMeta | null }) {
+  if (!feed) return null;
+  const tone = feed.source === 'tv_scraper'
+    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+    : feed.source === 'cache_stale'
+      ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
+      : 'border-zinc-600/40 bg-zinc-700/20 text-zinc-400';
+  const label = feed.source === 'tv_scraper' ? 'LIVE :8001'
+    : feed.source === 'cache_stale' ? 'STALE CACHE' : 'SYNTHETIC';
+  return (
+    <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}
+      title={feed.upstream_error || `source=${feed.source}`}>
+      {label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
+    </span>
+  );
+}
 
 /* ------------------------------------------------------- 1 VirtualBotDeck */
 
@@ -192,13 +211,15 @@ export function MarketChart() {
   const [symbol, setSymbol] = useState('BTC/USD');
   const [interval, setIntervalMin] = useState(15);
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [feed, setFeed] = useState<FeedMeta | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    const out = await sigmaApi.ohlc(symbol, interval, 300)
-      ?? await sigmaApi.ohlcFallback(symbol, interval, 300);
+    const primary = await sigmaApi.ohlc(symbol, interval, 300);
+    const out = primary ?? await sigmaApi.ohlcFallback(symbol, interval, 300);
+    setFeed(primary?.feed ?? null);
     if (out?.candles?.length) { setCandles(out.candles); setError(''); }
-    else setError('no candles — start sigma-scraper on :8001');
+    else setError('no candles — start the sidecar: bin/sigma-scraper');
   }, [symbol, interval]);
 
   useEffect(() => { void load(); }, [load]);
@@ -206,6 +227,7 @@ export function MarketChart() {
   return (
     <PanelShell title="Market Chart" icon={<Activity size={13} />}
       actions={<>
+        <FeedBadge feed={feed} />
         <select value={symbol} onChange={(e) => setSymbol(e.target.value)}
           className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-[10px]">
           {['BTC/USD', 'ETH/USD', 'XRP/USD', 'SOL/USD'].map((s) => <option key={s}>{s}</option>)}
@@ -219,7 +241,8 @@ export function MarketChart() {
       {candles.length ? <TvLightweightChart candles={candles} height={240} />
         : <div className="text-zinc-600">{error || 'loading…'}</div>}
       <div className="mt-2 text-[10px] text-zinc-500">
-        Lightweight Charts · Feed: Loop C scraper (:8001) · {candles.length} candles
+        Lightweight Charts · Loop C sidecar (:8001) · {candles.length} candles
+        {feed?.source === 'synthetic' && ' · deterministic offline feed — not for live decisions'}
       </div>
     </PanelShell>
   );
@@ -520,6 +543,70 @@ export function TvJobsPanel() {
   );
 }
 
+/* ------------------------------------------ extra: Loop C Market Radar */
+
+export function MarketRadarPanel() {
+  const [category, setCategory] = useState<'gainers' | 'losers'>('gainers');
+  const [rows, setRows] = useState<MoverRow[]>([]);
+  const [feed, setFeed] = useState<FeedMeta | null>(null);
+  const [health, setHealth] = useState<ScraperHealth | null>(null);
+
+  const load = useCallback(async () => {
+    const [movers, hp] = await Promise.all([
+      sigmaApi.movers('crypto', category, 15),
+      sigmaApi.scraperHealth(),
+    ]);
+    setRows(movers?.rows ?? []);
+    setFeed(movers?.feed ?? null);
+    setHealth(hp);
+  }, [category]);
+
+  useEffect(() => { void load(); const id = setInterval(load, 60_000); return () => clearInterval(id); }, [load]);
+
+  return (
+    <PanelShell title="Market Radar (Loop C)" icon={<Radar size={13} />}
+      actions={<>
+        <FeedBadge feed={feed} />
+        <select value={category} onChange={(e) => setCategory(e.target.value as 'gainers' | 'losers')}
+          className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-[10px]">
+          <option value="gainers">gainers</option>
+          <option value="losers">losers</option>
+        </select>
+        <IconBtn onClick={load} title="Refresh"><RefreshCw size={12} /></IconBtn>
+      </>}>
+      <div className="mb-2 grid grid-cols-3 gap-2">
+        <Stat label="Sidecar" value={health?.ok ? 'online' : 'offline'}
+          tone={health?.ok ? 'text-emerald-400' : 'text-red-400'} />
+        <Stat label="Vendor" value={health?.vendor?.importable ? 'loaded' : 'missing'}
+          tone={health?.vendor?.importable ? 'text-emerald-400' : 'text-amber-400'} />
+        <Stat label="Cache hit" value={`${Math.round((health?.cache?.hit_ratio ?? 0) * 100)}%`} />
+      </div>
+      <table className="w-full text-left font-mono text-[11px]">
+        <thead className="text-[10px] uppercase text-zinc-500">
+          <tr><th className="py-1">Symbol</th><th>Last</th><th>Change</th><th>Volume</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.name}-${i}`} className="border-t border-zinc-800/60">
+              <td className="py-1 text-zinc-300">{r.name}</td>
+              <td>{Number(r.close).toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+              <td className={r.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                {r.change >= 0 ? '+' : ''}{Number(r.change).toFixed(2)}%
+              </td>
+              <td className="text-zinc-500">{Number(r.volume).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length && <div className="text-zinc-600">No movers — is bin/sigma-scraper running on :8001?</div>}
+      <div className="mt-2 text-[10px] text-zinc-500">
+        {health?.base_url ?? 'http://127.0.0.1:8001'} · rate {health?.rate_limit?.rate_per_min ?? 60}/min
+        {health?.rate_limit?.rejected ? ` · ${health.rate_limit.rejected} throttled` : ''}
+      </div>
+    </PanelShell>
+  );
+}
+
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
   PineStudio,
@@ -533,6 +620,7 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   RewardXPMatrixPanel,
   MemoryWatchdogPanel,
   TvJobsPanel,
+  MarketRadarPanel,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -548,4 +636,5 @@ export const PANEL_TITLES: Record<string, string> = {
   RewardXPMatrixPanel: 'Reward XP',
   MemoryWatchdogPanel: 'Memory',
   TvJobsPanel: 'TV Jobs',
+  MarketRadarPanel: 'Market Radar',
 };

@@ -43,7 +43,7 @@ const PRESET_LAYOUTS: Record<Preset, IJsonModel> = {
         set(40, ['VirtualBotDeck']),
       ]),
       row(30, [
-        set(50, ['RewardXPMatrixPanel']),
+        set(50, ['RewardXPMatrixPanel', 'MarketRadarPanel']),
         set(50, ['AcademyBadgeMatrix', 'TelegramOperatorPanel']),
       ]),
     ]) as IJsonModel['layout'],
@@ -68,7 +68,7 @@ const PRESET_LAYOUTS: Record<Preset, IJsonModel> = {
         set(55, ['MarketChart']),
       ]),
       row(40, [
-        set(34, ['DeadmanSwitchPanel']),
+        set(34, ['DeadmanSwitchPanel', 'MarketRadarPanel']),
         set(33, ['MemoryWatchdogPanel']),
         set(33, ['SelfOptimizingMLPanel']),
       ]),

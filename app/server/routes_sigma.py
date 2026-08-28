@@ -349,20 +349,79 @@ async def tv_session_status():
 
 @router.get("/api/v1/market/ohlc")
 async def market_ohlc(symbol: str = "BTC/USD", interval: int = 15, count: int = 300):
+    client = get_scraper_client()
     try:
-        candles = get_scraper_client().fetch_ohlc(symbol, interval, count)
+        candles, meta = client.fetch_ohlc_with_meta(symbol, interval, count)
     except ScraperUnavailable as exc:
         raise HTTPException(503, f"scraper unavailable: {exc}") from exc
-    return {"symbol": symbol, "interval": interval, "candles": candles, "count": len(candles)}
+    return {"symbol": symbol, "interval": interval, "candles": candles,
+            "count": len(candles), "feed": meta}
+
+
+@router.get("/api/v1/market/indicators")
+async def market_indicators(symbol: str = "BTC/USD", interval: int = 1440):
+    client = get_scraper_client()
+    try:
+        data = client.fetch_indicators(symbol, interval)
+    except ScraperUnavailable as exc:
+        raise HTTPException(503, f"scraper unavailable: {exc}") from exc
+    return {"symbol": symbol, "interval": interval, "indicators": data, "feed": client.last_meta}
+
+
+@router.get("/api/v1/market/overview")
+async def market_overview(symbol: str = "BTC/USD"):
+    client = get_scraper_client()
+    try:
+        data = client.fetch_overview(symbol)
+    except ScraperUnavailable as exc:
+        raise HTTPException(503, f"scraper unavailable: {exc}") from exc
+    return {"symbol": symbol, "overview": data, "feed": client.last_meta}
+
+
+@router.get("/api/v1/market/movers")
+async def market_movers(market: str = "crypto", category: str = "gainers", limit: int = 25):
+    client = get_scraper_client()
+    try:
+        rows = client.movers(market, category, limit)
+    except ScraperUnavailable as exc:
+        raise HTTPException(503, f"scraper unavailable: {exc}") from exc
+    return {"market": market, "category": category, "rows": rows,
+            "count": len(rows), "feed": client.last_meta}
+
+
+@router.get("/api/v1/market/screener")
+async def market_screener(market: str = "crypto", sort_by: str = "volume",
+                          sort_order: str = "desc", limit: int = 25):
+    client = get_scraper_client()
+    try:
+        rows = client.screener(market=market, sort_by=sort_by, sort_order=sort_order, limit=limit)
+    except ScraperUnavailable as exc:
+        raise HTTPException(503, f"scraper unavailable: {exc}") from exc
+    return {"market": market, "rows": rows, "count": len(rows), "feed": client.last_meta}
+
+
+@router.get("/api/v1/scraper/health")
+async def scraper_health():
+    """Loop-C-Sidecar-Status inkl. Vendor-Import, Cache und Rate-Limit (§6)."""
+    client = get_scraper_client()
+    snapshot = client.health()
+    return {
+        "base_url": client.base_url,
+        "endpoints": dict(bp.SCRAPER_ENDPOINTS),
+        "market_sources": list(bp.MARKET_SOURCES),
+        "market_source_prod": bp.MARKET_SOURCE_PROD,
+        **snapshot,
+    }
 
 
 @router.get("/api/v1/regime")
 async def regime(symbol: str = "BTC/USD", interval: int = 15, count: int = 300):
+    client = get_scraper_client()
     try:
-        candles = get_scraper_client().fetch_ohlc(symbol, interval, count)
+        candles, meta = client.fetch_ohlc_with_meta(symbol, interval, count)
     except ScraperUnavailable as exc:
         raise HTTPException(503, f"scraper unavailable: {exc}") from exc
-    return {"symbol": symbol, **detect_regime(candles)}
+    return {"symbol": symbol, **detect_regime(candles), "feed": meta}
 
 
 # =============================================================================

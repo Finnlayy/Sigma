@@ -136,6 +136,35 @@ export interface RegimeVector {
 
 export interface Candle { ts: number; o: number; h: number; l: number; c: number; v: number }
 
+/** Herkunft der Loop-C-Daten: echtes Sidecar, abgelaufener Cache oder Offline-Fallback. */
+export interface FeedMeta {
+  source: 'tv_scraper' | 'cache_stale' | 'synthetic' | 'unknown';
+  degraded: boolean;
+  cached: boolean;
+  age_s?: number | null;
+  upstream_error?: string | null;
+}
+
+export interface ScraperHealth {
+  ok: boolean;
+  base_url: string;
+  degraded: boolean;
+  error?: string;
+  vendor?: { importable?: boolean; import_error?: string | null; calls?: number; failures?: number; offline_mode?: boolean };
+  cache?: { entries?: number; hits?: number; misses?: number; hit_ratio?: number };
+  rate_limit?: { tokens?: number; capacity?: number; rate_per_min?: number; rejected?: number };
+  endpoints?: Record<string, string>;
+  market_source_prod?: string;
+}
+
+export interface MoverRow {
+  name: string;
+  close: number;
+  change: number;
+  volume: number;
+  market?: string;
+}
+
 export interface TvJob {
   job_id: string;
   kind: string;
@@ -233,7 +262,7 @@ export const sigmaApi = {
 
   // Market / Regime
   ohlc: (symbol: string, interval: number, count = 300) =>
-    request<{ candles: Candle[] }>(`/api/v1/market/ohlc?symbol=${encodeURIComponent(symbol)}&interval=${interval}&count=${count}`),
+    request<{ candles: Candle[]; feed?: FeedMeta }>(`/api/v1/market/ohlc?symbol=${encodeURIComponent(symbol)}&interval=${interval}&count=${count}`),
   /** Fallback: TV-CSV/Store-Kerzen aus dem Core, falls der Scraper (:8001) schläft. */
   ohlcFallback: async (symbol: string, interval: number, count = 300): Promise<{ candles: Candle[] } | null> => {
     const raw = await request<{ candles: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }> }>(
@@ -246,6 +275,17 @@ export const sigmaApi = {
       })),
     };
   },
+
+  scraperHealth: () => request<ScraperHealth>('/api/v1/scraper/health'),
+  movers: (market = 'crypto', category = 'gainers', limit = 20) =>
+    request<{ rows: MoverRow[]; feed: FeedMeta; count: number }>(
+      `/api/v1/market/movers?market=${market}&category=${category}&limit=${limit}`),
+  screener: (market = 'crypto', sortBy = 'volume', limit = 20) =>
+    request<{ rows: MoverRow[]; feed: FeedMeta; count: number }>(
+      `/api/v1/market/screener?market=${market}&sort_by=${sortBy}&limit=${limit}`),
+  marketIndicators: (symbol: string, interval = 1440) =>
+    request<{ indicators: Record<string, number>; feed: FeedMeta }>(
+      `/api/v1/market/indicators?symbol=${encodeURIComponent(symbol)}&interval=${interval}`),
 
   regime: (symbol: string, interval: number) =>
     request<RegimeVector>(`/api/v1/regime?symbol=${encodeURIComponent(symbol)}&interval=${interval}`),

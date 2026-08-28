@@ -32,9 +32,25 @@ from typing import Any, Dict, Mapping, Tuple
 # 0. Identität / Freeze-Header
 # =============================================================================
 
+# Implementierter Stand (dieses Modul ist die Wahrheit fuer den Code).
 BLUEPRINT_VERSION = "3.0"
 BLUEPRINT_STATUS = "Canonical Spec Freeze v3.0 (5-Loop A-E, Virtual Bots, FlexLayout Terminal, Reward/ONNX/Telegram)"
 MASTERPROMPT_VERSION = "3.0.0-SIGMA-RELEASE"
+
+# Stand der eingefrorenen Dokumente in docs/. Liegt DOCS_* vor BLUEPRINT_VERSION,
+# sind die in DOCS_PENDING_SECTIONS gelisteten Kapitel noch nicht implementiert.
+DOCS_BLUEPRINT_VERSION = "3.1"
+DOCS_MASTERPROMPT_VERSION = "3.1.0-SIGMA-RELEASE"
+DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
+    "23 Zeit-Anker & Scheduler-Matrix",
+    "24 Glint x Orderbook Confluence",
+    "25 Closed-Loop Order ACK & Retry",
+    "26 Multi-Provider Rate Limiter",
+    "27 Epidemic SIR Contagion",
+    "28 50/50 Flywheel",
+    "29 Fester Hebel pro Strategie",
+    "30 Erweiterte UI-Panels",
+)
 AUTONOMY_LEVEL = 4
 AUTONOMY_LABEL = "L4 — High Operational Autonomy"
 LINEAGE = "Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4"
@@ -375,6 +391,25 @@ SCRAPER_ENDPOINTS: Mapping[str, str] = MappingProxyType({
     "screener": "/api/screener",
     "download": "/api/download",
 })
+# Sigma-Overlay um das Vendor-API (Cache, Rate-Limit, Retry, Offline-Fallback).
+# Der Blueprint-Prozess `sigma-tv-scraper` startet weiterhin ein FastAPI auf :8001 —
+# `bin/sigma-scraper` waehlt Overlay (Default) oder `--vendor` (pures api.main:app).
+SCRAPER_SIGMA_ENTRY = "uvicorn app.scraper.main:app"
+SCRAPER_VENDOR_ENTRY = "uvicorn api.main:app"
+SCRAPER_VENDOR_PATH = "vendor/tradingview-scraper"
+SCRAPER_LAUNCHER = "bin/sigma-scraper"
+SCRAPER_HEALTH_ROUTE = "/health"
+SCRAPER_OHLCV_TTL_S = 20.0          # Kerzen-Cache
+SCRAPER_META_TTL_S = 300.0          # Overview/Indicators
+SCRAPER_MARKET_TTL_S = 120.0        # Movers/Screener
+SCRAPER_RATE_LIMIT_PER_MIN = 60.0   # Token-Bucket gegen TradingView
+SCRAPER_RATE_LIMIT_BURST = 15.0
+SCRAPER_MAX_RETRIES = 2
+SCRAPER_SOURCES: Tuple[str, ...] = ("tv_scraper", "cache_stale", "synthetic")
+SCRAPER_TIMEFRAMES: Tuple[str, ...] = (
+    "1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d", "1w",
+)
+
 MARKET_SOURCES: Tuple[str, ...] = ("synthetic", "tv_scraper", "ccxt_ws")
 MARKET_SOURCE_PROD = "tv_scraper"
 
