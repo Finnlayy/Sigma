@@ -123,6 +123,8 @@ def _builtin() -> Dict[str, Any]:
             "badge_f_winrate_max": bp.BADGE_F_WINRATE_MAX,
             "badge_f_profit_factor_max": bp.BADGE_F_PROFIT_FACTOR_MAX,
             "allocator_model_path": bp.PATH_ONNX_ALLOCATOR,
+            "initialize_release_pf": bp.INITIALIZE_RELEASE_PF,
+            "initialize_lookback_days": bp.INITIALIZE_LOOKBACK_DAYS,
         },
         "reward_shaping": {
             **{k: v for k, v in bp.REWARD_WEIGHTS.items()},

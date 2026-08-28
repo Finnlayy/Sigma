@@ -152,6 +152,7 @@ class AppState:
         self.kraken_cli = None
         self.deadman = None
         self.memory_watchdog = None
+        self.scorecard = None
         self.flywheel = None
         self.contagion = None
         self.contagion_feed = None
@@ -282,6 +283,9 @@ class AppState:
                                                              set_lifecycle_service)
         from app.services.telegram_bot_operator import (TelegramBotOperator,
                                                          set_telegram_operator)
+        from app.optimizer.strategy_scorecard import (
+            StrategyScorecard, set_strategy_scorecard,
+        )
         from app.tv.alert_provisioner import get_alert_provisioner
         from app.tv.worker import get_tv_queue
 
@@ -310,6 +314,17 @@ class AppState:
             pressure_hook=self._memory_pressure,
         )
         set_memory_watchdog(self.memory_watchdog)
+        alloc = get_allocator(alert_provisioner=get_alert_provisioner())
+        self.scorecard = StrategyScorecard(
+            store=self.store,
+            queue=get_tv_queue(cfg),
+            allocator=alloc,
+            ga_runner=self._scorecard_ga,
+            live_trading_provider=lambda: bool(self.config.live_trading),
+            idle_provider=self._runtime_idle,
+        )
+        alloc.lock_provider = self.scorecard.is_locked
+        set_strategy_scorecard(self.scorecard)
         self.contagion = EpidemicContagionEngine(store=self.store)
         set_contagion_engine(self.contagion)
         self.depth_adapter = routes._DEPTH_ADAPTER or KrakenDepthAdapter()
@@ -422,6 +437,18 @@ class AppState:
             return f"tv cache trimmed {dropped}"
         except Exception as exc:
             return f"tv cache trim failed: {exc}"
+
+    def _scorecard_ga(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        pair = str(cfg.get("assetPair") or "BTC/USD")
+        interval = int(cfg.get("interval") or 15)
+        count = int(cfg.get("candleCount") or 500)
+        candles = self.store.ohlcv(pair, 60, limit=max(count * interval + 120, 300))
+        candles = resample_candles(candles, max(1, interval))[-count:]
+        if len(candles) < 240:
+            return {"shadowGate": {"passed": False}, "error": "WFO needs 240 candles"}
+        if self.ga is None:
+            return {"shadowGate": {"passed": False}, "error": "ga unavailable"}
+        return self.ga.run(cfg, candles)
 
     def _restart_tv_worker(self) -> str:
         from app.tv.worker import get_tv_queue
@@ -665,6 +692,7 @@ class AppState:
             contagion_feed=self.contagion_feed,
             flywheel=self.flywheel,
             fill_reconciler=self.fill_reconciler,
+            scorecard=self.scorecard,
         )
         self.deadman.start()
         logger.info("Scheduler matrix online (%d tasks)", len(sched.tasks))

@@ -78,10 +78,12 @@ class Profile:
 class StrategyAllocator:
     """Entscheidet, welche TV-Alerts im aktuellen Regime laufen dürfen."""
 
-    def __init__(self, alert_provisioner=None, academy=None, model_path: str = bp.PATH_ONNX_ALLOCATOR):
+    def __init__(self, alert_provisioner=None, academy=None, model_path: str = bp.PATH_ONNX_ALLOCATOR,
+                 lock_provider=None):
         self.alerts = alert_provisioner
         self.academy = academy
         self.model_path = model_path
+        self.lock_provider = lock_provider
         self._profiles: Dict[Tuple[str, str, str, str], Profile] = {}
 
     # -------------------------------------------------------------- ingest
@@ -116,6 +118,16 @@ class StrategyAllocator:
     def evaluate(self, strategy_id: str, symbol: str, timeframe: Any,
                  regime: str) -> Dict[str, Any]:
         """§18.4 Allocator-Gate — F oder not is_allowed blockiert den Start."""
+        if self.lock_provider is not None:
+            try:
+                if self.lock_provider(strategy_id, symbol, timeframe, regime):
+                    return {
+                        "allow": False, "rating": "F", "badge": "LOCKED",
+                        "reason": "scorecard lock", "incubating": False,
+                        "trade_count": 0, "locked": True,
+                    }
+            except Exception as exc:  # pragma: no cover
+                logger.error("allocator lock_provider failed: %s", exc)
         prof = self.get_profile(strategy_id, symbol, timeframe, regime)
         if prof is None or prof.trade_count < bp.BADGE_MIN_SAMPLE:
             # Unter N=30 kein Urteil -> Scout/Paper erlaubt, Live vorsichtig zulassen

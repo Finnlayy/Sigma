@@ -10,8 +10,10 @@ import AIReviewer from '../AIReviewer';
 import { BacktestingPanel } from '../BacktestingPanel';
 import { GeneticOptimizerPanel } from '../GeneticOptimizerPanel';
 import { useStrategyWorkspace } from '@/hooks/useStrategyWorkspace';
-import { sigmaApi, type TvLibraryCatalog, type TvLibraryScript } from '@/lib/sigmaApi';
+import { sigmaApi, type LibrarySnapshotRow, type TvLibraryCatalog, type TvLibraryScript } from '@/lib/sigmaApi';
 import { formatTimeframe } from '@/types';
+import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
+import { AmpelDot, StrategyScorecardTab } from './StrategyScorecardTab';
 
 const STRATEGY_DETAIL_TABS = [
   'Code', 'Parameters', 'Alerts', 'Backtest', 'Optimize', 'Live / M8', 'Audit', 'Academy Badges & Profiling',
@@ -33,6 +35,7 @@ export function StrategyLibraryPanel() {
   const [tvCatalog, setTvCatalog] = useState<TvLibraryCatalog | null>(null);
   const [tvPicked, setTvPicked] = useState<Record<string, boolean>>({});
   const [tvBusy, setTvBusy] = useState(false);
+  const [snapRows, setSnapRows] = useState<Record<string, LibrarySnapshotRow>>({});
 
   const selected = ws.selected;
   const visible = ws.strategies.filter((s) => {
@@ -44,6 +47,22 @@ export function StrategyLibraryPanel() {
   useEffect(() => {
     setParamText(JSON.stringify(selected?.parameters ?? {}, null, 2));
   }, [selected?.id]);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void sigmaApi.librarySnapshot().then((d) => {
+        if (!alive || !d?.strategies) return;
+        const map: Record<string, LibrarySnapshotRow> = {};
+        for (const row of d.strategies) map[row.id] = row;
+        setSnapRows(map);
+      });
+    };
+    load();
+    const id = window.setInterval(load, 12000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, []);
 
   const fromTemplate = async (template: string) => {
     setStatus('creating…');
@@ -77,6 +96,17 @@ export function StrategyLibraryPanel() {
     setAlertMsg('syncing…');
     const rec = await sigmaApi.syncAlert(selected.id, selected.assetPair, selected.interval);
     setAlertMsg(rec ? `${rec.status} ${rec.tv_alert_id || ''}` : 'alert sync failed');
+  };
+
+  const operatorAct = async (kind: 'initialize' | 'validate') => {
+    if (!selected) return;
+    const token = await PasskeyWebAuthnClient.authenticatePasskeyForSettings('master@alpha.local');
+    if (!token) return;
+    setStatus(kind === 'initialize' ? 'initializing…' : 'validating…');
+    const out = kind === 'initialize'
+      ? await sigmaApi.initializeStrategy(selected.id, token)
+      : await sigmaApi.validateStrategy(selected.id, token);
+    setStatus(out ? `${kind} ${out.lamp || out.job_id || 'ok'}` : `${kind} failed`);
   };
 
   const loadTvScripts = async () => {
@@ -219,7 +249,9 @@ export function StrategyLibraryPanel() {
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,18%)_1fr]">
         <ScrollArea className="border-r border-border">
           <div className="space-y-1 p-2">
-            {visible.map((s) => (
+            {visible.map((s) => {
+              const snap = snapRows[s.id];
+              return (
               <button
                 key={s.id}
                 onClick={() => ws.select(s)}
@@ -228,19 +260,36 @@ export function StrategyLibraryPanel() {
                 }`}
               >
                 <div className="flex items-center justify-between gap-1">
-                  <span className="truncate font-medium">{s.name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <AmpelDot lamp={snap?.lamp} glow={selected?.id === s.id} />
+                    <span className="truncate font-medium">{s.name}</span>
+                  </span>
                   <Badge variant="outline" className="h-4 text-[9px]">{s.executionMode || 'paper'}</Badge>
                 </div>
                 <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                  {s.assetPair} · {formatTimeframe(s.interval)} · {s.status}
+                  {snap?.best_symbol || s.assetPair} · {formatTimeframe(s.interval)} · {s.status}
                   {s.tv_script_id ? ' · TV' : ''}
+                  {snap?.primary_badge ? ` · ${snap.primary_badge}` : ''}
                 </div>
               </button>
-            ))}
+              );
+            })}
             {!visible.length && <div className="text-[11px] text-muted-foreground">No strategies</div>}
           </div>
         </ScrollArea>
         <Tabs defaultValue="Code" className="flex min-h-0 flex-col gap-0">
+          {selected && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
+              <AmpelDot lamp={snapRows[selected.id]?.lamp} glow />
+              <span className="truncate text-[12px] font-medium">{selected.name}</span>
+              <Button size="sm" className="h-6 text-[10px]" disabled={!selected}
+                onClick={() => void operatorAct('initialize')}>Initialisieren</Button>
+              <div className="flex flex-col">
+                <Button size="sm" variant="outline" className="h-6 text-[10px]"
+                  onClick={() => void operatorAct('validate')}>Validieren</Button>
+              </div>
+            </div>
+          )}
           <TabsList variant="line" className="h-8 w-full justify-start overflow-x-auto rounded-none">
             {STRATEGY_DETAIL_TABS.map((t) => (
               <TabsTrigger key={t} value={t} className="h-7 flex-none text-[10px]">{t}</TabsTrigger>
@@ -309,8 +358,16 @@ export function StrategyLibraryPanel() {
           <TabsContent value="Audit" className="mt-0 overflow-auto p-3 text-xs text-muted-foreground">
             Lifecycle, receipts and reject reasons for {selected?.id || '—'}. Use Order Receipts / Process Log panels for the live stream.
           </TabsContent>
-          <TabsContent value="Academy Badges & Profiling" className="mt-0 min-h-0 flex-1 overflow-auto p-3 text-xs text-muted-foreground">
-            Academy scorecard lives in the Academy Badges dock panel for the full matrix. This tab is bound to {selected?.id || 'the selected strategy'}.
+          <TabsContent value="Academy Badges & Profiling" className="mt-0 min-h-0 flex-1 overflow-auto">
+            {selected ? (
+              <StrategyScorecardTab
+                strategyId={selected.id}
+                snapshot={snapRows[selected.id]}
+                onBusy={setStatus}
+              />
+            ) : (
+              <p className="p-3 text-xs text-muted-foreground">Select a strategy.</p>
+            )}
           </TabsContent>
         </Tabs>
       </div>

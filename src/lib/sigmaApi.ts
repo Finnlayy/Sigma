@@ -145,6 +145,62 @@ export interface BadgeRow {
   badge: string;
 }
 
+export type StrategyLamp = 'gray' | 'yellow' | 'green_solid' | 'green_glow' | 'red_glow';
+
+export interface ScorecardKpis {
+  trade_count: number;
+  win_rate: number;
+  profit_factor: number;
+  net_pnl: number;
+}
+
+export interface ScorecardSlot {
+  strategy_id: string;
+  symbol: string;
+  timeframe: string;
+  regime: string;
+  origin: 'user' | 'academy';
+  lamp: StrategyLamp;
+  locked: boolean;
+  favorite: boolean;
+  pf_after_fees: number;
+  last_job_id: string;
+  verified_at: number | null;
+}
+
+export interface LibrarySnapshotRow {
+  id: string;
+  name: string;
+  status: string;
+  executionMode: string;
+  assetPair: string;
+  interval: number;
+  tv: boolean;
+  lamp: StrategyLamp;
+  kpis: ScorecardKpis;
+  primary_badge: string;
+  best_symbol: string;
+  best_tf: string;
+  stage1_done: boolean;
+}
+
+export interface StrategyScorecard {
+  ok: boolean;
+  strategy: Record<string, unknown>;
+  header: {
+    strategy_id: string;
+    lamp: StrategyLamp;
+    stage1_done: boolean;
+    pf_after_fees: number;
+    last_init_job_id: string;
+    last_validate_job_id: string;
+  };
+  kpis: ScorecardKpis;
+  slots: ScorecardSlot[];
+  badges: BadgeRow[];
+  lamp: StrategyLamp;
+}
+
 export interface RewardRow {
   strategy_id: string;
   xp: number;
@@ -318,6 +374,16 @@ const operatorPost = <T,>(path: string, settingsToken: string, body?: unknown) =
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
+const operatorPut = <T,>(path: string, settingsToken: string, body?: unknown) =>
+  request<T>(path, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Sigma-Settings-Token': settingsToken,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
 export const sigmaApi = {
   health: () => request<HealthResponse>('/api/v1/health'),
   blueprint: () => request<any>('/api/v1/blueprint'),
@@ -397,6 +463,17 @@ export const sigmaApi = {
   // Academy / Reward / ML / Scout
   badges: (strategyId = '') => request<{ matrix: BadgeRow[]; profiles: number; ratings: Record<string, number> }>(
     `/api/v1/academy/badges${strategyId ? `?strategyId=${strategyId}` : ''}`),
+  librarySnapshot: () => request<{ strategies: LibrarySnapshotRow[]; count: number }>(
+    '/api/v1/strategies/library-snapshot'),
+  strategyScorecard: (id: string) => request<StrategyScorecard>(
+    `/api/v1/strategies/${encodeURIComponent(id)}/scorecard`),
+  putStrategySlots: (id: string, settingsToken: string, slots: Array<Partial<ScorecardSlot>>) =>
+    operatorPut<{ ok: boolean; slots: ScorecardSlot[] }>(
+      `/api/v1/strategies/${encodeURIComponent(id)}/slots`, settingsToken, { slots }),
+  initializeStrategy: (id: string, settingsToken: string) =>
+    operatorPost<any>(`/api/v1/strategies/${encodeURIComponent(id)}/initialize`, settingsToken),
+  validateStrategy: (id: string, settingsToken: string) =>
+    operatorPost<any>(`/api/v1/strategies/${encodeURIComponent(id)}/validate`, settingsToken),
   trainingDataset: () => request<{ rows: any[]; count: number }>('/api/v1/academy/training-dataset'),
   rewardMatrix: () => request<{ matrix: RewardRow[]; weights: Record<string, number> }>('/api/v1/reward/matrix'),
   mlState: () => request<MlSnapshot>('/api/v1/ml/self-optimizing'),

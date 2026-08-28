@@ -287,6 +287,15 @@ def test_memory_watchdog_stages():
     assert bp.MEMORY_IDLE_MIN_STAGE == 3
 
 
+def test_scorecard_initialize_constants():
+    assert bp.INITIALIZE_RELEASE_PF == 1.5
+    assert bp.INITIALIZE_LOOKBACK_DAYS == 30
+    assert bp.StrategyLamp.GREEN_GLOW.value == "green_glow"
+    assert "scorecard_stage1_idle" in next(
+        s.tasks for s in bp.SCHEDULER_MATRIX if int(s.tier) == 2
+    )
+
+
 def test_virtual_bot_and_deadman_rules():
     assert bp.VIRTUAL_BOT_SIZING_BASIS == "bot.current_equity"
     assert bp.PIONEX_ENABLED_DEFAULT is False

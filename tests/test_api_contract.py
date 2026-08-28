@@ -255,9 +255,41 @@ def test_deadman_and_memory_endpoints(client):
     json.dumps(payload)
     names = [t["name"] for tier in payload["tiers"] for t in tier.get("registered", [])]
     assert "deadman_heartbeat" in names
+    assert "scorecard_stage1_idle" in names
     t0 = next(tier for tier in payload["tiers"] if tier["tier"] == 0)
     for task in t0.get("registered", []):
         assert task["next_run"] is None
+
+
+def test_library_snapshot_omits_code_and_scorecard_writes(client):
+    import app.server.routes_sigma as routes
+
+    snap = client.get("/api/v1/strategies/library-snapshot").json()
+    assert "strategies" in snap
+    for row in snap["strategies"]:
+        assert "code" not in row
+        assert "lamp" in row
+    routes.set_operator_auth_override(lambda request: True)
+    try:
+        denied = client.put("/api/v1/strategies/missing/slots", json={"slots": []})
+        # override is on — unknown strategy still upserts empty list
+        assert denied.status_code in (200, 404)
+        if snap["strategies"]:
+            sid = snap["strategies"][0]["id"]
+            put = client.put(f"/api/v1/strategies/{sid}/slots", json={
+                "slots": [{"symbol": "ETH/USD", "timeframe": "15", "favorite": True, "locked": False}],
+            })
+            assert put.status_code == 200
+            body = put.json()
+            assert body["slots"][0]["origin"] == "user"
+            assert body["slots"][0]["lamp"] == "green_solid"
+            card = client.get(f"/api/v1/strategies/{sid}/scorecard").json()
+            assert "code" not in card["strategy"]
+            init = client.post(f"/api/v1/strategies/{sid}/initialize")
+            assert init.status_code == 200
+            assert init.json()["ok"] is True
+    finally:
+        routes.set_operator_auth_override(None)
 
 
 def test_telegram_whitelist_and_fastpath(client):

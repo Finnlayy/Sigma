@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 import duckdb
@@ -204,6 +205,38 @@ CREATE TABLE IF NOT EXISTS academy_registry (
   last_drill_ts TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS strategy_slots (
+  strategy_id VARCHAR,
+  symbol VARCHAR,
+  timeframe VARCHAR,
+  regime VARCHAR,
+  origin VARCHAR,
+  lamp VARCHAR,
+  locked INTEGER,
+  favorite INTEGER,
+  pf_after_fees DOUBLE,
+  last_job_id VARCHAR,
+  verified_at DOUBLE,
+  updated_at DOUBLE,
+  PRIMARY KEY (strategy_id, symbol, timeframe, regime)
+);
+
+CREATE TABLE IF NOT EXISTS strategy_scorecard (
+  strategy_id VARCHAR PRIMARY KEY,
+  lamp VARCHAR,
+  initialized_at DOUBLE,
+  stage1_done INTEGER,
+  options_opened_at DOUBLE,
+  last_init_job_id VARCHAR,
+  last_pull_job_id VARCHAR,
+  last_validate_job_id VARCHAR,
+  pf_after_fees DOUBLE,
+  net_pnl DOUBLE,
+  trade_count INTEGER,
+  win_rate DOUBLE,
+  updated_at DOUBLE
+);
 """
 
 
@@ -242,6 +275,22 @@ class DuckDBStore:
             )
         except Exception:
             pass
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS strategy_slots (
+              strategy_id VARCHAR, symbol VARCHAR, timeframe VARCHAR, regime VARCHAR,
+              origin VARCHAR, lamp VARCHAR, locked INTEGER, favorite INTEGER,
+              pf_after_fees DOUBLE, last_job_id VARCHAR, verified_at DOUBLE, updated_at DOUBLE,
+              PRIMARY KEY (strategy_id, symbol, timeframe, regime)
+            )"""
+        )
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS strategy_scorecard (
+              strategy_id VARCHAR PRIMARY KEY, lamp VARCHAR, initialized_at DOUBLE,
+              stage1_done INTEGER, options_opened_at DOUBLE, last_init_job_id VARCHAR,
+              last_pull_job_id VARCHAR, last_validate_job_id VARCHAR, pf_after_fees DOUBLE,
+              net_pnl DOUBLE, trade_count INTEGER, win_rate DOUBLE, updated_at DOUBLE
+            )"""
+        )
 
     # ------------------------------------------------------------------ helpers
     def _rows(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
@@ -821,6 +870,132 @@ class DuckDBStore:
                 if r.get(k) is not None:
                     r[k] = str(r[k])
         return rows
+
+    # ---------------------------------------------------------- scorecard slots
+    def upsert_strategy_slot(self, slot: Dict[str, Any]) -> None:
+        self._exec(
+            """INSERT OR REPLACE INTO strategy_slots
+               (strategy_id, symbol, timeframe, regime, origin, lamp, locked, favorite,
+                pf_after_fees, last_job_id, verified_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                slot["strategy_id"], slot.get("symbol") or "",
+                str(slot.get("timeframe") or ""), slot.get("regime") or "",
+                slot.get("origin") or "academy", slot.get("lamp") or "gray",
+                int(1 if slot.get("locked") else 0),
+                int(1 if slot.get("favorite", True) else 0),
+                _f(slot.get("pf_after_fees")),
+                slot.get("last_job_id") or "",
+                slot.get("verified_at"),
+                float(slot.get("updated_at") or time.time()),
+            ],
+        )
+
+    def get_strategy_slot(self, strategy_id: str, symbol: str, timeframe: Any,
+                          regime: str = "") -> Optional[Dict[str, Any]]:
+        row = self._one(
+            "SELECT * FROM strategy_slots WHERE strategy_id=? AND symbol=? AND timeframe=? AND regime=?",
+            [strategy_id, symbol, str(timeframe), regime or ""],
+        )
+        return self._slot_row(row) if row else None
+
+    def list_strategy_slots(self, strategy_id: str = "") -> List[Dict[str, Any]]:
+        if strategy_id:
+            rows = self._rows(
+                "SELECT * FROM strategy_slots WHERE strategy_id=? ORDER BY favorite DESC, symbol, timeframe",
+                [strategy_id],
+            )
+        else:
+            rows = self._rows("SELECT * FROM strategy_slots ORDER BY strategy_id, symbol")
+        return [self._slot_row(r) for r in rows]
+
+    @staticmethod
+    def _slot_row(r: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "strategy_id": r["strategy_id"],
+            "symbol": r.get("symbol") or "",
+            "timeframe": r.get("timeframe") or "",
+            "regime": r.get("regime") or "",
+            "origin": r.get("origin") or "academy",
+            "lamp": r.get("lamp") or "gray",
+            "locked": bool(r.get("locked")),
+            "favorite": bool(r.get("favorite", 1)),
+            "pf_after_fees": float(r.get("pf_after_fees") or 0.0),
+            "last_job_id": r.get("last_job_id") or "",
+            "verified_at": r.get("verified_at"),
+            "updated_at": r.get("updated_at"),
+        }
+
+    def upsert_scorecard_header(self, header: Dict[str, Any]) -> None:
+        self._exec(
+            """INSERT OR REPLACE INTO strategy_scorecard
+               (strategy_id, lamp, initialized_at, stage1_done, options_opened_at,
+                last_init_job_id, last_pull_job_id, last_validate_job_id,
+                pf_after_fees, net_pnl, trade_count, win_rate, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                header["strategy_id"],
+                header.get("lamp") or "gray",
+                header.get("initialized_at"),
+                int(1 if header.get("stage1_done") else 0),
+                header.get("options_opened_at"),
+                header.get("last_init_job_id") or "",
+                header.get("last_pull_job_id") or "",
+                header.get("last_validate_job_id") or "",
+                _f(header.get("pf_after_fees")),
+                _f(header.get("net_pnl")),
+                int(_f(header.get("trade_count"), 0)),
+                _f(header.get("win_rate")),
+                header.get("updated_at") or time.time(),
+            ],
+        )
+
+    def get_scorecard_header(self, strategy_id: str) -> Optional[Dict[str, Any]]:
+        row = self._one("SELECT * FROM strategy_scorecard WHERE strategy_id=?", [strategy_id])
+        return self._scorecard_row(row) if row else None
+
+    def list_scorecard_headers(self) -> List[Dict[str, Any]]:
+        return [self._scorecard_row(r) for r in self._rows("SELECT * FROM strategy_scorecard")]
+
+    @staticmethod
+    def _scorecard_row(r: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "strategy_id": r["strategy_id"],
+            "lamp": r.get("lamp") or "gray",
+            "initialized_at": r.get("initialized_at"),
+            "stage1_done": bool(r.get("stage1_done")),
+            "options_opened_at": r.get("options_opened_at"),
+            "last_init_job_id": r.get("last_init_job_id") or "",
+            "last_pull_job_id": r.get("last_pull_job_id") or "",
+            "last_validate_job_id": r.get("last_validate_job_id") or "",
+            "pf_after_fees": float(r.get("pf_after_fees") or 0.0),
+            "net_pnl": float(r.get("net_pnl") or 0.0),
+            "trade_count": int(r.get("trade_count") or 0),
+            "win_rate": float(r.get("win_rate") or 0.0),
+            "updated_at": r.get("updated_at"),
+        }
+
+    def strategy_trade_kpis(self, strategy_id: str) -> Dict[str, float]:
+        row = self._one(
+            """SELECT COUNT(*) AS n,
+                      SUM(CASE WHEN COALESCE(net_pnl_usd, 0) > 0 THEN 1 ELSE 0 END) AS wins,
+                      COALESCE(SUM(net_pnl_usd), 0) AS net_pnl,
+                      COALESCE(SUM(CASE WHEN COALESCE(net_pnl_usd, 0) > 0 THEN net_pnl_usd ELSE 0 END), 0) AS gp,
+                      COALESCE(SUM(CASE WHEN COALESCE(net_pnl_usd, 0) < 0 THEN ABS(net_pnl_usd) ELSE 0 END), 0) AS gl
+               FROM trades WHERE strategy_id=? AND COALESCE(status, 'closed') != 'open'""",
+            [strategy_id],
+        ) or {}
+        n = int(row.get("n") or 0)
+        wins = int(row.get("wins") or 0)
+        gp = float(row.get("gp") or 0.0)
+        gl = float(row.get("gl") or 0.0)
+        pf = (gp / gl) if gl > 0 else (99.0 if gp > 0 else 0.0)
+        return {
+            "trade_count": n,
+            "win_rate": (wins / n) if n else 0.0,
+            "profit_factor": pf,
+            "net_pnl": float(row.get("net_pnl") or 0.0),
+        }
 
 
 def _f(v: Any, default: float = 0.0) -> float:

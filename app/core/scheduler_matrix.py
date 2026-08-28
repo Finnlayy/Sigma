@@ -256,6 +256,7 @@ def install_canonical_tasks(
     flywheel=None,
     fill_reconciler=None,
     glint_event: Optional[TaskFn] = None,
+    scorecard=None,
 ) -> SchedulerMatrix:
     """Wire the implemented T0/T1/T2/T4 jobs into the production scheduler.
 
@@ -318,6 +319,19 @@ def install_canonical_tasks(
             "macro_radar_scraper",
             bp.SchedulerTier.T2_MID,
             _macro_radar,
+            start_immediately=False,
+        )
+    if sched.get("scorecard_stage1_idle") is None:
+        card = scorecard
+        if card is None:
+            from app.optimizer.strategy_scorecard import get_strategy_scorecard
+
+            card = get_strategy_scorecard()
+        sched.register(
+            "scorecard_stage1_idle",
+            bp.SchedulerTier.T2_MID,
+            card.idle_stage1_tick,
+            cadence_s=float(bp.SCOUT_INCUBATOR_CYCLE_MINUTES) * 60.0,
             start_immediately=False,
         )
     if flywheel is not None and sched.get("flywheel_sweep") is None:

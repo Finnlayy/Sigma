@@ -120,6 +120,8 @@ academy:
   badge_f_winrate_max: 0.40
   badge_f_profit_factor_max: 0.9
   allocator_model_path: models/strategy_allocator.onnx
+  initialize_release_pf: 1.5
+  initialize_lookback_days: 30
 
 reward_shaping:
   w1_pnl: 1.0

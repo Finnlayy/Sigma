@@ -240,6 +240,7 @@ MODULES_NEW: Mapping[str, str] = MappingProxyType({
     "app/quant/regime_detector.py": "EMA-Delta, ATR-Perzentile, Hurst",
     "app/quant/self_optimizing_onnx.py": "Brier, Temperature, Hot-Reload",
     "app/optimizer/StrategyAllocator.py": "Badge + Regime -> Alert an/aus",
+    "app/optimizer/strategy_scorecard.py": "Strategie-Ampel, Slots, Stage-1 Initialize",
     "app/optimizer/reward_shaping.py": "XP/Strike -> M8 Multiplier / Quarantaene",
     "app/optimizer/gene_schema.py": "Parameter-CSV -> GeneSchema",
     "app/execution/VirtualBotEngine.py": "Budget-Ringfence, Sizing, Max-Loss, Sweep",
@@ -550,6 +551,26 @@ BADGE_F_PROFIT_FACTOR_MAX = 0.9
 BADGE_RATINGS: Tuple[str, ...] = ("S", "A", "B", "C", "F")
 
 ACADEMY_TABLES: Tuple[str, ...] = ("academy_trade_history", "strategy_performance_profiles")
+
+class StrategyLamp(str, Enum):
+    GRAY = "gray"
+    YELLOW = "yellow"
+    GREEN_SOLID = "green_solid"
+    GREEN_GLOW = "green_glow"
+    RED_GLOW = "red_glow"
+
+
+SLOT_ORIGIN_USER = "user"
+SLOT_ORIGIN_ACADEMY = "academy"
+INITIALIZE_RELEASE_PF = 1.5
+INITIALIZE_LOOKBACK_DAYS = 30
+STRATEGY_LAMP_RANK: Mapping[str, int] = MappingProxyType({
+    StrategyLamp.GRAY.value: 0,
+    StrategyLamp.YELLOW.value: 1,
+    StrategyLamp.GREEN_SOLID.value: 2,
+    StrategyLamp.GREEN_GLOW.value: 3,
+    StrategyLamp.RED_GLOW.value: 4,
+})
 
 # Kausale Fehler-Dekomposition (Masterprompt §2 Loop E)
 CAUSAL_FAULTS: Tuple[str, ...] = (
@@ -922,7 +943,7 @@ SCHEDULER_MATRIX: Tuple[TierSpec, ...] = (
     TierSpec(SchedulerTier.T1_FAST_PULSE, "Fast Pulse", 20.0, None,
              ("deadman_heartbeat", "memory_watchdog", "kraken_fill_reconcile")),
     TierSpec(SchedulerTier.T2_MID, "Mid", 300.0, None,
-             ("macro_radar_scraper",)),
+             ("macro_radar_scraper", "scorecard_stage1_idle")),
     TierSpec(SchedulerTier.T3_REGIME, "Regime", 14400.0, None,
              ("strategy_allocator", "regime_recheck", "brier_drift",
               "regime_strategy_dispatcher")),

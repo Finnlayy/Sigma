@@ -826,6 +826,55 @@ async def academy_badges(strategyId: str = ""):
     return {"matrix": alloc.badge_matrix(strategyId), **alloc.snapshot()}
 
 
+def _scorecard_svc():
+    from app.optimizer.strategy_scorecard import get_strategy_scorecard
+
+    return get_strategy_scorecard()
+
+
+@router.get("/api/v1/strategies/library-snapshot")
+async def library_snapshot():
+    return _scorecard_svc().library_snapshot()
+
+
+@router.get("/api/v1/strategies/{strategy_id}/scorecard")
+async def strategy_scorecard(strategy_id: str):
+    out = _scorecard_svc().scorecard(strategy_id, mark_opened=True)
+    if not out.get("ok"):
+        raise HTTPException(404, out.get("error") or "unknown strategy")
+    if "code" in (out.get("strategy") or {}):
+        out["strategy"] = {k: v for k, v in out["strategy"].items() if k != "code"}
+    return out
+
+
+@router.put("/api/v1/strategies/{strategy_id}/slots")
+async def put_strategy_slots(strategy_id: str, body: ScorecardSlotsPut, request: Request,
+                             x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
+    slots = _scorecard_svc().put_slots(strategy_id, [s.model_dump() for s in body.slots])
+    return {"ok": True, "slots": slots, "header": _scorecard_svc().header(strategy_id)}
+
+
+@router.post("/api/v1/strategies/{strategy_id}/initialize")
+async def initialize_strategy(strategy_id: str, request: Request,
+                              x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
+    out = _scorecard_svc().start_initialize(strategy_id, origin="user")
+    if not out.get("ok"):
+        raise HTTPException(404, out.get("error") or "unknown strategy")
+    return out
+
+
+@router.post("/api/v1/strategies/{strategy_id}/validate")
+async def validate_strategy(strategy_id: str, request: Request,
+                            x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
+    out = _scorecard_svc().start_validate(strategy_id)
+    if not out.get("ok"):
+        raise HTTPException(404, out.get("error") or "unknown strategy")
+    return out
+
+
 @router.post("/api/v1/academy/ingest")
 async def academy_ingest(body: TradeResultIn):
     alloc = get_allocator(alert_provisioner=get_alert_provisioner())
@@ -1427,6 +1476,18 @@ class FlywheelProfitIn(BaseModel):
 class FlywheelReconcileIn(BaseModel):
     executed: bool
     order_id: str = ""
+
+
+class ScorecardSlotIn(BaseModel):
+    symbol: str
+    timeframe: Any = 15
+    regime: str = ""
+    favorite: bool = True
+    locked: bool = False
+
+
+class ScorecardSlotsPut(BaseModel):
+    slots: List[ScorecardSlotIn] = Field(default_factory=list)
 
 
 def _require_operator(request: Request, token: Optional[str]) -> None:

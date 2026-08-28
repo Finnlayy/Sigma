@@ -98,7 +98,8 @@ def test_api_client_targets_blueprint_routes():
     for route in ("/api/v1/health", "/api/v1/bots", "/api/v1/safety",
                   "/api/v1/deadman", "/api/v1/memory", "/api/v1/reward/matrix",
                   "/api/v1/ml/self-optimizing", "/api/v1/academy/badges",
-                  "/api/v1/telegram", "/api/tv/jobs"):
+                  "/api/v1/telegram", "/api/tv/jobs",
+                  "/api/v1/strategies/library-snapshot"):
         assert route in src, f"UI client does not call {route}"
 
 
@@ -140,6 +141,9 @@ def test_unified_shell_panels_and_llm_wiring():
     for tab in bp.STRATEGY_DETAIL_TABS:
         assert tab in library
     assert "STRATEGY_DETAIL_TABS" in library
+    assert "Initialisieren" in library
+    assert "Validieren" in library
+    assert "animate-pulse" not in library
     assert "new WebSocket" in panels
     assert "llmStreamUrl" in panels and "llmToolCall" in panels
     assert "fromTemplate" in api
