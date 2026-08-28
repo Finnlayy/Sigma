@@ -349,6 +349,20 @@ export const sigmaApi = {
   flywheelSweep: () => post<any>('/api/v1/flywheel/sweep'),
   leverage: (strategyId: string) => request<any>(`/api/v1/leverage/${encodeURIComponent(strategyId)}`),
 
+  // §38 Netron ONNX Inspector
+  netronStatus: () => request<any>('/api/v1/models/netron/status'),
+  netronStart: (model = '') => post<any>(`/api/v1/models/netron/start${model ? `?model=${encodeURIComponent(model)}` : ''}`, {}),
+  inspectModel: (versionTag: string) => post<any>(`/api/v1/models/inspect/${encodeURIComponent(versionTag)}`, {}),
+
+  // §34 LLM Tool-Contracts
+  llmTools: () => request<any>('/api/v1/llm/tools'),
+  llmToolCall: (toolName: string, args: Record<string, unknown>) =>
+    post<any>('/api/v1/llm/tool-call', { tool_name: toolName, arguments: args }),
+  llmStreamUrl: () => {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/api/v1/llm/stream`;
+  },
+
   // §37 Live Process & AI Log Console
   logSources: () => request<LogSources>('/api/v1/logs/sources'),
   logTail: (filter = '', limit = 200) =>

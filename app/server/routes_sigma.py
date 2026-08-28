@@ -14,7 +14,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core import blueprint as bp
@@ -639,6 +639,123 @@ async def telegram_message(body: TelegramIn):
     op = get_telegram_operator(safety_guard=get_safety_guard(),
                                virtual_bots=get_virtual_bot_engine())
     return op.handle(body.chat_id, body.text)
+
+
+# =============================================================================
+# §38 Netron ONNX Visualization & Inspection Stack
+# =============================================================================
+
+@router.get("/api/v1/models/netron/status")
+async def netron_status():
+    """§38.3 — aktives Modell + Port-Health."""
+    from app.services.netron_server import get_netron_service
+
+    return get_netron_service().status()
+
+
+@router.post("/api/v1/models/netron/start")
+async def netron_start(model: str = ""):
+    from app.services.netron_server import get_netron_service
+
+    return get_netron_service().start_server(model or bp.NETRON_DEFAULT_MODEL)
+
+
+@router.post("/api/v1/models/inspect/{version_tag}")
+async def netron_inspect(version_tag: str):
+    """§38.5 — 'In Netron betrachten' aus der Model-Registry."""
+    from app.services.netron_server import get_netron_service
+
+    service = get_netron_service()
+    if not service.load_model(version_tag):
+        raise HTTPException(status_code=404, detail={
+            "code": "NETRON_MODEL_NOT_LOADED",
+            "reason": service.last_error or version_tag})
+    return {"loaded": True, "version_tag": service.version_tag,
+            "status": service.status()}
+
+
+# =============================================================================
+# §34 LLM-, Tool-Calling- & Streaming-Schemata
+# =============================================================================
+
+@router.get("/api/v1/llm/tools")
+async def llm_tools():
+    """§34.1 — Ollama/OpenAI-kompatible Function-Definitionen."""
+    from app.llm.schemas_llm import tool_registry
+
+    return {"version": bp.DOCS_BLUEPRINT_VERSION,
+            "requires_confirmation": list(bp.LLM_TOOLS_REQUIRING_CONFIRMATION),
+            "stream_route": bp.LLM_STREAM_ROUTE,
+            "ui_triggers": list(bp.LLM_UI_TRIGGERS),
+            "tools": tool_registry()}
+
+
+@router.post("/api/v1/llm/tool-call")
+async def llm_tool_call(body: Dict[str, Any]):
+    """Typisierter Tool-Call — Freitext wird nie ausgefuehrt (§34)."""
+    from app.llm.schemas_llm import ToolCallEnvelope
+    from app.llm.tool_executor import get_tool_executor
+
+    try:
+        envelope = ToolCallEnvelope(**body)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": "LLM_TOOL_ENVELOPE_INVALID", "reason": str(exc)})
+    result = get_tool_executor().execute(envelope)
+    return result.model_dump()
+
+
+@router.post("/api/v1/llm/pine-patch")
+async def llm_pine_patch(body: Dict[str, Any]):
+    """§34.2 — Pine-Patch mit Backup, Compile-Gate und Rollback."""
+    from app.llm.schemas_llm import PineCodePatchRequest, ToolCallEnvelope
+    from app.llm.tool_executor import get_tool_executor
+
+    try:
+        request = PineCodePatchRequest(**body)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": "ERR_TV_PINE_COMPILE_ERROR", "reason": str(exc)})
+    result = get_tool_executor().execute(ToolCallEnvelope(
+        tool_name="edit_pine_strategy_code", arguments=request.model_dump()))
+    return result.model_dump()
+
+
+@router.websocket(bp.LLM_STREAM_ROUTE)
+async def llm_stream(websocket: WebSocket):
+    """§34.3 — ChatStreamMessage-Stream fuer die LLMConsole."""
+    from app.llm.schemas_llm import ChatStreamMessage, ToolCallEnvelope
+    from app.llm.tool_executor import get_tool_executor
+
+    await websocket.accept()
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            session = str(payload.get("session_id") or "default")
+            call = payload.get("tool_call")
+            if call:
+                envelope = ToolCallEnvelope(**call)
+                await websocket.send_json(ChatStreamMessage(
+                    session_id=session, sender="TOOL_EXECUTOR",
+                    active_tool_call=envelope).model_dump())
+                result = get_tool_executor().execute(envelope)
+                trigger = result.result_data.get("ui_component_trigger")
+                await websocket.send_json(ChatStreamMessage(
+                    session_id=session, sender="TOOL_EXECUTOR",
+                    tool_result=result, is_complete=True,
+                    ui_component_trigger=trigger
+                    if trigger in bp.LLM_UI_TRIGGERS else None).model_dump())
+                continue
+            prompt = str(payload.get("prompt") or "")
+            for chunk in (prompt.split(" ") or [""]):
+                await websocket.send_json(ChatStreamMessage(
+                    session_id=session, sender="ASSISTANT",
+                    content_chunk=chunk + " ").model_dump())
+            await websocket.send_json(ChatStreamMessage(
+                session_id=session, sender="ASSISTANT",
+                is_complete=True).model_dump())
+    except WebSocketDisconnect:
+        return
 
 
 # =============================================================================

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
-  Download, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
+  Download, ExternalLink, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
   Trash2,
   Sparkles, Trophy, Zap,
 } from 'lucide-react';
@@ -956,6 +956,63 @@ export function DiagnosticsErrorPanel() {
   );
 }
 
+
+/* ---------------------------------------- 22 NetronVisualizerPanel §38 */
+
+export function NetronVisualizerPanel() {
+  const [data, refresh] = usePoll(() => sigmaApi.netronStatus(), 10000);
+  const [nonce, setNonce] = useState(0);
+  const models: any[] = data?.models ?? [];
+  const url: string = data?.url ?? 'http://localhost:8082';
+
+  const inspect = async (tag: string) => {
+    await sigmaApi.inspectModel(tag);
+    setNonce((n) => n + 1);
+    refresh();
+  };
+
+  return (
+    <PanelShell title="Netron ONNX Inspector" icon={<Brain size={13} className="text-fuchsia-400" />}
+      actions={<>
+        <IconBtn onClick={() => { setNonce((n) => n + 1); refresh(); }} title="Reload"><RefreshCw size={12} /></IconBtn>
+        <a href={url} target="_blank" rel="noreferrer" title="Extern öffnen"
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><ExternalLink size={12} /></a>
+      </>}>
+      <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">
+        <span className={`rounded px-1 font-bold ${data?.running ? 'bg-emerald-600/70' : 'bg-zinc-700'}`}>
+          {data?.running ? `LIVE :${data?.port}` : 'OFFLINE'}
+        </span>
+        <span className="font-mono text-zinc-400">{data?.version_tag || 'kein Modell'}</span>
+        {!data?.available && <span className="text-amber-400">pip install netron</span>}
+        {!data?.running && (
+          <button onClick={() => void sigmaApi.netronStart().then(refresh)}
+            className="rounded bg-zinc-800 px-1.5 py-0.5 font-semibold text-zinc-200 hover:bg-zinc-700">
+            Server starten
+          </button>
+        )}
+      </div>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {models.map((m) => (
+          <button key={m.version_tag} onClick={() => inspect(m.version_tag)}
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${m.active ? 'bg-fuchsia-600/80 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+            title={`${m.path} · ${(m.size_bytes / 1024).toFixed(0)} KB`}>
+            In Netron betrachten: {m.version_tag}
+          </button>
+        ))}
+        {!models.length && <span className="text-[10px] text-zinc-600">Keine .onnx Modelle in {data?.models_dir}</span>}
+      </div>
+      {data?.running ? (
+        <iframe key={nonce} src={url} title="Netron"
+          className="h-[420px] w-full rounded border border-zinc-800 bg-[#0e1117]" />
+      ) : (
+        <div className="flex h-[200px] items-center justify-center rounded border border-dashed border-zinc-800 bg-[#0e1117] text-[11px] text-zinc-600">
+          Netron offline — {data?.last_error || 'Server starten, um den ONNX-Graph zu inspizieren.'}
+        </div>
+      )}
+    </PanelShell>
+  );
+}
+
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
   PineStudio,
@@ -979,6 +1036,7 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   PaperLabPanel,
   DiagnosticsErrorPanel,
   ProcessLogView,
+  NetronVisualizerPanel,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -1004,4 +1062,5 @@ export const PANEL_TITLES: Record<string, string> = {
   PaperLabPanel: 'Paper Lab',
   DiagnosticsErrorPanel: 'Diagnostics',
   ProcessLogView: 'Process & AI Logs',
+  NetronVisualizerPanel: 'Netron ONNX',
 };

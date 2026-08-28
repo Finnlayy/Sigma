@@ -18,7 +18,7 @@ import { sigmaApi, type HealthResponse } from '../lib/sigmaApi';
 const STORAGE_KEY = 'sigma.terminal.layout.v1';
 const PRESET_KEY = 'sigma.terminal.preset.v1';
 
-export const PRESETS = ['BOT_COCKPIT', 'PINE_IDE', 'RISK_RADAR', 'SENTINEL_OPS', 'CAPITAL_OPS', 'PAPER_LAB', 'OBSERVABILITY'] as const;
+export const PRESETS = ['BOT_COCKPIT', 'PINE_IDE', 'RISK_RADAR', 'SENTINEL_OPS', 'CAPITAL_OPS', 'PAPER_LAB', 'OBSERVABILITY', 'ML_INSPECTOR'] as const;
 export type Preset = (typeof PRESETS)[number];
 
 const tab = (component: string) => ({
@@ -104,6 +104,15 @@ const PRESET_LAYOUTS: Record<Preset, IJsonModel> = {
         set(33, ['SchedulerTelemetryPanel']),
         set(33, ['RateLimiterPanel']),
       ]),
+    ]) as IJsonModel['layout'],
+  },
+  // §38.4 — ML Inspector
+  ML_INSPECTOR: {
+    global: {},
+    borders: [],
+    layout: row(100, [
+      set(60, ['NetronVisualizerPanel']),
+      set(40, ['SelfOptimizingMLPanel', 'AcademyBadgeMatrix']),
     ]) as IJsonModel['layout'],
   },
   // §37.4 — Observability Desk

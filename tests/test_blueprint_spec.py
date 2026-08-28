@@ -53,11 +53,17 @@ def test_freeze_header_matches_docs(blueprint_text, masterprompt_text):
 
 
 def test_pending_doc_sections_are_declared(blueprint_text):
-    """Was in docs/ steht, aber noch nicht implementiert ist, muss benannt sein."""
-    assert bp.DOCS_PENDING_SECTIONS, "pending sections must be listed explicitly"
+    """Offene Kapitel muessen benannt sein — v3.6 ist vollstaendig verdrahtet."""
     for section in bp.DOCS_PENDING_SECTIONS:
         number = section.split(" ", 1)[0]
         assert f"## {number}." in blueprint_text
+
+
+def test_all_documented_sections_are_implemented(blueprint_text):
+    """§1-§38: kein Kapitel darf mehr offen sein (v3.6-Freeze)."""
+    assert bp.DOCS_PENDING_SECTIONS == ()
+    last = bp.DOCS_SECTION_RANGE[1]
+    assert f"## {last}." in blueprint_text
 
 
 def test_five_loops_present():

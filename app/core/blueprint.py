@@ -42,10 +42,7 @@ MASTERPROMPT_VERSION = "3.0.0-SIGMA-RELEASE"
 DOCS_BLUEPRINT_VERSION = "3.6"
 DOCS_MASTERPROMPT_VERSION = "3.6.0-SIGMA-RELEASE"
 DOCS_SECTION_RANGE = (1, 38)
-DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
-    "34 LLM-, Tool-Calling- & Streaming-Schemata",
-    "38 Netron ONNX Visualization & Inspection Stack",
-)
+DOCS_PENDING_SECTIONS: Tuple[str, ...] = ()   # v3.6 vollstaendig hart verdrahtet
 # §23-§30 sind als Konstanten + Laufzeitmodule implementiert:
 #   §23 app/core/exchange_clock.py + app/core/scheduler_matrix.py
 #   §24 app/quant/glint_orderbook_verifier.py
@@ -59,6 +56,8 @@ DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
 #   §32 app/execution/kraken_paper_engine.py + KrakenCliBridge (Dual-Mode)
 #   §36 app/core/error_engine.py (Taxonomy, Handler, Diagnostics Desk)
 #   §37 app/server/routes_logs.py + src/pages/ProcessLogView.tsx
+#   §34 app/llm/schemas_llm.py + app/llm/tool_executor.py
+#   §38 app/services/netron_server.py + deploy/systemd/sigma-netron.service
 #   §33 app/server/schemas.py + POST /api/v1/signal/ingest
 #   §35 app/optimizer/exact_csv_serializer.py
 AUTONOMY_LEVEL = 4
