@@ -316,6 +316,11 @@ class KrakenCliBridge:
 
 
 def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int]:
+    for arg in argv:
+        if not isinstance(arg, str):
+            return "", f"EGeneral:Invalid argument type — expected str, got {type(arg).__name__}", 1
+        if any(c in arg for c in ('\0', '\n', '\r')):
+            return "", "EGeneral:Invalid argument — contains control characters", 1
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=max(timeout_s, 10))
         return proc.stdout, proc.stderr, proc.returncode

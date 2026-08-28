@@ -1,0 +1,14 @@
+🔒 Fix missing input validation in KrakenCliBridge
+
+🎯 **What:** The vulnerability fixed
+The `KrakenCliBridge._subprocess_runner` function was vulnerable to unexpected argument injection. It accepted arbitrary arguments via `argv` for the underlying `subprocess.run` call, which could potentially result in unintended tool behavior or options if malformed data (like incorrect types or strings with control characters) were passed.
+
+⚠️ **Risk:** The potential impact if left unfixed
+While `shell=True` was correctly avoided, passing unvalidated and unchecked input to `subprocess.run` can still lead to options manipulation or process failures. This can cause execution logic to behave unexpectedly, potentially allowing denial of service or execution bypass depending on the values passed in arguments (such as newlines or null bytes interpreting the arguments incorrectly).
+
+🛡️ **Solution:** How the fix addresses the vulnerability
+Input validation has been added to `_subprocess_runner` to strictly enforce:
+1. Every argument in `argv` is a string (prevents TypeErrors or unintended interpretations).
+2. No arguments contain control characters (`\0`, `\n`, `\r`) that could alter how arguments are parsed by the OS or the CLI utility.
+
+Any invalid argument now safely aborts the CLI call, returning an `EGeneral` error early with an exit code of `1`, maintaining backwards compatibility with the caller's error handling.
