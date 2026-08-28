@@ -642,6 +642,57 @@ async def telegram_message(body: TelegramIn):
 
 
 # =============================================================================
+# §36 Unified Error Taxonomy & Diagnostics Desk
+# =============================================================================
+
+@router.get("/api/v1/diagnostics/errors")
+async def diagnostics_errors(limit: int = 50, severity: str = "", category: str = ""):
+    """§36.4 — DiagnosticsErrorPanel: Code, Subsystem, Hint, Severity, Zeit."""
+    from app.core.error_engine import get_error_engine
+
+    engine = get_error_engine()
+    state = engine.panel_state(limit)
+    if severity or category:
+        state["errors"] = engine.recent(limit, severity=severity, category=category)
+    return state
+
+
+@router.get("/api/v1/diagnostics/catalog")
+async def diagnostics_catalog():
+    from app.core.error_engine import get_error_engine
+
+    return {"catalog": get_error_engine().catalog(),
+            "ranges": dict(bp.ERROR_CATEGORIES)}
+
+
+@router.get("/api/v1/diagnostics/export")
+async def diagnostics_export():
+    """Error-Logs als .jsonl exportieren (§36.4)."""
+    from fastapi.responses import PlainTextResponse
+
+    from app.core.error_engine import get_error_engine
+
+    return PlainTextResponse(
+        get_error_engine().export_jsonl(), media_type="application/x-ndjson",
+        headers={"Content-Disposition": "attachment; filename=sigma_errors.jsonl"})
+
+
+@router.post("/api/v1/diagnostics/self-test")
+async def diagnostics_self_test():
+    from app.core.error_engine import get_error_engine
+
+    return get_error_engine().self_test()
+
+
+@router.post("/api/v1/diagnostics/clear")
+async def diagnostics_clear():
+    from app.core.error_engine import get_error_engine
+
+    get_error_engine().clear()
+    return {"cleared": True}
+
+
+# =============================================================================
 # §32 Kraken Paper Trading Lab & Graduation
 # =============================================================================
 

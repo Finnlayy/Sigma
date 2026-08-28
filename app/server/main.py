@@ -184,6 +184,9 @@ class AppState:
         self.settings = SettingsEnvManager(cfg)
         self.mcp = KrakenMCPBridge(cfg, self.passkey, None, self.store)
         self.telegram = TelegramBotEngine(cfg)
+        # §36 — HIGH/CRITICAL Fehler pushen ueber denselben Bot
+        from app.core.error_engine import get_error_engine
+        get_error_engine().notifier = self.telegram
         self.eod = EodProfitFactorEngine(self.store, self.m8)
 
         self._seed_strategies()
@@ -1806,6 +1809,9 @@ async def ai_manifest_learn():
 
 from app.server.routes_quant import router as quant_router  # noqa: E402
 from app.server.routes_sigma import router as sigma_router  # noqa: E402
+
+from app.core.error_engine import install_error_handlers  # §36
+install_error_handlers(app)        # Unified Error Taxonomy — kein nacktes 500
 
 app.include_router(quant_router)
 app.include_router(sigma_router)   # Blueprint L4: Loop A-E Routen (§7)

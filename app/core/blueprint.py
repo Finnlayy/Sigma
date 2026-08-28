@@ -44,7 +44,6 @@ DOCS_MASTERPROMPT_VERSION = "3.6.0-SIGMA-RELEASE"
 DOCS_SECTION_RANGE = (1, 38)
 DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
     "34 LLM-, Tool-Calling- & Streaming-Schemata",
-    "36 Unified Error Taxonomy & Diagnostics Desk",
     "37 Live Process & AI Log Console",
     "38 Netron ONNX Visualization & Inspection Stack",
 )
@@ -59,6 +58,7 @@ DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
 #   §30 TERMINAL_PANELS_EXTENDED / TERMINAL_PRESETS_EXTENDED
 #   §31 app/services/strategy_lifecycle_service.py
 #   §32 app/execution/kraken_paper_engine.py + KrakenCliBridge (Dual-Mode)
+#   §36 app/core/error_engine.py (Taxonomy, Handler, Diagnostics Desk)
 #   §33 app/server/schemas.py + POST /api/v1/signal/ingest
 #   §35 app/optimizer/exact_csv_serializer.py
 AUTONOMY_LEVEL = 4

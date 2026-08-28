@@ -9,7 +9,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
-  MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
+  Download, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
+  Trash2,
   Sparkles, Trophy, Zap,
 } from 'lucide-react';
 import {
@@ -884,6 +885,76 @@ export function PaperLabPanel() {
   );
 }
 
+
+/* ------------------------------------------- 21 DiagnosticsErrorPanel §36 */
+
+const SEV_STYLE: Record<string, string> = {
+  CRITICAL: 'bg-rose-600/80 text-white',
+  HIGH: 'bg-amber-500/80 text-black',
+  MEDIUM: 'bg-sky-600/70 text-white',
+  LOW: 'bg-zinc-700 text-zinc-200',
+};
+
+export function DiagnosticsErrorPanel() {
+  const [sev, setSev] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const fetcher = useCallback(() => sigmaApi.diagnostics(50, sev), [sev]);
+  const [data, refresh] = usePoll(fetcher, 5000);
+  const errors: any[] = data?.errors ?? [];
+  const counts: Record<string, number> = data?.counts ?? {};
+
+  const selfTest = async () => { await sigmaApi.diagnosticsSelfTest(); refresh(); };
+  const clear = async () => { await sigmaApi.clearDiagnostics(); refresh(); };
+
+  return (
+    <PanelShell title="Diagnostics Desk" icon={<AlertTriangle size={13} className="text-rose-400" />}
+      actions={<>
+        <IconBtn onClick={selfTest} title="Selbsttest"><HeartPulse size={12} /></IconBtn>
+        <a href={sigmaApi.diagnosticsExportUrl()} download
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100" title="errors.jsonl exportieren">
+          <Download size={12} />
+        </a>
+        <IconBtn onClick={clear} title="Puffer leeren"><Trash2 size={12} /></IconBtn>
+        <IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>
+      </>}>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {['', ...(data?.severities ?? ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])].map((s: string) => (
+          <button key={s || 'ALL'} onClick={() => setSev(s)}
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${sev === s ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-800 text-zinc-400'}`}>
+            {s || 'ALLE'}
+          </button>
+        ))}
+        <span className="ml-auto font-mono text-[10px] text-zinc-500">
+          {Object.values(counts).reduce((a, b) => a + b, 0)} events · {data?.log_path}
+        </span>
+      </div>
+      <div className="space-y-1">
+        {errors.map((e) => (
+          <div key={`${e.trace_id}-${e.timestamp}`} className="rounded border border-zinc-800 bg-zinc-900/40 p-1.5">
+            <div className="flex items-center gap-2">
+              <span className={`rounded px-1 text-[9px] font-bold ${SEV_STYLE[e.severity] ?? SEV_STYLE.LOW}`}>{e.severity}</span>
+              <span className="font-mono text-[11px] text-zinc-100">{e.error_code}</span>
+              <span className="text-[10px] text-zinc-500">{e.subsystem} · {e.category}</span>
+              <button onClick={() => setOpen(open === e.trace_id ? null : e.trace_id)}
+                className="ml-auto text-[10px] text-zinc-500 hover:text-zinc-200">
+                {new Date(e.timestamp).toLocaleTimeString()}
+              </button>
+            </div>
+            <div className="mt-0.5 text-[11px] text-zinc-300">{e.message}</div>
+            <div className="text-[10px] text-emerald-400/80">→ {e.remediation_hint}</div>
+            {open === e.trace_id && (
+              <pre className="mt-1 max-h-40 overflow-auto rounded bg-black/50 p-1 font-mono text-[10px] text-zinc-400">
+                {JSON.stringify(e.technical_context, null, 2)}
+              </pre>
+            )}
+          </div>
+        ))}
+        {!errors.length && <div className="text-zinc-600">Keine Fehler im Puffer — sauber.</div>}
+      </div>
+    </PanelShell>
+  );
+}
+
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
   PineStudio,
@@ -905,6 +976,7 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   ContagionRadarPanel,
   FlywheelBudgetPanel,
   PaperLabPanel,
+  DiagnosticsErrorPanel,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -928,4 +1000,5 @@ export const PANEL_TITLES: Record<string, string> = {
   ContagionRadarPanel: 'Contagion',
   FlywheelBudgetPanel: 'Flywheel',
   PaperLabPanel: 'Paper Lab',
+  DiagnosticsErrorPanel: 'Diagnostics',
 };
