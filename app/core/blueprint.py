@@ -246,7 +246,7 @@ MODULES_NEW: Mapping[str, str] = MappingProxyType({
     "app/execution/KrakenCliBridge.py": "kraken trade add-order Subprocess",
     "app/execution/SafetyGuard.py": "KILL_SWITCH / PAUSE / daily loss / errors",
     "app/execution/deadman_switch_daemon.py": "Heartbeat; Limit-Cancel",
-    "app/core/memory_watchdog.py": "4-Stufen RAM Guard; Idle-only",
+    "app/core/memory_watchdog.py": "4-Stufen RAM Guard; RSS-Budget; GC immer",
     "app/services/telegram_bot_operator.py": "Bidirektional LLM + Fast-Path /kill",
     "app/scout/ScoutDaemon.py": "Loop D Paper Pairing",
     "src/components/SigmaTerminal.tsx": "FlexLayout 11-Panel Workspace",
@@ -600,12 +600,17 @@ DEADMAN_FALLBACK_ACTION = "close_all_market"
 # 15. Memory Watchdog (§21, Masterprompt Loop E)
 # =============================================================================
 
-MEMORY_STAGES_PCT: Tuple[float, ...] = (75.0, 85.0, 92.0, 96.0)
+# Stufen relativ zum Prozess-/cgroup-Budget (4G), nicht zum Host-RAM.
+# 60/72 liegen vor systemd MemoryHigh=3G; 92 vor MemoryMax=4G.
+MEMORY_STAGES_PCT: Tuple[float, ...] = (60.0, 72.0, 85.0, 92.0)
 MEMORY_STAGE_ACTIONS: Tuple[str, ...] = (
     "gc_collect", "duckdb_checkpoint", "chromium_zombie_reaper", "emergency_halt_and_restart_worker",
 )
+MEMORY_STAGE_COOLDOWN_S: Tuple[float, ...] = (45.0, 90.0, 60.0, 300.0)
 MEMORY_CGROUP_MAX = "4G"
 MEMORY_IDLE_ONLY = True
+MEMORY_IDLE_MIN_STAGE = 3          # GC + DuckDB immer; Reaper nur ohne laufenden TV-Job
+MEMORY_HOUSEKEEP_S = 90.0          # Stage-0 malloc_trim / gc, damit Arenen nicht anwachsen
 
 # =============================================================================
 # 16. Telegram Operator (§21, Masterprompt §4.B)

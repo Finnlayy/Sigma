@@ -215,6 +215,14 @@ def test_job_queue_cancel_and_snapshot(cfg):
     assert snap["concurrency"] == bp.TV_MAX_CONCURRENCY == 1
 
 
+def test_job_queue_trims_oldest_cache_entries(cfg):
+    q = TvJobQueue(cfg, driver_factory=FakeStrategyTesterDriver)
+    q._cache = {f"k{i}": {"n": i} for i in range(12)}
+    dropped = q.trim_cache(keep=8)
+    assert dropped == 4
+    assert list(q._cache) == [f"k{i}" for i in range(4, 12)]
+
+
 def test_job_failure_carries_error_code(cfg):
     class BrokenDriver(FakeStrategyTesterDriver):
         def run_backtest(self, window=None):

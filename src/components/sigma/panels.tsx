@@ -593,17 +593,21 @@ export function MemoryWatchdogPanel() {
       actions={<button onClick={check}
         className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] hover:border-sky-500">CHECK</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
-        <div className={`h-full ${(m?.percent ?? 0) > 92 ? 'bg-red-500' : (m?.percent ?? 0) > 85 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+        <div className={`h-full ${(m?.percent ?? 0) > 85 ? 'bg-red-500' : (m?.percent ?? 0) > 72 ? 'bg-amber-500' : 'bg-emerald-500'}`}
           style={{ width: `${Math.min(100, m?.percent ?? 0)}%` }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Stat label="RAM" value={`${(m?.percent ?? 0).toFixed(1)}%`} />
         <Stat label="Stage" value={`${m?.stage ?? 0} / 4`} tone={(m?.stage ?? 0) >= 3 ? 'text-red-400' : undefined} />
-        <Stat label="CGroup Max" value={m?.cgroup_memory_max ?? '4G'} />
+        <Stat label="RSS / Budget" value={
+          m?.budget_bytes
+            ? `${((m.rss_bytes ?? 0) / (1024 ** 3)).toFixed(2)} / ${((m.budget_bytes) / (1024 ** 3)).toFixed(1)}G`
+            : (m?.cgroup_memory_max ?? '4G')
+        } />
         <Stat label="Chromium reaped" value={m?.chromium_zombies_reaped ?? 0} />
       </div>
       <div className="mt-2 space-y-0.5 text-[10px] text-zinc-500">
-        {(m?.stages_pct ?? [75, 85, 92, 96]).map((p, i) => (
+        {(m?.stages_pct ?? [60, 72, 85, 92]).map((p, i) => (
           <div key={p} className={(m?.stage ?? 0) === i + 1 ? 'text-amber-400' : ''}>
             {p}% → {(m?.actions ?? [])[i] ?? '—'}
           </div>

@@ -277,12 +277,14 @@ def test_selector_self_healing_policy():
 
 
 def test_memory_watchdog_stages():
-    assert bp.MEMORY_STAGES_PCT == (75.0, 85.0, 92.0, 96.0)
+    assert bp.MEMORY_STAGES_PCT == (60.0, 72.0, 85.0, 92.0)
     assert bp.memory_stage(50) == 0
-    assert bp.memory_stage(80) == 1
-    assert bp.memory_stage(93) == 3
-    assert bp.memory_stage(99) == 4
+    assert bp.memory_stage(65) == 1
+    assert bp.memory_stage(80) == 2
+    assert bp.memory_stage(88) == 3
+    assert bp.memory_stage(93) == 4
     assert bp.MEMORY_CGROUP_MAX == "4G"
+    assert bp.MEMORY_IDLE_MIN_STAGE == 3
 
 
 def test_virtual_bot_and_deadman_rules():

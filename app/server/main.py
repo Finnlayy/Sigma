@@ -307,6 +307,7 @@ class AppState:
             safety_guard=self.safety,
             idle_provider=self._runtime_idle,
             worker_restart=self._restart_tv_worker,
+            pressure_hook=self._memory_pressure,
         )
         set_memory_watchdog(self.memory_watchdog)
         self.contagion = EpidemicContagionEngine(store=self.store)
@@ -403,12 +404,24 @@ class AppState:
             ))
 
     def _runtime_idle(self) -> bool:
+        """Idle = kein laufender TV/Playwright-Job. Offene Paper-Positionen
+        sind der Normalzustand und dürfen GC/Checkpoint nicht blockieren."""
         from app.tv.worker import get_tv_queue
 
-        if self.paper and self.paper.all_positions():
-            return False
         snapshot = get_tv_queue(self.config).snapshot()
-        return snapshot.get("queued", 0) == 0 and snapshot.get("counts", {}).get("running", 0) == 0
+        running = (snapshot.get("counts") or {}).get("running", 0) or 0
+        return int(running) == 0
+
+    def _memory_pressure(self, stage: int) -> str:
+        if stage < 2:
+            return "skip"
+        try:
+            from app.tv.worker import get_tv_queue
+
+            dropped = get_tv_queue(self.config).trim_cache(keep=8)
+            return f"tv cache trimmed {dropped}"
+        except Exception as exc:
+            return f"tv cache trim failed: {exc}"
 
     def _restart_tv_worker(self) -> str:
         from app.tv.worker import get_tv_queue

@@ -293,6 +293,16 @@ class TvJobQueue:
             self._thread = None
         return True
 
+    def trim_cache(self, keep: int = 8) -> int:
+        """Drop oldest param-cache entries under memory pressure. Files stay on disk."""
+        keep = max(0, int(keep))
+        with self._lock:
+            extra = max(0, len(self._cache) - keep)
+            if extra:
+                for key in list(self._cache.keys())[:extra]:
+                    self._cache.pop(key, None)
+            return extra
+
     def snapshot(self) -> Dict[str, Any]:
         counts: Dict[str, int] = {}
         for job in self._jobs.values():

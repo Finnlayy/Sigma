@@ -278,16 +278,25 @@ def test_scout_runs_paper_only_and_feeds_academy():
 def test_memory_stages_escalate():
     wd = MemoryWatchdog(idle_provider=lambda: True)
     assert wd.check(50.0)["stage"] == 0
-    assert wd.check(80.0)["action"] == "gc_collect"
-    assert wd.check(93.0)["stage"] == 3
-    assert wd.check(97.0)["action"] == "emergency_halt_and_restart_worker"
+    assert wd.check(65.0)["action"] == "gc_collect"
+    assert wd.check(88.0)["stage"] == 3
+    assert wd.check(93.0)["action"] == "emergency_halt_and_restart_worker"
 
 
-def test_memory_watchdog_is_idle_only():
+def test_memory_watchdog_gc_runs_when_busy():
     wd = MemoryWatchdog(idle_provider=lambda: False)
-    out = wd.check(80.0)
-    assert out["executed"] is False and out["reason"] == "busy"
-    assert wd.check(80.0, force=True)["executed"] is True
+    out = wd.check(65.0)
+    assert out["executed"] is True and out["action"] == "gc_collect"
+
+
+def test_memory_watchdog_reaper_is_idle_only():
+    wd = MemoryWatchdog(idle_provider=lambda: False)
+    out = wd.check(88.0)
+    assert out["reason"] == "busy_partial" and out["executed"] is True
+    assert out["action"] == "duckdb_checkpoint"
+    forced = wd.check(88.0, force=True)
+    assert forced["executed"] is True
+    assert forced["action"] == "chromium_zombie_reaper"
 
 
 def test_memory_stage_4_halts_even_when_busy():
@@ -303,6 +312,54 @@ def test_memory_stage_4_halts_even_when_busy():
     out = wd.check(99.0)
     assert out["executed"] is True
     assert tele.state_set == "EMERGENCY_HALT"
+
+
+def test_parse_memory_bytes_and_rss_budget(monkeypatch):
+    from app.core.memory_watchdog import parse_memory_bytes, read_memory_snapshot
+
+    assert parse_memory_bytes("4G") == 4 * 1024 ** 3
+    assert parse_memory_bytes("2GB") == 2 * 1024 ** 3
+    budget = parse_memory_bytes(bp.MEMORY_CGROUP_MAX)
+    monkeypatch.setattr("app.core.memory_watchdog.read_cgroup_memory", lambda: None)
+    monkeypatch.setattr(
+        "app.core.memory_watchdog.read_process_tree_rss_bytes",
+        lambda: int(0.8 * budget),
+    )
+    monkeypatch.setattr("app.core.memory_watchdog.read_host_memory_percent", lambda: 12.0)
+    snap = read_memory_snapshot()
+    assert snap["source"] == "rss"
+    assert snap["percent"] == pytest.approx(80.0, abs=0.15)
+
+
+def test_pressure_hook_and_release_memory_run_at_stage_two():
+    calls: list[int] = []
+
+    class Store:
+        def release_memory(self):
+            return "released"
+
+    wd = MemoryWatchdog(
+        store=Store(),
+        idle_provider=lambda: True,
+        pressure_hook=lambda stage: calls.append(stage) or f"ok-{stage}",
+    )
+    out = wd.check(80.0)
+    assert out["executed"] is True
+    assert calls == [2]
+    assert "released" in out["detail"]
+    assert "ok-2" in out["detail"]
+
+
+def test_headless_browser_cmd_detects_playwright_not_login():
+    from app.core.memory_watchdog import is_headless_browser_cmd
+
+    assert is_headless_browser_cmd(
+        "/home/sigma/.cache/ms-playwright/chromium/chrome --headless=new"
+    )
+    assert is_headless_browser_cmd("chrome-headless-shell --no-sandbox")
+    assert not is_headless_browser_cmd(
+        "/usr/bin/google-chrome --user-data-dir=/opt/sigma/data/tv-profile"
+    )
 
 
 # ---------------------------------------------------------------- telegram ---

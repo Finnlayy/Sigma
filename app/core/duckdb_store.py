@@ -212,6 +212,8 @@ class DuckDBStore:
 
     def __init__(self, db_path: str, memory_limit: str = "2GB", threads: int = 4):
         self.db_path = db_path
+        self._memory_limit = memory_limit
+        self._threads = int(threads)
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self._lock = threading.RLock()
         self._conn = duckdb.connect(db_path)
@@ -266,6 +268,17 @@ class DuckDBStore:
     def checkpoint(self) -> None:
         with self._lock:
             self._conn.execute("CHECKPOINT")
+
+    def release_memory(self) -> str:
+        """CHECKPOINT plus a brief memory_limit cycle so DuckDB drops buffer pool pages."""
+        with self._lock:
+            self._conn.execute("CHECKPOINT")
+            try:
+                self._conn.execute("SET memory_limit='256MB'")
+                self._conn.execute(f"SET memory_limit='{self._memory_limit}'")
+            except Exception as exc:
+                return f"duckdb checkpoint ok; limit-cycle skipped: {exc}"
+        return "duckdb checkpoint + memory_limit cycle"
 
     # -------------------------------------------------------------------- vault
     def vault_credit(self, entry_id: str, strategy_id: str, vtype: str,

@@ -173,10 +173,12 @@ scheduler_matrix:
   tier4_tasks: [flywheel_sweep]
 
 memory_watchdog:
-  stages_pct: [75, 85, 92, 96]
+  stages_pct: [60, 72, 85, 92]
   actions: [gc_collect, duckdb_checkpoint, chromium_zombie_reaper, emergency_halt_and_restart_worker]
   cgroup_memory_max: 4G
   idle_only: true
+  idle_min_stage: 3
+  housekeep_s: 90
 
 llm:
   ollama_url: http://127.0.0.1:11434

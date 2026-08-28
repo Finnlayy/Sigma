@@ -150,6 +150,8 @@ def _builtin() -> Dict[str, Any]:
             "actions": list(bp.MEMORY_STAGE_ACTIONS),
             "cgroup_memory_max": bp.MEMORY_CGROUP_MAX,
             "idle_only": bp.MEMORY_IDLE_ONLY,
+            "idle_min_stage": bp.MEMORY_IDLE_MIN_STAGE,
+            "housekeep_s": bp.MEMORY_HOUSEKEEP_S,
         },
         "llm": {
             "ollama_url": bp.OLLAMA_URL,

@@ -118,10 +118,16 @@ export interface DeadmanSnapshot {
 export interface MemorySnapshot {
   percent: number;
   stage: number;
+  source?: string;
+  rss_bytes?: number;
+  budget_bytes?: number;
+  host_percent?: number;
+  rss_percent?: number;
   stages_pct: number[];
   actions: string[];
   cgroup_memory_max: string;
   idle_only: boolean;
+  idle_min_stage?: number;
   chromium_zombies_reaped: number;
   history: Array<{ stage: number; action: string; percent: number; ts: number; detail: string }>;
 }
