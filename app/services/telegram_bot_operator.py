@@ -192,3 +192,8 @@ def get_telegram_operator(**kwargs) -> TelegramBotOperator:
     if _operator is None:
         _operator = TelegramBotOperator(**kwargs)
     return _operator
+
+
+def set_telegram_operator(operator: Optional[TelegramBotOperator]) -> None:
+    global _operator
+    _operator = operator

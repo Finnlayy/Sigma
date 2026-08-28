@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from app.core import blueprint as bp
 from app.core.config import load_config
 from app.core.memory_watchdog import get_memory_watchdog
+from app.core.telemetry import get_telemetry_center
 from app.server.schemas import SignalExecutionResponse
 from app.execution.KrakenCliBridge import KrakenCliBridge
 from app.execution.LoopAPipeline import LoopAPipeline, SignalRequest
@@ -101,23 +102,66 @@ class TelegramIn(BaseModel):
 # =============================================================================
 
 _pipeline: Optional[LoopAPipeline] = None
+_KRAKEN_BRIDGE: Optional[KrakenCliBridge] = None
+_DEPTH_ADAPTER: Optional[Any] = None
+_OPERATOR_AUTH_OVERRIDE: Optional[Callable[[Request], bool]] = None
+
+
+def get_kraken_bridge() -> KrakenCliBridge:
+    global _KRAKEN_BRIDGE
+    if _KRAKEN_BRIDGE is None:
+        _KRAKEN_BRIDGE = KrakenCliBridge(
+            load_config(), telemetry=get_telemetry_center()
+        )
+    return _KRAKEN_BRIDGE
+
+
+def set_kraken_bridge(bridge: Optional[KrakenCliBridge]) -> None:
+    global _KRAKEN_BRIDGE
+    _KRAKEN_BRIDGE = bridge
+
+
+def get_depth_adapter():
+    global _DEPTH_ADAPTER
+    if _DEPTH_ADAPTER is None:
+        from app.ingestion.kraken_depth_adapter import get_kraken_depth_adapter
+
+        _DEPTH_ADAPTER = get_kraken_depth_adapter()
+    return _DEPTH_ADAPTER
+
+
+def set_depth_adapter(adapter: Optional[Any]) -> None:
+    global _DEPTH_ADAPTER
+    _DEPTH_ADAPTER = adapter
+
+
+def set_operator_auth_override(
+    override: Optional[Callable[[Request], bool]]
+) -> None:
+    """Test seam; production must always leave this unset."""
+    global _OPERATOR_AUTH_OVERRIDE
+    _OPERATOR_AUTH_OVERRIDE = override
 
 
 def pipeline() -> LoopAPipeline:
     global _pipeline
     if _pipeline is None:
         cfg = load_config()
+        from app.quant.epidemic_contagion_engine import get_contagion_engine
+
         _pipeline = LoopAPipeline(
             cfg,
             safety=get_safety_guard(cfg),
             quant=get_quant_engine(cfg),
-            kraken=KrakenCliBridge(cfg),
+            kraken=get_kraken_bridge(),
             virtual_bots=get_virtual_bot_engine(alert_provisioner=get_alert_provisioner()),
             allocator=get_allocator(alert_provisioner=get_alert_provisioner()),
             deadman=get_deadman(),
             telegram=get_telegram_operator(safety_guard=get_safety_guard(cfg)),
             reward=get_reward_engine(),
             self_opt=get_self_optimizing_engine(get_quant_engine(cfg)),
+            contagion=get_contagion_engine(),
+            dispatcher=get_order_dispatcher(),
         )
     return _pipeline
 
@@ -136,6 +180,11 @@ def set_pipeline(p: Optional[LoopAPipeline]) -> None:
 async def signal_webhook(payload: PineAlertPayload, request: Request,
                          x_sigma_webhook_secret: Optional[str] = Header(default=None)):
     """TradingView Pine Alert -> Safety -> Sizing -> Kraken CLI / Paper."""
+    if pipeline().config.live_trading:
+        raise HTTPException(status_code=503, detail={
+            "code": "LEGACY_WEBHOOK_LIVE_DISABLED",
+            "reason": "Use the schema-A ingest route with verified execution accounting",
+        })
     sig = SignalRequest(
         symbol=payload.symbol, action=payload.action, price=payload.price,
         rsi=payload.rsi, atr=payload.atr, cisd_score=payload.cisd_score,
@@ -208,6 +257,20 @@ async def signal_ingest(request: Request,
         raise HTTPException(status_code=422, detail={
             "code": ERR_SCHEMA_INVALID, "reason": str(exc)})
 
+    provided = alert.secret or x_sigma_webhook_secret
+    auth = pipeline().safety.verify_webhook_secret(provided)
+    if not auth.allowed:
+        raise HTTPException(
+            status_code=auth.status_code,
+            detail={"code": auth.code, "reason": auth.reason},
+        )
+    clock = get_exchange_clock()
+    if clock.synced and clock.is_signal_stale(alert.timestamp):
+        raise HTTPException(status_code=400, detail={
+            "code": bp.STALE_SIGNAL_REJECT_CODE,
+            "reason": f"Signal {clock.signal_age_s(alert.timestamp):.0f}s alt "
+                      f"(max {bp.STALE_SIGNAL_MAX_LATENCY_S}s gegen Kraken-Zeit)"})
+
     dispatcher = get_order_dispatcher()
     if dispatcher.seen(alert.idempotency_key):
         return SignalExecutionResponse(
@@ -218,12 +281,83 @@ async def signal_ingest(request: Request,
             code=bp.OrderAck.DUPLICATE_IGNORED.value,
             reason="idempotency_key bereits verarbeitet", stage="idempotency")
 
-    clock = get_exchange_clock()
-    if clock.synced and clock.is_signal_stale(alert.timestamp):
-        raise HTTPException(status_code=400, detail={
-            "code": bp.STALE_SIGNAL_REJECT_CODE,
-            "reason": f"Signal {clock.signal_age_s(alert.timestamp):.0f}s alt "
-                      f"(max {bp.STALE_SIGNAL_MAX_LATENCY_S}s gegen Kraken-Zeit)"})
+    from app.tv.symbol_map import is_allowed
+
+    is_futures = alert.market_type == "futures"
+    if is_futures and alert.execution_mode == bp.ExecutionMode.LIVE.value:
+        raise HTTPException(status_code=503, detail={
+            "code": "FUTURES_LIVE_BRACKET_UNAVAILABLE",
+            "reason": "Live futures stay disabled until atomic entry + reduce-only stop is supported",
+        })
+    if not is_futures and alert.execution_mode == bp.ExecutionMode.LIVE.value:
+        raise HTTPException(status_code=503, detail={
+            "code": "SPOT_LIVE_PNL_RECONCILIATION_UNAVAILABLE",
+            "reason": (
+                "Kraken trades-history returns fill price/volume/fee, not "
+                "cost-basis realized PnL; live spot stays disabled"
+            ),
+        })
+    if not is_allowed(alert.symbol, futures=is_futures):
+        raise HTTPException(status_code=403, detail={
+            "code": "SYMBOL_NOT_ALLOWED",
+            "reason": f"{alert.symbol} not in Kraken allowlist",
+        })
+
+    confluence_multiplier = 1.0
+    if alert.action != "CLOSE":
+        from app.execution.reliable_order_dispatcher import OrderRequest
+        from app.tv.symbol_map import to_kraken_pair
+
+        try:
+            snapshot = get_depth_adapter().fetch(alert.symbol)
+            from app.core.scheduler_matrix import get_scheduler
+
+            scheduler = get_scheduler()
+            if scheduler.get("glint_orderbook_verify") is not None:
+                scheduler.fire_event("glint_orderbook_verify")
+            from app.quant.glint_orderbook_verifier import get_verifier
+
+            confluence = get_verifier().verify(
+                snapshot, alert.action, now=clock.now()
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail={
+                "code": "ORDERBOOK_DEPTH_UNAVAILABLE",
+                "reason": str(exc),
+                "stage": "glint_orderbook_jit",
+            }) from exc
+        if not confluence.approved:
+            request_model = OrderRequest(
+                idempotency_key=alert.idempotency_key,
+                strategy_id=alert.strategy_id,
+                bot_id=alert.bot_id,
+                pair=(f"PF_{to_kraken_pair(alert.symbol)}"
+                      if is_futures else to_kraken_pair(alert.symbol)),
+                side=alert.side,
+                volume=0.0,
+                stop_loss=alert.stop_loss,
+                take_profit=alert.take_profit,
+                fixed_leverage=alert.fixed_leverage,
+                execution_mode=alert.execution_mode,
+                market_type=alert.market_type,
+            )
+            receipt = dispatcher.veto(
+                request_model,
+                confluence.reason,
+                confluence.reject_code or bp.ORDERBOOK_WALL_REJECT,
+            )
+            return SignalExecutionResponse(
+                status="VETO_ORDERBOOK", schema_family=family,
+                strategy_id=alert.strategy_id, bot_id=alert.bot_id,
+                symbol=alert.symbol, action=alert.action,
+                idempotency_key=alert.idempotency_key,
+                execution_mode=alert.execution_mode,
+                fixed_leverage=alert.fixed_leverage,
+                code=receipt.error_code, reason=receipt.detail,
+                stage="glint_orderbook_jit", price=alert.price,
+                stop_loss=alert.stop_loss, take_profit=alert.take_profit,
+            )
+        confluence_multiplier = confluence.size_multiplier
 
     features = alert.features
     sig = SignalRequest(
@@ -236,8 +370,16 @@ async def signal_ingest(request: Request,
         interval=alert.interval or 15,
         secret=alert.secret,
     )
-    provided = alert.secret or x_sigma_webhook_secret
-    result = pipeline().handle_signal(sig, provided_secret=provided)
+    result = pipeline().handle_signal(
+        sig,
+        provided_secret=provided,
+        quantity_multiplier=confluence_multiplier,
+        idempotency_key=alert.idempotency_key,
+        bot_id=alert.bot_id,
+        execution_mode=alert.execution_mode,
+        fixed_leverage=alert.fixed_leverage,
+        execution_market=alert.market_type,
+    )
     payload = result.to_dict()
 
     if not result.accepted:
@@ -255,13 +397,14 @@ async def signal_ingest(request: Request,
         return response
 
     order_id = str(payload.get("txid") or payload.get("order_id") or "")
-    dispatcher.remember(
-        alert.idempotency_key, order_id=order_id, strategy_id=alert.strategy_id,
-        bot_id=alert.bot_id, pair=str(payload.get("pair") or alert.symbol),
-        side=alert.side, volume=float(payload.get("quantity") or 0.0),
-        execution_mode=alert.execution_mode, fixed_leverage=alert.fixed_leverage,
-        detail=f"Loop A stage={result.stage}",
-    )
+    if not dispatcher.seen(alert.idempotency_key):
+        dispatcher.remember(
+            alert.idempotency_key, order_id=order_id, strategy_id=alert.strategy_id,
+            bot_id=alert.bot_id, pair=str(payload.get("pair") or alert.symbol),
+            side=alert.side, volume=float(payload.get("quantity") or 0.0),
+            execution_mode=alert.execution_mode, fixed_leverage=alert.fixed_leverage,
+            detail=f"Loop A stage={result.stage}",
+        )
     return SignalExecutionResponse(
         status="EXECUTED", schema_family=family, strategy_id=alert.strategy_id,
         bot_id=alert.bot_id, symbol=alert.symbol, action=alert.action,
@@ -336,7 +479,9 @@ async def deadman_state():
 
 
 @router.post("/api/v1/deadman/beat")
-async def deadman_beat(has_native_stop_loss: bool = True):
+async def deadman_beat(request: Request, has_native_stop_loss: bool = True,
+                       x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
     dm = get_deadman()
     dm.beat(has_native_stop_loss=has_native_stop_loss)
     return dm.snapshot()
@@ -348,7 +493,9 @@ async def memory_state():
 
 
 @router.post("/api/v1/memory/check")
-async def memory_check(force: bool = False):
+async def memory_check(request: Request, force: bool = False,
+                       x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
     return get_memory_watchdog().check(force=force)
 
 
@@ -1002,6 +1149,8 @@ def get_lifecycle():
     service = get_lifecycle_service()
     if service._flywheel is None:                     # gemeinsamer Kapitaltopf
         service._flywheel = get_flywheel()
+    if service._depth_adapter is None:
+        service._depth_adapter = get_depth_adapter()
     if service.config is None:
         service.config = load_config()
     assert isinstance(service, StrategyLifecycleService)
@@ -1017,11 +1166,13 @@ async def strategy_start(strategy_id: str, body: StrategyStartIn):
 
     orderbook = None
     if body.bids and body.asks:
+        from app.core.exchange_clock import get_exchange_clock
+
         orderbook = OrderbookSnapshot(
             symbol=body.symbol,
             bids=[(lvl.price, lvl.volume) for lvl in body.bids],
             asks=[(lvl.price, lvl.volume) for lvl in body.asks],
-            timestamp=time.time(),
+            timestamp=get_exchange_clock().now(),
         )
     try:
         record = get_lifecycle().start(
@@ -1094,16 +1245,49 @@ def get_order_dispatcher():
     global _ORDER_DISPATCHER
     if _ORDER_DISPATCHER is None:
         from app.execution.reliable_order_dispatcher import ReliableOrderDispatcher
-        _ORDER_DISPATCHER = ReliableOrderDispatcher(KrakenCliBridge(load_config()))
+        _ORDER_DISPATCHER = ReliableOrderDispatcher(
+            get_kraken_bridge(),
+            paper_bridge=KrakenCliBridge(
+                load_config(),
+                telemetry=get_telemetry_center(),
+                execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+            ),
+            futures_bridge=KrakenCliBridge(
+                load_config(),
+                telemetry=get_telemetry_center(),
+                futures=True,
+            ),
+            paper_futures_bridge=KrakenCliBridge(
+                load_config(),
+                telemetry=get_telemetry_center(),
+                execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+                futures=True,
+            ),
+        )
     return _ORDER_DISPATCHER
+
+
+def set_order_dispatcher(dispatcher: Optional[Any]) -> None:
+    global _ORDER_DISPATCHER
+    _ORDER_DISPATCHER = dispatcher
 
 
 def get_flywheel():
     global _FLYWHEEL
     if _FLYWHEEL is None:
         from app.execution.capital_flywheel_engine import CapitalFlywheelEngine
-        _FLYWHEEL = CapitalFlywheelEngine()
+        from app.quant.epidemic_contagion_engine import get_contagion_engine
+
+        contagion = get_contagion_engine()
+        _FLYWHEEL = CapitalFlywheelEngine(
+            treasury_guard=contagion.treasury_allowed,
+        )
     return _FLYWHEEL
+
+
+def set_flywheel(flywheel: Optional[Any]) -> None:
+    global _FLYWHEEL
+    _FLYWHEEL = flywheel
 
 
 class DepthLevel(BaseModel):
@@ -1136,6 +1320,24 @@ class FlywheelProfitIn(BaseModel):
     strategy_id: str = ""
 
 
+class FlywheelReconcileIn(BaseModel):
+    executed: bool
+    order_id: str = ""
+
+
+def _require_operator(request: Request, token: Optional[str]) -> None:
+    if _OPERATOR_AUTH_OVERRIDE is not None and _OPERATOR_AUTH_OVERRIDE(request):
+        return
+    from app.server.main import state
+
+    if not token or state.passkey is None \
+            or state.passkey.validate_settings_token(token) is None:
+        raise HTTPException(403, detail={
+            "code": "OPERATOR_AUTH_REQUIRED",
+            "reason": "Passkey settings token required for flywheel mutation",
+        })
+
+
 @router.get("/api/v1/clock")
 async def exchange_clock_state():
     """§23.1 — Kraken-Serverzeit als Single Source of Truth."""
@@ -1162,13 +1364,26 @@ async def orderbook_confluence(body: ConfluenceIn):
     """§24 — JIT Glint x Orderbook Audit (nie als Poll-Loop aufrufen)."""
     from app.quant.glint_orderbook_verifier import OrderbookSnapshot, get_verifier
 
-    snapshot = OrderbookSnapshot(
-        symbol=body.symbol,
-        bids=[(lvl.price, lvl.volume) for lvl in body.bids],
-        asks=[(lvl.price, lvl.volume) for lvl in body.asks],
-        timestamp=body.timestamp or time.time(),
-    )
-    return get_verifier().verify(snapshot, body.direction).as_dict()
+    from app.core.exchange_clock import get_exchange_clock
+
+    clock = get_exchange_clock()
+    if body.bids and body.asks:
+        snapshot = OrderbookSnapshot(
+            symbol=body.symbol,
+            bids=[(lvl.price, lvl.volume) for lvl in body.bids],
+            asks=[(lvl.price, lvl.volume) for lvl in body.asks],
+            timestamp=body.timestamp or clock.now(),
+        )
+    else:
+        try:
+            snapshot = get_depth_adapter().fetch(body.symbol)
+        except Exception as exc:
+            raise HTTPException(503, detail={
+                "code": "ORDERBOOK_DEPTH_UNAVAILABLE", "reason": str(exc)
+            }) from exc
+    return get_verifier().verify(
+        snapshot, body.direction, now=clock.now()
+    ).as_dict()
 
 
 @router.get("/api/v1/orderbook/confluence")
@@ -1218,21 +1433,39 @@ async def flywheel_state():
 
 
 @router.post("/api/v1/flywheel/deposit")
-async def flywheel_deposit(body: FlywheelDepositIn):
+async def flywheel_deposit(body: FlywheelDepositIn, request: Request,
+                           x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
     entry = get_flywheel().deposit(body.amount_eur, body.note)
     return {"entry": entry.as_dict(), "state": get_flywheel().panel_state()}
 
 
 @router.post("/api/v1/flywheel/profit")
-async def flywheel_profit(body: FlywheelProfitIn):
+async def flywheel_profit(body: FlywheelProfitIn, request: Request,
+                          x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
     outcome = get_flywheel().register_realized_profit(
         body.amount_eur, strategy_id=body.strategy_id)
     return {"result": outcome, "state": get_flywheel().panel_state()}
 
 
 @router.post("/api/v1/flywheel/sweep")
-async def flywheel_sweep():
+async def flywheel_sweep(request: Request,
+                         x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
     return {"result": get_flywheel().sweep(), "state": get_flywheel().panel_state()}
+
+
+@router.post("/api/v1/flywheel/reconcile")
+async def flywheel_reconcile(body: FlywheelReconcileIn, request: Request,
+                             x_sigma_settings_token: Optional[str] = Header(default=None)):
+    _require_operator(request, x_sigma_settings_token)
+    return {
+        "result": get_flywheel().reconcile_vault_purchase(
+            executed=body.executed, order_id=body.order_id
+        ),
+        "state": get_flywheel().panel_state(),
+    }
 
 
 @router.get("/api/v1/leverage/{strategy_id}")

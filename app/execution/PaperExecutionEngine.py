@@ -35,7 +35,8 @@ async def process_paper_tick(state_engine, current_tick_price: float,
 class PaperExecutionEngine:
     _instance: Optional["PaperExecutionEngine"] = None
 
-    def __init__(self, fee_engine: Optional[FeeEngine] = None, config=None):
+    def __init__(self, fee_engine: Optional[FeeEngine] = None, config=None,
+                 realized_pnl_handler=None):
         from app.core.config import load_config
 
         self.config = config or load_config()
@@ -43,6 +44,7 @@ class PaperExecutionEngine:
             maker_fee_rate=self.config.maker_fee_rate,
             taker_fee_rate=self.config.taker_fee_rate,
         )
+        self.realized_pnl_handler = realized_pnl_handler
         self.open_positions: Dict[str, Dict[str, Any]] = {}
 
     @classmethod
@@ -296,6 +298,11 @@ class PaperExecutionEngine:
         position.update({"status": "closed", "exit_price": fill_price,
                          "exit_reason": exit_reason, "net_pnl_usd": fees.net_pnl_usd})
         self.open_positions.pop(position["trade_id"], None)
+        if self.realized_pnl_handler is not None:
+            try:
+                self.realized_pnl_handler(trade_record)
+            except Exception as exc:
+                logger.warning("realized pnl handler failed: %s", exc)
 
         icon = "💀" if liq else ("✅" if fees.net_pnl_usd >= 0 else "❌")
         bus.log(

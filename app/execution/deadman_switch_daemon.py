@@ -86,6 +86,19 @@ class DeadmanSwitchDaemon:
         self.state.trigger_count += 1
         self.state.last_action = decision["action"]
         logger.critical("DEADMAN triggered after %.1fs -> %s", decision["age_s"], decision["action"])
+        try:
+            from app.core.error_engine import (KrakenDeadmanTimeoutException,
+                                               get_error_engine)
+
+            get_error_engine().record(
+                KrakenDeadmanTimeoutException(
+                    f"Kraken heartbeat timeout after {decision['age_s']:.1f}s",
+                    context={"action": decision["action"]},
+                ),
+                subsystem="deadman_switch",
+            )
+        except Exception as exc:  # pragma: no cover - Safety action has priority
+            logger.warning("deadman diagnostic record failed: %s", exc)
         if self.bridge is not None:
             try:
                 if decision["action"] == "cancel_open_limit_orders":
@@ -154,6 +167,8 @@ class DeadmanSwitchDaemon:
             "pulse_source": "kraken:/0/public/Time",
             "kraken_rtt_ms": None if rtt is None else round(float(rtt), 1),
             "kraken_ok": kraken_ok,
+            "bridge_wired": self.bridge is not None,
+            "safety_wired": self.safety is not None,
         }
 
 
@@ -183,3 +198,8 @@ def get_deadman(**kwargs) -> DeadmanSwitchDaemon:
     if _daemon is None:
         _daemon = DeadmanSwitchDaemon(**kwargs)
     return _daemon
+
+
+def set_deadman(deadman: Optional[DeadmanSwitchDaemon]) -> None:
+    global _daemon
+    _daemon = deadman

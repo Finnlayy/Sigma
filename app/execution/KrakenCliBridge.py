@@ -80,10 +80,12 @@ class KrakenCliBridge:
 
     def _prefix(self) -> List[str]:
         """`kraken [futures] paper ...` bzw. `kraken trade ...` (§32.2)."""
-        if not self.paper_mode:
-            return [self.binary, "trade"]
-        return ([self.binary, "futures", "paper"] if self.futures
-                else [self.binary, "paper"])
+        if self.paper_mode:
+            return ([self.binary, "futures", "paper"] if self.futures
+                    else [self.binary, "paper"])
+        if self.futures:
+            return [self.binary, "futures", "order"]
+        return [self.binary, "trade"]
 
     def balance(self) -> OrderResult:
         """Paper- bzw. Live-Kontostand ueber die CLI (§32.2)."""
@@ -98,6 +100,22 @@ class KrakenCliBridge:
                            stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
                            error_code=_extract_error(stdout, stderr) if failed else "")
 
+    def futures_fills(self, *, since: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Authenticated recent futures fills; no simulated records are ever returned.
+
+        Spot ``trades-history`` is not a realized-PnL source: the CLI yields
+        price/volume/cost/fee, not cost-basis gains. Live spot stays disabled.
+        """
+        if not self.futures or self.paper_mode or not self.live_enabled:
+            return []
+        argv = [self.binary, "futures", "fills", "--output=json"]
+        if since is not None and since > 0:
+            argv.append(f"--since={since}")
+        stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+        if bp.kraken_output_is_error(stdout, stderr, code):
+            raise RuntimeError(_extract_error(stdout, stderr))
+        return _json_rows(stdout)
+
     def _cli_available(self) -> bool:
         import shutil
 
@@ -109,7 +127,8 @@ class KrakenCliBridge:
             return False
         if self.telemetry is None:
             return False
-        state = getattr(getattr(self.telemetry, "state", None), "state", None) or \
+        state = getattr(getattr(self.telemetry, "system", None), "state", None) or \
+            getattr(getattr(self.telemetry, "state", None), "state", None) or \
             getattr(self.telemetry, "current_state", None)
         return str(state).upper() == "LIVE_APPROVED"
 
@@ -124,17 +143,55 @@ class KrakenCliBridge:
         if volume <= 0:
             return OrderResult(False, "sim", error_code="ZERO_VOLUME", pair=pair, side=side)
 
-        argv = self._prefix() + (["order", side, pair, f"{volume:g}"] if self.paper_mode
-                                 else ["add-order"])
+        argv = self._prefix() + (
+            [side, pair, f"{volume:g}"] if self.paper_mode or self.futures
+            else ["add-order"]
+        )
         if self.paper_mode:
             argv += [f"--type={ordertype}"]
             if price is not None:
                 argv.append(f"--price={price}")
-            if stop_price is not None:
+            if stop_price is not None and self.futures:
                 argv.append(f"--stop-price={stop_price}")
             return self._dispatch_paper(argv, pair=pair, side=side, volume=volume,
                                         ordertype=ordertype, stop_price=stop_price,
                                         strategy_id=strategy_id)
+        if self.futures:
+            argv += [f"--type={ordertype}"]
+            if price is not None:
+                argv.append(f"--price={price}")
+            if leverage:
+                argv.append(f"--leverage={leverage:g}")
+            if strategy_id:
+                argv.append(f"--client-order-id={strategy_id[:32]}")
+            if not self.live_enabled:
+                result = OrderResult(
+                    ok=True, mode="sim", txid=f"SIM-{uuid.uuid4().hex[:10].upper()}",
+                    pair=pair, side=side, volume=volume, ordertype=ordertype,
+                    has_native_stop_loss=stop_price is not None, argv=argv,
+                    stdout="[SIM] futures live trading disabled",
+                )
+                self._audit(result, strategy_id)
+                return result
+            if stop_price is not None:
+                result = OrderResult(
+                    ok=False, mode="live", pair=pair, side=side, volume=volume,
+                    ordertype=ordertype, has_native_stop_loss=False, argv=argv,
+                    error_code="FUTURES_NATIVE_BRACKET_UNSUPPORTED",
+                    stderr="Atomic futures entry + native stop is not supported by Kraken CLI",
+                )
+                self._audit(result, strategy_id)
+                return result
+            stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+            failed = bp.kraken_output_is_error(stdout, stderr, code)
+            result = OrderResult(
+                ok=not failed, mode="live", txid=_extract_txid(stdout),
+                pair=pair, side=side, volume=volume, ordertype=ordertype,
+                stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                error_code=_extract_error(stdout, stderr) if failed else "",
+            )
+            self._audit(result, strategy_id)
+            return result
         argv += [f"--pair={pair}", f"--type={side}",
                 f"--ordertype={ordertype}", f"--volume={volume:.8f}".rstrip("0").rstrip(".")]
         if price is not None and ordertype in ("limit", "stop", "take-profit"):
@@ -284,3 +341,22 @@ def _extract_error(stdout: str, stderr: str) -> str:
         if idx >= 0:
             return blob[idx:].splitlines()[0].strip()
     return "EXECUTION_FAILED"
+
+
+def _json_rows(stdout: str) -> List[Dict[str, Any]]:
+    try:
+        payload = json.loads(stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Kraken CLI returned invalid JSON: {exc}") from exc
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        for key in ("fills", "elements", "data", "result"):
+            rows = payload.get(key)
+            if isinstance(rows, list):
+                return [row for row in rows if isinstance(row, dict)]
+            if isinstance(rows, dict):
+                nested = rows.get("fills")
+                if isinstance(nested, list):
+                    return [row for row in nested if isinstance(row, dict)]
+    return []

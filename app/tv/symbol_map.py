@@ -33,7 +33,7 @@ def split_pair(symbol: str) -> Tuple[str, str]:
     raw = symbol.strip().upper()
     if ":" in raw:
         raw = raw.split(":", 1)[1]
-    raw = raw.replace(".P", "").replace("PI_", "")
+    raw = raw.replace(".P", "").replace("PI_", "").replace("PF_", "")
     if "/" in raw:
         base, quote = raw.split("/", 1)
     else:

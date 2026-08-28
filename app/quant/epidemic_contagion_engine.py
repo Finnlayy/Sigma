@@ -19,6 +19,7 @@ die Orderbuch-Absorption (Heilungsrate) die Ansteckung daempft.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -62,6 +63,7 @@ class ContagionState:
     reason: str
     inputs: Dict[str, float]
     veto_code: Optional[str] = None
+    ts: float = 0.0
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -74,6 +76,7 @@ class ContagionState:
             "reason": self.reason,
             "inputs": self.inputs,
             "veto_code": self.veto_code,
+            "ts": self.ts,
             "thresholds": {
                 "hedge": bp.SIR_R0_HEDGE_THRESHOLD,
                 "derisk": bp.SIR_R0_DERISK_THRESHOLD,
@@ -90,12 +93,17 @@ class EpidemicContagionEngine:
         hedge_threshold: float = bp.SIR_R0_HEDGE_THRESHOLD,
         derisk_threshold: float = bp.SIR_R0_DERISK_THRESHOLD,
         derisk_multiplier: float = bp.SIR_DERISK_SIZE_MULTIPLIER,
+        store: Any = None,
+        clock=time.time,
     ) -> None:
         self.hedge_threshold = hedge_threshold
         self.derisk_threshold = derisk_threshold
         self.derisk_multiplier = derisk_multiplier
+        self.store = store
+        self._clock = clock
         self._state: Optional[ContagionState] = None
         self._history: List[Dict[str, Any]] = []
+        self._hydrate()
 
     # ------------------------------------------------------------ math ---
     @staticmethod
@@ -124,6 +132,7 @@ class EpidemicContagionEngine:
                 size_multiplier=0.0, allow_altcoin_treasury=False,
                 reason=f"R0={r0:.2f} >= {self.hedge_threshold} — Flucht in Cash + Hedge",
                 inputs=inputs.as_dict(), veto_code=bp.CONTAGION_VETO_CODE,
+                ts=self._clock(),
             )
         elif r0 >= self.derisk_threshold:
             state = ContagionState(
@@ -132,6 +141,7 @@ class EpidemicContagionEngine:
                 size_multiplier=self.derisk_multiplier, allow_altcoin_treasury=False,
                 reason=f"R0={r0:.2f} >= {self.derisk_threshold} — Futures-Sizing halbiert",
                 inputs=inputs.as_dict(), veto_code=None,
+                ts=self._clock(),
             )
         else:
             state = ContagionState(
@@ -140,21 +150,75 @@ class EpidemicContagionEngine:
                 size_multiplier=1.0, allow_altcoin_treasury=True,
                 reason=f"R0={r0:.2f} — keine systemische Ansteckung",
                 inputs=inputs.as_dict(), veto_code=None,
+                ts=self._clock(),
             )
 
         self._state = state
         self._history.append(state.as_dict())
         del self._history[:-50]
+        self._persist(state)
         if state.mode != bp.ContagionMode.NORMAL.value:
             logger.warning("contagion mode %s (R0=%.2f)", state.mode, r0)
         return state
+
+    def _persist(self, state: ContagionState) -> None:
+        writer = getattr(self.store, "contagion_append", None) if self.store is not None else None
+        if writer is None:
+            return
+        try:
+            writer(state.as_dict())
+        except Exception as exc:  # pragma: no cover - Telemetrie darf nicht blocken
+            logger.warning("contagion history persist failed: %s", exc)
+
+    def _hydrate(self) -> None:
+        reader = getattr(self.store, "contagion_history", None) if self.store is not None else None
+        if reader is None:
+            return
+        try:
+            rows = list(reversed(reader(limit=50)))
+        except Exception as exc:  # pragma: no cover
+            logger.warning("contagion history hydrate failed: %s", exc)
+            return
+        self._history = rows
+        if rows:
+            last = rows[-1]
+            self._state = ContagionState(
+                r0=float(last.get("r0") or 0.0),
+                beta=float(last.get("beta") or 0.0),
+                gamma=float(last.get("gamma") or _GAMMA_FLOOR),
+                mode=str(last.get("mode") or bp.ContagionMode.NORMAL.value),
+                size_multiplier=float(last.get("size_multiplier") or 0.0),
+                allow_altcoin_treasury=bool(last.get("allow_altcoin_treasury")),
+                reason=str(last.get("reason") or ""),
+                inputs=dict(last.get("inputs") or {}),
+                veto_code=last.get("veto_code"),
+                ts=float(last.get("ts") or 0.0),
+            )
 
     # ------------------------------------------------------ allocation ---
     @property
     def state(self) -> ContagionState:
         if self._state is None:
-            return self.evaluate(ContagionInputs())
+            return ContagionState(
+                r0=0.0,
+                beta=0.0,
+                gamma=1.0,
+                mode=bp.ContagionMode.NORMAL.value,
+                size_multiplier=1.0,
+                allow_altcoin_treasury=False,
+                reason="macro contagion feed has not produced a snapshot",
+                inputs=ContagionInputs().as_dict(),
+                veto_code=None,
+                ts=0.0,
+            )
         return self._state
+
+    def is_fresh(self, *, now: Optional[float] = None,
+                 max_age_s: float = bp.SIR_MAX_STATE_AGE_S) -> bool:
+        if self._state is None or self._state.ts <= 0:
+            return False
+        current = self._clock() if now is None else now
+        return 0.0 <= current - self._state.ts <= max_age_s
 
     def apply_sizing(self, notional: float) -> float:
         """Allocator-Hook: skaliert ein Futures-Notional nach Kontagionslage."""
@@ -168,6 +232,7 @@ class EpidemicContagionEngine:
 
     def panel_state(self) -> Dict[str, Any]:
         return {"current": self.state.as_dict(), "history": self._history[-20:],
+                "fresh": self.is_fresh(), "max_state_age_s": bp.SIR_MAX_STATE_AGE_S,
                 "inputs_spec": list(bp.SIR_INPUTS)}
 
 

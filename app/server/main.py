@@ -148,10 +148,22 @@ class AppState:
         self.telegram: Optional[TelegramBotEngine] = None
         self.eod: Optional[EodProfitFactorEngine] = None
         self.tv_backtest: Optional[TvMcpBacktest] = None
+        self.safety = None
+        self.kraken_cli = None
+        self.deadman = None
+        self.memory_watchdog = None
+        self.flywheel = None
+        self.contagion = None
+        self.contagion_feed = None
+        self.depth_adapter = None
+        self.order_dispatcher = None
+        self.fill_reconciler = None
+        self.l4_pipeline = None
         self.started_at = time.time()
         self.is_paper_trading = True
         self.has_credentials = False
         self._tasks: List[asyncio.Task] = []
+        self._scheduler_work: Optional[asyncio.Task] = None
         self._last_eod_day: Optional[str] = None
 
     # ------------------------------------------------------------- lifecycle
@@ -190,6 +202,12 @@ class AppState:
         from app.core.error_engine import get_error_engine
         get_error_engine().notifier = self.telegram
         self.eod = EodProfitFactorEngine(self.store, self.m8)
+        self._compose_l4_runtime()
+        try:
+            inputs = await asyncio.to_thread(self.contagion_feed.snapshot)
+            self.contagion.evaluate(inputs)
+        except Exception as exc:
+            logger.error("initial contagion refresh failed; entries stay blocked: %s", exc)
 
         self._seed_strategies()
         await self._register_m8_instances()
@@ -220,11 +238,197 @@ class AppState:
     async def shutdown(self) -> None:
         for t in self._tasks:
             t.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._scheduler_work is not None and not self._scheduler_work.done():
+            await self._scheduler_work
+        if self.deadman:
+            await self.deadman.stop()
         if self.ingestor:
             await self.ingestor.stop()
         await close_redis()
         if self.store:
             self.store.close()
+
+    def _compose_l4_runtime(self) -> None:
+        """Single composition root shared by API routes, scheduler and Loop A."""
+        import app.server.routes_sigma as routes
+        from app.core.memory_watchdog import MemoryWatchdog, set_memory_watchdog
+        from app.execution.KrakenCliBridge import KrakenCliBridge
+        from app.execution.LoopAPipeline import LoopAPipeline
+        from app.execution.SafetyGuard import SafetyGuard, set_safety_guard
+        from app.execution.VirtualBotEngine import get_virtual_bot_engine
+        from app.execution.capital_flywheel_engine import CapitalFlywheelEngine
+        from app.execution.capital_vault_executor import CapitalVaultExecutor
+        from app.execution.deadman_switch_daemon import (DeadmanSwitchDaemon,
+                                                         set_deadman)
+        from app.execution.reliable_order_dispatcher import ReliableOrderDispatcher
+        from app.execution.kraken_fill_reconciler import KrakenFillReconciler
+        from app.ingestion.kraken_depth_adapter import (KrakenDepthAdapter,
+                                                        set_kraken_depth_adapter)
+        from app.ingestion.macro_contagion_feed import MacroContagionFeed
+        from app.optimizer.StrategyAllocator import get_allocator
+        from app.optimizer.reward_shaping import get_reward_engine
+        from app.quant.epidemic_contagion_engine import (EpidemicContagionEngine,
+                                                        set_contagion_engine)
+        from app.quant.glint_orderbook_verifier import get_verifier
+        from app.quant.onnx_kelly import get_quant_engine
+        from app.quant.self_optimizing_onnx import get_self_optimizing_engine
+        from app.services.strategy_lifecycle_service import (StrategyLifecycleService,
+                                                             _SERVICE,
+                                                             set_lifecycle_service)
+        from app.services.telegram_bot_operator import (TelegramBotOperator,
+                                                         set_telegram_operator)
+        from app.tv.alert_provisioner import get_alert_provisioner
+        from app.tv.worker import get_tv_queue
+
+        cfg = self.config
+        self.safety = SafetyGuard(cfg, redis_client=self.redis, store=self.store)
+        set_safety_guard(self.safety)
+        self.kraken_cli = KrakenCliBridge(cfg, telemetry=self.telemetry)
+        self.deadman = DeadmanSwitchDaemon(
+            kraken_bridge=self.kraken_cli,
+            safety_guard=self.safety,
+            timeout_seconds=cfg.deadman_timeout_seconds,
+        )
+        set_deadman(self.deadman)
+        self.memory_watchdog = MemoryWatchdog(
+            store=self.store,
+            telemetry=self.telemetry,
+            safety_guard=self.safety,
+            idle_provider=self._runtime_idle,
+            worker_restart=self._restart_tv_worker,
+        )
+        set_memory_watchdog(self.memory_watchdog)
+        self.contagion = EpidemicContagionEngine(store=self.store)
+        set_contagion_engine(self.contagion)
+        self.depth_adapter = routes._DEPTH_ADAPTER or KrakenDepthAdapter()
+        set_kraken_depth_adapter(self.depth_adapter)
+        self.flywheel = CapitalFlywheelEngine(
+            store=self.store,
+            treasury_guard=self.contagion.treasury_allowed,
+            vault_executor=CapitalVaultExecutor(
+                self.kraken_cli,
+                self.depth_adapter,
+                enabled=cfg.flywheel_spot_execution_enabled,
+            ),
+        )
+        self.contagion_feed = MacroContagionFeed(depth=self.depth_adapter)
+        paper_bridge = KrakenCliBridge(
+            cfg,
+            telemetry=self.telemetry,
+            execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+        )
+        futures_bridge = KrakenCliBridge(
+            cfg,
+            telemetry=self.telemetry,
+            futures=True,
+        )
+        paper_futures_bridge = KrakenCliBridge(
+            cfg,
+            telemetry=self.telemetry,
+            execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+            futures=True,
+        )
+        self.order_dispatcher = ReliableOrderDispatcher(
+            self.kraken_cli,
+            paper_bridge=paper_bridge,
+            futures_bridge=futures_bridge,
+            paper_futures_bridge=paper_futures_bridge,
+            receipts_log=cfg.orders_log_path,
+        )
+        self.fill_reconciler = KrakenFillReconciler(
+            futures_bridge,
+            self.store,
+            self._on_realized_trade,
+        )
+        self.paper.realized_pnl_handler = self._on_realized_trade
+        quant = get_quant_engine(cfg)
+        virtual_bots = get_virtual_bot_engine(
+            alert_provisioner=get_alert_provisioner()
+        )
+        telegram_operator = TelegramBotOperator(
+            cfg,
+            safety_guard=self.safety,
+            telemetry=self.telemetry,
+            virtual_bots=virtual_bots,
+        )
+        set_telegram_operator(telegram_operator)
+        self.l4_pipeline = LoopAPipeline(
+            cfg,
+            safety=self.safety,
+            quant=quant,
+            judge=self.judge,
+            m8=self.m8,
+            kraken=self.kraken_cli,
+            paper=self.paper,
+            virtual_bots=virtual_bots,
+            allocator=get_allocator(alert_provisioner=get_alert_provisioner()),
+            telemetry=self.telemetry,
+            deadman=self.deadman,
+            telegram=telegram_operator,
+            reward=get_reward_engine(),
+            self_opt=get_self_optimizing_engine(quant),
+            contagion=self.contagion,
+            dispatcher=self.order_dispatcher,
+        )
+
+        routes.set_kraken_bridge(self.kraken_cli)
+        if routes._DEPTH_ADAPTER is None:
+            routes.set_depth_adapter(self.depth_adapter)
+        routes.set_order_dispatcher(self.order_dispatcher)
+        routes.set_flywheel(self.flywheel)
+        if routes._pipeline is None:
+            routes.set_pipeline(self.l4_pipeline)
+        if _SERVICE is None:
+            set_lifecycle_service(StrategyLifecycleService(
+                virtual_bots=get_virtual_bot_engine(),
+                alert_provisioner=get_alert_provisioner(),
+                tv_queue=get_tv_queue(cfg),
+                flywheel=self.flywheel,
+                safety=self.safety,
+                verifier=get_verifier(),
+                depth_adapter=self.depth_adapter,
+                allocator=get_allocator(),
+                config=cfg,
+            ))
+
+    def _runtime_idle(self) -> bool:
+        from app.tv.worker import get_tv_queue
+
+        if self.paper and self.paper.all_positions():
+            return False
+        snapshot = get_tv_queue(self.config).snapshot()
+        return snapshot.get("queued", 0) == 0 and snapshot.get("counts", {}).get("running", 0) == 0
+
+    def _restart_tv_worker(self) -> str:
+        from app.tv.worker import get_tv_queue
+
+        queue = get_tv_queue(self.config)
+        if not queue.snapshot().get("running"):
+            return "tv worker external or inactive"
+        if not queue.stop(timeout=1.0):
+            return "tv worker restart deferred; worker still stopping"
+        queue.start()
+        return "tv worker restarted"
+
+    def _on_realized_trade(self, trade: Dict[str, Any]) -> None:
+        if (trade.get("execution_mode") != "live"
+                or trade.get("accounting_source") != "verified_live_fill"):
+            return
+        fill_id = str(trade.get("fill_id") or "")
+        if not fill_id:
+            return
+        pnl_usd = float(trade.get("net_pnl_usd") or 0.0)
+        if self.safety:
+            self.safety.record_pnl(pnl_usd, reference_id=fill_id)
+        fx = float(self.config.flywheel_usd_to_eur_rate or 0.0)
+        if (self.flywheel and trade.get("execution_mode") == "live" and fx > 0):
+            self.flywheel.register_realized_profit(
+                pnl_usd * fx,
+                strategy_id=str(trade.get("strategy_id") or ""),
+                external_ref=fill_id,
+            )
 
     # ------------------------------------------------------------------ seeds
     def _seed_strategies(self) -> None:
@@ -432,16 +636,27 @@ class AppState:
     async def _scheduler_loop(self) -> None:
         """§23.2 Tier-1 Fast Pulse — Deadman erneuert sich selbst, Memory-Watchdog tickt."""
         from app.core.scheduler_matrix import install_canonical_tasks
-        from app.execution.deadman_switch_daemon import get_deadman
-
-        sched = install_canonical_tasks()
-        get_deadman().start()
+        sched = install_canonical_tasks(
+            deadman=self.deadman,
+            memory=self.memory_watchdog,
+            contagion=self.contagion,
+            contagion_feed=self.contagion_feed,
+            flywheel=self.flywheel,
+            fill_reconciler=self.fill_reconciler,
+        )
+        self.deadman.start()
         logger.info("Scheduler matrix online (%d tasks)", len(sched.tasks))
         while True:
             try:
-                sched.run_due()
+                self._scheduler_work = asyncio.create_task(
+                    asyncio.to_thread(sched.run_due)
+                )
+                await asyncio.shield(self._scheduler_work)
             except Exception as exc:
                 logger.warning("scheduler: %s", exc)
+            finally:
+                if self._scheduler_work is not None and self._scheduler_work.done():
+                    self._scheduler_work = None
             await asyncio.sleep(1.0)
 
 

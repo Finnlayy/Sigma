@@ -77,6 +77,22 @@ data_feed:
     enabled: true
     base_url: http://127.0.0.1:8001
     timeout_s: 30
+  macro_contagion:
+    interval_seconds: 300
+    lookback_days: 90
+    oil_symbol: TVC:USOIL
+    gold_symbol: TVC:GOLD
+    dxy_symbol: TVC:DXY
+    crypto_symbol: KRAKEN:XBTUSD
+
+orderbook_confluence:
+  source: kraken_rest_depth
+  count: 100
+  max_cached_age_seconds: 3
+  depth_band_pct: 0.02
+  imbalance_confirm: 0.30
+  imbalance_veto: -0.20
+  max_spread_bps: 15
 
 quant:
   regime:
@@ -130,6 +146,31 @@ deadman_switch:
   timeout_seconds: 1800
   cancel_only_if_native_stop: true
   fallback_action: close_all_market
+
+capital_flywheel:
+  ledger_table: flywheel_ledger
+  profit_reinvest_pct: 0.50
+  profit_vault_pct: 0.50
+  min_split_trigger_eur: 10
+  vault_asset: XBT
+  one_way: true
+  spot_execution_enabled: false  # set SIGMA_FLYWHEEL_SPOT_EXECUTION=1 after live approval
+  usd_to_eur_rate: 0.0  # set SIGMA_FLYWHEEL_USD_TO_EUR_RATE for live close hooks
+
+contagion:
+  hedge_r0: 1.5
+  derisk_r0: 1.0
+  derisk_size_multiplier: 0.5
+  max_state_age_seconds: 900
+
+scheduler_matrix:
+  timezone: UTC
+  tier0_event: [glint_orderbook_verify]
+  tier1_seconds: 20
+  tier1_tasks: [deadman_heartbeat, memory_watchdog, kraken_fill_reconcile]
+  tier2_seconds: 300
+  tier4_cron: "05 00 * * *"
+  tier4_tasks: [flywheel_sweep]
 
 memory_watchdog:
   stages_pct: [75, 85, 92, 96]

@@ -48,6 +48,8 @@ def normalize_symbol(raw: str) -> str:
     symbol = _SYMBOL_PREFIX.sub("", symbol)
     if symbol.endswith(".P"):
         symbol = symbol[:-2]
+    if symbol.startswith(("PI_", "PF_")):
+        symbol = symbol[3:]
     return symbol
 
 
@@ -105,7 +107,27 @@ class SigmaL4AlertPayload(StrictModel):
     interval: Optional[str] = None
     execution_mode: Literal["live", "kraken_paper", "hybrid_scout"] = \
         bp.EXECUTION_MODE_DEFAULT
+    market_type: Literal["spot", "futures"] = "spot"
     features: Optional[MLFeaturePayload] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _preserve_market_type(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        raw = str(value.get("symbol") or "").strip().upper()
+        data = dict(value)
+        inferred_futures = (
+            raw.endswith(".P") or raw.startswith(("PI_", "PF_"))
+            or ":PI_" in raw or ":PF_" in raw
+        )
+        if inferred_futures and data.get("market_type") == "spot":
+            raise ValueError("futures symbol cannot be routed as spot")
+        if inferred_futures:
+            data["market_type"] = "futures"
+        else:
+            data.setdefault("market_type", "spot")
+        return data
 
     @field_validator("symbol")
     @classmethod

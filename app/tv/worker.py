@@ -283,11 +283,15 @@ class TvJobQueue:
         self._thread = threading.Thread(target=self._loop, name="tv-worker", daemon=True)
         self._thread.start()
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 5.0) -> bool:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                logger.warning("tv worker did not stop within %.1fs", timeout)
+                return False
             self._thread = None
+        return True
 
     def snapshot(self) -> Dict[str, Any]:
         counts: Dict[str, int] = {}

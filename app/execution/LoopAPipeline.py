@@ -82,7 +82,8 @@ class LoopAPipeline:
                  quant: Optional[QuantEngine] = None, judge=None, m8=None,
                  kraken=None, paper=None, virtual_bots=None, allocator=None,
                  telemetry=None, deadman=None, telegram=None, reward=None,
-                 self_opt=None, equity_provider=None):
+                 self_opt=None, equity_provider=None, contagion=None,
+                 dispatcher=None):
         self.config = config or load_config()
         self.safety = safety or get_safety_guard(self.config)
         self.quant = quant or get_quant_engine(self.config)
@@ -97,6 +98,8 @@ class LoopAPipeline:
         self.telegram = telegram
         self.reward = reward
         self.self_opt = self_opt
+        self.contagion = contagion
+        self.dispatcher = dispatcher
         self._equity_provider = equity_provider or (lambda: 10_000.0)
         self.open_positions = 0
         self.processed = 0
@@ -105,7 +108,12 @@ class LoopAPipeline:
     # ------------------------------------------------------------- entrypoint
     def handle_signal(self, sig: SignalRequest, *, provided_secret: Optional[str] = None,
                       m8_state: Optional[str] = None, regime: Optional[str] = None,
-                      symbol_halted: bool = False) -> ExecutionResponse:
+                      symbol_halted: bool = False, quantity_multiplier: float = 1.0,
+                      idempotency_key: str = "", bot_id: str = "",
+                      execution_mode: str = bp.EXECUTION_MODE_DEFAULT,
+                      fixed_leverage: int = bp.FIXED_LEVERAGE_DEFAULT,
+                      execution_market: str = "spot",
+                      ) -> ExecutionResponse:
         trace: List[str] = []
 
         # §17.1 Auth (vor allem anderen)
@@ -152,6 +160,31 @@ class LoopAPipeline:
         if sig.action.upper() == "CLOSE":
             return self._handle_close(sig, state, trace)
 
+        contagion_multiplier = 1.0
+        if self.contagion is not None:
+            if not self.contagion.is_fresh():
+                trace.append("contagion_gate")
+                return self._reject(
+                    "contagion",
+                    "CONTAGION_DATA_STALE",
+                    "macro contagion snapshot missing or stale",
+                    503,
+                    sig,
+                    trace,
+                )
+            contagion_state = self.contagion.state
+            trace.append("contagion_gate")
+            if contagion_state.mode == bp.ContagionMode.FLIGHT_TO_CASH_AND_HEDGE.value:
+                return self._reject(
+                    "contagion",
+                    contagion_state.veto_code or bp.CONTAGION_VETO_CODE,
+                    contagion_state.reason,
+                    409,
+                    sig,
+                    trace,
+                )
+            contagion_multiplier = float(contagion_state.size_multiplier)
+
         # Schritt 3: Confidence
         conf = self.quant.predict_confidence(sig.rsi, sig.atr, sig.cisd_score, price=sig.price)
         trace.append(bp.LOOP_A_PIPELINE[2])
@@ -161,15 +194,23 @@ class LoopAPipeline:
         equity, bot = self._equity_for(sig.strategy_id)
         sizing = self.quant.size_position(equity=equity, price=sig.price, win_prob=win_prob,
                                           atr=sig.atr, action=sig.action)
-        quantity = sizing.quantity * policy.budget_multiplier
+        quantity = (
+            sizing.quantity
+            * policy.budget_multiplier
+            * contagion_multiplier
+            * max(0.0, float(quantity_multiplier))
+        )
         trace.append(bp.LOOP_A_PIPELINE[3])
         trace.append(bp.LOOP_A_PIPELINE[4])
         if quantity <= 0:
             return self._reject("sizing", "ZERO_SIZE", "kelly size is zero", 200, sig, trace)
 
         # Schritt 6: Symbol-Map + Notional-Limits
-        futures = market_type(sig.symbol) == "FUTURES"
-        pair = to_kraken_pair(sig.symbol)
+        futures = execution_market == "futures" or market_type(sig.symbol) == "FUTURES"
+        pair = (
+            f"PF_{to_kraken_pair(sig.symbol)}"
+            if futures else to_kraken_pair(sig.symbol)
+        )
         trace.append(bp.LOOP_A_PIPELINE[5])
         if not is_allowed(sig.symbol, futures=futures):
             return self._reject("symbol", "SYMBOL_NOT_ALLOWED",
@@ -196,7 +237,12 @@ class LoopAPipeline:
                                     gates=gates)
 
         # Schritt 8: Ausführung
-        exec_result = self._execute(sig, pair, quantity, sizing.stop_loss, sizing.take_profit, bot)
+        exec_result = self._execute(
+            sig, pair, quantity, sizing.stop_loss, sizing.take_profit, bot,
+            idempotency_key=idempotency_key, bot_id=bot_id,
+            execution_mode=execution_mode, fixed_leverage=fixed_leverage,
+            execution_market="futures" if futures else "spot",
+        )
         trace.append(bp.LOOP_A_PIPELINE[7])
         trace.append(bp.LOOP_A_PIPELINE[8])   # Audit passiert in der Bridge (orders.jsonl)
 
@@ -233,8 +279,41 @@ class LoopAPipeline:
 
     # -------------------------------------------------------------- helpers
     def _execute(self, sig: SignalRequest, pair: str, quantity: float,
-                 stop_loss: float, take_profit: float, bot) -> Dict[str, Any]:
+                 stop_loss: float, take_profit: float, bot, *,
+                 idempotency_key: str = "", bot_id: str = "",
+                 execution_mode: str = bp.EXECUTION_MODE_DEFAULT,
+                 fixed_leverage: int = bp.FIXED_LEVERAGE_DEFAULT,
+                 execution_market: str = "spot") -> Dict[str, Any]:
         side = "buy" if sig.action.upper() == "BUY" else "sell"
+        if self.dispatcher is not None and idempotency_key:
+            from app.execution.reliable_order_dispatcher import OrderRequest
+
+            receipt = self.dispatcher.dispatch(OrderRequest(
+                idempotency_key=idempotency_key,
+                strategy_id=sig.strategy_id or "",
+                bot_id=bot_id,
+                pair=pair,
+                side=side,
+                volume=quantity,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                fixed_leverage=fixed_leverage,
+                execution_mode=execution_mode,
+                market_type=execution_market,
+            ))
+            actual_mode = (
+                "sim" if "mode=sim" in receipt.detail
+                else "paper" if "mode=paper" in receipt.detail
+                else execution_mode
+            )
+            return {
+                "ok": receipt.success,
+                "mode": actual_mode,
+                "txid": receipt.order_id,
+                "native_stop": receipt.success and stop_loss > 0,
+                "error_code": receipt.error_code,
+                "reason": receipt.detail,
+            }
         live_ok = (self.config.live_trading and self._telemetry_state() == "LIVE_APPROVED"
                    and self.kraken is not None)
         if live_ok:
@@ -315,6 +394,9 @@ class LoopAPipeline:
         if self.telemetry is None:
             return "SHADOW_ACTIVE"
         try:
+            system = getattr(self.telemetry, "system", None)
+            if system is not None:
+                return str(getattr(system, "state", "SHADOW_ACTIVE"))
             return str(getattr(self.telemetry.state, "state", "SHADOW_ACTIVE"))
         except Exception:  # pragma: no cover
             return "SHADOW_ACTIVE"
@@ -327,6 +409,8 @@ class LoopAPipeline:
             "live_trading": self.config.live_trading,
             "safety": self.safety.snapshot(),
             "quant": self.quant.snapshot(),
+            "contagion": self.contagion.state.as_dict() if self.contagion is not None else None,
+            "reliable_dispatcher": self.dispatcher is not None,
         }
 
 

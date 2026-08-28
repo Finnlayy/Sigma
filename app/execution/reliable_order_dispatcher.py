@@ -54,6 +54,7 @@ class OrderRequest:
     fixed_leverage: int = bp.FIXED_LEVERAGE_DEFAULT
     bot_id: str = ""
     execution_mode: str = bp.EXECUTION_MODE_DEFAULT
+    market_type: str = "spot"
 
 
 @dataclass
@@ -93,6 +94,8 @@ class ReliableOrderDispatcher:
         bridge: Any,
         *,
         paper_bridge: Any = None,
+        futures_bridge: Any = None,
+        paper_futures_bridge: Any = None,
         notifier: Optional[Callable[[OrderReceipt], None]] = None,
         receipts_log: str = bp.ORDER_RECEIPT_LOG,
         max_retries: int = bp.ORDER_MAX_RETRIES,
@@ -100,6 +103,8 @@ class ReliableOrderDispatcher:
     ) -> None:
         self.bridge = bridge
         self.paper_bridge = paper_bridge
+        self.futures_bridge = futures_bridge
+        self.paper_futures_bridge = paper_futures_bridge
         self.notifier = notifier
         self.receipts_log = receipts_log
         self.max_retries = max_retries
@@ -108,8 +113,16 @@ class ReliableOrderDispatcher:
         self._receipts: List[OrderReceipt] = []
 
     # ----------------------------------------------------------- routing ---
-    def _bridge_for(self, mode: str) -> Any:
-        if mode == bp.ExecutionMode.KRAKEN_PAPER.value and self.paper_bridge is not None:
+    def _bridge_for(self, request: OrderRequest) -> Any:
+        if request.market_type == "futures":
+            if (request.execution_mode == bp.ExecutionMode.KRAKEN_PAPER.value
+                    and self.paper_futures_bridge is not None):
+                return self.paper_futures_bridge
+            if self.futures_bridge is None:
+                raise RuntimeError("futures bridge is not configured")
+            return self.futures_bridge
+        if (request.execution_mode == bp.ExecutionMode.KRAKEN_PAPER.value
+                and self.paper_bridge is not None):
             return self.paper_bridge
         return self.bridge
 
@@ -156,7 +169,21 @@ class ReliableOrderDispatcher:
             self._record(receipt, remember=False)
             return receipt
 
-        bridge = self._bridge_for(request.execution_mode)
+        try:
+            bridge = self._bridge_for(request)
+        except Exception as exc:
+            receipt = OrderReceipt(
+                idempotency_key=request.idempotency_key,
+                strategy_id=request.strategy_id, bot_id=request.bot_id,
+                pair=request.pair, side=request.side, volume=request.volume,
+                ack=bp.OrderAck.FAILED_REJECTED.value, attempts=0,
+                execution_mode=request.execution_mode,
+                fixed_leverage=request.fixed_leverage,
+                error_code="EXECUTION_ROUTE_UNAVAILABLE",
+                detail=str(exc), ts=self._clock(),
+            )
+            self._record(receipt)
+            return receipt
         leverage = max(bp.FIXED_LEVERAGE_MIN,
                        min(bp.FIXED_LEVERAGE_MAX, int(request.fixed_leverage)))
         started = time.perf_counter()

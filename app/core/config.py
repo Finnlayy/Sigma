@@ -208,6 +208,8 @@ class SigmaConfig:
     pionex_enabled: bool = bp.PIONEX_ENABLED_DEFAULT
     native_bracket_sl_required: bool = bp.NATIVE_BRACKET_SL_REQUIRED
     deadman_timeout_seconds: int = bp.DEADMAN_TIMEOUT_SECONDS
+    flywheel_usd_to_eur_rate: float = 0.0
+    flywheel_spot_execution_enabled: bool = False
 
     # --- §16 Self-Healing Selectors ------------------------------------------------
     selectors_path: str = bp.PATH_SELECTORS_YAML
@@ -306,6 +308,13 @@ class SigmaConfig:
             )
             self.ollama_url = _env("SIGMA_OLLAMA_URL", self.ollama_url)
             self.pionex_enabled = _env_bool("SIGMA_PIONEX_ENABLED", self.pionex_enabled)
+            self.flywheel_usd_to_eur_rate = _env_float(
+                "SIGMA_FLYWHEEL_USD_TO_EUR_RATE", self.flywheel_usd_to_eur_rate
+            )
+            self.flywheel_spot_execution_enabled = _env_bool(
+                "SIGMA_FLYWHEEL_SPOT_EXECUTION",
+                self.flywheel_spot_execution_enabled,
+            )
             # §17.4: Playwright bleibt serialisiert — Env darf das nicht aufweichen
             self.tv_max_concurrency = max(1, min(self.tv_max_concurrency, bp.TV_MAX_CONCURRENCY))
 

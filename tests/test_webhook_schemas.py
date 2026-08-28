@@ -15,6 +15,10 @@ from app.server.schemas import (ERR_PIONEX_DISABLED, ERR_SCHEMA_INVALID,
                                 SignalExecutionResponse, SigmaL4AlertPayload,
                                 detect_schema, normalize_epoch, normalize_symbol,
                                 parse_payload)
+from app.quant.glint_orderbook_verifier import OrderbookSnapshot
+from app.quant.epidemic_contagion_engine import (ContagionInputs,
+                                                 EpidemicContagionEngine,
+                                                 set_contagion_engine)
 
 SECRET = "sigma_prod_secure_token_8849"
 
@@ -32,6 +36,7 @@ def _alert(**over) -> dict:
         "stop_loss": 67_000.0,
         "take_profit": 70_000.0,
         "fixed_leverage": 5,
+        "execution_mode": "kraken_paper",
         "timestamp": int(time.time()),
         "features": {"rsi": 28.4, "atr": 0.0052, "cisd_score": 0.88,
                      "bb_bandwidth": 0.024},
@@ -52,11 +57,21 @@ def client() -> TestClient:
     import app.execution.SafetyGuard as safety_module
 
     safety_module._guard = None            # Secret wird beim Bau eingelesen
+    contagion = EpidemicContagionEngine()
+    contagion.evaluate(ContagionInputs())
+    set_contagion_engine(contagion)
     routes.set_pipeline(None)
     routes._ORDER_DISPATCHER = None
+    routes.set_depth_adapter(type("_Depth", (), {
+        "fetch": staticmethod(lambda symbol: OrderbookSnapshot(
+            symbol, [(67_999.0, 80.0)], [(68_001.0, 20.0)], time.time()
+        ))
+    })())
     yield TestClient(app)
     safety_module._guard = None
     routes.set_pipeline(None)
+    routes.set_depth_adapter(None)
+    set_contagion_engine(None)
     if previous is None:
         os.environ.pop("SIGMA_WEBHOOK_SECRET", None)
     else:
@@ -68,6 +83,7 @@ def client() -> TestClient:
 def test_valid_sigma_l4_alert_parses():
     alert = SigmaL4AlertPayload.model_validate(_alert())
     assert alert.symbol == "XBTUSD"          # KRAKEN:-Prefix und .P entfernt
+    assert alert.market_type == "futures"    # Marktidentitaet bleibt separat erhalten
     assert alert.side == "buy"
     assert alert.features.cisd_score == 0.88
     assert alert.feature_dict()["rsi"] == 28.4
@@ -233,6 +249,46 @@ def test_ingest_executes_and_then_ignores_duplicate(client):
     assert second.status_code == 200
     assert second.json()["status"] == "DUPLICATE_IGNORED"
     assert second.json()["stage"] == "idempotency"
+
+
+def test_ingest_records_orderbook_veto_before_execution(client):
+    import app.server.routes_sigma as routes
+
+    previous = routes._DEPTH_ADAPTER
+    routes.set_depth_adapter(type("_OpposingDepth", (), {
+        "fetch": staticmethod(lambda symbol: OrderbookSnapshot(
+            symbol, [(67_999.0, 10.0)], [(68_001.0, 90.0)], time.time()
+        ))
+    })())
+    try:
+        body = _alert(idempotency_key=f"sig_veto_XBTUSD_{int(time.time())}_book")
+        response = client.post("/api/v1/signal/ingest", json=body)
+        assert response.status_code == 200
+        assert response.json()["status"] == "VETO_ORDERBOOK"
+        assert response.json()["code"] == bp.ORDERBOOK_WALL_REJECT
+    finally:
+        routes.set_depth_adapter(previous)
+
+
+def test_ingest_fails_closed_for_unsupported_live_futures(client):
+    body = _alert(
+        execution_mode="live",
+        idempotency_key=f"sig_live_future_{int(time.time())}_blocked",
+    )
+    response = client.post("/api/v1/signal/ingest", json=body)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "FUTURES_LIVE_BRACKET_UNAVAILABLE"
+
+
+def test_ingest_fails_closed_for_unsupported_live_spot(client):
+    body = _alert(
+        symbol="KRAKEN:XBTUSD",
+        execution_mode="live",
+        idempotency_key=f"sig_live_spot_{int(time.time())}_blocked",
+    )
+    response = client.post("/api/v1/signal/ingest", json=body)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "SPOT_LIVE_PNL_RECONCILIATION_UNAVAILABLE"
 
 
 def test_ingest_rejects_non_allowlisted_symbol(client):

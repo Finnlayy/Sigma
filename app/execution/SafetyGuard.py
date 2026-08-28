@@ -56,6 +56,7 @@ class SafetyGuard:
         self._consecutive_errors = 0
         self._daily_pnl_usd = 0.0
         self._daily_key = _today()
+        self._pnl_refs: set[str] = set()
 
     # ----------------------------------------------------------- file signals
     @property
@@ -87,9 +88,13 @@ class SafetyGuard:
     def record_success(self) -> None:
         self._consecutive_errors = 0
 
-    def record_pnl(self, pnl_usd: float) -> float:
+    def record_pnl(self, pnl_usd: float, *, reference_id: str = "") -> float:
         self._roll_day()
+        if reference_id and reference_id in self._pnl_refs:
+            return self._daily_pnl_usd
         self._daily_pnl_usd += float(pnl_usd)
+        if reference_id:
+            self._pnl_refs.add(reference_id)
         return self._daily_pnl_usd
 
     @property
@@ -107,6 +112,7 @@ class SafetyGuard:
             self._daily_key = today
             self._daily_pnl_usd = 0.0
             self._consecutive_errors = 0
+            self._pnl_refs.clear()
 
     # ------------------------------------------------------------ §17.1 auth
     def verify_webhook_secret(self, provided: Optional[str]) -> SafetyVerdict:
@@ -123,7 +129,10 @@ class SafetyGuard:
     # --------------------------------------------------------- §17.2 freshness
     def check_signal_freshness(self, timestamp: float, interval_seconds: int = 60,
                                now: Optional[float] = None) -> SafetyVerdict:
-        now = now if now is not None else time.time()
+        if now is None:
+            from app.core.exchange_clock import get_exchange_clock
+
+            now = get_exchange_clock().now()
         if bp.is_stale_signal(timestamp, now, interval_seconds):
             age = now - bp.normalize_timestamp(timestamp)
             return SafetyVerdict(False, "STALE_SIGNAL", f"signal age {age:.0f}s exceeds limit", 400)
@@ -193,3 +202,8 @@ def get_safety_guard(config: Optional[SigmaConfig] = None) -> SafetyGuard:
     if _guard is None:
         _guard = SafetyGuard(config)
     return _guard
+
+
+def set_safety_guard(guard: Optional[SafetyGuard]) -> None:
+    global _guard
+    _guard = guard

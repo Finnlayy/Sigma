@@ -138,6 +138,42 @@ CREATE TABLE IF NOT EXISTS daily_pnl (
   PRIMARY KEY (strategy_id, day)
 );
 
+CREATE TABLE IF NOT EXISTS flywheel_ledger (
+  entry_id VARCHAR PRIMARY KEY,
+  ts DOUBLE,
+  kind VARCHAR,
+  amount_eur DOUBLE,
+  futures_delta_eur DOUBLE,
+  vault_delta_eur DOUBLE,
+  asset VARCHAR,
+  strategy_id VARCHAR,
+  note VARCHAR,
+  external_ref VARCHAR UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS contagion_history (
+  ts DOUBLE,
+  r0 DOUBLE,
+  beta DOUBLE,
+  gamma DOUBLE,
+  mode VARCHAR,
+  size_multiplier DOUBLE,
+  allow_altcoin_treasury INTEGER,
+  reason VARCHAR,
+  inputs VARCHAR,
+  veto_code VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS reconciled_fills (
+  fill_id VARCHAR PRIMARY KEY,
+  ts DOUBLE,
+  strategy_id VARCHAR,
+  symbol VARCHAR,
+  net_pnl_usd DOUBLE,
+  status VARCHAR,
+  payload VARCHAR
+);
+
 CREATE TABLE IF NOT EXISTS genomes (
   genome_id VARCHAR PRIMARY KEY,
   strategy_id VARCHAR,
@@ -190,6 +226,20 @@ class DuckDBStore:
     def initialize(self) -> None:
         with self._lock:
             self._conn.execute(SCHEMA_DDL)
+            self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        """Additive upgrades for stores created before the five-module ledger columns."""
+        self._conn.execute(
+            "ALTER TABLE flywheel_ledger ADD COLUMN IF NOT EXISTS external_ref VARCHAR"
+        )
+        try:
+            self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS flywheel_ledger_external_ref "
+                "ON flywheel_ledger(external_ref) WHERE external_ref IS NOT NULL"
+            )
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ helpers
     def _rows(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
@@ -212,6 +262,10 @@ class DuckDBStore:
                 self._conn.close()
             except Exception:
                 pass
+
+    def checkpoint(self) -> None:
+        with self._lock:
+            self._conn.execute("CHECKPOINT")
 
     # -------------------------------------------------------------------- vault
     def vault_credit(self, entry_id: str, strategy_id: str, vtype: str,
@@ -511,6 +565,168 @@ class DuckDBStore:
             if r.get("day") is not None:
                 r["day"] = str(r["day"])
         return rows
+
+    # -------------------------------------------------------------- flywheel
+    def flywheel_append(self, row: Dict[str, Any]) -> None:
+        self._exec(
+            """INSERT INTO flywheel_ledger
+               (entry_id, ts, kind, amount_eur, futures_delta_eur, vault_delta_eur,
+                asset, strategy_id, note, external_ref)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            [
+                row["entry_id"], _f(row.get("ts")), row.get("kind"),
+                _f(row.get("amount_eur")), _f(row.get("futures_delta_eur")),
+                _f(row.get("vault_delta_eur")), row.get("asset"),
+                row.get("strategy_id"), row.get("note"),
+                row.get("external_ref") or None,
+            ],
+        )
+
+    def flywheel_external_ref_seen(self, external_ref: str) -> bool:
+        if not external_ref:
+            return False
+        return self._one(
+            "SELECT entry_id FROM flywheel_ledger WHERE external_ref = ?",
+            [external_ref],
+        ) is not None
+
+    def flywheel_entries(self, limit: int = 1000, *, ascending: bool = False
+                         ) -> List[Dict[str, Any]]:
+        if ascending:
+            return self._rows(
+                """SELECT * FROM (
+                     SELECT * FROM flywheel_ledger ORDER BY ts DESC LIMIT ?
+                   ) recent ORDER BY ts ASC""",
+                [int(limit)],
+            )
+        return self._rows(
+            "SELECT * FROM flywheel_ledger ORDER BY ts DESC LIMIT ?",
+            [int(limit)],
+        )
+
+    def flywheel_state(self) -> Dict[str, Any]:
+        totals = self._one(
+            """SELECT
+                 COALESCE(SUM(futures_delta_eur), 0) AS futures_balance_eur,
+                 COALESCE(SUM(vault_delta_eur), 0) AS vault_balance_eur,
+                 COALESCE(SUM(CASE
+                   WHEN kind = 'bot_allocation' THEN amount_eur
+                   WHEN kind = 'bot_release' THEN -amount_eur
+                   ELSE 0 END), 0) AS allocated_eur
+               FROM flywheel_ledger"""
+        ) or {}
+        latest_split = self._one(
+            "SELECT COALESCE(MAX(ts), 0) AS ts FROM flywheel_ledger "
+            "WHERE kind = 'profit_split'"
+        ) or {"ts": 0.0}
+        pending = self._one(
+            """SELECT COALESCE(SUM(amount_eur), 0) AS pending_profit_eur
+               FROM flywheel_ledger
+               WHERE kind = 'realized_profit' AND ts > ?""",
+            [_f(latest_split.get("ts"))],
+        ) or {}
+        control = self._one(
+            """SELECT entry_id, kind FROM flywheel_ledger
+               WHERE kind IN ('vault_purchase_pending', 'vault_purchase_cancelled',
+                              'profit_split')
+               ORDER BY ts DESC LIMIT 1"""
+        )
+        reconciliation_required = bool(
+            control and control.get("kind") == "vault_purchase_pending"
+        )
+        return {
+            "futures_balance_eur": _f(totals.get("futures_balance_eur")),
+            "vault_balance_eur": _f(totals.get("vault_balance_eur")),
+            "allocated_eur": max(0.0, _f(totals.get("allocated_eur"))),
+            "pending_profit_eur": _f(pending.get("pending_profit_eur")),
+            "reconciliation_required": reconciliation_required,
+            "pending_vault_operation_id": (
+                str(control.get("entry_id")) if reconciliation_required else ""
+            ),
+        }
+
+    # ------------------------------------------------------------- contagion
+    def contagion_append(self, row: Dict[str, Any]) -> None:
+        self._exec(
+            """INSERT INTO contagion_history
+               (ts, r0, beta, gamma, mode, size_multiplier,
+                allow_altcoin_treasury, reason, inputs, veto_code)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            [
+                _f(row.get("ts")), _f(row.get("r0")), _f(row.get("beta")),
+                _f(row.get("gamma")), row.get("mode"),
+                _f(row.get("size_multiplier"), 1.0),
+                int(bool(row.get("allow_altcoin_treasury"))),
+                row.get("reason"), json.dumps(row.get("inputs") or {}),
+                row.get("veto_code"),
+            ],
+        )
+
+    def contagion_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        rows = self._rows(
+            "SELECT * FROM contagion_history ORDER BY ts DESC LIMIT ?",
+            [int(limit)],
+        )
+        for row in rows:
+            row["inputs"] = json.loads(row.get("inputs") or "{}")
+            row["allow_altcoin_treasury"] = bool(row.get("allow_altcoin_treasury"))
+        return rows
+
+    # ------------------------------------------------------ live fill ledger
+    def reconciled_fill_status(self, fill_id: str) -> Optional[str]:
+        row = self._one(
+            "SELECT status FROM reconciled_fills WHERE fill_id = ?",
+            [fill_id],
+        )
+        return str(row.get("status")) if row else None
+
+    def record_reconciled_fill(self, row: Dict[str, Any],
+                               status: str = "pending") -> None:
+        self._exec(
+            """INSERT OR IGNORE INTO reconciled_fills
+               (fill_id, ts, strategy_id, symbol, net_pnl_usd, status, payload)
+               VALUES (?,?,?,?,?,?,?)""",
+            [
+                row["fill_id"], _f(row.get("ts")), row.get("strategy_id"),
+                row.get("symbol"), _f(row.get("net_pnl_usd")),
+                status,
+                json.dumps(row.get("payload") or {}),
+            ],
+        )
+
+    def set_reconciled_fill_status(self, fill_id: str, status: str) -> None:
+        self._exec(
+            "UPDATE reconciled_fills SET status = ? WHERE fill_id = ?",
+            [status, fill_id],
+        )
+
+    def reconciled_fill_watermark(self) -> float:
+        row = self._one("SELECT COALESCE(MAX(ts), 0) AS ts FROM reconciled_fills")
+        return _f(row.get("ts")) if row else 0.0
+
+    def unapplied_reconciled_fills(self) -> List[Dict[str, Any]]:
+        """Pending/failed fills that must be retried even outside the CLI window."""
+        rows = self._rows(
+            "SELECT * FROM reconciled_fills WHERE status IN ('pending', 'failed')"
+        )
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            payload = row.get("payload")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload or "{}")
+                except json.JSONDecodeError:
+                    payload = {}
+            out.append({
+                "fill_id": str(row.get("fill_id") or ""),
+                "ts": _f(row.get("ts")),
+                "strategy_id": str(row.get("strategy_id") or ""),
+                "symbol": str(row.get("symbol") or ""),
+                "net_pnl_usd": _f(row.get("net_pnl_usd")),
+                "payload": payload or {},
+                "status": str(row.get("status") or ""),
+            })
+        return out
 
     # ------------------------------------------------------------------ genomes
     def upsert_genome(self, g: Dict[str, Any]) -> None:

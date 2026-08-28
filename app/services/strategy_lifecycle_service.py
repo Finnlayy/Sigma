@@ -103,6 +103,7 @@ class StrategyLifecycleService:
         flywheel=None,
         safety=None,
         verifier=None,
+        depth_adapter=None,
         allocator=None,
         config=None,
     ) -> None:
@@ -113,6 +114,7 @@ class StrategyLifecycleService:
         self._flywheel = flywheel
         self._safety = safety
         self._verifier = verifier
+        self._depth_adapter = depth_adapter
         self._allocator = allocator
         self._runs: List[LifecycleRecord] = []
         self._by_strategy: Dict[str, LifecycleRecord] = {}
@@ -266,11 +268,24 @@ class StrategyLifecycleService:
                     "GLINT_SCORE_TOO_LOW",
                     f"Glint {score:.1f} < {bp.GLINT_SCORE_AUTONOMOUS_ENTRY} — "
                     "kein autonomer Live-Start")
+            if orderbook is None and self._depth_adapter is not None:
+                try:
+                    orderbook = self._depth_adapter.fetch(record.symbol)
+                except Exception as exc:
+                    raise LifecycleError(
+                        "ORDERBOOK_DEPTH_UNAVAILABLE",
+                        f"Kraken JIT depth unavailable: {exc}",
+                        status_code=503,
+                    ) from exc
             if orderbook is None:
                 raise LifecycleError("ORDERBOOK_AUDIT_MISSING",
                                      "Pfad 2 verlangt ein JIT-Orderbuch-Audit (§24)")
             direction = "BULLISH"
-            verdict = self.verifier.verify(orderbook, direction, now=time.time())
+            from app.core.exchange_clock import get_exchange_clock
+
+            verdict = self.verifier.verify(
+                orderbook, direction, now=get_exchange_clock().now()
+            )
             if not verdict.approved:
                 raise LifecycleError(verdict.reject_code or bp.ORDERBOOK_WALL_REJECT,
                                      verdict.reason)

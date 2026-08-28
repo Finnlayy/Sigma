@@ -261,6 +261,16 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 6000): P
 const post = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
 
+const operatorPost = <T,>(path: string, settingsToken: string, body?: unknown) =>
+  request<T>(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Sigma-Settings-Token': settingsToken,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
 export const sigmaApi = {
   health: () => request<HealthResponse>('/api/v1/health'),
   blueprint: () => request<any>('/api/v1/blueprint'),
@@ -271,9 +281,14 @@ export const sigmaApi = {
   pause: () => post<SafetySnapshot>('/api/v1/safety/pause'),
   release: () => post<SafetySnapshot>('/api/v1/safety/release'),
   deadman: () => request<DeadmanSnapshot>('/api/v1/deadman'),
-  deadmanBeat: (native = true) => post<DeadmanSnapshot>(`/api/v1/deadman/beat?has_native_stop_loss=${native}`),
+  deadmanBeat: (settingsToken: string, native = true) =>
+    operatorPost<DeadmanSnapshot>(
+      `/api/v1/deadman/beat?has_native_stop_loss=${native}`,
+      settingsToken,
+    ),
   memory: () => request<MemorySnapshot>('/api/v1/memory'),
-  memoryCheck: (force = false) => post<any>(`/api/v1/memory/check?force=${force}`),
+  memoryCheck: (settingsToken: string, force = false) =>
+    operatorPost<any>(`/api/v1/memory/check?force=${force}`, settingsToken),
 
   // Virtual Bots
   bots: () => request<{ bots: BotCard[]; total_equity_eur: number; total_budget_eur: number }>('/api/v1/bots'),
@@ -350,7 +365,8 @@ export const sigmaApi = {
   rateLimiter: () => request<any>('/api/v1/rate-limiter'),
   contagion: () => request<any>('/api/v1/contagion'),
   flywheel: () => request<any>('/api/v1/flywheel'),
-  flywheelSweep: () => post<any>('/api/v1/flywheel/sweep'),
+  flywheelSweep: (settingsToken: string) =>
+    operatorPost<any>('/api/v1/flywheel/sweep', settingsToken),
   leverage: (strategyId: string) => request<any>(`/api/v1/leverage/${encodeURIComponent(strategyId)}`),
 
   // §38 Netron ONNX Inspector

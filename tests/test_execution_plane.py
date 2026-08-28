@@ -636,11 +636,28 @@ def test_confluence_endpoint_vetoes_wall():
 def test_flywheel_endpoints_split_profit():
     from fastapi.testclient import TestClient
 
+    import app.server.routes_sigma as routes
     from app.server.main import app
 
+    routes.set_operator_auth_override(lambda request: True)
     client = TestClient(app)
-    client.post("/api/v1/flywheel/deposit", json={"amount_eur": 400.0})
-    out = client.post("/api/v1/flywheel/profit",
-                      json={"amount_eur": 60.0, "strategy_id": "s1"}).json()
-    assert out["result"]["split"] is True
-    assert out["result"]["reinvest_eur"] == out["result"]["vault_eur"] == 30.0
+    try:
+        client.post("/api/v1/flywheel/deposit", json={"amount_eur": 400.0})
+        out = client.post("/api/v1/flywheel/profit",
+                          json={"amount_eur": 60.0, "strategy_id": "s1"}).json()
+        assert out["result"]["split"] is True
+        assert out["result"]["reinvest_eur"] == out["result"]["vault_eur"] == 30.0
+    finally:
+        routes.set_operator_auth_override(None)
+
+
+def test_flywheel_mutations_require_operator_token():
+    from fastapi.testclient import TestClient
+
+    from app.server.main import app
+
+    response = TestClient(app).post(
+        "/api/v1/flywheel/deposit", json={"amount_eur": 10.0}
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "OPERATOR_AUTH_REQUIRED"

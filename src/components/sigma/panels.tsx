@@ -38,6 +38,7 @@ import {
   SettingsPanel as SettingsPanelImpl,
 } from './legacyPanels';
 import { StrategyLibraryPanel as StrategyLibraryPanelImpl } from './StrategyLibraryPanel';
+import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
 
 /* ------------------------------------------------------------------ shared */
@@ -507,9 +508,15 @@ export function DeadmanSwitchPanel() {
   const pct = Math.min(100, ((d?.age_s ?? 0) / (d?.timeout_s || 1800)) * 100);
   const auto = d?.auto_pulse !== false;
   const timeoutMin = Math.round((d?.timeout_s ?? 1800) / 60);
+  const override = async () => {
+    const token = await PasskeyWebAuthnClient.authenticatePasskeyForSettings('master@alpha.local');
+    if (!token) return;
+    await sigmaApi.deadmanBeat(token, true);
+    refresh();
+  };
   return (
     <PanelShell title="Deadman Switch" icon={<HeartPulse size={13} />}
-      actions={<button onClick={() => sigmaApi.deadmanBeat(true).then(refresh)}
+      actions={<button onClick={override}
         title="Manueller Override — Puls kommt vom Kraken-Time-Ping"
         className="rounded border border-zinc-600/60 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800">OVERRIDE</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
@@ -575,9 +582,15 @@ export function RewardXPMatrixPanel() {
 export function MemoryWatchdogPanel() {
   const [mem, refresh] = usePoll(sigmaApi.memory, 6000);
   const m: MemorySnapshot | null = mem;
+  const check = async () => {
+    const token = await PasskeyWebAuthnClient.authenticatePasskeyForSettings('master@alpha.local');
+    if (!token) return;
+    await sigmaApi.memoryCheck(token, true);
+    refresh();
+  };
   return (
     <PanelShell title="Memory Watchdog" icon={<MemoryStick size={13} />}
-      actions={<button onClick={() => sigmaApi.memoryCheck(true).then(refresh)}
+      actions={<button onClick={check}
         className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] hover:border-sky-500">CHECK</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
         <div className={`h-full ${(m?.percent ?? 0) > 92 ? 'bg-red-500' : (m?.percent ?? 0) > 85 ? 'bg-amber-500' : 'bg-emerald-500'}`}
@@ -870,7 +883,12 @@ export function ContagionRadarPanel() {
 
 export function FlywheelBudgetPanel() {
   const [data, refresh] = usePoll(sigmaApi.flywheel, 6000);
-  const sweep = async () => { await sigmaApi.flywheelSweep(); refresh(); };
+  const sweep = async () => {
+    const token = await PasskeyWebAuthnClient.authenticatePasskeyForSettings('master@alpha.local');
+    if (!token) return;
+    await sigmaApi.flywheelSweep(token);
+    refresh();
+  };
   return (
     <PanelShell title="Flywheel Budget" icon={<Trophy size={13} className="text-emerald-400" />}
       actions={<>

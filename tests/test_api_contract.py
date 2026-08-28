@@ -23,10 +23,17 @@ def client(tmp_path_factory):
 
     import app.server.main as main
     import app.server.routes_sigma as routes
+    from app.ingestion.macro_contagion_feed import MacroContagionFeed
+    from app.quant.epidemic_contagion_engine import ContagionInputs
 
     routes.set_pipeline(None)          # frisch bauen, damit das Secret greift
-    with TestClient(main.app) as c:
-        yield c
+    original_snapshot = MacroContagionFeed.snapshot
+    MacroContagionFeed.snapshot = lambda self: ContagionInputs()
+    try:
+        with TestClient(main.app) as c:
+            yield c
+    finally:
+        MacroContagionFeed.snapshot = original_snapshot
 
 
 def _alert(**kw):
@@ -69,6 +76,20 @@ def test_webhook_happy_path_returns_sizing(client):
     assert body["pair"] == "XBTUSD"
     assert body["stop_loss"] < body["price"] < body["take_profit"]
     assert body["mode"] in ("sim", "paper", "dry_run")
+
+
+def test_legacy_webhook_is_disabled_when_live_trading(client):
+    import app.server.routes_sigma as routes
+
+    pipe = routes.pipeline()
+    previous = pipe.config.live_trading
+    pipe.config.live_trading = True
+    try:
+        response = client.post(bp.WEBHOOK_ROUTE, json=_alert())
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "LEGACY_WEBHOOK_LIVE_DISABLED"
+    finally:
+        pipe.config.live_trading = previous
 
 
 def test_webhook_rejects_stale_and_unknown_symbol(client):
@@ -175,14 +196,21 @@ def test_scout_plan_endpoint(client):
 # ---------------------------------------------------------- ops / telegram ---
 
 def test_deadman_and_memory_endpoints(client):
+    import app.server.routes_sigma as routes
+
     snap = client.get("/api/v1/deadman").json()
     assert snap["timeout_s"] == bp.DEADMAN_TIMEOUT_SECONDS
     assert snap["expired"] is False
     assert snap["auto_pulse"] is True
-    dm = client.post("/api/v1/deadman/beat", params={"has_native_stop_loss": True}).json()
-    assert dm["timeout_s"] == bp.DEADMAN_TIMEOUT_SECONDS and dm["expired"] is False
-    mem = client.post("/api/v1/memory/check", params={"force": True}).json()
-    assert "stage" in mem
+    routes.set_operator_auth_override(lambda request: True)
+    try:
+        dm = client.post("/api/v1/deadman/beat",
+                         params={"has_native_stop_loss": True}).json()
+        assert dm["timeout_s"] == bp.DEADMAN_TIMEOUT_SECONDS and dm["expired"] is False
+        mem = client.post("/api/v1/memory/check", params={"force": True}).json()
+        assert "stage" in mem
+    finally:
+        routes.set_operator_auth_override(None)
     assert client.get("/api/v1/memory").json()["stages_pct"] == list(bp.MEMORY_STAGES_PCT)
     tele = client.get("/api/v1/scheduler").json()
     names = [t["name"] for tier in tele["tiers"] for t in tier.get("registered", [])]

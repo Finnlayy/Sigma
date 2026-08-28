@@ -14,6 +14,7 @@ sowohl in ein asyncio-Loop als auch in einen Thread haengen.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -73,7 +74,7 @@ class ScheduledTask:
             "tier_label": TIER_SPECS[self.tier].label,
             "cadence_s": self.cadence_s,
             "cron": self.cron,
-            "next_run": self.next_run,
+            "next_run": self.next_run if math.isfinite(self.next_run) else None,
             "last_run": self.last_run,
             "last_duration_ms": self.last_duration_ms,
             "runs": self.runs,
@@ -239,13 +240,24 @@ def install_canonical_tasks(
     *,
     deadman=None,
     memory=None,
+    contagion=None,
+    contagion_feed=None,
+    flywheel=None,
+    fill_reconciler=None,
+    glint_event: Optional[TaskFn] = None,
 ) -> SchedulerMatrix:
-    """Verdrahtet die Blueprint-T1-Pulse (Deadman-Heartbeat, Memory-Watchdog).
+    """Wire the implemented T0/T1/T2/T4 jobs into the production scheduler.
 
     Ohne diese Registrierung altert ``last_beat`` unbegrenzt — der Operator
     müsste dann manuell BEAT drücken. Der Core erneuert den Puls selbst.
     """
     sched = scheduler or get_scheduler()
+    if sched.get("glint_orderbook_verify") is None:
+        sched.register(
+            "glint_orderbook_verify",
+            bp.SchedulerTier.T0_EVENT,
+            glint_event or (lambda: None),
+        )
     if sched.get("deadman_heartbeat") is None:
         if deadman is None:
             from app.execution.deadman_switch_daemon import get_deadman
@@ -277,5 +289,30 @@ def install_canonical_tasks(
             memory.check,
             cadence_s=float(bp.DEADMAN_HEARTBEAT_SECONDS_MAX),
             start_immediately=True,
+        )
+    if fill_reconciler is not None and sched.get("kraken_fill_reconcile") is None:
+        sched.register(
+            "kraken_fill_reconcile",
+            bp.SchedulerTier.T1_FAST_PULSE,
+            fill_reconciler.poll,
+            cadence_s=float(bp.DEADMAN_HEARTBEAT_SECONDS_MAX),
+            start_immediately=False,
+        )
+    if contagion is not None and contagion_feed is not None \
+            and sched.get("macro_radar_scraper") is None:
+        def _macro_radar() -> None:
+            contagion.evaluate(contagion_feed.snapshot())
+
+        sched.register(
+            "macro_radar_scraper",
+            bp.SchedulerTier.T2_MID,
+            _macro_radar,
+            start_immediately=False,
+        )
+    if flywheel is not None and sched.get("flywheel_sweep") is None:
+        sched.register(
+            "flywheel_sweep",
+            bp.SchedulerTier.T4_DAILY,
+            flywheel.sweep,
         )
     return sched

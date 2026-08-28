@@ -83,7 +83,19 @@ class TradingViewScraperClient:
                              *, exchange: str = "KRAKEN"
                              ) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
         ex, ticker = to_scraper_ticker(symbol, exchange=exchange)
-        path = bp.SCRAPER_ENDPOINTS["ohlcv"].format(exchange=ex, ticker=ticker)
+        return self.fetch_ticker_ohlc(ex, ticker, interval_min, count)
+
+    def fetch_ticker_ohlc(
+        self,
+        exchange: str,
+        ticker: str,
+        interval_min: int = 15,
+        count: int = 500,
+    ) -> Tuple[List[Dict[str, float]], Dict[str, Any]]:
+        """Fetch an exact TradingView ticker without crypto pair normalization."""
+        ex = exchange.strip().upper()
+        symbol = ticker.strip().upper()
+        path = bp.SCRAPER_ENDPOINTS["ohlcv"].format(exchange=ex, ticker=symbol)
         payload = self._get(path, {"timeframe": to_scraper_timeframe(interval_min), "candles": count})
         self._last_meta = self._meta(payload)
         return normalize_ohlc(payload), dict(self._last_meta)

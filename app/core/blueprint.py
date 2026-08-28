@@ -910,7 +910,7 @@ SCHEDULER_MATRIX: Tuple[TierSpec, ...] = (
              ("glint_orderbook_verify", "webhook_execution", "kill_switch",
               "playwright_compile")),
     TierSpec(SchedulerTier.T1_FAST_PULSE, "Fast Pulse", 20.0, None,
-             ("deadman_heartbeat", "memory_watchdog")),
+             ("deadman_heartbeat", "memory_watchdog", "kraken_fill_reconcile")),
     TierSpec(SchedulerTier.T2_MID, "Mid", 300.0, None,
              ("macro_radar_scraper",)),
     TierSpec(SchedulerTier.T3_REGIME, "Regime", 14400.0, None,
@@ -991,6 +991,7 @@ HTTP_429_BACKOFF_S: Tuple[float, ...] = (10.0, 30.0, 60.0)
 SIR_R0_HEDGE_THRESHOLD = 1.5            # >= 1.5 -> FLIGHT_TO_CASH_AND_HEDGE
 SIR_R0_DERISK_THRESHOLD = 1.0           # >= 1.0 -> Futures-Sizing -50 %
 SIR_DERISK_SIZE_MULTIPLIER = 0.5
+SIR_MAX_STATE_AGE_S = 900
 SIR_INPUTS: Tuple[str, ...] = (
     "oil_vol_zscore", "gold_dxy_ratio", "cross_asset_correlation",
     "orderbook_absorption",

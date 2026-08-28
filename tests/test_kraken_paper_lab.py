@@ -46,13 +46,15 @@ def test_paper_prefix_spot_and_futures():
     assert KrakenCliBridge()._prefix() == [bp.KRAKEN_CLI_BINARY, "trade"]
 
 
-def test_paper_order_argv_and_simulated_fill():
-    res = _bridge(futures=True).add_order(
+def test_paper_order_argv_and_simulated_fill(monkeypatch):
+    bridge = _bridge(futures=True)
+    monkeypatch.setattr(bridge, "_cli_available", lambda: False)
+    res = bridge.add_order(
         pair="PF_XBTUSD", side="buy", volume=1.0, ordertype="limit",
         price=68000.0, stop_price=67000.0, strategy_id="s1")
     assert res.ok and res.mode == "paper"
     assert res.txid.startswith("PAPER-")
-    assert res.argv[:4] == [bp.KRAKEN_CLI_BINARY, "futures", "paper", "order"]
+    assert res.argv[:4] == [bp.KRAKEN_CLI_BINARY, "futures", "paper", "buy"]
     assert "--price=68000.0" in res.argv and "--stop-price=67000.0" in res.argv
     assert res.has_native_stop_loss is True
 
@@ -78,8 +80,10 @@ def test_paper_order_error_is_flagged(monkeypatch):
     assert res.ok is False and res.error_code
 
 
-def test_paper_balance_simulated():
-    res = _bridge().balance()
+def test_paper_balance_simulated(monkeypatch):
+    bridge = _bridge()
+    monkeypatch.setattr(bridge, "_cli_available", lambda: False)
+    res = bridge.balance()
     assert res.ok and "10000" in res.stdout
 
 
@@ -178,8 +182,9 @@ def test_academy_hook_is_non_fatal():
     assert eng.stats("s1")["trades"] == 1
 
 
-def test_submit_order_returns_paper_receipt():
+def test_submit_order_returns_paper_receipt(monkeypatch):
     eng = _engine()
+    monkeypatch.setattr(eng.bridge, "_cli_available", lambda: False)
     out = eng.submit_order("s1", "PF_XBTUSD", "buy", 1.0)
     assert out["ok"] and out["mode"] == "paper" and out["order_id"].startswith("PAPER-")
 
