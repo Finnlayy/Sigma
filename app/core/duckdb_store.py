@@ -329,6 +329,22 @@ class DuckDBStore:
 
     # -------------------------------------------------------------- strategies
     def upsert_strategy(self, s: Dict[str, Any]) -> None:
+        params = s.get("parameters") or {}
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except json.JSONDecodeError:
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
+        else:
+            params = dict(params)
+        tv_script_id = s.get("tv_script_id") or params.get("tv_script_id") or ""
+        if tv_script_id:
+            params["tv_script_id"] = tv_script_id
+        execution_mode = s.get("executionMode") or s.get("execution_mode") or "paper"
+        if str(execution_mode).lower() == "live" and tv_script_id:
+            execution_mode = "paper"
         self._exec(
             """INSERT OR REPLACE INTO strategies
                (id, name, description, code, status, asset_pair, interval_min,
@@ -340,8 +356,8 @@ class DuckDBStore:
                 s["id"], s.get("name"), s.get("description", ""), s.get("code", ""),
                 s.get("status", "inactive"), s.get("assetPair") or s.get("asset_pair"),
                 int(s.get("interval") or s.get("interval_min") or 15),
-                s.get("executionMode") or s.get("execution_mode") or "paper",
-                json.dumps(s.get("parameters") or {}),
+                execution_mode,
+                json.dumps(params),
                 int(1 if s.get("hardStopEnabled", True) else 0),
                 _f(s.get("hardStopPercent"), 5.0),
                 s.get("createdAt") or s.get("created_at"),
@@ -364,8 +380,29 @@ class DuckDBStore:
         sql += " ORDER BY created_at"
         return [self._strategy_row_to_api(r) for r in self._rows(sql)]
 
+    def find_strategy_by_tv_script_id(self, tv_script_id: str) -> Optional[Dict[str, Any]]:
+        needle = (tv_script_id or "").strip()
+        if not needle:
+            return None
+        for row in self.list_strategies():
+            params = row.get("parameters") or {}
+            stored = str(row.get("tv_script_id") or params.get("tv_script_id") or "")
+            if stored == needle:
+                return row
+        return None
+
     @staticmethod
     def _strategy_row_to_api(r: Dict[str, Any]) -> Dict[str, Any]:
+        raw_params = r.get("parameters") or {}
+        if isinstance(raw_params, dict):
+            params = dict(raw_params)
+        else:
+            try:
+                params = json.loads(raw_params or "{}")
+            except (TypeError, json.JSONDecodeError):
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
         return {
             "id": r["id"],
             "name": r["name"],
@@ -375,7 +412,8 @@ class DuckDBStore:
             "assetPair": r.get("asset_pair"),
             "interval": int(r.get("interval_min") or 15),
             "executionMode": r.get("execution_mode") or "paper",
-            "parameters": json.loads(r.get("parameters") or "{}"),
+            "parameters": params,
+            "tv_script_id": params.get("tv_script_id") or "",
             "hardStopEnabled": bool(r.get("hard_stop_enabled", 1)),
             "hardStopPercent": float(r.get("hard_stop_percent") or 5.0),
             "createdAt": str(r.get("created_at")) if r.get("created_at") else None,

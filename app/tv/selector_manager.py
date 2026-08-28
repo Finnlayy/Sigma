@@ -63,7 +63,10 @@ BUILTIN_DEFAULT_SELECTORS: Dict[str, Any] = {
         "webhook_url_field": ['input[data-name="webhook-url"]'],
         "submit_button": ['button[data-name="submit"]'],
     },
-    "account": {"my_scripts_link": ['a[href*="/scripts/"]']},
+    "account": {
+        "my_scripts_link": ['a[href*="/scripts/"]'],
+        "script_row": ['.tv-feed__item', '[data-widget-type="user-script"]'],
+    },
 }
 
 

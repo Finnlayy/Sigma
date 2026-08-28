@@ -219,6 +219,47 @@ export interface TvJob {
   created_at: number;
 }
 
+export interface TvLibraryScript {
+  tv_script_id: string;
+  name: string;
+  type: string;
+  version?: string;
+  symbol?: string;
+  interval?: number | string;
+  url?: string;
+  origin?: string;
+  has_source?: boolean;
+  already_imported?: boolean;
+  library_id?: string;
+  library_execution_mode?: string;
+}
+
+export interface TvLibraryCatalog {
+  scripts: TvLibraryScript[];
+  source: string;
+  session_present: boolean;
+  driver: string;
+  reason?: string;
+  count: number;
+  imported_count?: number;
+}
+
+export interface TvLibrarySyncResult {
+  ok: boolean;
+  source: string;
+  session_present: boolean;
+  driver: string;
+  reason?: string;
+  execution_mode: string;
+  live_trading: boolean;
+  imported: Array<{ tv_script_id: string; name: string; library_id: string; executionMode: string; status: string }>;
+  skipped: Array<{ tv_script_id: string; name: string; library_id: string; reason: string }>;
+  missing: string[];
+  imported_count: number;
+  skipped_count: number;
+  strategies?: unknown[];
+}
+
 export interface AlertRecord {
   strategy_id: string;
   name: string;
@@ -315,6 +356,7 @@ export const sigmaApi = {
     post<TvJob>(`/api/strategies/${id}/tv/push`, { ...body, strategy_id: id }),
   cancelJob: (jobId: string) => post<any>(`/api/tv/jobs/${jobId}/cancel`),
   tvSession: () => request<any>('/api/tv/session/status'),
+  tvLogin: () => request<any>('/api/tv/session/login', { method: 'POST', body: '{}' }, 20000),
 
   // Market / Regime
   ohlc: (symbol: string, interval: number, count = 300) =>
@@ -384,6 +426,12 @@ export const sigmaApi = {
   },
   fromTemplate: (template: string, name?: string) =>
     post<any>('/api/strategies/from-template', { template, name }),
+  tvScripts: () => request<TvLibraryCatalog>('/api/strategies/tv/scripts', undefined, 25000),
+  syncTvLibrary: (body?: { script_ids?: string[]; symbol?: string; interval?: number }) =>
+    request<TvLibrarySyncResult>('/api/strategies/tv/sync-library', {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }, 25000),
 
   // §37 Live Process & AI Log Console
   logSources: () => request<LogSources>('/api/v1/logs/sources'),

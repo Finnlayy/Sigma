@@ -9,6 +9,7 @@ Knoten:     Jaune (Carrera-Engine) / API
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -547,6 +548,64 @@ async def set_bot_m8_state(bot_id: str, state: str):
 
 
 # =============================================================================
+# TV library — My Scripts import (§8.5)
+# =============================================================================
+
+class TvSyncLibraryIn(BaseModel):
+    script_ids: List[str] = Field(default_factory=list)
+    symbol: str = "BTC/USD"
+    interval: Any = 15
+    execution_mode: str = "paper"
+
+
+def _tv_library_service():
+    from app.services.tv_library_service import get_tv_library_service
+
+    return get_tv_library_service()
+
+
+@router.get("/api/strategies/tv/scripts")
+async def list_tv_library_scripts():
+    from app.server.main import state
+
+    # Playwright Sync API cannot run on uvicorn's asyncio loop.
+    return await asyncio.to_thread(_tv_library_service().discover, state.store)
+
+
+@router.post("/api/strategies/tv/sync-library")
+async def sync_tv_library(body: TvSyncLibraryIn):
+    from app.server.main import state
+
+    result = await asyncio.to_thread(
+        _tv_library_service().sync,
+        state.store,
+        script_ids=body.script_ids,
+        symbol=body.symbol,
+        interval=body.interval,
+    )
+    created_ids = {row.get("library_id") for row in result.get("imported") or []}
+    for strategy in result.get("strategies") or []:
+        sid = strategy.get("id")
+        if sid not in created_ids:
+            continue
+        try:
+            await state.m8.register_strategy(sid, last_ga_recalibration_ts=time.time())
+        except Exception:
+            pass
+        try:
+            state.academy.seed([strategy])
+        except Exception:
+            pass
+        state.bus.log(
+            "info",
+            f"TV library import: {strategy.get('name')} ({strategy.get('assetPair')}) paper/inactive",
+            category="SYSTEM",
+            strategy_id=sid,
+        )
+    return result
+
+
+# =============================================================================
 # Alerts (§4.6 / §8.3)
 # =============================================================================
 
@@ -631,13 +690,37 @@ async def tv_session_status():
     import os
 
     cfg = load_config()
+    from app.tv.chrome_login import chrome_binary, get_tv_chrome_launcher
+
+    chrome = get_tv_chrome_launcher(cfg).snapshot()
     return {
         "storage_state_path": cfg.tv_storage_state_path,
         "session_present": os.path.exists(cfg.tv_storage_state_path),
         "driver": "playwright" if os.path.exists(cfg.tv_storage_state_path) else "fake",
         "selectors": get_selector_manager().snapshot(),
         "worker": get_tv_queue().snapshot(),
+        "login_url": bp.TV_LOGIN_URL,
+        "chart_url": bp.TV_CHART_URL,
+        "chrome_binary": chrome_binary(),
+        "chrome_open": bool(chrome.get("open")),
+        "live_trading": False,
     }
+
+
+@router.post("/api/tv/session/login")
+async def tv_session_login():
+    """Open (or reopen) Chrome on TradingView for a manual login. Never arms live."""
+    from app.tv.chrome_login import open_tradingview_login
+
+    result = open_tradingview_login()
+    result["live_trading"] = False
+    if not result.get("ok") and result.get("error"):
+        raise HTTPException(503, detail={
+            "code": "TV_CHROME_LAUNCH_FAILED",
+            "reason": result.get("error"),
+            "live_trading": False,
+        })
+    return result
 
 
 # =============================================================================

@@ -139,6 +139,7 @@ PROCESSES: Tuple[ProcessSpec, ...] = (
 # --- Kanonische Datenpfade (relativ zu SIGMA_DATA_DIR bzw. Repo-Root) -------
 DATA_DIR = "./data"
 PATH_TV_STORAGE_STATE = "./data/secrets/tv_storage_state.json"
+PATH_TV_CHROME_PROFILE = "./data/secrets/tv_chrome_profile"
 PATH_TV_EXPORTS = "./data/tv_exports"          # /{job_id}/
 PATH_TV_JOBS = "./data/tv_jobs"                # /{job_id}.json
 PATH_KILL_SWITCH = "./data/signals/KILL_SWITCH"
@@ -376,6 +377,8 @@ TV_NAVIGATION_TIMEOUT_MS = 120_000
 TV_TESTER_RUN_TIMEOUT_MS = 180_000
 TV_JOB_TOTAL_TIMEOUT_MS = 600_000
 TV_BASE_URL = "https://www.tradingview.com"
+TV_LOGIN_URL = "https://www.tradingview.com/#signin"
+TV_CHART_URL = "https://www.tradingview.com/chart/"
 
 GA_MAX_POPULATION = 15
 GA_MAX_GENERATIONS = 5
@@ -435,6 +438,7 @@ API_ROUTES: Mapping[str, str] = MappingProxyType({
     "POST /api/tv/jobs/{id}/cancel": "Abbruch wenn queued",
     "POST /api/genetic/run": "GA mit TV-Evals",
     "GET /api/tv/session/status": "storage_state vorhanden?",
+    "POST /api/tv/session/login": "Chrome auf TradingView oeffnen (manueller Login)",
     "POST /api/strategies/{id}/tv/push": "Code+Params nach TV",
     "POST /api/strategies/{id}/tv/pull-parameters": "Parameter-CSV lesen",
     "POST /api/strategies/{id}/alerts/sync": "Alert upsert",
@@ -442,6 +446,7 @@ API_ROUTES: Mapping[str, str] = MappingProxyType({
     "POST /api/strategies/{id}/backtest": "Backtest-Job der Strategy",
     "GET /api/tv/jobs": "Jobs (Filter strategyId)",
     "POST /api/strategies/from-template": "Neue Strategy aus Pine-Template",
+    "GET /api/strategies/tv/scripts": "My Scripts / published scripts listen",
     "POST /api/strategies/tv/sync-library": "My Scripts importieren",
 })
 

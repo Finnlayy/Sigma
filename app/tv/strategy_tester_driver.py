@@ -17,11 +17,13 @@ Vertrag (beide Driver identisch):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Protocol
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, TypeVar
 
 from app.backtest.tv_csv import params_to_csv, synthesize_result_csv
 from app.core import blueprint as bp
@@ -99,7 +101,24 @@ class FakeStrategyTesterDriver:
         return {"trades_csv": trades_csv, "performance_csv": perf_csv, "source": "fake"}
 
     def list_my_scripts(self) -> List[Dict[str, str]]:
-        return [{"tv_script_id": "PUB;fake1", "name": "CISD Momentum v6", "type": "strategy"}]
+        return [
+            {
+                "tv_script_id": "PUB;fake1",
+                "name": "CISD Momentum v6",
+                "type": "strategy",
+                "symbol": "BTC/USD",
+                "interval": 15,
+                "origin": "saved",
+            },
+            {
+                "tv_script_id": "USER;fake2",
+                "name": "RSI Reversion TV",
+                "type": "strategy",
+                "symbol": "ETH/USD",
+                "interval": 15,
+                "origin": "published",
+            },
+        ]
 
     def close(self) -> None:
         self.calls.append("close")
@@ -292,8 +311,37 @@ class PlaywrightStrategyTesterDriver:
             return fh.read()
 
     def list_my_scripts(self) -> List[Dict[str, str]]:
-        """§8.5 — Strategien aus dem TV-Konto listen."""
+        """§8.5 — Strategien aus dem TV-Konto listen (pine-facade, dann DOM)."""
         self.start()
+        out = self._list_via_pine_facade()
+        if out:
+            return out
+        return self._list_via_dom()
+
+    def _list_via_pine_facade(self) -> List[Dict[str, str]]:
+        from app.tv.script_catalog import (
+            merge_scripts,
+            normalize_script_rows,
+            pine_facade_list_urls,
+        )
+
+        groups: List[List[Dict[str, str]]] = []
+        seen_urls = set()
+        for url, origin in pine_facade_list_urls():
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            try:
+                resp = self._context.request.get(url, timeout=15_000)
+                if resp.ok:
+                    rows = normalize_script_rows(resp.json(), origin=origin)
+                    if rows:
+                        groups.append(rows)
+            except Exception as exc:
+                logger.info("pine-facade list via playwright failed (%s): %s", origin, exc)
+        return merge_scripts(*groups)
+
+    def _list_via_dom(self) -> List[Dict[str, str]]:
         self.page.goto(f"{self.config.tv_base_url}/u/#published-scripts",
                        wait_until="domcontentloaded")
         out: List[Dict[str, str]] = []
@@ -303,7 +351,14 @@ class PlaywrightStrategyTesterDriver:
                     name = (node.inner_text() or "").strip().splitlines()[0]
                     link = node.locator("a").first.get_attribute("href") or ""
                     if name:
-                        out.append({"tv_script_id": link, "name": name, "type": "strategy"})
+                        script_id = link or name
+                        out.append({
+                            "tv_script_id": script_id,
+                            "name": name,
+                            "type": "strategy",
+                            "url": link,
+                            "origin": "published",
+                        })
             except Exception:
                 continue
             if out:
@@ -320,3 +375,37 @@ def get_driver(config: Optional[SigmaConfig] = None, *, prefer_fake: Optional[bo
         logger.info("TV FakeDriver active (no session at %s)", cfg.tv_storage_state_path)
         return FakeStrategyTesterDriver()
     return PlaywrightStrategyTesterDriver(cfg)
+
+
+_T = TypeVar("_T")
+
+
+def run_sync_off_asyncio_loop(fn: Callable[[], _T]) -> _T:
+    """Playwright Sync API cannot start on a running asyncio loop (FastAPI/uvicorn).
+
+    Login TV already isolates Playwright on its own thread. Library listing must
+    do the same when called from an async route: hop to a worker thread, then
+    run the entire driver lifecycle there (start/list/close are thread-affine).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return fn()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="tv-pw-sync") as pool:
+        return pool.submit(fn).result()
+
+
+def list_my_scripts_with_playwright(config: Optional[SigmaConfig] = None) -> List[Dict[str, Any]]:
+    """Open a Playwright driver, list My Scripts, close — never on the asyncio loop."""
+
+    def _work() -> List[Dict[str, Any]]:
+        drv = get_driver(config, prefer_fake=False)
+        try:
+            return list(drv.list_my_scripts() or [])
+        finally:
+            try:
+                drv.close()
+            except Exception:
+                pass
+
+    return run_sync_off_asyncio_loop(_work)

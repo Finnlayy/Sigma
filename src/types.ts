@@ -8,6 +8,7 @@ export interface TradingStrategy {
   interval: number; // in minutes (Kraken OHLC timeframe: 1, 5, 15, 30, 60, 240, 1440, etc.)
   executionMode?: 'paper' | 'live'; // Strategy-specific independent execution queue
   parameters: Record<string, number | string | boolean>;
+  tv_script_id?: string;
   hardStopEnabled?: boolean;
   hardStopPercent?: number;
   createdAt: string;

@@ -10,7 +10,7 @@ import AIReviewer from '../AIReviewer';
 import { BacktestingPanel } from '../BacktestingPanel';
 import { GeneticOptimizerPanel } from '../GeneticOptimizerPanel';
 import { useStrategyWorkspace } from '@/hooks/useStrategyWorkspace';
-import { sigmaApi } from '@/lib/sigmaApi';
+import { sigmaApi, type TvLibraryCatalog, type TvLibraryScript } from '@/lib/sigmaApi';
 import { formatTimeframe } from '@/types';
 
 const STRATEGY_DETAIL_TABS = [
@@ -29,11 +29,15 @@ export function StrategyLibraryPanel() {
   const [status, setStatus] = useState('');
   const [paramText, setParamText] = useState('{}');
   const [alertMsg, setAlertMsg] = useState('');
+  const [tvOpen, setTvOpen] = useState(false);
+  const [tvCatalog, setTvCatalog] = useState<TvLibraryCatalog | null>(null);
+  const [tvPicked, setTvPicked] = useState<Record<string, boolean>>({});
+  const [tvBusy, setTvBusy] = useState(false);
 
   const selected = ws.selected;
   const visible = ws.strategies.filter((s) => {
     const q = filter.toLowerCase();
-    if (q && !`${s.name} ${s.assetPair} ${s.id}`.toLowerCase().includes(q)) return false;
+    if (q && !`${s.name} ${s.assetPair} ${s.id} ${s.tv_script_id || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -57,12 +61,79 @@ export function StrategyLibraryPanel() {
     setStatus(job ? `job ${job.job_id}` : 'push failed');
   };
 
+  const loginTv = async () => {
+    setStatus('opening Chrome…');
+    const out = await sigmaApi.tvLogin();
+    if (!out) {
+      setStatus('Chrome login failed');
+      return;
+    }
+    const how = out.reused ? 'reused' : 'opened';
+    setStatus(`${how} ${out.url || 'TradingView'} (${out.mode || 'chrome'})`);
+  };
+
   const syncAlert = async () => {
     if (!selected) return;
     setAlertMsg('syncing…');
     const rec = await sigmaApi.syncAlert(selected.id, selected.assetPair, selected.interval);
     setAlertMsg(rec ? `${rec.status} ${rec.tv_alert_id || ''}` : 'alert sync failed');
   };
+
+  const loadTvScripts = async () => {
+    setTvOpen(true);
+    setTvBusy(true);
+    setStatus('loading TV scripts…');
+    const catalog = await sigmaApi.tvScripts();
+    setTvBusy(false);
+    if (!catalog) {
+      setStatus('TV catalog failed');
+      return;
+    }
+    setTvCatalog(catalog);
+    const next: Record<string, boolean> = {};
+    for (const row of catalog.scripts) {
+      next[row.tv_script_id] = !row.already_imported;
+    }
+    setTvPicked(next);
+    if (!catalog.session_present) {
+      setStatus(catalog.reason || 'TV session missing — run bin/sigma-tv-login');
+    } else {
+      setStatus(`${catalog.count} TV script${catalog.count === 1 ? '' : 's'} (${catalog.source})`);
+    }
+  };
+
+  const importTv = async (ids?: string[]) => {
+    const scriptIds = ids ?? Object.entries(tvPicked).filter(([, on]) => on).map(([id]) => id);
+    if (!scriptIds.length) {
+      setStatus('select at least one TV script');
+      return;
+    }
+    setTvBusy(true);
+    setStatus('importing…');
+    const out = await sigmaApi.syncTvLibrary({ script_ids: scriptIds });
+    setTvBusy(false);
+    if (!out) {
+      setStatus('TV import failed');
+      return;
+    }
+    setStatus(
+      `imported ${out.imported_count}, skipped ${out.skipped_count}`
+      + (out.missing?.length ? `, missing ${out.missing.length}` : '')
+      + ' — paper/inactive',
+    );
+    await ws.reload();
+    const refreshed = await sigmaApi.tvScripts();
+    if (refreshed) {
+      setTvCatalog(refreshed);
+      const next: Record<string, boolean> = {};
+      for (const row of refreshed.scripts) {
+        next[row.tv_script_id] = !row.already_imported;
+      }
+      setTvPicked(next);
+    }
+  };
+
+  const tvRows: TvLibraryScript[] = tvCatalog?.scripts ?? [];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -79,11 +150,72 @@ export function StrategyLibraryPanel() {
             New {t.label}
           </Button>
         ))}
+        <Button size="sm" variant="outline" className="h-7 text-[10px]"
+          onClick={() => void loadTvScripts()} disabled={tvBusy}>
+          Load from TV
+        </Button>
         <Button size="sm" className="h-7 text-[10px]" onClick={() => void push()} disabled={!selected}>
           Push to TV
         </Button>
+        <Button size="sm" variant="outline" className="h-7 text-[10px]"
+          onClick={() => void loginTv()}>
+          Login TV
+        </Button>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{status}</span>
       </div>
+      {tvOpen && (
+        <div className="border-b border-border bg-zinc-950/40 p-2">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium">TradingView scripts</span>
+            <Badge variant="outline" className="h-4 text-[9px]">
+              {tvCatalog?.session_present ? (tvCatalog.driver || 'session') : 'no session'}
+            </Badge>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {tvCatalog?.reason || tvCatalog?.source || (tvBusy ? 'loading…' : '')}
+            </span>
+            <Button size="sm" variant="outline" className="ml-auto h-6 text-[10px]"
+              onClick={() => void importTv()} disabled={tvBusy || !tvRows.length}>
+              Import selected
+            </Button>
+            <Button size="sm" variant="outline" className="h-6 text-[10px]"
+              onClick={() => void importTv(tvRows.map((r) => r.tv_script_id))}
+              disabled={tvBusy || !tvRows.length}>
+              Import all
+            </Button>
+            <Button size="sm" variant="ghost" className="h-6 text-[10px]"
+              onClick={() => setTvOpen(false)}>
+              Hide
+            </Button>
+          </div>
+          {!tvRows.length && !tvBusy && (
+            <div className="text-[11px] text-muted-foreground">
+              {tvCatalog?.session_present
+                ? 'No saved or published scripts on this TradingView session.'
+                : 'Log in with bin/sigma-tv-login so Sigma can read your TV library. Imports always start paper/inactive.'}
+            </div>
+          )}
+          {!!tvRows.length && (
+            <div className="max-h-36 space-y-1 overflow-auto">
+              {tvRows.map((row) => (
+                <label key={row.tv_script_id}
+                  className="flex items-center gap-2 rounded border border-border px-2 py-1 text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(tvPicked[row.tv_script_id])}
+                    onChange={(e) => setTvPicked((prev) => ({ ...prev, [row.tv_script_id]: e.target.checked }))}
+                    disabled={tvBusy}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{row.name}</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">{row.origin || row.type}</span>
+                  {row.already_imported && (
+                    <Badge variant="outline" className="h-4 text-[9px]">in library</Badge>
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,18%)_1fr]">
         <ScrollArea className="border-r border-border">
           <div className="space-y-1 p-2">
@@ -101,6 +233,7 @@ export function StrategyLibraryPanel() {
                 </div>
                 <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
                   {s.assetPair} · {formatTimeframe(s.interval)} · {s.status}
+                  {s.tv_script_id ? ' · TV' : ''}
                 </div>
               </button>
             ))}

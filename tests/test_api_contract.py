@@ -162,6 +162,42 @@ def test_tv_session_status_reports_fake_driver(client):
     s = client.get("/api/tv/session/status").json()
     assert s["driver"] in ("fake", "playwright")
     assert "categories" in s["selectors"]
+    assert s["login_url"].startswith("https://www.tradingview.com")
+    assert s["live_trading"] is False
+
+
+def test_tv_session_login_opens_tradingview_without_live(client):
+    from app.tv import chrome_login
+
+    calls = []
+
+    def fake_open(**kwargs):
+        calls.append(kwargs)
+        return {
+            "ok": True,
+            "open": True,
+            "reused": False,
+            "launched": True,
+            "url": bp.TV_LOGIN_URL,
+            "mode": "test",
+            "chrome_binary": "/usr/bin/google-chrome",
+        }
+
+    chrome_login.set_tv_chrome_opener(fake_open)
+    try:
+        out = client.post("/api/tv/session/login").json()
+        assert out["ok"] is True
+        assert out["live_trading"] is False
+        assert out["url"] == bp.TV_LOGIN_URL
+        assert "tradingview.com" in out["url"]
+        assert calls
+        again = client.post("/api/tv/session/login").json()
+        assert again["live_trading"] is False
+        assert len(calls) == 2
+        contract = client.get("/api/v1/blueprint").json()["api_contract"]
+        assert "POST /api/tv/session/login" in contract
+    finally:
+        chrome_login.set_tv_chrome_opener(None)
 
 
 # ------------------------------------------------------------- academy/scout ---
@@ -246,3 +282,44 @@ def test_strategy_from_template_creates_pine_v6(client):
     assert out["parameters"]["template"] == "cisd"
     bad = client.post("/api/strategies/from-template", json={"template": "nope"})
     assert bad.status_code == 400
+
+
+def test_tv_library_list_and_import_is_idempotent_paper(client):
+    from app.services import tv_library_service as tvlib
+    from app.tv.strategy_tester_driver import FakeStrategyTesterDriver
+
+    tvlib.set_tv_library_driver_factory(FakeStrategyTesterDriver)
+    try:
+        catalog = client.get("/api/strategies/tv/scripts").json()
+        assert catalog["source"] == "driver"
+        ids = {row["tv_script_id"] for row in catalog["scripts"]}
+        assert "PUB;fake1" in ids
+        first = client.post("/api/strategies/tv/sync-library",
+                            json={"script_ids": ["PUB;fake1"]}).json()
+        assert first["ok"] is True
+        assert first["imported_count"] == 1
+        assert first["skipped_count"] == 0
+        assert first["execution_mode"] == "paper"
+        assert first["live_trading"] is False
+        row = first["strategies"][0]
+        assert row["executionMode"] == "paper"
+        assert row["status"] == "inactive"
+        assert row["tv_script_id"] == "PUB;fake1"
+        assert row["code"].startswith("//@version=6")
+        lib = client.get("/api/strategies").json()
+        assert sum(1 for s in lib if s.get("tv_script_id") == "PUB;fake1") == 1
+        again = client.post("/api/strategies/tv/sync-library",
+                            json={"script_ids": ["PUB;fake1"]}).json()
+        assert again["imported_count"] == 0
+        assert again["skipped_count"] == 1
+        lib2 = client.get("/api/strategies").json()
+        assert sum(1 for s in lib2 if s.get("tv_script_id") == "PUB;fake1") == 1
+        live_ignored = client.post("/api/strategies/tv/sync-library",
+                                   json={"script_ids": ["USER;fake2"], "execution_mode": "live"}).json()
+        assert live_ignored["imported_count"] == 1
+        assert live_ignored["strategies"][0]["executionMode"] == "paper"
+        contract = client.get("/api/v1/blueprint").json()["api_contract"]
+        assert "GET /api/strategies/tv/scripts" in contract
+        assert "POST /api/strategies/tv/sync-library" in contract
+    finally:
+        tvlib.set_tv_library_driver_factory(None)

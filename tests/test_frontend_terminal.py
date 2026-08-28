@@ -144,6 +144,14 @@ def test_unified_shell_panels_and_llm_wiring():
     assert "llmStreamUrl" in panels and "llmToolCall" in panels
     assert "fromTemplate" in api
     assert "/api/strategies/from-template" in api
+    assert "syncTvLibrary" in api
+    assert "/api/strategies/tv/sync-library" in api
+    assert "/api/strategies/tv/scripts" in api
+    assert "Load from TV" in library
+    assert "Login TV" in library
+    assert library.find("Push to TV") < library.find("Login TV")
+    assert "tvLogin" in api
+    assert "/api/tv/session/login" in api
     assert "ResizablePanelGroup" in dock
     assert "flexlayout-react" not in dock
 
