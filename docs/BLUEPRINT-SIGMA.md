@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze v3.4 (Exact TV CSV Roundtrip Protocol) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.5 (Error Taxonomy, Diagnostics Desk, Live Log Console) — `docs/BLUEPRINT-SIGMA.md`  
 > **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
@@ -1075,6 +1075,8 @@ kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 | Webhook Schemas | `app/server/schemas.py` | SigmaL4, Pionex, ML features; Pydantic V2 |
 | LLM Schemas | `app/llm/schemas_llm.py` | Tools, Pine patch, WebSocket stream |
 | Exact CSV | `app/optimizer/exact_csv_serializer.py` | TV filename + header freeze; roundtrip |
+| Error Engine | `app/core/error_engine.py` | E1000–E5000 taxonomy; FastAPI handlers |
+| Log Stream | `app/server/routes_logs.py` | WS `/api/v1/logs/stream`; multi-file tail |
 
 systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
 
@@ -1248,8 +1250,9 @@ Zusätzlich zu §8 / Sentinel-Panels:
 | `ContagionRadarPanel` | epidemic_contagion_engine |
 | `FlywheelBudgetPanel` | capital_flywheel_engine |
 | `PaperLabPanel` | kraken_paper_engine / Scout graduation |
+| `DiagnosticsErrorPanel` | error_engine; E1000–E5000 + remediation hints |
 
-Presets: `SENTINEL_OPS` + `CAPITAL_OPS` + `PAPER_LAB`.
+Presets: `SENTINEL_OPS` + `CAPITAL_OPS` + `PAPER_LAB` + `OBSERVABILITY`.
 
 ---
 
@@ -1762,5 +1765,139 @@ Bei Mismatch: `CSV_HEADER_MISMATCH` — kein Upload, GA-Individuum verworfen.
 | Optimierung | Werte mutieren; Header via `ExactTradingViewCSVHandler` frozen |
 | Re-Upload | `upload_properties_csv_to_tv` mit `optimized/{OriginalName}.csv` |
 | Diff UI | Baseline vs Optimized (gleicher Dateiname, verschiedene Ordner) |
+
+---
+
+## 36. Unified Error Taxonomy & Diagnostics Desk
+
+Pfad: [`app/core/error_engine.py`](app/core/error_engine.py).
+
+Jeder Fehler liefert strukturiertes `ErrorDetail` — kein blindes `500 Internal Server Error`. Persistenz: `./data/logs/errors.jsonl`.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA UNIFIED ERROR TAXONOMY & DIAGNOSTICS                  │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[Error Taxonomy E1000–E5000]    [Diagnostics Engine]            [Live Error Desk UI]
+• Kategorisierte ERR_* Codes    • remediation_hint pro Fehler   • DiagnosticsErrorPanel
+• Structured ErrorDetail        • Telegram HIGH/CRITICAL Push     • 1-Click Retry / Export
+• Global FastAPI handler        • trace_id + technical_context  • Stacktrace Drawer
+```
+
+### 36.1 ErrorDetail Schema
+
+```python
+class ErrorDetail(BaseModel):
+    error_code: str           # z.B. ERR_TV_PINE_COMPILE_ERROR
+    category: str             # AUTHENTICATION | TRADINGVIEW | KRAKEN | RISK_GUARD | SYSTEM
+    message: str
+    subsystem: str            # sigma-core | playwright-worker | kraken-bridge | scraper-8001
+    remediation_hint: str       # Konkreter Fix-Schritt für Operator
+    technical_context: Dict[str, Any]
+    trace_id: Optional[str] = None
+    timestamp: int
+```
+
+Alle `SigmaBaseException`-Subklassen → `sigma_global_exception_handler` → JSON-Response + `errors.jsonl`. Unhandled → `ERR_SYS_UNHANDLED_EXCEPTION` (kein Server-Crash).
+
+### 36.2 Fehlercode-Katalog (E1000–E5000)
+
+| Range | Kategorie | Beispiel-Codes |
+|-------|-----------|----------------|
+| **E1000** | Auth & Security | `ERR_AUTH_INVALID_SECRET`, `ERR_AUTH_TV_SESSION_EXPIRED`, `ERR_AUTH_WHITELIST_BLOCKED` |
+| **E2000** | TradingView & Playwright | `ERR_TV_SELECTOR_NOT_FOUND`, `ERR_TV_PINE_COMPILE_ERROR`, `ERR_TV_ALERT_QUOTA_EXCEEDED`, `ERR_TV_EXPORT_TIMEOUT`, `ERR_TV_CSV_HEADER_MISMATCH` |
+| **E3000** | Kraken & Execution | `ERR_KRAKEN_INSUFFICIENT_FUNDS`, `ERR_KRAKEN_RATE_LIMIT_429`, `ERR_KRAKEN_DEADMAN_TIMEOUT`, `ERR_KRAKEN_CLI_NOT_FOUND` |
+| **E4000** | Quant, Risiko & Markt | `ERR_RISK_MAX_DAILY_LOSS`, `ERR_RISK_KILL_SWITCH_ACTIVE`, `ERR_ORDERBOOK_LIQUIDITY_TRAP`, `ERR_CONTAGION_VETO_R0`, `ERR_STALE_SIGNAL_REJECT` |
+| **E5000** | System & Ressourcen | `ERR_SYS_RAM_SOFT_CAP`, `ERR_SYS_DUCKDB_LOCK`, `ERR_SYS_OLLAMA_OFFLINE`, `ERR_SYS_UNHANDLED_EXCEPTION` |
+
+### 36.3 Wichtige Exception-Mappings
+
+| Exception | Code | remediation_hint (Kurz) |
+|-----------|------|-------------------------|
+| `InvalidWebhookSecretException` | `ERR_AUTH_INVALID_SECRET` | `SIGMA_SECRET` in Pine + `.env` abgleichen |
+| `TradingViewSessionExpiredException` | `ERR_AUTH_TV_SESSION_EXPIRED` | `sigma-tv-login` → `tv_storage_state.json` |
+| `PineCompilationException` | `ERR_TV_PINE_COMPILE_ERROR` | Monaco Editor; Pine v6 Syntax prüfen |
+| `DOMSelectorNotFoundException` | `ERR_TV_SELECTOR_NOT_FOUND` | `DynamicYamlResolver` Selector-Update |
+| `KrakenInsufficientFundsException` | `ERR_KRAKEN_INSUFFICIENT_FUNDS` | Einzahlung oder Bot-Budget senken |
+| `LiquidityTrapOrderbookException` | `ERR_ORDERBOOK_LIQUIDITY_TRAP` | Schutz-Veto — kein Eingriff nötig |
+
+### 36.4 UI & Telegram
+
+- **Panel:** `DiagnosticsErrorPanel` — Code, Subsystem, Message, remediation_hint, Severity, Zeit
+- **Actions:** Error-Logs exportieren (`.jsonl`); Diagnose-Selbsttest
+- **Telegram:** Bei `HIGH` / `CRITICAL` — formatierte Push mit Code, Subsystem, Auswirkung, Lösungsempfehlung
+
+---
+
+## 37. Live Process & AI Log Console
+
+Pfad Backend: [`app/server/routes_logs.py`](app/server/routes_logs.py)  
+Pfad Frontend: [`src/pages/ProcessLogView.tsx`](src/pages/ProcessLogView.tsx)  
+Route: **`/logs`** (auch als FlexLayout-Panel `ProcessLogView` dockbar).
+
+Aggregiert alle Subsystem-Logs in Echtzeit — kein SSH `tail -f` nötig.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA LIVE LOG STREAM & OBSERVABILITY DESK                  │
+│                     (Route: /logs // Aggregierter Multi-Log)                │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[WS /api/v1/logs/stream]        [Subsystem-Filter]              [Ringpuffer UI]
+• Async tail aller Log-Files    • AI_LAYER / CORE / ORDERS      • Max 2.000 Zeilen
+• 250ms Poll-Intervall          • TV_WORKER / ERROR / SCRAPER   • Auto-Scroll Lock
+• JSON + Plain Text             • Volltext + Regex-Suche        • Pause / Export
+```
+
+### 37.1 Getailte Log-Quellen
+
+| Tag | Datei | Inhalt |
+|-----|-------|--------|
+| `CORE` | `./data/logs/sigma_core.log` | Webhooks, Pydantic, Kelly, M8 |
+| `ORDERS` | `./data/logs/orders.jsonl` | Kraken CLI, ACK/Retry, Fills |
+| `TV_WORKER` | `./data/logs/tv_worker.log` | Playwright, Pine, CSV |
+| `ERRORS` | `./data/logs/errors.jsonl` | Structured errors (§36) |
+| `AI_LAYER` | `./data/logs/ai_layer.log` | ONNX, Regime, Allocator, Glint, SIR |
+| `SCRAPER` | `./data/logs/scraper.log` | Sidecar :8001, Breadth, Movers |
+
+### 37.2 WebSocket API
+
+`WS /api/v1/logs/stream`
+
+```json
+{
+  "subsystem": "AI_LAYER",
+  "level": "INFO",
+  "raw_line": "ONNX Brier Score: 0.142 | Temperature T=1.05",
+  "timestamp": 1787786800
+}
+```
+
+Optional Query-Params: `?filter=ORDERS,AI_LAYER` (Subsystem-Whitelist).
+
+### 37.3 ProcessLogView UI
+
+| Feature | Detail |
+|---------|--------|
+| **Filter** | Subsystem-Dropdown + Volltextsuche |
+| **Farbcodierung** | AI_LAYER (lila), ORDERS (grün), TV_WORKER (blau), ERROR (rot) |
+| **Auto-Scroll** | Toggle; Pause bei manuellem Scroll |
+| **Buffer** | Ringpuffer max 2.000 Zeilen (Client) |
+| **Actions** | Clear view; Download sichtbarer Logs |
+
+### 37.4 Navigation
+
+- Header-Menü: **Process & AI Logs** in `SigmaTerminal.tsx`
+- URL: `http://localhost:3000/logs`
+- FlexLayout Preset: `OBSERVABILITY` = `DiagnosticsErrorPanel` + `ProcessLogView` + `SchedulerTelemetryPanel`
+
+### 37.5 Noir-Gate
+
+- Log-Streamer darf Core nicht blockieren: async I/O, 250ms Poll
+- Bei WS-Disconnect: File-Pointer bleiben — Reconnect setzt tail fort
+- Keine Secrets in Log-Lines (Webhook `secret` maskiert)
 
 ---

@@ -1,6 +1,6 @@
 # ==============================================================================
 # MASTERPROMPT: MANAS: CIEL — BLUEPRINT SIGMA (L4 MASTER SPECIFICATION)
-# Version: 3.4.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
+# Version: 3.5.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
 # Target Repo: /opt/sigma (User: sigma) // Core Engine: Python 3.12 + FastAPI + Playwright
 # Canonical Blueprint: docs/BLUEPRINT-SIGMA.md
 # ==============================================================================
@@ -97,6 +97,18 @@ Du koordinierst ein synchronisiertes Netzwerk aus vier Primordialen Subagenten:
 - Header Zeile 1 **byte-identisch** — keine erfundenen Namen (`parameters_optimized.csv` verboten).
 - Versionierung: `./data/strategies/{id}/baseline/` vs `optimized/` — gleicher Dateiname in beiden.
 - `ExactTradingViewCSVHandler` + Pre-Upload Header-Assertion vor Playwright Re-Upload.
+
+### Axiom 14: Unified Error Taxonomy (E1000–E5000)
+
+- Jeder Fehler: `ErrorDetail` mit `error_code`, `remediation_hint`, `subsystem`, `technical_context`.
+- `app/core/error_engine.py` + `errors.jsonl`; kein unhandled crash.
+- UI `DiagnosticsErrorPanel`; Telegram Push bei HIGH/CRITICAL.
+
+### Axiom 15: Live Process & AI Log Console
+
+- Route `/logs`; WS `/api/v1/logs/stream` tailt CORE, ORDERS, TV_WORKER, ERRORS, AI_LAYER, SCRAPER.
+- `ProcessLogView`: Filter, Auto-Scroll, Ringpuffer 2.000 Zeilen.
+- Preset `OBSERVABILITY` für Error Desk + Log Console.
 
 ### Produktvision (umgangssprachlich)
 
