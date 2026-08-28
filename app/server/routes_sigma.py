@@ -641,6 +641,121 @@ async def telegram_message(body: TelegramIn):
 
 
 # =============================================================================
+# §31 Strategy Lifecycle — die 3 Trigger-Pfade
+# =============================================================================
+
+class LifecycleDepth(BaseModel):
+    price: float
+    volume: float
+
+
+class StrategyStartIn(BaseModel):
+    symbol: str
+    budget_eur: float = 250.0
+    trigger_path: str = bp.TriggerPath.MANUAL.value
+    execution_mode: Optional[str] = None
+    fixed_leverage: Optional[int] = None
+    timeframe: str = "15"
+    style: Optional[str] = None
+    glint_score: Optional[float] = None
+    initiator: str = "operator"
+    bids: List[LifecycleDepth] = Field(default_factory=list)
+    asks: List[LifecycleDepth] = Field(default_factory=list)
+
+
+class LifecycleReasonIn(BaseModel):
+    reason: str = "operator"
+
+
+def get_lifecycle():
+    """Teilt Flywheel-Singleton und Engines mit dem restlichen Core."""
+    from app.services.strategy_lifecycle_service import (get_lifecycle_service,
+                                                         set_lifecycle_service,
+                                                         StrategyLifecycleService)
+
+    service = get_lifecycle_service()
+    if service._flywheel is None:                     # gemeinsamer Kapitaltopf
+        service._flywheel = get_flywheel()
+    if service.config is None:
+        service.config = load_config()
+    assert isinstance(service, StrategyLifecycleService)
+    set_lifecycle_service(service)
+    return service
+
+
+@router.post("/api/strategies/{strategy_id}/start")
+async def strategy_start(strategy_id: str, body: StrategyStartIn):
+    """§31 — Pfad 1/2/3 muenden in dieselbe Dispatcher-Pipeline."""
+    from app.quant.glint_orderbook_verifier import OrderbookSnapshot
+    from app.services.strategy_lifecycle_service import LifecycleError
+
+    orderbook = None
+    if body.bids and body.asks:
+        orderbook = OrderbookSnapshot(
+            symbol=body.symbol,
+            bids=[(lvl.price, lvl.volume) for lvl in body.bids],
+            asks=[(lvl.price, lvl.volume) for lvl in body.asks],
+            timestamp=time.time(),
+        )
+    try:
+        record = get_lifecycle().start(
+            strategy_id, body.symbol, trigger_path=body.trigger_path,
+            budget_eur=body.budget_eur, execution_mode=body.execution_mode,
+            fixed_leverage=body.fixed_leverage, timeframe=body.timeframe,
+            style=body.style, glint_score=body.glint_score, orderbook=orderbook,
+            initiator=body.initiator)
+    except LifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code,
+                            detail={"code": exc.code, "reason": exc.reason})
+    payload = record.as_dict()
+    if not record.ok:
+        raise HTTPException(status_code=409, detail=payload)
+    return payload
+
+
+@router.post("/api/strategies/{strategy_id}/pause")
+async def strategy_pause(strategy_id: str, body: LifecycleReasonIn | None = None):
+    return _lifecycle_transition("pause", strategy_id, body)
+
+
+@router.post("/api/strategies/{strategy_id}/resume")
+async def strategy_resume(strategy_id: str, body: LifecycleReasonIn | None = None):
+    return _lifecycle_transition("resume", strategy_id, body)
+
+
+@router.post("/api/strategies/{strategy_id}/quarantine")
+async def strategy_quarantine(strategy_id: str, body: LifecycleReasonIn | None = None):
+    return _lifecycle_transition("quarantine", strategy_id, body)
+
+
+def _lifecycle_transition(action: str, strategy_id: str,
+                          body: Optional[LifecycleReasonIn]):
+    from app.services.strategy_lifecycle_service import LifecycleError
+
+    reason = (body.reason if body else None) or ("risk" if action == "quarantine"
+                                                 else "operator")
+    try:
+        return getattr(get_lifecycle(), action)(strategy_id, reason)
+    except LifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code,
+                            detail={"code": exc.code, "reason": exc.reason})
+
+
+@router.get("/api/v1/lifecycle")
+async def lifecycle_snapshot(limit: int = 25):
+    return get_lifecycle().snapshot(limit)
+
+
+@router.get("/api/strategies/{strategy_id}/lifecycle")
+async def lifecycle_for_strategy(strategy_id: str):
+    state = get_lifecycle().status(strategy_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "UNKNOWN_STRATEGY", "reason": f"{strategy_id} wurde nie platziert"})
+    return state
+
+
+# =============================================================================
 # Execution Plane §23-§29 — Telemetrie fuer die erweiterten Panels (§30)
 # =============================================================================
 

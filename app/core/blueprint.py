@@ -43,7 +43,6 @@ DOCS_BLUEPRINT_VERSION = "3.6"
 DOCS_MASTERPROMPT_VERSION = "3.6.0-SIGMA-RELEASE"
 DOCS_SECTION_RANGE = (1, 38)
 DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
-    "31 Die 3 Trigger-Pfade zur Strategie-Platzierung",
     "32 Kraken Paper Trading Lab",
     "34 LLM-, Tool-Calling- & Streaming-Schemata",
     "35 Exact TradingView CSV Roundtrip Protocol",
@@ -60,6 +59,7 @@ DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
 #   §28 app/execution/capital_flywheel_engine.py
 #   §29 app/execution/fixed_leverage.py
 #   §30 TERMINAL_PANELS_EXTENDED / TERMINAL_PRESETS_EXTENDED
+#   §31 app/services/strategy_lifecycle_service.py
 #   §33 app/server/schemas.py + POST /api/v1/signal/ingest
 AUTONOMY_LEVEL = 4
 AUTONOMY_LABEL = "L4 — High Operational Autonomy"

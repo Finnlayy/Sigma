@@ -121,6 +121,14 @@ export function VirtualBotDeck() {
                 <span className="ml-2 text-zinc-500">{bot.symbol} · {bot.timeframe}m</span>
               </div>
               <div className="flex items-center gap-1">
+                {bot.leverage_badge && (
+                  <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[9px] font-bold text-amber-400"
+                    title="§29 fester Hebel pro Strategie">{bot.leverage_badge}</span>
+                )}
+                {bot.execution_mode === 'kraken_paper' && (
+                  <span className="rounded border border-sky-500/40 bg-sky-500/10 px-1 text-[9px] font-bold text-sky-400"
+                    title="§32 Kraken Paper Lab">PAPER</span>
+                )}
                 <span className={`text-[10px] font-bold ${m8Color(bot.m8_state)}`}>{bot.m8_state}</span>
                 {bot.runner_status === 'RUNNING'
                   ? <IconBtn onClick={() => act(sigmaApi.pauseBot(bot.bot_id))} title="Pause"><Pause size={12} /></IconBtn>
@@ -136,7 +144,7 @@ export function VirtualBotDeck() {
               <div><span className="text-zinc-500">maxL </span>{bot.max_loss}€</div>
             </div>
             <div className="mt-1 flex items-center justify-between text-[10px] text-zinc-500">
-              <span>{bot.style} · x{bot.budget_multiplier}</span>
+              <span>{bot.style} · x{bot.budget_multiplier}{bot.trigger_path ? ` · ${bot.trigger_path}` : ''}</span>
               <span>XP {bot.xp_strikes.xp} · Strikes {bot.xp_strikes.strikes}</span>
               <span className={bot.runner_status === 'QUARANTINED' ? 'text-red-400' : 'text-zinc-400'}>
                 {bot.runner_status}

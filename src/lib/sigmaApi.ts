@@ -48,6 +48,26 @@ export interface BotCard {
   style: string;
   budget_multiplier: number;
   swept_to_vault: number;
+  /** §29 fester Hebel + §31/§32 Herkunft und Modus */
+  fixed_leverage?: number;
+  leverage_badge?: string;
+  execution_mode?: string;
+  trigger_path?: string;
+}
+
+export interface LifecycleRun {
+  run_id: string;
+  strategy_id: string;
+  symbol: string;
+  trigger_path: string;
+  execution_mode: string;
+  state: 'RUNNING' | 'PAUSED' | 'QUARANTINED';
+  fixed_leverage: number;
+  badge: string;
+  ok: boolean;
+  code: string;
+  reason: string;
+  steps: Array<{ step: string; ok: boolean; detail: string }>;
 }
 
 export interface SafetySnapshot {
@@ -311,6 +331,19 @@ export const sigmaApi = {
   flywheel: () => request<any>('/api/v1/flywheel'),
   flywheelSweep: () => post<any>('/api/v1/flywheel/sweep'),
   leverage: (strategyId: string) => request<any>(`/api/v1/leverage/${encodeURIComponent(strategyId)}`),
+
+  // §31 Strategy Lifecycle — 3 Trigger-Pfade
+  lifecycle: (limit = 25) => request<{ active: Record<string, string>; runs: LifecycleRun[]; trigger_paths: Record<string, string[]>; steps: string[] }>(
+    `/api/v1/lifecycle?limit=${limit}`),
+  lifecycleFor: (strategyId: string) => request<LifecycleRun>(`/api/strategies/${encodeURIComponent(strategyId)}/lifecycle`),
+  startStrategy: (strategyId: string, body: { symbol: string; budget_eur?: number; trigger_path?: string; execution_mode?: string; fixed_leverage?: number; timeframe?: string }) =>
+    post<LifecycleRun>(`/api/strategies/${encodeURIComponent(strategyId)}/start`, body),
+  pauseStrategy: (strategyId: string, reason = 'operator') =>
+    post<any>(`/api/strategies/${encodeURIComponent(strategyId)}/pause`, { reason }),
+  resumeStrategy: (strategyId: string, reason = 'operator') =>
+    post<any>(`/api/strategies/${encodeURIComponent(strategyId)}/resume`, { reason }),
+  quarantineStrategy: (strategyId: string, reason = 'risk') =>
+    post<any>(`/api/strategies/${encodeURIComponent(strategyId)}/quarantine`, { reason }),
 
   // Telegram / LLM
   telegram: () => request<TelegramSnapshot>('/api/v1/telegram'),

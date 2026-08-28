@@ -38,6 +38,9 @@ class VirtualBot:
     status: str = "PAUSED"               # RUNNING | PAUSED | QUARANTINED
     m8_state: str = bp.M8State.ACTIVE.value
     style: str = "STYLE_INTRADAY_MOMENT"
+    fixed_leverage: int = bp.FIXED_LEVERAGE_DEFAULT      # §29 strategy-bound
+    execution_mode: str = bp.EXECUTION_MODE_DEFAULT      # §32 live | kraken_paper
+    trigger_path: str = bp.TriggerPath.MANUAL.value      # §31 Herkunft
     xp: int = 0
     strikes: int = 0
     open_positions: int = 0
@@ -75,6 +78,10 @@ class VirtualBot:
             "style": self.style,
             "budget_multiplier": bp.alert_policy_for_state(self.m8_state).budget_multiplier,
             "swept_to_vault": round(self.swept_to_vault, 2),
+            "fixed_leverage": self.fixed_leverage,
+            "leverage_badge": f"[ {self.fixed_leverage}x HEBEL ]",
+            "execution_mode": self.execution_mode,
+            "trigger_path": self.trigger_path,
         }
 
 
