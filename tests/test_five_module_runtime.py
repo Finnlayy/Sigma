@@ -1,6 +1,7 @@
 """End-to-end seams for the five completed execution-plane modules."""
 from __future__ import annotations
 
+import json
 import math
 import time
 
@@ -418,6 +419,17 @@ def test_pipeline_fails_closed_without_fresh_contagion(tmp_path):
     assert outcome.accepted is False
     assert outcome.code == "CONTAGION_DATA_STALE"
     assert outcome.status_code == 503
+
+
+def test_contagion_panel_state_survives_import():
+    from app.quant import epidemic_contagion_engine as contagion_mod
+
+    assert bp.SIR_MAX_STATE_AGE_S == 900
+    assert contagion_mod.SIR_MAX_STATE_AGE_S == 900
+    panel = EpidemicContagionEngine().panel_state()
+    assert panel["fresh"] is False
+    assert panel["max_state_age_s"] == 900
+    json.dumps(panel)
 
 
 def test_telemetry_center_can_enable_live_bridge():

@@ -4,6 +4,7 @@ Telegram, Health/Blueprint. Läuft gegen die echte FastAPI-App.
 """
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -212,9 +213,15 @@ def test_deadman_and_memory_endpoints(client):
     finally:
         routes.set_operator_auth_override(None)
     assert client.get("/api/v1/memory").json()["stages_pct"] == list(bp.MEMORY_STAGES_PCT)
-    tele = client.get("/api/v1/scheduler").json()
-    names = [t["name"] for tier in tele["tiers"] for t in tier.get("registered", [])]
+    tele = client.get("/api/v1/scheduler")
+    assert tele.status_code == 200
+    payload = tele.json()
+    json.dumps(payload)
+    names = [t["name"] for tier in payload["tiers"] for t in tier.get("registered", [])]
     assert "deadman_heartbeat" in names
+    t0 = next(tier for tier in payload["tiers"] if tier["tier"] == 0)
+    for task in t0.get("registered", []):
+        assert task["next_run"] is None
 
 
 def test_telegram_whitelist_and_fastpath(client):

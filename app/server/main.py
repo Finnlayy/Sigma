@@ -248,7 +248,10 @@ class AppState:
             await self.ingestor.stop()
         await close_redis()
         if self.store:
-            self.store.close()
+            from app.core.duckdb_store import close_store
+
+            close_store()
+            self.store = None
 
     def _compose_l4_runtime(self) -> None:
         """Single composition root shared by API routes, scheduler and Loop A."""
@@ -286,8 +289,14 @@ class AppState:
         self.safety = SafetyGuard(cfg, redis_client=self.redis, store=self.store)
         set_safety_guard(self.safety)
         self.kraken_cli = KrakenCliBridge(cfg, telemetry=self.telemetry)
+        deadman_bridge = self.kraken_cli
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            from app.execution.deadman_switch_daemon import TestDeadmanBridge
+
+            # TestClient must never cancel/flatten a real Kraken account.
+            deadman_bridge = TestDeadmanBridge()
         self.deadman = DeadmanSwitchDaemon(
-            kraken_bridge=self.kraken_cli,
+            kraken_bridge=deadman_bridge,
             safety_guard=self.safety,
             timeout_seconds=cfg.deadman_timeout_seconds,
         )
@@ -714,8 +723,10 @@ def _portfolio_value(state: AppState, balances: Dict[str, float]) -> float:
 # ---------------------------------------------------------------------- app
 async def _lifespan(_app: FastAPI):
     await state.startup()
+    _app.state.sigma = state
     yield
     await state.shutdown()
+    _app.state.sigma = None
 
 
 app = FastAPI(title="Projekt:Sigma — M8 Execution API",

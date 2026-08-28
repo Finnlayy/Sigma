@@ -176,11 +176,38 @@ def test_scheduler_telemetry_shape():
     host = _FakeHostClock(1_700_000_000.0)
     sched = _scheduler(host)
     sched.register("spot_rebalance", 4, lambda: None)
+    sched.register("glint_orderbook_verify", 0, lambda: None)
     telemetry = sched.telemetry()
     assert telemetry["timezone"] == "UTC"
     assert len(telemetry["tiers"]) == 6
     tier4 = telemetry["tiers"][4]
     assert tier4["registered"][0]["name"] == "spot_rebalance"
+    json.dumps(telemetry)
+    t0 = next(tier for tier in telemetry["tiers"] if tier["tier"] == 0)
+    assert t0["registered"][0]["next_run"] is None
+
+
+def test_scheduler_endpoint_json_roundtrip():
+    from fastapi.testclient import TestClient
+
+    from app.core.scheduler_matrix import set_scheduler
+    from app.server.main import app
+
+    sched = _scheduler(_FakeHostClock(1_700_000_000.0))
+    sched.register("glint_orderbook_verify", 0, lambda: None)
+    set_scheduler(sched)
+    try:
+        client = TestClient(app)
+        response = client.get("/api/v1/scheduler")
+        assert response.status_code == 200
+        payload = response.json()
+        json.dumps(payload)
+        t0 = next(tier for tier in payload["tiers"] if tier["tier"] == 0)
+        assert t0["registered"]
+        for task in t0["registered"]:
+            assert task["next_run"] is None
+    finally:
+        set_scheduler(None)
 
 
 # -------------------------------------------------------------------- §24 ---
@@ -607,14 +634,22 @@ def test_extended_panels_and_presets_are_frozen():
 def test_execution_plane_endpoints_are_mounted():
     from fastapi.testclient import TestClient
 
+    import app.server.routes_sigma as routes
     from app.server.main import app
 
-    client = TestClient(app)
-    for path in ("/api/v1/scheduler", "/api/v1/rate-limiter", "/api/v1/contagion",
-                 "/api/v1/flywheel", "/api/orders/receipts",
-                 "/api/v1/orderbook/confluence", "/api/v1/leverage/demo_strategy"):
-        resp = client.get(path)
-        assert resp.status_code == 200, f"{path} -> {resp.status_code}"
+    previous = routes._FLYWHEEL
+    routes.set_flywheel(CapitalFlywheelEngine())
+    try:
+        client = TestClient(app)
+        for path in ("/api/v1/scheduler", "/api/v1/rate-limiter", "/api/v1/contagion",
+                     "/api/v1/flywheel", "/api/orders/receipts",
+                     "/api/v1/orderbook/confluence", "/api/v1/leverage/demo_strategy"):
+            resp = client.get(path)
+            assert resp.status_code == 200, f"{path} -> {resp.status_code}"
+        json.dumps(client.get("/api/v1/scheduler").json())
+        json.dumps(client.get("/api/v1/contagion").json())
+    finally:
+        routes.set_flywheel(previous)
 
 
 def test_confluence_endpoint_vetoes_wall():
@@ -640,6 +675,8 @@ def test_flywheel_endpoints_split_profit():
     from app.server.main import app
 
     routes.set_operator_auth_override(lambda request: True)
+    previous = routes._FLYWHEEL
+    routes.set_flywheel(CapitalFlywheelEngine())
     client = TestClient(app)
     try:
         client.post("/api/v1/flywheel/deposit", json={"amount_eur": 400.0})
@@ -649,6 +686,7 @@ def test_flywheel_endpoints_split_profit():
         assert out["result"]["reinvest_eur"] == out["result"]["vault_eur"] == 30.0
     finally:
         routes.set_operator_auth_override(None)
+        routes.set_flywheel(previous)
 
 
 def test_flywheel_mutations_require_operator_token():
@@ -661,3 +699,21 @@ def test_flywheel_mutations_require_operator_token():
     )
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "OPERATOR_AUTH_REQUIRED"
+
+
+def test_flywheel_fails_closed_without_appstate():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import app.server.routes_sigma as routes
+
+    previous = routes._FLYWHEEL
+    routes.set_flywheel(None)
+    try:
+        bare = FastAPI()
+        bare.include_router(routes.router)
+        response = TestClient(bare).get("/api/v1/flywheel")
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "FLYWHEEL_UNAVAILABLE"
+    finally:
+        routes.set_flywheel(previous)

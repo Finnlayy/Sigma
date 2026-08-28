@@ -483,7 +483,10 @@ async def deadman_beat(request: Request, has_native_stop_loss: bool = True,
                        x_sigma_settings_token: Optional[str] = Header(default=None)):
     _require_operator(request, x_sigma_settings_token)
     dm = get_deadman()
-    dm.beat(has_native_stop_loss=has_native_stop_loss)
+    sigma = getattr(request.app.state, "sigma", None)
+    if sigma is not None and getattr(sigma, "deadman", None) is not None:
+        dm = sigma.deadman
+    dm.beat(has_native_stop_loss=has_native_stop_loss, rearm=True)
     return dm.snapshot()
 
 
@@ -1240,6 +1243,26 @@ _ORDER_DISPATCHER: Optional[Any] = None
 _FLYWHEEL: Optional[Any] = None
 
 
+def _app_state(request: Optional[Request]):
+    if request is None:
+        return None
+    return getattr(request.app.state, "sigma", None)
+
+
+def _runtime_engine(request: Optional[Request], attr: str, injected: Any = None):
+    """Prefer the composition-root engine on AppState; never open a second DuckDB."""
+    sigma = _app_state(request)
+    if sigma is not None:
+        value = getattr(sigma, attr, None)
+        if value is not None:
+            return value
+    if request is not None:
+        value = getattr(request.app.state, attr, None)
+        if value is not None:
+            return value
+    return injected
+
+
 def get_order_dispatcher():
     """Lazy Singleton — teilt sich die KrakenCliBridge mit Loop A."""
     global _ORDER_DISPATCHER
@@ -1272,17 +1295,15 @@ def set_order_dispatcher(dispatcher: Optional[Any]) -> None:
     _ORDER_DISPATCHER = dispatcher
 
 
-def get_flywheel():
-    global _FLYWHEEL
-    if _FLYWHEEL is None:
-        from app.execution.capital_flywheel_engine import CapitalFlywheelEngine
-        from app.quant.epidemic_contagion_engine import get_contagion_engine
-
-        contagion = get_contagion_engine()
-        _FLYWHEEL = CapitalFlywheelEngine(
-            treasury_guard=contagion.treasury_allowed,
-        )
-    return _FLYWHEEL
+def get_flywheel(request: Optional[Request] = None):
+    """Return the AppState-injected flywheel. Never calls get_store() / duckdb.connect."""
+    engine = _runtime_engine(request, "flywheel", _FLYWHEEL)
+    if engine is None:
+        raise HTTPException(status_code=503, detail={
+            "code": "FLYWHEEL_UNAVAILABLE",
+            "reason": "Capital flywheel is not attached to AppState",
+        })
+    return engine
 
 
 def set_flywheel(flywheel: Optional[Any]) -> None:
@@ -1410,61 +1431,71 @@ async def rate_limiter_state():
 
 
 @router.get("/api/v1/contagion")
-async def contagion_state():
+async def contagion_state(request: Request):
     """§27 — SIR-Fruehwarnung (ContagionRadarPanel)."""
     from app.quant.epidemic_contagion_engine import get_contagion_engine
 
-    return get_contagion_engine().panel_state()
+    engine = _runtime_engine(request, "contagion")
+    if engine is None:
+        engine = get_contagion_engine()
+    return engine.panel_state()
 
 
 @router.post("/api/v1/contagion")
-async def contagion_update(body: ContagionIn):
+async def contagion_update(body: ContagionIn, request: Request):
     from app.quant.epidemic_contagion_engine import (ContagionInputs,
                                                      get_contagion_engine)
 
-    state = get_contagion_engine().evaluate(ContagionInputs(**body.model_dump()))
+    engine = _runtime_engine(request, "contagion")
+    if engine is None:
+        engine = get_contagion_engine()
+    state = engine.evaluate(ContagionInputs(**body.model_dump()))
     return state.as_dict()
 
 
 @router.get("/api/v1/flywheel")
-async def flywheel_state():
+async def flywheel_state(request: Request):
     """§28 — 50/50 Kapitalarchitektur (FlywheelBudgetPanel)."""
-    return get_flywheel().panel_state()
+    return get_flywheel(request).panel_state()
 
 
 @router.post("/api/v1/flywheel/deposit")
 async def flywheel_deposit(body: FlywheelDepositIn, request: Request,
                            x_sigma_settings_token: Optional[str] = Header(default=None)):
     _require_operator(request, x_sigma_settings_token)
-    entry = get_flywheel().deposit(body.amount_eur, body.note)
-    return {"entry": entry.as_dict(), "state": get_flywheel().panel_state()}
+    engine = get_flywheel(request)
+    entry = engine.deposit(body.amount_eur, body.note)
+    return {"entry": entry.as_dict(), "state": engine.panel_state()}
 
 
 @router.post("/api/v1/flywheel/profit")
 async def flywheel_profit(body: FlywheelProfitIn, request: Request,
                           x_sigma_settings_token: Optional[str] = Header(default=None)):
     _require_operator(request, x_sigma_settings_token)
-    outcome = get_flywheel().register_realized_profit(
+    engine = get_flywheel(request)
+    outcome = engine.register_realized_profit(
         body.amount_eur, strategy_id=body.strategy_id)
-    return {"result": outcome, "state": get_flywheel().panel_state()}
+    return {"result": outcome, "state": engine.panel_state()}
 
 
 @router.post("/api/v1/flywheel/sweep")
 async def flywheel_sweep(request: Request,
                          x_sigma_settings_token: Optional[str] = Header(default=None)):
     _require_operator(request, x_sigma_settings_token)
-    return {"result": get_flywheel().sweep(), "state": get_flywheel().panel_state()}
+    engine = get_flywheel(request)
+    return {"result": engine.sweep(), "state": engine.panel_state()}
 
 
 @router.post("/api/v1/flywheel/reconcile")
 async def flywheel_reconcile(body: FlywheelReconcileIn, request: Request,
                              x_sigma_settings_token: Optional[str] = Header(default=None)):
     _require_operator(request, x_sigma_settings_token)
+    engine = get_flywheel(request)
     return {
-        "result": get_flywheel().reconcile_vault_purchase(
+        "result": engine.reconcile_vault_purchase(
             executed=body.executed, order_id=body.order_id
         ),
-        "state": get_flywheel().panel_state(),
+        "state": engine.panel_state(),
     }
 
 

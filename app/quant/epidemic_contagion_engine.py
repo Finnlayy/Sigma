@@ -27,6 +27,10 @@ from app.core import blueprint as bp
 
 logger = logging.getLogger("app.quant.epidemic_contagion_engine")
 
+# Fail-closed freshness window (§27). getattr keeps panel_state import-safe if
+# an older process loaded blueprint before SIR_MAX_STATE_AGE_S was exported.
+SIR_MAX_STATE_AGE_S = float(getattr(bp, "SIR_MAX_STATE_AGE_S", 900))
+
 _GAMMA_FLOOR = 0.05
 
 
@@ -214,7 +218,7 @@ class EpidemicContagionEngine:
         return self._state
 
     def is_fresh(self, *, now: Optional[float] = None,
-                 max_age_s: float = bp.SIR_MAX_STATE_AGE_S) -> bool:
+                 max_age_s: float = SIR_MAX_STATE_AGE_S) -> bool:
         if self._state is None or self._state.ts <= 0:
             return False
         current = self._clock() if now is None else now
@@ -232,7 +236,7 @@ class EpidemicContagionEngine:
 
     def panel_state(self) -> Dict[str, Any]:
         return {"current": self.state.as_dict(), "history": self._history[-20:],
-                "fresh": self.is_fresh(), "max_state_age_s": bp.SIR_MAX_STATE_AGE_S,
+                "fresh": self.is_fresh(), "max_state_age_s": SIR_MAX_STATE_AGE_S,
                 "inputs_spec": list(bp.SIR_INPUTS)}
 
 

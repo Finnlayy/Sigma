@@ -244,6 +244,19 @@ def test_deadman_closes_all_without_native_stop():
     assert bridge.calls[0][0] == "close_all"
 
 
+def test_deadman_latches_after_first_flatten():
+    bridge = RecordingBridge()
+    dm = DeadmanSwitchDaemon(kraken_bridge=bridge)
+    dm.beat(has_native_stop_loss=True)
+    dm.state.last_beat = time.time() - (bp.DEADMAN_TIMEOUT_SECONDS + 5)
+    first = dm.trigger()
+    second = dm.trigger()
+    assert first["expired"] is True
+    assert first["action"] == "cancel_open_limit_orders"
+    assert second.get("latched") is True
+    assert bridge.calls == [("cancel_limits", "deadman_timeout")]
+
+
 def test_deadman_quiet_while_beating():
     dm = DeadmanSwitchDaemon()
     dm.beat()

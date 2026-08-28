@@ -29,6 +29,17 @@ TaskFn = Callable[[], Any]
 TIER_SPECS: Dict[int, bp.TierSpec] = {int(spec.tier): spec for spec in bp.SCHEDULER_MATRIX}
 
 
+def _json_safe(value: Any) -> Any:
+    """Starlette JSONResponse rejects NaN/Inf — emit JSON null instead."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _cron_next(cron: str, after: float) -> float:
     """Minimaler Cron-Support fuer die zwei kanonischen Ausdruecke (§23.2).
 
@@ -68,20 +79,20 @@ class ScheduledTask:
     enabled: bool = True
 
     def as_dict(self) -> Dict[str, Any]:
-        return {
+        return _json_safe({
             "name": self.name,
             "tier": self.tier,
             "tier_label": TIER_SPECS[self.tier].label,
             "cadence_s": self.cadence_s,
             "cron": self.cron,
-            "next_run": self.next_run if math.isfinite(self.next_run) else None,
+            "next_run": self.next_run,
             "last_run": self.last_run,
             "last_duration_ms": self.last_duration_ms,
             "runs": self.runs,
             "errors": self.errors,
             "last_error": self.last_error,
             "enabled": self.enabled,
-        }
+        })
 
 
 class SchedulerMatrix:
@@ -211,13 +222,13 @@ class SchedulerMatrix:
                 "spec_tasks": list(spec.tasks),
                 "registered": [t.as_dict() for t in tier_tasks],
             })
-        return {
+        return _json_safe({
             "timezone": bp.SCHEDULER_TIMEZONE,
             "now": now,
             "clock": self._clock.status().as_dict(),
             "tiers": tiers,
             "recent_events": self._events[-25:],
-        }
+        })
 
 
 _SCHEDULER: Optional[SchedulerMatrix] = None

@@ -15,6 +15,7 @@ unbrauchbar und fuehrt zu einem konservativen Veto.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -79,7 +80,8 @@ class ConfluenceResult:
             "verdict": self.verdict,
             "approved": self.approved,
             "depth_imbalance": round(self.depth_imbalance, 4),
-            "spread_bps": round(self.spread_bps, 2),
+            "spread_bps": (None if not math.isfinite(self.spread_bps)
+                           else round(self.spread_bps, 2)),
             "bid_volume_2pct": round(self.bid_volume, 6),
             "ask_volume_2pct": round(self.ask_volume, 6),
             "size_multiplier": self.size_multiplier,

@@ -796,3 +796,11 @@ def get_store(config=None) -> DuckDBStore:
         _store._memory_limit = cfg.duckdb_memory_limit
         _store._threads = cfg.duckdb_threads
     return _store
+
+
+def close_store() -> None:
+    """Drop the process-wide singleton so a later startup can reconnect."""
+    global _store
+    store, _store = _store, None
+    if store is not None:
+        store.close()

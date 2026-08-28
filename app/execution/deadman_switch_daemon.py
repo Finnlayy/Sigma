@@ -31,6 +31,20 @@ class DeadmanState:
     has_native_stop_loss: bool = True
 
 
+class TestDeadmanBridge:
+    """pytest-only stand-in — never issues cancel/flatten against Kraken."""
+
+    live_enabled = False
+
+    def cancel_open_limit_orders(self, reason: str = "deadman"):
+        logger.info("test deadman ignored cancel_open_limit_orders (%s)", reason)
+        return {"ok": True, "mode": "test", "reason": reason}
+
+    def close_all_market(self, reason: str = "deadman_no_native_stop"):
+        logger.info("test deadman ignored close_all_market (%s)", reason)
+        return {"ok": True, "mode": "test", "reason": reason}
+
+
 class DeadmanSwitchDaemon:
     """Verliert der Core den Puls, räumt die Börse auf — nicht andersherum."""
 
@@ -44,6 +58,8 @@ class DeadmanSwitchDaemon:
         self.state = DeadmanState()
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
+        self._flatten_latched = False
+        self.state.last_beat = self._now()
 
     def _now(self) -> float:
         from app.core.exchange_clock import get_exchange_clock
@@ -51,10 +67,17 @@ class DeadmanSwitchDaemon:
         return get_exchange_clock().now()
 
     # ------------------------------------------------------------- heartbeat
-    def beat(self, *, has_native_stop_loss: Optional[bool] = None) -> None:
-        """Core-Puls. Wird vom Tier-1-Scheduler alle 15–20s gesetzt — nicht vom UI."""
+    def beat(self, *, has_native_stop_loss: Optional[bool] = None,
+             rearm: bool = False) -> None:
+        """Core-Puls. Wird vom Tier-1-Scheduler alle 15–20s gesetzt — nicht vom UI.
+
+        Auto-pulse refreshes last_beat (liveness) but does not clear a flatten
+        latch. Operator ``POST /deadman/beat`` passes ``rearm=True``.
+        """
         self.state.last_beat = self._now()
         self.state.triggered = False
+        if rearm:
+            self._flatten_latched = False
         if has_native_stop_loss is not None:
             self.state.has_native_stop_loss = bool(has_native_stop_loss)
 
@@ -82,6 +105,11 @@ class DeadmanSwitchDaemon:
         decision = self.evaluate()
         if not decision["expired"]:
             return decision
+        if self._flatten_latched:
+            decision["latched"] = True
+            decision["action"] = self.state.last_action or decision["action"]
+            return decision
+        self._flatten_latched = True
         self.state.triggered = True
         self.state.trigger_count += 1
         self.state.last_action = decision["action"]
@@ -121,8 +149,10 @@ class DeadmanSwitchDaemon:
         logger.info("Deadman daemon online (timeout %ss, heartbeat %ss)",
                     self.timeout_seconds, self.heartbeat_seconds)
         while not self._stop.is_set():
-            if self.expired and not self.state.triggered:
+            if self.expired:
                 self.trigger()
+            else:
+                self._flatten_latched = False
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.heartbeat_seconds / 2)
             except asyncio.TimeoutError:
@@ -169,6 +199,7 @@ class DeadmanSwitchDaemon:
             "kraken_ok": kraken_ok,
             "bridge_wired": self.bridge is not None,
             "safety_wired": self.safety is not None,
+            "flatten_latched": self._flatten_latched,
         }
 
 
