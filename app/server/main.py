@@ -14,6 +14,7 @@ import datetime as _dt
 import json
 import logging
 import math
+import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -182,6 +183,7 @@ class AppState:
         self.ga = GeneticOptimizer(cfg)
         self.passkey = PasskeyAuthEngine(self.redis, cfg)
         self.settings = SettingsEnvManager(cfg)
+        self.has_credentials = _kraken_credentials_present()
         self.mcp = KrakenMCPBridge(cfg, self.passkey, None, self.store)
         self.telegram = TelegramBotEngine(cfg)
         # §36 — HIGH/CRITICAL Fehler pushen ueber denselben Bot
@@ -204,6 +206,7 @@ class AppState:
         self._tasks.append(asyncio.create_task(self._sse_heartbeat()))
         self._tasks.append(asyncio.create_task(self._eod_scheduler()))
         self._tasks.append(asyncio.create_task(self._tick_guard()))
+        self._tasks.append(asyncio.create_task(self._scheduler_loop()))
         logger.info("Projekt:Sigma Core online (spec %s / skeleton v%s)",
                     cfg.spec_version, cfg.skeleton_version)
         try:
@@ -426,6 +429,21 @@ class AppState:
                 logger.warning("tick guard: %s", exc)
             await asyncio.sleep(1.0)
 
+    async def _scheduler_loop(self) -> None:
+        """§23.2 Tier-1 Fast Pulse — Deadman erneuert sich selbst, Memory-Watchdog tickt."""
+        from app.core.scheduler_matrix import install_canonical_tasks
+        from app.execution.deadman_switch_daemon import get_deadman
+
+        sched = install_canonical_tasks()
+        get_deadman().start()
+        logger.info("Scheduler matrix online (%d tasks)", len(sched.tasks))
+        while True:
+            try:
+                sched.run_due()
+            except Exception as exc:
+                logger.warning("scheduler: %s", exc)
+            await asyncio.sleep(1.0)
+
 
 # -------------------------------------------------------------------- helpers
 def _realized_vol(closes: List[float], window: int = 96) -> float:
@@ -581,12 +599,18 @@ async def dashboard_init():
 
 @app.get("/api/kraken/status")
 async def kraken_status():
+    from app.core.exchange_clock import get_exchange_clock
+
+    clock = get_exchange_clock()
+    st = clock.status()
     return {
-        "connected": state.has_credentials,
+        "connected": bool(clock.synced) and st.last_error is None,
         "hasCredentials": state.has_credentials,
         "paperTrading": state.is_paper_trading,
         "mode": "paper" if state.is_paper_trading else "live",
-        # [MOCK] Live-Konnektivität — im Sandbox ohne Exchange-Zugriff.
+        "latencyMs": None if clock.last_rtt_ms is None else round(clock.last_rtt_ms, 1),
+        "stream": "kraken_time",
+        "lastError": st.last_error,
     }
 
 
@@ -627,6 +651,7 @@ async def logs():
 
 
 def _build_metrics(st: AppState, strategies: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from app.core.exchange_clock import get_exchange_clock
     from app.core.telemetry import _cpu_percent, _mem_usage_percent
 
     balances = _paper_balances(st)
@@ -642,7 +667,8 @@ def _build_metrics(st: AppState, strategies: List[Dict[str, Any]]) -> Dict[str, 
     return {
         "cpuUsage": round(_cpu_percent(), 1),
         "memoryUsage": round(_mem_usage_percent(), 1),
-        "latencyMs": round(getattr(st.telemetry, "avg_latency_microseconds", 45) / 1000.0 * 10, 1) or 14,
+        "latencyMs": round(get_exchange_clock().last_rtt_ms, 1)
+        if get_exchange_clock().last_rtt_ms is not None else 0.0,
         "activeWorkers": len(active),
         "paperWorkers": len(paper_active),
         "liveWorkers": len(live_active),
@@ -752,6 +778,140 @@ async def create_strategy(body: StrategyBody):
     await state.m8.register_strategy(sid, last_ga_recalibration_ts=time.time())
     state.academy.seed([s])
     state.bus.log("info", f"Strategy created: {s.get('name')} ({s.get('assetPair')})",
+                  category="SYSTEM", strategy_id=sid)
+    return state.store.get_strategy(sid)
+
+
+_PINE_ALERT_JSON = (
+    '{"symbol":"{{ticker}}","action":"%s","price":{{close}},'
+    '"rsi":50,"atr":0,"timestamp":{{timenow}},'
+    '"strategy_id":"REPLACE_ME","secret":"REPLACE_SECRET"}'
+)
+
+_PINE_CISD = f'''//@version=6
+strategy("Sigma CISD Momentum", overlay=true, initial_capital=1000, pyramiding=0)
+
+fastLen      = input.int(12, "Fast EMA")
+slowLen      = input.int(60, "Slow EMA")
+atrLen       = input.int(14, "ATR Period")
+atrMult      = input.float(1.5, "ATR Stop Multiplier")
+cisdLookback = input.int(12, "CISD Lookback")
+cisdDisp     = input.float(1.5, "CISD Displacement Mult")
+
+fast = ta.ema(close, fastLen)
+slow = ta.ema(close, slowLen)
+atr  = ta.atr(atrLen)
+avgBody = ta.sma(math.abs(close - open), cisdLookback)
+bullDisp = (close - open) > avgBody * cisdDisp and close > ta.highest(high, cisdLookback)[1]
+bearDisp = (open - close) > avgBody * cisdDisp and close < ta.lowest(low, cisdLookback)[1]
+cisdBull = bullDisp and fast > slow
+cisdBear = bearDisp and fast < slow
+
+if ta.crossover(fast, slow) or cisdBull
+    strategy.entry("L", strategy.long, alert_message = '{_PINE_ALERT_JSON % "BUY"}')
+    strategy.exit("XL", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
+
+if ta.crossunder(fast, slow) or cisdBear
+    strategy.entry("S", strategy.short, alert_message = '{_PINE_ALERT_JSON % "SELL"}')
+    strategy.exit("XS", "S", stop = close + atr * atrMult, limit = close - atr * atrMult * 2)
+'''
+
+_PINE_RSI = f'''//@version=6
+strategy("Sigma RSI Reversion", overlay=true, initial_capital=1000, pyramiding=0)
+
+rsiLen   = input.int(14, "RSI Period")
+rsiLower = input.int(32, "RSI Oversold")
+rsiUpper = input.int(68, "RSI Overbought")
+atrLen   = input.int(14, "ATR Period")
+atrMult  = input.float(1.5, "ATR Stop Multiplier")
+
+rsi = ta.rsi(close, rsiLen)
+atr = ta.atr(atrLen)
+
+if ta.crossunder(rsi, rsiLower)
+    strategy.entry("L", strategy.long, alert_message = '{_PINE_ALERT_JSON % "BUY"}')
+    strategy.exit("XL", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
+
+if ta.crossover(rsi, rsiUpper)
+    strategy.entry("S", strategy.short, alert_message = '{_PINE_ALERT_JSON % "SELL"}')
+    strategy.exit("XS", "S", stop = close + atr * atrMult, limit = close - atr * atrMult * 2)
+'''
+
+_PINE_EMPTY = '''//@version=6
+strategy("Sigma Empty")
+'''
+
+PINE_STRATEGY_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    "cisd": {
+        "name": "CISD Momentum",
+        "description": "CISD/EMA momentum Pine v6 — displacement through prior swing plus EMA trend.",
+        "code": _PINE_CISD,
+        "assetPair": "BTC/USD",
+        "parameters": {
+            "template": "cisd",
+            "trendFastEma": 12,
+            "trendSlowEma": 60,
+            "cisdLookback": 12,
+            "cisdDisplacementMult": 1.5,
+            "atrStopMultiplier": 1.5,
+        },
+    },
+    "rsi": {
+        "name": "RSI Reversion",
+        "description": "RSI mean-reversion Pine v6 — oversold/overbought crosses with ATR stop/TP.",
+        "code": _PINE_RSI,
+        "assetPair": "BTC/USD",
+        "parameters": {
+            "template": "rsi",
+            "rsiPeriod": 14,
+            "rsiLower": 32,
+            "rsiUpper": 68,
+            "atrStopMultiplier": 1.5,
+        },
+    },
+    "empty": {
+        "name": "Sigma Empty",
+        "description": "Minimal Pine v6 strategy stub.",
+        "code": _PINE_EMPTY,
+        "assetPair": "BTC/USD",
+        "parameters": {"template": "empty"},
+    },
+}
+
+
+class FromTemplateBody(BaseModel):
+    template: str
+    name: Optional[str] = None
+    assetPair: Optional[str] = None
+    interval: Optional[int] = 15
+
+
+@app.post("/api/strategies/from-template")
+async def create_strategy_from_template(body: FromTemplateBody):
+    spec = PINE_STRATEGY_TEMPLATES.get((body.template or "").strip().lower())
+    if spec is None:
+        raise HTTPException(400, f"unknown template: {body.template!r}")
+    sid = uuid.uuid4().hex[:12]
+    s = {
+        "id": sid,
+        "name": body.name or spec["name"],
+        "description": spec["description"],
+        "code": spec["code"],
+        "status": "inactive",
+        "assetPair": body.assetPair or spec.get("assetPair") or "BTC/USD",
+        "interval": int(body.interval if body.interval is not None else 15),
+        "executionMode": "paper",
+        "parameters": dict(spec.get("parameters") or {}),
+        "hardStopEnabled": True,
+        "hardStopPercent": 5.0,
+        "createdAt": _iso(time.time()),
+        "version": 1,
+    }
+    state.store.upsert_strategy(s)
+    await state.m8.register_strategy(sid, last_ga_recalibration_ts=time.time())
+    state.academy.seed([s])
+    state.bus.log("info",
+                  f"Strategy created from template {body.template}: {s.get('name')} ({s.get('assetPair')})",
                   category="SYSTEM", strategy_id=sid)
     return state.store.get_strategy(sid)
 
@@ -1596,9 +1756,30 @@ async def passkey_verify(body: PasskeyVerifyBody):
     return await state.passkey.verify_assertion(body.email, body.credential)
 
 
+def _kraken_credentials_present() -> bool:
+    key = os.environ.get("KRAKEN_API_KEY", "").strip()
+    secret = os.environ.get("KRAKEN_API_SECRET", "").strip()
+    return bool(key and secret)
+
+
+def _is_loopback(request: Request) -> bool:
+    host = (request.client.host if request.client else "") or ""
+    return host in {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _settings_unlocked(request: Request, token: Optional[str]) -> bool:
+    if _is_loopback(request):
+        return True
+    return state.passkey.validate_settings_token(token) is not None
+
+
 @app.get("/api/settings")
 async def settings_get():
-    return {"settings": state.settings.get_all()}
+    return {
+        "settings": state.settings.get_all(),
+        "hasCredentials": _kraken_credentials_present(),
+        "loopbackUnlocked": True,
+    }
 
 
 class SettingsUpdateBody(BaseModel):
@@ -1608,27 +1789,31 @@ class SettingsUpdateBody(BaseModel):
 
 
 @app.put("/api/settings")
-async def settings_update(body: SettingsUpdateBody):
-    token_data = state.passkey.validate_settings_token(body.settingsToken)
-    if token_data is None:
+async def settings_update(request: Request, body: SettingsUpdateBody):
+    if not _settings_unlocked(request, body.settingsToken):
         raise HTTPException(403, "PASSKEY GATE: gültiges settingsToken erforderlich.")
     if not body.key or body.value is None:
         raise HTTPException(400, "key & value erforderlich.")
     try:
-        return state.settings.update(body.key, body.value)
+        out = state.settings.update(body.key, body.value)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    state.has_credentials = _kraken_credentials_present()
+    out["hasCredentials"] = state.has_credentials
+    return out
 
 
 @app.delete("/api/settings/{key}")
-async def settings_delete(key: str, token: Optional[str] = None):
-    token_data = state.passkey.validate_settings_token(token)
-    if token_data is None:
+async def settings_delete(request: Request, key: str, token: Optional[str] = None):
+    if not _settings_unlocked(request, token):
         raise HTTPException(403, "PASSKEY GATE: gültiges settingsToken erforderlich.")
     try:
-        return state.settings.delete(key)
+        out = state.settings.delete(key)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    state.has_credentials = _kraken_credentials_present()
+    out["hasCredentials"] = state.has_credentials
+    return out
 
 
 # =====================================================================

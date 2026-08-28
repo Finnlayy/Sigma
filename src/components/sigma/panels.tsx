@@ -21,7 +21,24 @@ import {
   type TelegramSnapshot, type TvJob,
 } from '../../lib/sigmaApi';
 import TvLightweightChart from '../TvLightweightChart';
-import ProcessLogView from '../../pages/ProcessLogView';   // §37
+import { Card } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
+import {
+  OverviewMetricsPanel as OverviewMetricsPanelImpl,
+  QueueMatrixPanelView,
+  LedgersPanel as LedgersPanelImpl,
+  DataLakePanelView,
+  BacktestPanel as BacktestPanelImpl,
+  GeneticPanel as GeneticPanelImpl,
+  SystemHealthPanel as SystemHealthPanelImpl,
+  RegimePanel as RegimePanelImpl,
+  ExecutionRiskPanel as ExecutionRiskPanelImpl,
+  AcademyRegistryPanel as AcademyRegistryPanelImpl,
+  SettingsPanel as SettingsPanelImpl,
+} from './legacyPanels';
+import { StrategyLibraryPanel as StrategyLibraryPanelImpl } from './StrategyLibraryPanel';
+import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
 
 /* ------------------------------------------------------------------ shared */
 
@@ -40,15 +57,17 @@ function PanelShell({ title, icon, actions, children }: {
   title: string; icon: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-full flex-col bg-zinc-950/60 text-zinc-200">
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
-        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+    <Card size="sm" className="flex h-full min-h-0 flex-col gap-0 rounded-none py-0 ring-0">
+      <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {icon}{title}
         </div>
         <div className="flex items-center gap-1">{actions}</div>
       </div>
-      <div className="flex-1 overflow-auto p-3 text-xs">{children}</div>
-    </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="p-3 text-xs">{children}</div>
+      </ScrollArea>
+    </Card>
   );
 }
 
@@ -261,32 +280,81 @@ export function MarketChart() {
 /* -------------------------------------------------------------- 4 LLMConsole */
 
 export function LLMConsole() {
-  const [tele, setTele] = useState<TelegramSnapshot | null>(null);
-  const [input, setInput] = useState('/status');
+  const [input, setInput] = useState('');
   const [lines, setLines] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => { void sigmaApi.telegram().then((t) => t && setTele(t)); }, []);
+  const append = (s: string) => setLines((l) => [...l.slice(-80), s]);
 
   const send = async () => {
-    const chat = tele?.whitelist?.[0] ?? '0';
-    const out = await sigmaApi.telegramSend(chat, input);
-    setLines((l) => [...l.slice(-40), `> ${input}`, out ? `${out.text} (${out.latency_ms}ms)` : 'no response']);
+    const prompt = input.trim();
+    if (!prompt || busy) return;
+    setBusy(true);
+    setError('');
+    append(`> ${prompt}`);
     setInput('');
+    try {
+      const tools = await sigmaApi.llmTools();
+      const names: string[] = (tools?.tools ?? []).map((t: { name?: string }) => t.name).filter(Boolean);
+      const match = names.find((n) => prompt.startsWith(n) || prompt.includes(n));
+      if (match && !prompt.includes(' ')) {
+        const out = await sigmaApi.llmToolCall(match, {});
+        append(JSON.stringify(out ?? { error: 'no result' }).slice(0, 800));
+        return;
+      }
+      const ws = new WebSocket(sigmaApi.llmStreamUrl());
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('LLM stream timeout')), 20000);
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ session_id: 'terminal', prompt }));
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.content_chunk) append(String(msg.content_chunk).trimEnd());
+            if (msg.tool_result) append(JSON.stringify(msg.tool_result).slice(0, 800));
+            if (msg.is_complete) {
+              clearTimeout(timer);
+              ws.close();
+              resolve();
+            }
+          } catch {
+            append(String(ev.data).slice(0, 400));
+          }
+        };
+        ws.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error('Ollama/stream unavailable'));
+        };
+        ws.onclose = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+    } catch (exc) {
+      const msg = exc instanceof Error ? exc.message : 'LLM failed';
+      setError(msg);
+      append(`! ${msg}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <PanelShell title="LLM Console (Ollama)" icon={<Brain size={13} />}>
-      <div className="mb-2 text-[10px] text-zinc-500">
-        Offline endpoint {tele?.llm_url ?? 'http://127.0.0.1:11434'} · tools: update_risk_settings, control_strategy_runner, edit_strategy_pine_code, query_telemetry
+      <div className="mb-2 text-[10px] text-muted-foreground">
+        Offline {sigmaApi.llmStreamUrl()} · tools: update_risk_settings, control_bot, edit_pine_strategy_code, query_kausal_autopsy
       </div>
-      <div className="mb-2 h-[calc(100%-6rem)] min-h-24 overflow-auto rounded border border-zinc-800 bg-black/60 p-2 font-mono text-[11px] text-emerald-300">
-        {lines.length ? lines.map((l, i) => <div key={i}>{l}</div>) : <span className="text-zinc-600">Fast-path: /status /pause /resume /kill</span>}
+      <div className="mb-2 h-[calc(100%-6rem)] min-h-24 overflow-auto rounded border border-border bg-black/60 p-2 font-mono text-[11px] text-emerald-300">
+        {lines.length ? lines.map((l, i) => <div key={i}>{l}</div>) : <span className="text-zinc-600">Prompt or tool name — not Telegram</span>}
       </div>
+      {error && <div className="mb-1 text-[10px] text-red-400">{error}</div>}
       <div className="flex gap-1">
         <input value={input} onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && send()}
+          onKeyDown={(e) => e.key === 'Enter' && void send()}
           className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px]" />
-        <button onClick={send} className="rounded bg-sky-600/80 px-2 py-1 text-[11px] hover:bg-sky-500"><Send size={12} /></button>
+        <Button size="sm" className="h-7" disabled={busy} onClick={() => void send()}><Send size={12} /></Button>
       </div>
     </PanelShell>
   );
@@ -436,24 +504,32 @@ export function TelegramOperatorPanel() {
 export function DeadmanSwitchPanel() {
   const [dm, refresh] = usePoll(sigmaApi.deadman, 3000);
   const d: DeadmanSnapshot | null = dm;
-  const pct = Math.min(100, ((d?.age_s ?? 0) / (d?.timeout_s || 60)) * 100);
+  const pct = Math.min(100, ((d?.age_s ?? 0) / (d?.timeout_s || 1800)) * 100);
+  const auto = d?.auto_pulse !== false;
+  const timeoutMin = Math.round((d?.timeout_s ?? 1800) / 60);
   return (
     <PanelShell title="Deadman Switch" icon={<HeartPulse size={13} />}
       actions={<button onClick={() => sigmaApi.deadmanBeat(true).then(refresh)}
-        className="rounded border border-emerald-600/60 px-2 py-0.5 text-[10px] text-emerald-400 hover:bg-emerald-500/10">BEAT</button>}>
+        title="Manueller Override — Puls kommt vom Kraken-Time-Ping"
+        className="rounded border border-zinc-600/60 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800">OVERRIDE</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
-        <div className={`h-full transition-all ${pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+        <div className={`h-full transition-all ${d?.expired || pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
           style={{ width: `${pct}%` }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <Stat label="Heartbeat Age" value={`${(d?.age_s ?? 0).toFixed(1)}s`} />
-        <Stat label="Timeout" value={`${d?.timeout_s ?? 60}s`} />
+        <Stat label="Heartbeat Age" value={`${(d?.age_s ?? 0).toFixed(1)}s`}
+          tone={d?.expired ? 'text-red-400' : 'text-emerald-400'} />
+        <Stat label="Timeout" value={`${timeoutMin} min`} />
+        <Stat label="Kraken RTT" value={d?.kraken_rtt_ms != null ? `${d.kraken_rtt_ms}ms` : '—'}
+          tone={d?.kraken_ok ? 'text-emerald-400' : 'text-amber-400'} />
+        <Stat label="Auto-Pulse" value={auto ? `Kraken ${d?.heartbeat_s ?? 20}s` : 'off'}
+          tone={auto && d?.kraken_ok ? 'text-emerald-400' : 'text-amber-400'} />
         <Stat label="Native Bracket-SL" value={d?.has_native_stop_loss ? 'yes' : 'no'}
           tone={d?.has_native_stop_loss ? 'text-emerald-400' : 'text-amber-400'} />
         <Stat label="Triggers" value={d?.trigger_count ?? 0} tone={(d?.trigger_count ?? 0) > 0 ? 'text-red-400' : undefined} />
       </div>
       <div className="mt-2 text-[10px] text-zinc-500">
-        Timeout ⇒ {d?.has_native_stop_loss ? 'cancel open entry limits (exchange stop stays alive)' : 'close_all_market'}
+        Puls nur solange Kraken Time erreichbar ist. {timeoutMin} min Offline ⇒ {d?.has_native_stop_loss ? 'cancel open entry limits (exchange stop stays alive)' : 'close_all_market'}
         {d?.last_action ? ` · last: ${d.last_action}` : ''}
       </div>
     </PanelShell>
@@ -1020,6 +1096,20 @@ export function NetronVisualizerPanel() {
   );
 }
 
+export function ProcessLogView() { return <ProcessLogViewImpl />; }
+export function OverviewMetricsPanel() { return <OverviewMetricsPanelImpl />; }
+export function StrategyLibraryPanel() { return <StrategyLibraryPanelImpl />; }
+export function QueueMatrixPanel() { return <QueueMatrixPanelView />; }
+export function LedgersPanel() { return <LedgersPanelImpl />; }
+export function DataLakePanel() { return <DataLakePanelView />; }
+export function BacktestPanel() { return <BacktestPanelImpl />; }
+export function GeneticPanel() { return <GeneticPanelImpl />; }
+export function SystemHealthPanel() { return <SystemHealthPanelImpl />; }
+export function RegimePanel() { return <RegimePanelImpl />; }
+export function ExecutionRiskPanel() { return <ExecutionRiskPanelImpl />; }
+export function AcademyRegistryPanel() { return <AcademyRegistryPanelImpl />; }
+export function SettingsPanel() { return <SettingsPanelImpl />; }
+
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
   PineStudio,
@@ -1044,6 +1134,18 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   DiagnosticsErrorPanel,
   ProcessLogView,
   NetronVisualizerPanel,
+  OverviewMetricsPanel,
+  StrategyLibraryPanel,
+  QueueMatrixPanel,
+  LedgersPanel,
+  DataLakePanel,
+  BacktestPanel,
+  GeneticPanel,
+  SystemHealthPanel,
+  RegimePanel,
+  ExecutionRiskPanel,
+  AcademyRegistryPanel,
+  SettingsPanel,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -1070,4 +1172,16 @@ export const PANEL_TITLES: Record<string, string> = {
   DiagnosticsErrorPanel: 'Diagnostics',
   ProcessLogView: 'Process & AI Logs',
   NetronVisualizerPanel: 'Netron ONNX',
+  OverviewMetricsPanel: 'Overview',
+  StrategyLibraryPanel: 'Strategy Library',
+  QueueMatrixPanel: 'Queue Matrix',
+  LedgersPanel: 'Ledgers',
+  DataLakePanel: 'Data Lake',
+  BacktestPanel: 'Backtest',
+  GeneticPanel: 'Genetic',
+  SystemHealthPanel: 'System Health',
+  RegimePanel: 'Regimes',
+  ExecutionRiskPanel: 'Execution Risk',
+  AcademyRegistryPanel: 'Academy Registry',
+  SettingsPanel: 'Settings',
 };

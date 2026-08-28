@@ -587,7 +587,7 @@ NATIVE_BRACKET_SL_REQUIRED = True
 # Deadman Switch (§21, Masterprompt §4.C)
 DEADMAN_HEARTBEAT_SECONDS_MIN = 15
 DEADMAN_HEARTBEAT_SECONDS_MAX = 20
-DEADMAN_TIMEOUT_SECONDS = 60
+DEADMAN_TIMEOUT_SECONDS = 1800          # 30 min ohne Kraken-Time-Ping → Trigger
 DEADMAN_CANCEL_ONLY_IF_NATIVE_STOP = True
 DEADMAN_FALLBACK_ACTION = "close_all_market"
 
@@ -1048,9 +1048,22 @@ TERMINAL_PANELS_EXTENDED: Tuple[str, ...] = (
     "DiagnosticsErrorPanel",
     "ProcessLogView",
     "NetronVisualizerPanel",
+    "OverviewMetricsPanel",
+    "StrategyLibraryPanel",
+    "SystemHealthPanel",
+    "RegimePanel",
+    "ExecutionRiskPanel",
+    "AcademyRegistryPanel",
+    "BacktestPanel",
+    "GeneticPanel",
+    "QueueMatrixPanel",
+    "LedgersPanel",
+    "DataLakePanel",
+    "SettingsPanel",
 )
 TERMINAL_PRESETS_EXTENDED: Tuple[str, ...] = (
     "CAPITAL_OPS", "PAPER_LAB", "OBSERVABILITY", "ML_INSPECTOR",
+    "OVERVIEW", "LIBRARY", "QUANT", "CONFIG",
 )
 ALL_TERMINAL_PANELS: Tuple[str, ...] = TERMINAL_PANELS + TERMINAL_PANELS_EXTENDED
 ALL_TERMINAL_PRESETS: Tuple[str, ...] = TERMINAL_PRESETS + TERMINAL_PRESETS_EXTENDED

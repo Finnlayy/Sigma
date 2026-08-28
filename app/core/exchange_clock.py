@@ -51,6 +51,7 @@ class ClockStatus:
     last_sync_ts: Optional[float]
     last_error: Optional[str]
     drift_warning: bool
+    last_rtt_ms: Optional[float] = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -59,6 +60,7 @@ class ClockStatus:
             "last_sync_ts": self.last_sync_ts,
             "last_error": self.last_error,
             "drift_warning": self.drift_warning,
+            "last_rtt_ms": None if self.last_rtt_ms is None else round(self.last_rtt_ms, 1),
             "resync_interval_s": bp.CLOCK_RESYNC_INTERVAL_S,
             "source": bp.KRAKEN_TIME_URL,
         }
@@ -82,6 +84,7 @@ class ExchangeClock:
         self._last_sync: Optional[float] = None
         self._last_error: Optional[str] = None
         self._synced = False
+        self._last_rtt_ms: Optional[float] = None
 
     # ------------------------------------------------------------ sync ---
     def sync(self, *, force: bool = False) -> ClockStatus:
@@ -115,6 +118,31 @@ class ExchangeClock:
         """Tier-1-tauglich: synchronisiert nur, wenn das Intervall abgelaufen ist."""
         return self.sync(force=False)
 
+    def ping(self) -> Dict[str, Any]:
+        """Immer Kraken `/0/public/Time` anpingen und RTT messen.
+
+        Im Gegensatz zu ``sync()`` kein Intervall-Skip — das ist der
+        Deadman-Liveness-Probe (CLI-Stream / Internet).
+        """
+        t0 = time.perf_counter()
+        try:
+            kraken_now = float(self._fetcher())
+            rtt_ms = (time.perf_counter() - t0) * 1000.0
+            with self._lock:
+                self._offset = kraken_now - self._host_time()
+                self._last_sync = self._host_time()
+                self._last_error = None
+                self._synced = True
+                self._last_rtt_ms = rtt_ms
+            return {"ok": True, "rtt_ms": round(rtt_ms, 1), "error": None}
+        except Exception as exc:
+            rtt_ms = (time.perf_counter() - t0) * 1000.0
+            with self._lock:
+                self._last_error = f"{type(exc).__name__}: {exc}"
+                self._last_rtt_ms = None
+            logger.warning("exchange_clock ping failed: %s", self._last_error)
+            return {"ok": False, "rtt_ms": round(rtt_ms, 1), "error": self._last_error}
+
     # ------------------------------------------------------------ time ---
     def now(self) -> float:
         return self._host_time() + self._offset
@@ -129,6 +157,10 @@ class ExchangeClock:
     @property
     def synced(self) -> bool:
         return self._synced
+
+    @property
+    def last_rtt_ms(self) -> Optional[float]:
+        return self._last_rtt_ms
 
     # ------------------------------------------------------------ gate ---
     def signal_age_s(self, signal_ts: float) -> float:
@@ -164,6 +196,7 @@ class ExchangeClock:
             last_sync_ts=self._last_sync,
             last_error=self._last_error,
             drift_warning=abs(self._offset) >= bp.CLOCK_MAX_OFFSET_WARN_S,
+            last_rtt_ms=self._last_rtt_ms,
         )
 
 

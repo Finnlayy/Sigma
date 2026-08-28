@@ -232,3 +232,50 @@ def get_scheduler() -> SchedulerMatrix:
 def set_scheduler(scheduler: Optional[SchedulerMatrix]) -> None:
     global _SCHEDULER
     _SCHEDULER = scheduler
+
+
+def install_canonical_tasks(
+    scheduler: Optional[SchedulerMatrix] = None,
+    *,
+    deadman=None,
+    memory=None,
+) -> SchedulerMatrix:
+    """Verdrahtet die Blueprint-T1-Pulse (Deadman-Heartbeat, Memory-Watchdog).
+
+    Ohne diese Registrierung altert ``last_beat`` unbegrenzt — der Operator
+    müsste dann manuell BEAT drücken. Der Core erneuert den Puls selbst.
+    """
+    sched = scheduler or get_scheduler()
+    if sched.get("deadman_heartbeat") is None:
+        if deadman is None:
+            from app.execution.deadman_switch_daemon import get_deadman
+
+            deadman = get_deadman()
+        from app.execution.deadman_switch_daemon import pulse_deadman_from_kraken
+
+        dm = deadman
+
+        def _kraken_pulse() -> None:
+            pulse_deadman_from_kraken(deadman=dm)
+
+        sched.register(
+            "deadman_heartbeat",
+            bp.SchedulerTier.T1_FAST_PULSE,
+            _kraken_pulse,
+            cadence_s=float(bp.DEADMAN_HEARTBEAT_SECONDS_MAX),
+            start_immediately=True,
+        )
+        _kraken_pulse()
+    if sched.get("memory_watchdog") is None:
+        if memory is None:
+            from app.core.memory_watchdog import get_memory_watchdog
+
+            memory = get_memory_watchdog()
+        sched.register(
+            "memory_watchdog",
+            bp.SchedulerTier.T1_FAST_PULSE,
+            memory.check,
+            cadence_s=float(bp.DEADMAN_HEARTBEAT_SECONDS_MAX),
+            start_immediately=True,
+        )
+    return sched

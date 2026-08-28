@@ -251,6 +251,61 @@ def test_deadman_quiet_while_beating():
     assert not dm.expired
 
 
+def test_deadman_auto_pulse_via_scheduler():
+    from app.core.exchange_clock import ExchangeClock, set_exchange_clock
+    from app.core.scheduler_matrix import SchedulerMatrix, install_canonical_tasks
+    from app.execution.deadman_switch_daemon import pulse_deadman_from_kraken
+
+    class _Mem:
+        def check(self):
+            return {"stage": 0}
+
+    class _Host:
+        def __init__(self, t=1_700_000_000.0):
+            self.t = t
+
+        def __call__(self):
+            return self.t
+
+    host = _Host()
+    clock = ExchangeClock(fetcher=lambda: host.t + 0.04, host_time=host)
+    dm = DeadmanSwitchDaemon()
+    dm.state.last_beat = time.time() - 120
+    out = pulse_deadman_from_kraken(dm, clock)
+    assert out["beat"] is True and out["ok"] is True
+    assert not dm.expired
+    assert clock.last_rtt_ms is not None
+
+    set_exchange_clock(clock)
+    try:
+        sched = SchedulerMatrix()
+        install_canonical_tasks(sched, deadman=dm, memory=_Mem())
+        assert sched.get("deadman_heartbeat") is not None
+        assert sched.get("memory_watchdog") is not None
+        snap = dm.snapshot()
+        assert snap["auto_pulse"] is True
+        assert snap["age_s"] < bp.DEADMAN_TIMEOUT_SECONDS
+        assert snap["timeout_s"] == 1800
+    finally:
+        set_exchange_clock(None)
+
+
+def test_deadman_skips_beat_when_kraken_unreachable():
+    from app.core.exchange_clock import ExchangeClock
+    from app.execution.deadman_switch_daemon import pulse_deadman_from_kraken
+
+    def boom():
+        raise RuntimeError("offline")
+
+    clock = ExchangeClock(fetcher=boom, host_time=time.time)
+    dm = DeadmanSwitchDaemon()
+    dm.state.last_beat = time.time() - 90
+    age0 = dm.age_seconds
+    out = pulse_deadman_from_kraken(dm, clock)
+    assert out["beat"] is False
+    assert dm.age_seconds >= age0 - 0.05
+
+
 # ----------------------------------------------------------------- pipeline ---
 
 @pytest.fixture()

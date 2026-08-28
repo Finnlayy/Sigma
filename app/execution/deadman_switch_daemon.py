@@ -2,7 +2,7 @@
 =========================================================
 Datei:      app/execution/deadman_switch_daemon.py
 Zweck:      §20 / Masterprompt §4.C — Heartbeat-Wächter.
-            Timeout 60s: offene Entry-Limits canceln, wenn ein natives
+            Timeout 1800s (30 min ohne Kraken-Ping): offene Entry-Limits canceln, wenn ein natives
             Börsen-Stop-Loss existiert; sonst close_all_market.
 System:     Manas: Ciel Core Matrix — Projekt:Sigma
 Knoten:     Noir (Diablo) / Safety
@@ -45,16 +45,22 @@ class DeadmanSwitchDaemon:
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
 
+    def _now(self) -> float:
+        from app.core.exchange_clock import get_exchange_clock
+
+        return get_exchange_clock().now()
+
     # ------------------------------------------------------------- heartbeat
     def beat(self, *, has_native_stop_loss: Optional[bool] = None) -> None:
-        self.state.last_beat = time.time()
+        """Core-Puls. Wird vom Tier-1-Scheduler alle 15–20s gesetzt — nicht vom UI."""
+        self.state.last_beat = self._now()
         self.state.triggered = False
         if has_native_stop_loss is not None:
             self.state.has_native_stop_loss = bool(has_native_stop_loss)
 
     @property
     def age_seconds(self) -> float:
-        return time.time() - self.state.last_beat
+        return self._now() - self.state.last_beat
 
     @property
     def expired(self) -> bool:
@@ -63,7 +69,7 @@ class DeadmanSwitchDaemon:
     # ---------------------------------------------------------------- action
     def evaluate(self, now: Optional[float] = None) -> Dict[str, Any]:
         """Pure Entscheidung — testbar ohne Loop."""
-        now = now if now is not None else time.time()
+        now = now if now is not None else self._now()
         age = now - self.state.last_beat
         if not self.state.armed or age <= self.timeout_seconds:
             return {"action": "none", "age_s": round(age, 1), "expired": False}
@@ -124,6 +130,16 @@ class DeadmanSwitchDaemon:
             self._task = None
 
     def snapshot(self) -> Dict[str, Any]:
+        rtt = None
+        kraken_ok = False
+        try:
+            from app.core.exchange_clock import get_exchange_clock
+
+            clock = get_exchange_clock()
+            rtt = clock.last_rtt_ms
+            kraken_ok = bool(clock.synced) and clock.status().last_error is None and rtt is not None
+        except Exception:
+            pass
         return {
             "armed": self.state.armed,
             "age_s": round(self.age_seconds, 1),
@@ -134,7 +150,29 @@ class DeadmanSwitchDaemon:
             "trigger_count": self.state.trigger_count,
             "last_action": self.state.last_action,
             "has_native_stop_loss": self.state.has_native_stop_loss,
+            "auto_pulse": True,
+            "pulse_source": "kraken:/0/public/Time",
+            "kraken_rtt_ms": None if rtt is None else round(float(rtt), 1),
+            "kraken_ok": kraken_ok,
         }
+
+
+def pulse_deadman_from_kraken(deadman: Optional[DeadmanSwitchDaemon] = None,
+                              clock=None) -> Dict[str, Any]:
+    """Erneuert den Deadman nur bei erfolgreichem Kraken-Time-Ping (Netz/CLI-Stream)."""
+    from app.core.exchange_clock import get_exchange_clock
+
+    dm = deadman if deadman is not None else get_deadman()
+    clk = clock if clock is not None else get_exchange_clock()
+    result = clk.ping()
+    if result.get("ok"):
+        dm.beat()
+        result["beat"] = True
+    else:
+        result["beat"] = False
+    result["age_s"] = round(dm.age_seconds, 1)
+    result["expired"] = dm.expired
+    return result
 
 
 _daemon: Optional[DeadmanSwitchDaemon] = None

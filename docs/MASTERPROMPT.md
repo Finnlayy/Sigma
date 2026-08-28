@@ -251,10 +251,12 @@ Live Execute Backtest&GA   Market Radar   Scout Labor    Academy &
 
 ### C. Kraken Deadman Switch (`app/execution/deadman_switch_daemon.py`)
 
-- Heartbeat alle 15–20s; Timeout 60s → Cancel offener Limit-Orders.
+- Heartbeat alle 15–20s gegen Kraken `/0/public/Time` (CLI-Stream-Liveness / RTT). Timeout 1800s (30 min ohne erfolgreichen Ping) → Cancel offener Limit-Orders.
 - Native Bracket-SL bleibt börsenseitig aktiv (`has_native_stop_loss == True` → kein Panic-Close der Position).
 
-### D. FlexLayout React Workspace (`src/components/SigmaTerminal.tsx`)
+### D. Resizable + Tabs Dock (`src/components/SigmaTerminal.tsx`)
+
+Primärshell: shadcn Resizable-Splits und Tabs-Tabsets (FlexLayout-Verhalten, nicht FlexLayout React / flexlayout-react). Layout: `sigma.terminal.layout.v2`.
 
 Panels (Factory-IDs):
 
@@ -278,8 +280,20 @@ Panels (Factory-IDs):
 | `ContagionRadarPanel` | SIR R₀, Hedge/Cash-Modus |
 | `FlywheelBudgetPanel` | Futures/Spot Split, Flywheel-Ledger |
 | `PaperLabPanel` | Kraken Paper Lab, Graduation, Scout Loop D |
+| `OverviewMetricsPanel` | KPI / Overview-Metriken |
+| `StrategyLibraryPanel` | Strategie-Bibliothek |
+| `SystemHealthPanel` | Core / Scraper / Worker Health |
+| `RegimePanel` | Regime-Vektor |
+| `ExecutionRiskPanel` | Execution-Risk Gauges |
+| `AcademyRegistryPanel` | Academy-Registry |
+| `BacktestPanel` | TV-Backtest Jobs |
+| `GeneticPanel` | Genetic Optimizer |
+| `QueueMatrixPanel` | Job-Queue Matrix |
+| `LedgersPanel` | Kraken Ledgers |
+| `DataLakePanel` | DuckDB / Parquet Lake |
+| `SettingsPanel` | Settings / Env |
 
-Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_OPS` | `PAPER_LAB`.
+Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` plus `CAPITAL_OPS` | `PAPER_LAB` | `OBSERVABILITY` | `ML_INSPECTOR` | `OVERVIEW` | `LIBRARY` | `QUANT` | `CONFIG`.
 
 ### E. Prozesse & Ports
 

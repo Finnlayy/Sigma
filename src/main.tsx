@@ -2,6 +2,7 @@ import React, { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import ProcessLogView from './pages/ProcessLogView';   // §37
+import { TooltipProvider } from '@/components/ui/tooltip';
 import './index.css';
 
 interface ErrorBoundaryProps {
@@ -80,11 +81,13 @@ const isLogsRoute = window.location.pathname.replace(/\/$/, '') === '/logs';
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      {isLogsRoute ? (
-        <div className="h-screen w-screen bg-[#0e1117]"><ProcessLogView /></div>
-      ) : (
-        <App />
-      )}
+      <TooltipProvider>
+        {isLogsRoute ? (
+          <div className="h-screen w-screen bg-background"><ProcessLogView /></div>
+        ) : (
+          <App />
+        )}
+      </TooltipProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

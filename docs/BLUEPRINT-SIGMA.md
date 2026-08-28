@@ -572,13 +572,13 @@ Alle M8-/Academy-/Lake-/Strategy-CRUD-/Dashboard-Routen aus Alpha `main.py` + `r
 
 ## 8. UI — Sigma Terminal + Strategie-Bibliothek
 
-**Primärshell:** Dockable FlexLayout Workspace [`SigmaTerminal.tsx`](../src/components/SigmaTerminal.tsx) (flexlayout-react, lucide, monaco, lightweight-charts). Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS`. Layout in `localStorage`.
+**Primärshell:** Dockable shadcn Resizable + Tabs Workspace [`SigmaTerminal.tsx`](../src/components/SigmaTerminal.tsx) (FlexLayout-Verhalten über Resizable-Splits und Tabs-Tabsets; lucide, monaco, lightweight-charts — nicht flexlayout-react). Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` plus `CAPITAL_OPS` | `PAPER_LAB` | `OBSERVABILITY` | `ML_INSPECTOR` | `OVERVIEW` | `LIBRARY` | `QUANT` | `CONFIG`. Layout persistiert als `sigma.terminal.layout.v2`.
 
 **Panel-Registry (11):** VirtualBotDeck, PineStudio, MarketChart, LLMConsole, AcademyBadgeMatrix, RiskGauges, SelfOptimizingMLPanel, TelegramOperatorPanel, DeadmanSwitchPanel, RewardXPMatrixPanel, MemoryWatchdogPanel.
 
 **VirtualBotDeck (Pionex-Style):** Bot-Karten mit Budget, Equity, PnL, Max-Loss, Style-Badge, Start/Pause → VirtualBotEngine + Alert-Provisioner.
 
-Strategie-Bibliothek bleibt erste Klasse; Playwright spricht TV im Hintergrund. Kein Full-shadcn-Rewrite.
+Strategie-Bibliothek bleibt erste Klasse; Playwright spricht TV im Hintergrund.
 
 ### 8.1 Bibliotheks-Oberfläche
 
@@ -1051,7 +1051,7 @@ Pfad: [`app/execution/VirtualBotEngine.py`](../app/execution/VirtualBotEngine.py
 kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 ```
 
-**Deadman:** bei Timeout nur Entry-Limits cancel wenn `has_native_stop_loss`; sonst `close_all_market`.
+**Deadman:** Puls nur bei erfolgreichem Kraken-Time-Ping (dieselbe RTT wie die Header-Latenz). Timeout 1800s (30 min Offline) → nur Entry-Limits cancel wenn `has_native_stop_loss`; sonst `close_all_market`.
 
 ---
 

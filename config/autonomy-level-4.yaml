@@ -127,7 +127,7 @@ virtual_bots:
 
 deadman_switch:
   heartbeat_seconds: 20
-  timeout_seconds: 60
+  timeout_seconds: 1800
   cancel_only_if_native_stop: true
   fallback_action: close_all_market
 

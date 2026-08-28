@@ -11,7 +11,7 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, './src'),
       },
     },
     server: {
@@ -31,6 +31,7 @@ export default defineConfig(() => {
         '/api': {
           target: process.env.SIGMA_CORE_PROXY || process.env.ALPHA_CORE_PROXY || 'http://127.0.0.1:8000',
           changeOrigin: true,
+          ws: true,
         },
       },
     },
@@ -42,6 +43,7 @@ export default defineConfig(() => {
         '/api': {
           target: process.env.SIGMA_CORE_PROXY || process.env.ALPHA_CORE_PROXY || 'http://127.0.0.1:8000',
           changeOrigin: true,
+          ws: true,
         },
       },
     },

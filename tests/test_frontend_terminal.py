@@ -21,6 +21,8 @@ TERMINAL_TSX = os.path.join(ROOT, "src", "components", "SigmaTerminal.tsx")
 API_TS = os.path.join(ROOT, "src", "lib", "sigmaApi.ts")
 APP_TSX = os.path.join(ROOT, "src", "App.tsx")
 TV_LOGIN = os.path.join(ROOT, "bin", "sigma-tv-login")
+SIGMA_UP = os.path.join(ROOT, "bin", "sigma-up")
+SIGMA_DOWN = os.path.join(ROOT, "bin", "sigma-down")
 
 
 def _read(path: str) -> str:
@@ -55,12 +57,15 @@ def test_every_preset_has_a_layout(preset: str):
 
 
 def test_presets_cover_blueprint_core_plus_capital_ops():
-    """§8 Presets + §30 CAPITAL_OPS (Execution-Plane-Panels)."""
+    """§8 Presets + §30 CAPITAL_OPS / OVERVIEW / LIBRARY / QUANT / CONFIG."""
     src = _read(TERMINAL_TSX)
     listed = src.split("export const PRESETS = [", 1)[1].split("]", 1)[0]
     names = [p.strip().strip("'\"") for p in listed.split(",") if p.strip()]
     assert names[:len(bp.TERMINAL_PRESETS)] == list(bp.TERMINAL_PRESETS)
     assert "CAPITAL_OPS" in names
+    for extra in bp.TERMINAL_PRESETS_EXTENDED:
+        assert extra in names
+        assert extra in bp.ALL_TERMINAL_PRESETS
     for preset in names:
         assert preset in bp.ALL_TERMINAL_PRESETS
         assert f"  {preset}: {{" in src
@@ -71,7 +76,7 @@ def test_presets_cover_blueprint_core_plus_capital_ops():
     "RateLimiterPanel", "ContagionRadarPanel", "FlywheelBudgetPanel",
 ])
 def test_extended_panels_are_registered(panel):
-    """§30 — die Execution-Plane-Panels haengen in der FlexLayout-Registry."""
+    """§30 — die Execution-Plane-Panels haengen in der Dock-Registry."""
     src = _read(PANELS_TSX)
     assert f"export function {panel}()" in src
     registry = src.split("PANEL_REGISTRY", 1)[1].split("};", 1)[0]
@@ -82,7 +87,9 @@ def test_extended_panels_are_registered(panel):
 def test_terminal_is_wired_into_app_navigation():
     src = _read(APP_TSX)
     assert "SigmaTerminal" in src
-    assert "'terminal'" in src
+    assert "import SigmaTerminal" in src
+    assert "activePage" not in src
+    assert "nav-tab-" not in src
 
 
 def test_api_client_targets_blueprint_routes():
@@ -108,11 +115,47 @@ def test_tv_login_bootstrap_exists_and_is_executable():
     assert bp.PATH_TV_STORAGE_STATE in src or "PATH_TV_STORAGE_STATE" in src
 
 
+def test_sigma_up_requires_tv_session_before_stack():
+    assert os.path.exists(SIGMA_UP)
+    assert os.access(SIGMA_UP, os.X_OK), "bin/sigma-up must be executable"
+    assert os.path.exists(SIGMA_DOWN)
+    assert os.access(SIGMA_DOWN, os.X_OK), "bin/sigma-down must be executable"
+    src = _read(SIGMA_UP)
+    assert "ensure_tv_session" in src
+    assert src.find("ensure_tv_session") < src.find("start_bg scraper")
+    assert src.find("ensure_tv_session") < src.find("start_bg core")
+    assert "refusing to start the stack" in src
+    assert "sigma-tv-login" in src
+
+
+def test_unified_shell_panels_and_llm_wiring():
+    panels = _read(PANELS_TSX)
+    library = _read(os.path.join(ROOT, "src", "components", "sigma", "StrategyLibraryPanel.tsx"))
+    dock = _read(os.path.join(ROOT, "src", "components", "sigma", "dock.tsx"))
+    api = _read(API_TS)
+    registry = panels.split("PANEL_REGISTRY", 1)[1].split("};", 1)[0]
+    for panel in bp.TERMINAL_PANELS_EXTENDED:
+        assert f"export function {panel}(" in panels, f"{panel} missing export"
+        assert f"  {panel},\n" in registry, f"{panel} not in PANEL_REGISTRY"
+    for tab in bp.STRATEGY_DETAIL_TABS:
+        assert tab in library
+    assert "STRATEGY_DETAIL_TABS" in library
+    assert "new WebSocket" in panels
+    assert "llmStreamUrl" in panels and "llmToolCall" in panels
+    assert "fromTemplate" in api
+    assert "/api/strategies/from-template" in api
+    assert "ResizablePanelGroup" in dock
+    assert "flexlayout-react" not in dock
+
+
 def test_package_json_pins_terminal_dependencies():
     import json
 
     with open(os.path.join(ROOT, "package.json"), "r", encoding="utf-8") as fh:
         pkg = json.load(fh)
     deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-    assert "flexlayout-react" in deps
+    assert "react-resizable-panels" in deps
     assert "lightweight-charts" in deps
+    assert "flexlayout-react" not in deps
+    assert os.path.exists(os.path.join(ROOT, "components.json"))
+    assert os.path.exists(os.path.join(ROOT, "src", "components", "ui", "resizable.tsx"))

@@ -14,3 +14,5 @@ dist/
 
 # §38 — ONNX-Modelle sind Laufzeit-Artefakte (Registry/Training), nicht versioniert
 models/*.onnx
+.vercel
+.env*

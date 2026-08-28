@@ -289,7 +289,7 @@ def test_virtual_bot_and_deadman_rules():
     assert bp.VIRTUAL_BOT_SIZING_BASIS == "bot.current_equity"
     assert bp.PIONEX_ENABLED_DEFAULT is False
     assert bp.NATIVE_BRACKET_SL_REQUIRED is True
-    assert bp.DEADMAN_TIMEOUT_SECONDS == 60
+    assert bp.DEADMAN_TIMEOUT_SECONDS == 1800
     assert bp.DEADMAN_CANCEL_ONLY_IF_NATIVE_STOP is True
     state, action = bp.VIRTUAL_BOT_ON_MAX_LOSS
     assert state is bp.M8State.QUARANTINED and action is bp.AlertAction.DISABLE

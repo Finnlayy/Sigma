@@ -175,11 +175,18 @@ def test_scout_plan_endpoint(client):
 # ---------------------------------------------------------- ops / telegram ---
 
 def test_deadman_and_memory_endpoints(client):
+    snap = client.get("/api/v1/deadman").json()
+    assert snap["timeout_s"] == bp.DEADMAN_TIMEOUT_SECONDS
+    assert snap["expired"] is False
+    assert snap["auto_pulse"] is True
     dm = client.post("/api/v1/deadman/beat", params={"has_native_stop_loss": True}).json()
     assert dm["timeout_s"] == bp.DEADMAN_TIMEOUT_SECONDS and dm["expired"] is False
     mem = client.post("/api/v1/memory/check", params={"force": True}).json()
     assert "stage" in mem
     assert client.get("/api/v1/memory").json()["stages_pct"] == list(bp.MEMORY_STAGES_PCT)
+    tele = client.get("/api/v1/scheduler").json()
+    names = [t["name"] for tier in tele["tiers"] for t in tier.get("registered", [])]
+    assert "deadman_heartbeat" in names
 
 
 def test_telegram_whitelist_and_fastpath(client):
@@ -196,3 +203,11 @@ def test_safety_snapshot_shape(client):
     s = client.get("/api/v1/safety").json()
     assert s["max_daily_loss_usd"] == bp.RISK_GUARD["max_daily_loss_usd"]
     assert s["live_trading"] is False
+
+
+def test_strategy_from_template_creates_pine_v6(client):
+    out = client.post("/api/strategies/from-template", json={"template": "cisd"}).json()
+    assert out["id"] and out["code"].startswith("//@version=6")
+    assert out["parameters"]["template"] == "cisd"
+    bad = client.post("/api/strategies/from-template", json={"template": "nope"})
+    assert bad.status_code == 400

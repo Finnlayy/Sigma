@@ -6,6 +6,7 @@ Knoten:     Jaune (Carrera-Engine)
 =========================================================
 Mutative Schreibzugriffe erfordern ein gültiges settingsToken
 (Passkey-Gate, Blueprint: 'Passkey-gated settings and mutative commands').
+Loopback (127.0.0.1) darf ohne Token schreiben — lokaler Operator.
 """
 from __future__ import annotations
 
@@ -31,13 +32,42 @@ ENV_MAP: Dict[str, str] = {
     "ALPHA_LOG_LEVEL": "Log-Level (DEBUG|INFO|WARNING)",
 }
 
-SENSITIVE_PREFIXES = ("TELEGRAM_", "KRAKEN_", "ALPHA_WEBAUTHN_")
+SECRET_MAP: Dict[str, str] = {
+    "KRAKEN_API_KEY": "Kraken API Key",
+    "KRAKEN_API_SECRET": "Kraken API Secret",
+    "SIGMA_WEBHOOK_SECRET": "TradingView Webhook Secret",
+    "TELEGRAM_BOT_TOKEN": "Telegram Bot Token",
+    "TELEGRAM_CHAT_ID": "Telegram Chat ID",
+}
+
+RUNTIME_MAP: Dict[str, str] = {
+    "SIGMA_LIVE_TRADING": "Live Trading (0 = paper, 1 = live)",
+    "SIGMA_MARKET_SOURCE": "Market source (synthetic | ccxt_ws)",
+    "SIGMA_TV_MCP_URL": "TradingView MCP URL (fake = sandbox)",
+    "SIGMA_OLLAMA_URL": "Ollama URL",
+    "SIGMA_PUBLIC_URL": "Public webhook base URL",
+}
+
+WRITABLE: Dict[str, str] = {**ENV_MAP, **SECRET_MAP, **RUNTIME_MAP}
+SENSITIVE_PREFIXES = ("TELEGRAM_", "KRAKEN_", "ALPHA_WEBAUTHN_", "SIGMA_WEBHOOK_")
 
 
 def _mask(value: str) -> str:
     if len(value) <= 4:
         return "****"
     return value[:2] + "…" + value[-2:]
+
+
+def _is_sensitive(key: str) -> bool:
+    return key in SECRET_MAP or any(key.startswith(p) for p in SENSITIVE_PREFIXES)
+
+
+def _group(key: str) -> str:
+    if key in SECRET_MAP:
+        return "secrets"
+    if key in RUNTIME_MAP:
+        return "runtime"
+    return "risk"
 
 
 class SettingsEnvManager:
@@ -47,23 +77,32 @@ class SettingsEnvManager:
 
     # --------------------------------------------------------------------- read
     def get_all(self) -> List[Dict[str, Any]]:
-        rows = []
-        for key, label in ENV_MAP.items():
+        rows: List[Dict[str, Any]] = []
+        seen = set()
+        for key, label in WRITABLE.items():
             value = os.environ.get(key, "")
+            sensitive = _is_sensitive(key)
             rows.append({
                 "key": key,
                 "label": label,
-                "value": _mask(value) if any(key.startswith(p) for p in SENSITIVE_PREFIXES)
-                         and value else (value or self._default_for(key)),
-                "isMasked": bool(value and any(key.startswith(p) for p in SENSITIVE_PREFIXES)),
+                "group": _group(key),
+                "value": _mask(value) if sensitive and value else (value or self._default_for(key)),
+                "isMasked": bool(sensitive and value),
                 "setInEnv": bool(value),
             })
-        # Zusätzlich sensible Keys anzeigen (nur existenzweise)
+            seen.add(key)
         for k in os.environ:
+            if k in seen:
+                continue
             if any(k.startswith(p) for p in SENSITIVE_PREFIXES):
-                rows.append({"key": k, "label": "Secret (masked)",
-                             "value": "****" if os.environ.get(k) else "",
-                             "isMasked": True, "setInEnv": bool(os.environ.get(k))})
+                rows.append({
+                    "key": k,
+                    "label": "Secret (masked)",
+                    "group": "secrets",
+                    "value": "****" if os.environ.get(k) else "",
+                    "isMasked": True,
+                    "setInEnv": bool(os.environ.get(k)),
+                })
         return rows
 
     def _default_for(self, key: str) -> str:
@@ -79,21 +118,28 @@ class SettingsEnvManager:
             "ALPHA_MARKET_SOURCE": self.config.market_source,
             "ALPHA_AUTOPSY_ORDER": self.config.autopsy_order,
             "ALPHA_LOG_LEVEL": self.config.log_level,
+            "SIGMA_LIVE_TRADING": "1" if self.config.live_trading else "0",
+            "SIGMA_MARKET_SOURCE": self.config.market_source,
+            "SIGMA_TV_MCP_URL": self.config.tv_mcp_url,
+            "SIGMA_OLLAMA_URL": self.config.ollama_url,
         }
         return defaults.get(key, "")
 
     # -------------------------------------------------------------------- write
     def update(self, key: str, value: str) -> Dict[str, Any]:
-        if key not in ENV_MAP:
+        if key not in WRITABLE:
             raise ValueError(f"Key '{key}' ist nicht für die UI freigegeben.")
         os.environ[key] = str(value)
         self._write_env_file(key, str(value))
         self.config.reload_from_env()
+        if _is_sensitive(key):
+            logger.info("Hot-Reload: %s → [redacted]", key)
+            return {"key": key, "value": "****", "applied": True, "hotReloaded": True, "masked": True}
         logger.info("Hot-Reload: %s → %s", key, value)
         return {"key": key, "value": str(value), "applied": True, "hotReloaded": True}
 
     def delete(self, key: str) -> Dict[str, Any]:
-        if key not in ENV_MAP:
+        if key not in WRITABLE:
             raise ValueError(f"Key '{key}' ist nicht für die UI freigegeben.")
         os.environ.pop(key, None)
         self._write_env_file(key, None)

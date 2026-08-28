@@ -62,6 +62,20 @@ def test_clock_resync_respects_interval_and_force():
     assert clock.offset_s == pytest.approx(5.0 - 3601)
 
 
+def test_clock_ping_records_rtt_and_survives_failure():
+    host = _FakeHostClock(1000.0)
+    clock = ExchangeClock(fetcher=lambda: 1000.05, host_time=host)
+    ok = clock.ping()
+    assert ok["ok"] is True and clock.last_rtt_ms is not None
+
+    def boom() -> float:
+        raise RuntimeError("offline")
+
+    bad = ExchangeClock(fetcher=boom, host_time=host)
+    fail = bad.ping()
+    assert fail["ok"] is False and bad.last_rtt_ms is None
+
+
 def test_clock_survives_failed_sync():
     def boom() -> float:
         raise RuntimeError("no network")

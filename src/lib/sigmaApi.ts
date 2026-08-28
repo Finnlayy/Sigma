@@ -109,6 +109,10 @@ export interface DeadmanSnapshot {
   trigger_count: number;
   last_action: string;
   has_native_stop_loss: boolean;
+  auto_pulse?: boolean;
+  pulse_source?: string;
+  kraken_rtt_ms?: number | null;
+  kraken_ok?: boolean;
 }
 
 export interface MemorySnapshot {
@@ -362,6 +366,8 @@ export const sigmaApi = {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${window.location.host}/api/v1/llm/stream`;
   },
+  fromTemplate: (template: string, name?: string) =>
+    post<any>('/api/strategies/from-template', { template, name }),
 
   // §37 Live Process & AI Log Console
   logSources: () => request<LogSources>('/api/v1/logs/sources'),

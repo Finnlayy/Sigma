@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# =========================================================
+# Datei:      bin/sigma-up
+# Zweck:      Startet den lokalen Sigma-Stack NUR nach einer
+#             gültigen TradingView-Session (Blueprint §11).
+#             Reihenfolge: TV-Login → Redis → Scraper → Core → UI
+# System:     Manas: Ciel Core Matrix — Projekt:Sigma
+# =========================================================
+# Verwendung:
+#   bin/sigma-up                 # Login falls nötig, dann Stack
+#   bin/sigma-up --force-login   # immer neu einloggen
+#   bin/sigma-up --skip-login    # FakeDriver (kein Playwright)
+#   bin/sigma-up --stop          # Stack stoppen (siehe bin/sigma-down)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+VENV="${SIGMA_VENV:-$ROOT/.venv}"
+PYTHON="$VENV/bin/python"
+RUN_DIR="$ROOT/data/run"
+export DISPLAY="${DISPLAY:-:0}"
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+export PYTHONUNBUFFERED=1
+
+FORCE_LOGIN=0
+SKIP_LOGIN=0
+TV_LOGIN_TIMEOUT="${TV_LOGIN_TIMEOUT:-600}"
+
+log() { printf '[sigma-up] %s\n' "$*"; }
+die() { printf '[sigma-up] ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  sed -n '9,14p' "$0" | sed 's/^# //;s/^#//'
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --force-login) FORCE_LOGIN=1 ;;
+    --skip-login)  SKIP_LOGIN=1 ;;
+    --stop)        exec "$ROOT/bin/sigma-down" ;;
+    -h|--help)     usage; exit 0 ;;
+    *)             die "unknown flag: $arg" ;;
+  esac
+done
+
+[[ -x "$PYTHON" ]] || die "venv missing: $PYTHON"
+
+mkdir -p "$RUN_DIR" "$ROOT/data/secrets" "$ROOT/data/signals" "$ROOT/data/logs" \
+         "$ROOT/data/tv_exports" "$ROOT/data/tv_jobs"
+chmod 700 "$ROOT/data/secrets" 2>/dev/null || true
+
+port_listening() {
+  "$PYTHON" -c 'import socket, sys
+s = socket.socket()
+s.settimeout(0.3)
+code = s.connect_ex(("127.0.0.1", int(sys.argv[1])))
+s.close()
+raise SystemExit(0 if code == 0 else 1)' "$1"
+}
+
+wait_http() {
+  local url="$1" tries="${2:-40}" i
+  for i in $(seq 1 "$tries"); do
+    if "$PYTHON" -c 'import sys, urllib.request
+urllib.request.urlopen(sys.argv[1], timeout=2)' "$url" >/dev/null 2>&1
+    then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+ensure_playwright() {
+  if "$PYTHON" -c 'from playwright.sync_api import sync_playwright
+p = sync_playwright().start()
+b = p.chromium.launch(headless=True)
+b.close()
+p.stop()' >/dev/null 2>&1
+  then
+    return 0
+  fi
+  log "installing Playwright Chromium → $PLAYWRIGHT_BROWSERS_PATH"
+  "$PYTHON" -m playwright install chromium
+}
+
+tv_session_ok() {
+  "$PYTHON" bin/sigma-tv-login --check >/dev/null
+}
+
+ensure_tv_session() {
+  if [[ "$SKIP_LOGIN" -eq 1 ]]; then
+    log "skipping TV login — Playwright driver will stay in FakeDriver mode"
+    return 0
+  fi
+  if [[ "$FORCE_LOGIN" -eq 0 ]] && tv_session_ok; then
+    log "TradingView session already present — starting stack"
+    "$PYTHON" bin/sigma-tv-login --check
+    return 0
+  fi
+  ensure_playwright
+  log "TradingView login required BEFORE the stack starts."
+  log "Chromium will open. Sign in (incl. 2FA) and leave the window open."
+  log "Stack starts only after tv_storage_state.json is written."
+  "$PYTHON" bin/sigma-tv-login --timeout "$TV_LOGIN_TIMEOUT"
+  tv_session_ok || die "no TradingView session — refusing to start the stack"
+  "$PYTHON" bin/sigma-tv-login --check
+}
+
+ensure_redis() {
+  if port_listening 6379; then
+    log "redis already on :6379"
+    return 0
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    docker start sigma-redis >/dev/null 2>&1 || \
+      docker run -d --name sigma-redis --restart unless-stopped \
+        -p 127.0.0.1:6379:6379 redis:7-alpine \
+        redis-server --appendonly yes --appendfsync everysec >/dev/null
+    sleep 1
+  fi
+  port_listening 6379 || log "redis not reachable — core will use fakeredis"
+}
+
+start_bg() {
+  local name="$1" pidfile="$RUN_DIR/${1}.pid"
+  shift
+  if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    log "$name already running (pid $(cat "$pidfile"))"
+    return 0
+  fi
+  nohup "$@" >"$RUN_DIR/${name}.log" 2>&1 &
+  echo $! >"$pidfile"
+  log "$name pid $(cat "$pidfile")"
+}
+
+ensure_tv_session
+ensure_redis
+
+if ! port_listening 8001; then
+  start_bg scraper "$PYTHON" bin/sigma-scraper --host 127.0.0.1 --port 8001
+else
+  log "scraper already on :8001"
+fi
+
+if ! port_listening 8000; then
+  start_bg core "$VENV/bin/uvicorn" app.server.main:app \
+    --host 127.0.0.1 --port 8000 --env-file "$ROOT/.env"
+else
+  log "core already on :8000"
+fi
+
+if ! port_listening 3000; then
+  start_bg ui npm run dev
+else
+  log "ui already on :3000"
+fi
+
+wait_http "http://127.0.0.1:8001/" || log "warning: scraper not answering yet"
+wait_http "http://127.0.0.1:8000/api/v1/health" || die "core did not become healthy"
+wait_http "http://127.0.0.1:3000/" || die "ui did not become healthy"
+
+log "ready"
+log "  UI     http://localhost:3000/"
+log "  core   http://127.0.0.1:8000/api/v1/health"
+log "  TV     playwright driver (session present)"
+log "stop with: bin/sigma-down"
