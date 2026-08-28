@@ -23,7 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from app.core import blueprint as bp
 from app.core.config import AlphaConfig, load_config
+from app.core.l4_config import load_l4_config
 from app.core.duckdb_store import get_store
 from app.core.event_bus import EventBus, get_event_bus
 from app.core.redis_client import close_redis, get_redis
@@ -182,6 +184,9 @@ class AppState:
         self.settings = SettingsEnvManager(cfg)
         self.mcp = KrakenMCPBridge(cfg, self.passkey, None, self.store)
         self.telegram = TelegramBotEngine(cfg)
+        # §36 — HIGH/CRITICAL Fehler pushen ueber denselben Bot
+        from app.core.error_engine import get_error_engine
+        get_error_engine().notifier = self.telegram
         self.eod = EodProfitFactorEngine(self.store, self.m8)
 
         self._seed_strategies()
@@ -490,6 +495,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 state = AppState()
+
+
+# =====================================================================
+# BLUEPRINT / HEALTH (§7 API-Vertrag)
+# =====================================================================
+@app.get("/api/v1/health")
+async def sigma_health():
+    """§7 — status, kill_switch, scraper_ok, tv_worker_ok (+ Spec-Fingerprint)."""
+    import os as _os
+
+    kill = _os.path.exists(state.config.kill_switch_file)
+    paused = _os.path.exists(state.config.pause_signal_file)
+    tv_worker_ok = _os.path.exists(state.config.tv_jobs_dir)
+
+    # Loop C: echter Ping gegen das Sidecar (:8001), Ergebnis 5 s gecacht.
+    scraper: dict = {"ok": False, "degraded": True}
+    try:
+        from app.tv.scraper_client import get_scraper_client
+
+        scraper = await asyncio.to_thread(get_scraper_client().health)
+    except Exception as exc:  # pragma: no cover - defensive
+        scraper = {"ok": False, "degraded": True, "error": str(exc)}
+
+    return {
+        "status": "halted" if kill else ("paused" if paused else "ok"),
+        "kill_switch": kill,
+        "pause": paused,
+        "scraper_ok": bool(scraper.get("ok")),
+        "scraper": scraper,
+        "tv_worker_ok": tv_worker_ok,
+        "live_trading": state.config.live_trading,
+        "uptime": round(time.time() - state.started_at, 1),
+        "blueprint": bp.spec_summary(),
+    }
+
+
+@app.get("/api/v1/blueprint")
+async def sigma_blueprint():
+    """Hart verdrahtete Spec (app/core/blueprint.py) + geladene L4-Config."""
+    return {
+        "spec": bp.spec_summary(),
+        "loops": {
+            loop.value: {
+                "title": s.title, "trigger": s.trigger,
+                "output": s.output, "autonomy": s.autonomy,
+            }
+            for loop, s in bp.LOOPS.items()
+        },
+        "m8_alert_matrix": {
+            st.value: {
+                "alert": pol.alert.value,
+                "accept_webhook": pol.accept_webhook,
+                "budget_multiplier": pol.budget_multiplier,
+                "note": pol.note,
+            }
+            for st, pol in bp.M8_ALERT_MATRIX.items()
+        },
+        "api_contract": dict(bp.API_ROUTES),
+        "delivery_phases": dict(bp.DELIVERY_PHASES),
+        "config": load_l4_config(),
+    }
 
 
 # =====================================================================
@@ -1742,8 +1808,16 @@ async def ai_manifest_learn():
 
 
 from app.server.routes_quant import router as quant_router  # noqa: E402
+from app.server.routes_sigma import router as sigma_router  # noqa: E402
+
+from app.core.error_engine import install_error_handlers  # §36
+install_error_handlers(app)        # Unified Error Taxonomy — kein nacktes 500
 
 app.include_router(quant_router)
+app.include_router(sigma_router)   # Blueprint L4: Loop A-E Routen (§7)
+
+from app.server.routes_logs import router as logs_router  # §37
+app.include_router(logs_router)    # Live Process & AI Log Console
 
 
 # =====================================================================

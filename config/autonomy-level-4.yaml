@@ -1,0 +1,168 @@
+# =============================================================================
+# config/autonomy-level-4.yaml
+# Projekt:Sigma — Autonomy Level 4 Runtime Config
+# Kanonische Quelle: docs/BLUEPRINT-SIGMA.md §9 (Spec Freeze v3.0)
+# Maschinenspiegel:  app/core/blueprint.py  (Werte muessen identisch sein —
+#                    verifiziert durch tests/test_blueprint_spec.py)
+# =============================================================================
+version: "3.0"
+environment: production   # oder development
+
+exchange:
+  name: kraken
+  primary: kraken_cli
+  regulatory_region: DE_BAFIN
+  spot:
+    enabled: true
+    allowed_symbols: [XBTUSD, ETHUSD]
+    allowed_order_types: [limit, market]
+    max_order_notional_usd: 500
+    max_daily_notional_usd: 2000
+    symbol_mappings:
+      XBTUSD: KRAKEN:XBTUSD
+      ETHUSD: KRAKEN:ETHUSD
+  futures:
+    enabled: true
+    allowed_symbols: [PI_XBTUSD, PI_ETHUSD]
+    allowed_order_types: [limit, market, stop, take-profit]
+    max_leverage: 5
+    max_order_notional_usd: 1000
+    max_daily_notional_usd: 5000
+    symbol_mappings:
+      PI_XBTUSD: KRAKEN:XBTUSD.P
+      PI_ETHUSD: KRAKEN:ETHUSD.P
+  pionex:
+    enabled: false          # §20 — kein DE-Live-Futures; nur Lab
+    mode: spot_only
+
+risk_guard:
+  max_open_positions: 4
+  max_daily_loss_usd: 600
+  max_consecutive_errors: 3
+  max_spread_bps: 45
+  min_spot_balance_usd: 250
+  min_futures_balance_usd: 500
+  kelly_fraction: 0.5
+  max_portfolio_risk_per_trade: 0.10
+  atr_stop_multiplier: 1.5
+  atr_take_profit_multiplier: 3.0
+  symbol_halt_ttl_seconds: 300
+
+tv_automation:
+  enabled: true
+  driver: playwright
+  base_url: https://www.tradingview.com
+  storage_state_path: ./data/secrets/tv_storage_state.json
+  export_dir: ./data/tv_exports
+  max_concurrency: 1
+  navigation_timeout_ms: 120000
+  tester_run_timeout_ms: 180000
+  job_total_timeout_ms: 600000
+  alert_name_template: "sigma:{strategy_id}"
+  selectors_path: ./app/tv/selectors.yaml
+
+optimizer:
+  # §17.4 GA-Laufzeit-Haertung (verbindlich)
+  max_population: 15
+  max_generations: 5
+  early_termination_stall_generations: 3
+  param_cache_required: true
+  concurrency: 1
+  dsr_shadow_gate: 0.95
+  min_trades: 30
+
+data_feed:
+  market_source: tv_scraper   # synthetic | tv_scraper | ccxt_ws
+  tradingview_scraper:
+    enabled: true
+    base_url: http://127.0.0.1:8001
+    timeout_s: 30
+
+quant:
+  regime:
+    ema_fast: 50
+    ema_slow: 200
+    atr_period: 14
+    atr_percentile_window: 100
+    atr_pctl_compression_max: 30
+    atr_pctl_normal_max: 70
+    atr_pctl_crisis_min: 95
+    hurst_mean_reversion_max: 0.45
+    hurst_trend_min: 0.55
+  onnx:
+    model_path: ./models/regime_classifier.onnx
+    brier_drift_threshold: 0.28
+    temperature_default: 1.0
+    temperature_step: 0.1
+    temperature_max: 3.0
+    shadow_gate_before_hot_reload: true
+
+academy:
+  badge_min_sample: 30
+  badge_s_winrate_min: 0.60
+  badge_s_profit_factor_min: 1.8
+  badge_f_winrate_max: 0.40
+  badge_f_profit_factor_max: 0.9
+  allocator_model_path: models/strategy_allocator.onnx
+
+reward_shaping:
+  w1_pnl: 1.0
+  w2_mfe_mae: 0.5
+  w3_time_decay: 0.25
+  w4_fee_churn: 0.25
+  multiplier_s: 1.5
+  multiplier_a: 1.25
+  multiplier_b: 1.0
+  multiplier_c: 0.5
+  multiplier_f: 0.5
+  strikes_to_quarantine: 3
+
+virtual_bots:
+  sizing_basis: bot_equity        # niemals Gesamtkonto
+  native_bracket_sl_required: true
+  vault_table: strategy_vaults
+  on_max_loss:
+    m8_state: QUARANTINED
+    alert: disable
+
+deadman_switch:
+  heartbeat_seconds: 20
+  timeout_seconds: 60
+  cancel_only_if_native_stop: true
+  fallback_action: close_all_market
+
+memory_watchdog:
+  stages_pct: [75, 85, 92, 96]
+  actions: [gc_collect, duckdb_checkpoint, chromium_zombie_reaper, emergency_halt_and_restart_worker]
+  cgroup_memory_max: 4G
+  idle_only: true
+
+llm:
+  ollama_url: http://127.0.0.1:11434
+  models: [llama3.1:8b, qwen2.5-coder]
+  tools: [update_risk_settings, control_strategy_runner, edit_strategy_pine_code, query_telemetry]
+
+telegram:
+  enabled: false
+  fast_path_commands: ["/status", "/pause", "/resume", "/kill"]
+  fast_path_budget_ms: 50
+
+webhook:
+  route: /api/v1/signal/webhook
+  secret_env: SIGMA_WEBHOOK_SECRET
+  secret_header: X-Sigma-Webhook-Secret
+  stale_min_seconds: 120
+  stale_interval_factor: 2
+
+safety:
+  kill_switch_file: ./data/signals/KILL_SWITCH
+  pause_signal_file: ./data/signals/PAUSE
+  halt_action: cancel_all
+  audit_log_dir: ./data/logs
+  live_trading_env: SIGMA_LIVE_TRADING
+
+m8:
+  # uebernimmt Alpha-Defaults; Spec v1.2.0
+  base_budget_usd: 50
+  autopsy_order: v1.2.0
+  throttled_budget_multiplier: 0.5

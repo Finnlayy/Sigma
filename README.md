@@ -19,6 +19,21 @@ Hybrid fork of Alpha: **Ubuntu-only**, **TradingView MCP** backtesting via **CSV
 | GA / WFO | Local engine evaluations | Same Python orchestrator; fitness from **TV result CSVs** |
 | UI | Command Center | Same app; backtest flows → TV MCP |
 
+## Hard-coded Blueprint (Spec Freeze v3.0)
+
+Die Blaupause ist nicht nur Prosa — sie ist im Code festverdrahtet:
+
+| Artefakt | Rolle |
+|----------|-------|
+| [`app/core/blueprint.py`](app/core/blueprint.py) | **Maschinenlesbarer Spec-Freeze**: Ports, Pfade, Loops A–E, Risk-Limits, M8-Alert-Matrix, GA-Härtung, Regime-/ONNX-/Reward-/Badge-Schwellen, Panels, Redis-Keys, Delivery-Phasen — eingefroren (`tuple` / `MappingProxyType`) + normative Helfer (`calculate_kelly`, `badge_rating`, `alert_policy_for_state`, …) |
+| [`config/autonomy-level-4.yaml`](config/autonomy-level-4.yaml) | Deploy-Config nach Blueprint §9 |
+| [`app/core/l4_config.py`](app/core/l4_config.py) | Lädt die YAML, fällt bei Fehlen/Parse-Fehler **hart auf die Blueprint-Defaults** zurück (kein stiller Zufallswert) |
+| [`app/core/config.py`](app/core/config.py) | `SigmaConfig` bezieht alle L4-Defaults aus `blueprint.py`; `SIGMA_*`-Env darf Caps (GA-Population/Generationen, Playwright-Concurrency 1) **nicht** überschreiten |
+| [`tests/test_blueprint_spec.py`](tests/test_blueprint_spec.py) | Noir-Gate: verifiziert `blueprint.py` ⟷ `docs/BLUEPRINT-SIGMA.md` ⟷ `docs/MASTERPROMPT.md` ⟷ YAML |
+
+Laufzeit-Introspektion: `GET /api/v1/health` (Spec-Fingerprint, Kill-Switch, Scraper/Worker)
+und `GET /api/v1/blueprint` (Loops, M8-Alert-Matrix, API-Vertrag, geladene Config).
+
 ## CSV Seam
 
 1. **Parameter CSV** ↔ Pine `input.*` / GA genes (`app/backtest/tv_csv.py`)
