@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze v3.0 (5-Loop A–E, Virtual Bots, FlexLayout Terminal, Reward/ONNX/Telegram) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.1 (Execution Plane: Scheduler, Glint/OB, ACK/Retry, Flywheel, Fixed Leverage) — `docs/BLUEPRINT-SIGMA.md`  
 > **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
@@ -26,7 +26,7 @@ Dieses Dokument ist die verbindliche Blaupause. Der Masterprompt ist die Persona
 | Power | Beliebige Pine v6; TV Strategy Tester + GA; Scout; Academy; Offline-LLM + Telegram |
 | Engine | Kraken CLI Ubuntu; Ring-Fencing; native Bracket-SL + Deadman |
 
-Strategy-Card Pflichtfelder: `RUNNING`/`PAUSED`/`QUARANTINED`, Kapital EUR, Bot-PnL, Max-Loss, XP/Strike.
+Strategy-Card Pflichtfelder: `RUNNING`/`PAUSED`/`QUARANTINED`, Kapital EUR, Bot-PnL, Max-Loss, **fester Hebel** (z. B. `5x`), XP/Strike.
 
 ### 0.1 Grundsatz: Strategy ≡ TradingView
 
@@ -1068,13 +1068,186 @@ kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 | Memory | `app/core/memory_watchdog.py` | 75/85/92/96%; Idle-only; CGroup 4G |
 | Telegram | `app/services/telegram_bot_operator.py` | Whitelist; `/kill` Fast-Path; LLM Chat |
 | YAML Heal | `app/tv/yaml_resolver.py` | Remote selectors + Hot-Reload |
+| Exchange Clock | `app/core/exchange_clock.py` | Kraken `/0/public/Time` SoT; Stale-Signal-Gate |
+| Scheduler | `app/core/scheduler_matrix.py` | Tier 0–5; APScheduler UTC |
+| Glint×OB | `app/quant/glint_orderbook_verifier.py` | JIT 2%-Depth; Liquidity-Trap-Veto |
+| Order ACK | `app/execution/reliable_order_dispatcher.py` | Idempotenz; 2× Retry; Ghost-Fill-Check |
+| Rate Limiter | `app/core/rate_limiter.py` | TV-Tier; Kraken Token-Bucket; Emergency Reserve |
+| SIR Contagion | `app/quant/epidemic_contagion_engine.py` | R₀ Makro; Hedge/Cash-Modi |
+| Flywheel | `app/execution/capital_flywheel_engine.py` | 100% Deposit→Futures; 50/50 Profit-Split |
 
 systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
+
+**Hebel:** `fixed_leverage` pro Strategie in `profile.json` — siehe §29.
 
 ---
 
 ## 22. Masterprompt
 
 KI-Persona und Axiom-Konsolidierung: [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) (Ciel Core Matrix 3.0 // Sigma L4). Bei Konflikten gilt dieses Blueprint-Dokument als kanonische System-Spezifikation; der Masterprompt steuert Antwortformat und Primordial-Rollen.
+
+---
+
+## 23. Zeit-Anker & Scheduler-Matrix
+
+### 23.1 Kraken Server-Time = Single Source of Truth
+
+Pfad: [`app/core/exchange_clock.py`](app/core/exchange_clock.py).
+
+- Endpoint: `GET https://api.kraken.com/0/public/Time`
+- `time_offset = t_kraken - t_host` (RTT/2 korrigiert); stündlicher Re-Sync
+- Alle Module nutzen `exchange_clock.now()` statt `time.time()` für: Deadman, EOD, Stale-Signal-Gate, Scheduler
+- `is_signal_stale(signal_ts, max_latency)` → `STALE_SIGNAL_REJECT` in `orders.jsonl`
+
+### 23.2 Deterministic Scheduling Matrix
+
+Pfad: [`app/core/scheduler_matrix.py`](app/core/scheduler_matrix.py) (APScheduler AsyncIO).
+
+| Tier | Cadence | Tasks |
+|------|---------|-------|
+| **0 Event-Driven** | Just-in-Time | Glint×OB Verify, Webhook Execution, Kill-Switch, Playwright Compile |
+| **1 Fast Pulse** | 15–20s | Deadman Heartbeat, Memory Watchdog |
+| **2 Mid** | 5 min | Makro-Radar (Scraper :8001 Breadth/Sektoren) |
+| **3 Regime** | 4 h | Strategy Allocator, Regime Re-Check, Brier Drift |
+| **4 Daily** | 00:05 UTC | Spot Rebalance, EOD Profit Factor, 50/50 Flywheel Sweep |
+| **5 Weekly** | So 23:00 UTC | Academy Badge Recalibration, Kausal-Audit |
+
+**Regel:** Kein Dauer-Orderbuch-Scan aller Symbole. Orderbuch nur **Just-in-Time** für das eine Symbol beim Signal/Spot-Kauf (`max_cached_depth_age_seconds: 3`).
+
+Config-Snippet in `config/autonomy-level-4.yaml` → `scheduler_matrix:`.
+
+---
+
+## 24. Glint × Orderbook Confluence (Just-in-Time)
+
+Pfad: [`app/quant/glint_orderbook_verifier.py`](app/quant/glint_orderbook_verifier.py).
+
+**Depth Imbalance:** `I_depth = (bid_vol_2pct - ask_vol_2pct) / (bid_vol_2pct + ask_vol_2pct)` (−1 … +1).
+
+| Glint | Orderbuch | Verdict | Sizing |
+|-------|-----------|---------|--------|
+| BULLISH | `I_depth ≥ +0.30`, spread ≤15 bps | `CONFLUENCE_CONFIRMED` | Multiplier 1.25× |
+| BULLISH | `I_depth ≤ −0.20` | `LIQUIDITY_TRAP_VETO` | 0 — `ORDERBOOK_WALL_REJECT` |
+| BEARISH | symmetrisch | analog | analog |
+
+**Trigger:** Nur bei Webhook-Entry, Bot-Start oder gezieltem Spot-Kauf — **nie** als globaler Poll-Loop.
+
+UI: `OrderbookConfluencePanel` in FlexLayout.
+
+---
+
+## 25. Closed-Loop Order ACK & Retry
+
+Pfad: [`app/execution/reliable_order_dispatcher.py`](app/execution/reliable_order_dispatcher.py).
+
+1. **Idempotency:** `signal_id` Hash → Duplikat = `DUPLICATE_IGNORED`
+2. **Execute:** Kraken CLI mit `fixed_leverage` + Bracket-SL
+3. **ACK:** `order_id` + Status `FILLED` / `RETRY_SUCCESS` / `FAILED_REJECTED`
+4. **Smart Retry:** max 2× bei transientem Fehler; **kein** Retry bei `Insufficient funds` / `Invalid arguments`
+5. **Ghost-Fill-Schutz:** vor Retry `open-orders` Check (<200 ms)
+6. **Notify:** Telegram Push + UI `OrderReceiptsPanel`
+
+Receipt-Schema in `orders.jsonl` + REST `/api/orders/receipts`.
+
+---
+
+## 26. Multi-Provider Rate Limiter
+
+Pfad: [`app/core/rate_limiter.py`](app/core/rate_limiter.py) (Token-Bucket pro Provider).
+
+```yaml
+provider_limits:
+  tradingview_subscription:
+    tier: "essential"          # free | essential | plus | premium
+    max_active_alerts: 5
+    enable_alert_rotation_queue: true
+  kraken_api:
+    max_call_counter: 15.0
+    counter_decay_per_second: 0.50
+    reserve_emergency_tokens: 3.0   # Kill-Switch immer frei
+  telegram_bot:
+    max_messages_per_second: 1.0
+```
+
+- **TV Alert Rotation:** bei Tier-Limit rotiert Allocator schwächste Strategie aus, schaltet Top-Strategie scharf
+- **Pre-emptive Soft Cap:** bei 80% Kraken-Counter → Hintergrund-Polls pausieren
+- **HTTP 429:** exponentieller Backoff (10s → 30s → 60s)
+
+UI: `RateLimiterPanel`.
+
+---
+
+## 27. Epidemic SIR Contagion (Makro-Frühwarnung)
+
+Pfad: [`app/quant/epidemic_contagion_engine.py`](app/quant/epidemic_contagion_engine.py).
+
+- Inputs: Öl-Vol Z-Score, Gold/DXY, Cross-Asset-Korrelation, Orderbook-Absorption
+- `R0 = β/γ`; `R0 ≥ 1.5` → `FLIGHT_TO_CASH_AND_HEDGE`; `R0 ≥ 1.0` → Futures-Sizing −50%
+- Steuert Allocator + Spot-Treasury (kein Altcoin-Kauf bei systemischer Kontagion)
+
+UI: `ContagionRadarPanel`.
+
+---
+
+## 28. 50/50 Flywheel — Kanonische Budgetverwaltung
+
+Pfad: [`app/execution/capital_flywheel_engine.py`](app/execution/capital_flywheel_engine.py).
+
+| Flow | Regel |
+|------|-------|
+| **Einzahlung** | 100% → Kraken Futures Arbeitskonto → aktive Bot-Budgets |
+| **Gewinn-Split** | ab `min_split_trigger_eur: 10` → **50%** Bot-Reinvest, **50%** Spot-Tresor |
+| **Spot-Kauf** | Default `XBT`/EUR; optional Glint-Target |
+| **Einbahnstraße** | Spot → Futures **nie** automatisch |
+
+DuckDB: `flywheel_ledger`.
+
+UI: `FlywheelBudgetPanel`.
+
+**Hinweis DE:** Futures-Nutzung nur im regulierten Kraken-Rahmen; Spot-Tresor bleibt liquidationssicher.
+
+---
+
+## 29. Fester Hebel pro Strategie (Strategy-Bound Fixed Leverage)
+
+**Kanonisch:** Hebel wird **einmal pro Strategie/Bot** festgelegt — **nicht** pro Trade dynamisch.
+
+```json
+{
+  "strategy_id": "cisd_sniper_breakout_v6",
+  "fixed_leverage": 5,
+  "style": "STYLE_MICRO_SCALP"
+}
+```
+
+| Strategie-Typ | Typischer fester Hebel | Pine/TV Backtest |
+|---------------|------------------------|------------------|
+| Sniper Breakout (eng SL, Squeeze) | 5× | identisch in TV Tester |
+| Intraday Momentum | 3× | identisch |
+| Swing / Macro | 1×–2× | identisch |
+
+- `KrakenCliBridge` liest `strategy_meta.fixed_leverage` → `--leverage=N`
+- **Sniper-Logik** beeinflusst Strategie-Design (eng SL in Pine), nicht Laufzeit-Hebel-Umschaltung
+- Liquidations-Sicherheit: SL-Distanz ≪ Liquidations-Distanz bei festem Hebel
+- Strategy-Card Badge: `[ 5x HEBEL ]`
+
+**Verworfen:** `dynamic_leverage_engine` mit per-Trade Neuberechnung (Latenz, TV-Divergenz, Race-Conditions).
+
+---
+
+## 30. Erweiterte UI-Panels (FlexLayout Registry)
+
+Zusätzlich zu §8 / Sentinel-Panels:
+
+| Panel ID | Backend |
+|----------|---------|
+| `OrderbookConfluencePanel` | GlintOrderbookVerifier |
+| `SchedulerTelemetryPanel` | scheduler_matrix |
+| `OrderReceiptsPanel` | reliable_order_dispatcher |
+| `RateLimiterPanel` | rate_limiter |
+| `ContagionRadarPanel` | epidemic_contagion_engine |
+| `FlywheelBudgetPanel` | capital_flywheel_engine |
+
+Presets: `SENTINEL_OPS` + `CAPITAL_OPS` (Flywheel + Receipts + Rate Limits).
 
 ---
