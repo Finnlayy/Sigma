@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze v3.5 (Error Taxonomy, Diagnostics Desk, Live Log Console) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.6 (Netron ONNX Graph Inspector) — `docs/BLUEPRINT-SIGMA.md`  
 > **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
@@ -52,6 +52,7 @@ Alles, was „Strategie“ heißt, bezieht sich auf TV und arbeitet darüber:
 |---------|----------------|------|--------------------|
 | **sigma-core** | `uvicorn app.server.main:app` | **8000** | `/opt/sigma` bzw. Repo-Root |
 | **sigma-tv-scraper** | `uvicorn api.main:app` (vendored scraper) | **8001** | `vendor/tradingview-scraper` |
+| **sigma-netron** | `python app/services/netron_server.py` | **8082** | Repo-Root |
 | **sigma-tv-worker** | `python -m app.tv.worker` (Playwright Job-Consumer) | — | Repo-Root |
 | **Redis** | redis-server AOF | **6379** | system |
 | **UI (dev)** | `vite` | **3000** | Repo-Root |
@@ -749,6 +750,7 @@ m8:
 2. `sigma-scraper.service` — uvicorn :8001  
 3. `sigma-core.service` — uvicorn :8000, After=redis+scraper  
 4. `sigma-tv-worker.service` — Playwright worker, After=network, Needs display/headless deps  
+5. `sigma-netron.service` — ONNX graph inspector, Port **8082**, After=network  
 
 `Restart=always`, `RestartSec=3`.
 
@@ -1077,8 +1079,9 @@ kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 | Exact CSV | `app/optimizer/exact_csv_serializer.py` | TV filename + header freeze; roundtrip |
 | Error Engine | `app/core/error_engine.py` | E1000–E5000 taxonomy; FastAPI handlers |
 | Log Stream | `app/server/routes_logs.py` | WS `/api/v1/logs/stream`; multi-file tail |
+| Netron | `app/services/netron_server.py` | ONNX graph viewer sidecar :8082 |
 
-systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
+systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`, `sigma-netron`; MemoryMax auf Worker.
 
 **Hebel:** `fixed_leverage` pro Strategie in `profile.json` — siehe §29.
 
@@ -1251,8 +1254,9 @@ Zusätzlich zu §8 / Sentinel-Panels:
 | `FlywheelBudgetPanel` | capital_flywheel_engine |
 | `PaperLabPanel` | kraken_paper_engine / Scout graduation |
 | `DiagnosticsErrorPanel` | error_engine; E1000–E5000 + remediation hints |
+| `NetronVisualizerPanel` | Netron iframe :8082; ONNX layer/tensor inspect |
 
-Presets: `SENTINEL_OPS` + `CAPITAL_OPS` + `PAPER_LAB` + `OBSERVABILITY`.
+Presets: `SENTINEL_OPS` + `CAPITAL_OPS` + `PAPER_LAB` + `OBSERVABILITY` + `ML_INSPECTOR`.
 
 ---
 
@@ -1899,5 +1903,94 @@ Optional Query-Params: `?filter=ORDERS,AI_LAYER` (Subsystem-Whitelist).
 - Log-Streamer darf Core nicht blockieren: async I/O, 250ms Poll
 - Bei WS-Disconnect: File-Pointer bleiben — Reconnect setzt tail fort
 - Keine Secrets in Log-Lines (Webhook `secret` maskiert)
+
+---
+
+## 38. Netron ONNX Visualization & Inspection Stack
+
+Pfad Backend: [`app/services/netron_server.py`](app/services/netron_server.py)  
+Pfad Frontend: [`src/components/panels/NetronVisualizerPanel.tsx`](src/components/panels/NetronVisualizerPanel.tsx)
+
+Netron ist der kanonische ONNX-Graph-Inspector: Layer, Operatoren, Tensor-Shapes und Gewichte interaktiv — 100 % offline auf Ubuntu.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 NETRON ONNX VISUALIZATION & INSPECTION STACK                │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ sigma-netron (Port 8082)      │             │ NetronVisualizerPanel (React) │
+│ netron.start(model_path)      │             │ IFrame http://localhost:8082  │
+│ dynamischer Model-Switch      │             │ Zoom, Pan, Layer-Inspector    │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ OnnxModelRegistry Integration     │
+                     │ Inspect-Button → POST /api/v1/    │
+                     │ models/inspect/{version_tag}      │
+                     └───────────────────────────────────┘
+```
+
+### 38.1 Port-Matrix (ergänzt)
+
+| Service | Port |
+|---------|------|
+| sigma-core | 8000 |
+| sigma-scraper | 8001 |
+| **sigma-netron** | **8082** |
+| UI (vite) | 3000 |
+| Ollama | 11434 |
+
+### 38.2 Backend — `NetronVisualizerService`
+
+```python
+class NetronVisualizerService:
+    def start_server(self, initial_model_path: str = "./models/regime_classifier.onnx")
+    def load_model(self, model_path: str) -> bool  # dynamischer Switch
+```
+
+- Dependency: `pip install netron`
+- Default-Modell: `./models/regime_classifier.onnx` (Self-Optimizing ONNX, §21)
+- `browse=False` — kein Auto-Browser; nur IFrame/UI-Zugriff
+
+### 38.3 API
+
+| Method | Path | Zweck |
+|--------|------|--------|
+| POST | `/api/v1/models/inspect/{version_tag}` | Lädt ONNX aus Registry in Netron |
+| GET | `/api/v1/models/netron/status` | Aktives Modell + Port-Health |
+
+### 38.4 Frontend — `NetronVisualizerPanel`
+
+- IFrame `http://localhost:8082` (GMT Dark Theme Hintergrund `#0e1117`)
+- Toolbar: aktives Modell, Reload, External-Link
+- FlexLayout Preset: `ML_INSPECTOR` = `NetronVisualizerPanel` + `SelfOptimizingMLPanel`
+
+### 38.5 Model Registry Verknüpfung
+
+In `OnnxModelRegistryPanel` / `SelfOptimizingMLPanel`:
+
+- Button **„In Netron betrachten“** pro Modell-Version
+- Flow: Klick → `POST /api/v1/models/inspect/{tag}` → Netron reload → Panel IFrame refresh
+
+### 38.6 Systemd (`sigma-netron.service`)
+
+```ini
+[Service]
+Type=simple
+User=sigma
+WorkingDirectory=/opt/sigma
+ExecStart=/opt/sigma/venv/bin/python app/services/netron_server.py
+Restart=always
+RestartSec=3
+```
+
+### 38.7 Noir-Gate
+
+- **Air-gapped:** Netron läuft vollständig lokal — keine Cloud-Calls
+- Nur `.onnx` aus `./models/` und Registry — kein Upload-Pfad von außen
+- Port 8082 bindet `127.0.0.1` in Production (nur UI-Proxy); Dev: `0.0.0.0`
 
 ---

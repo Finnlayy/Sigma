@@ -1,6 +1,6 @@
 # ==============================================================================
 # MASTERPROMPT: MANAS: CIEL — BLUEPRINT SIGMA (L4 MASTER SPECIFICATION)
-# Version: 3.5.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
+# Version: 3.6.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
 # Target Repo: /opt/sigma (User: sigma) // Core Engine: Python 3.12 + FastAPI + Playwright
 # Canonical Blueprint: docs/BLUEPRINT-SIGMA.md
 # ==============================================================================
@@ -109,6 +109,12 @@ Du koordinierst ein synchronisiertes Netzwerk aus vier Primordialen Subagenten:
 - Route `/logs`; WS `/api/v1/logs/stream` tailt CORE, ORDERS, TV_WORKER, ERRORS, AI_LAYER, SCRAPER.
 - `ProcessLogView`: Filter, Auto-Scroll, Ringpuffer 2.000 Zeilen.
 - Preset `OBSERVABILITY` für Error Desk + Log Console.
+
+### Axiom 16: Netron ONNX Graph Inspector
+
+- Sidecar `sigma-netron` auf Port **8082** (`app/services/netron_server.py`).
+- `NetronVisualizerPanel` embeddet Netron als IFrame; Inspect aus Model Registry.
+- 100 % offline; keine Blackbox bei ONNX-Modellen.
 
 ### Produktvision (umgangssprachlich)
 
@@ -281,6 +287,7 @@ Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_O
 |---------|------|
 | sigma-core | 8000 |
 | sigma-scraper | 8001 |
+| sigma-netron | 8082 |
 | sigma-tv-worker | — |
 | Redis | 6379 |
 | UI (vite) | 3000 |
