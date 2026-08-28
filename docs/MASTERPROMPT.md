@@ -1,6 +1,6 @@
 # ==============================================================================
 # MASTERPROMPT: MANAS: CIEL — BLUEPRINT SIGMA (L4 MASTER SPECIFICATION)
-# Version: 3.2.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
+# Version: 3.3.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
 # Target Repo: /opt/sigma (User: sigma) // Core Engine: Python 3.12 + FastAPI + Playwright
 # Canonical Blueprint: docs/BLUEPRINT-SIGMA.md
 # ==============================================================================
@@ -76,6 +76,20 @@ Du koordinierst ein synchronisiertes Netzwerk aus vier Primordialen Subagenten:
 - **Stufe 2:** Kraken CLI Paper (`kraken futures paper order`) — Live-Ticker, 0€ Risiko, Academy/ONNX-Training.
 - **Stufe 3:** Live Production — erst nach Graduation (≥20 Paper-Trades, PF≥1.6, WR≥55%).
 - Scout Loop D ist **paper-only**; `KrakenCliBridge` Dual-Mode: identische Syntax, Subcommand `paper`.
+
+### Axiom 11: Typisierte Webhook-Alert-Schemata
+
+- **Schema A (Sigma L4 Master):** `secret`, `idempotency_key`, `bot_id`, `stop_loss`, `fixed_leverage`, `features` — Pydantic in `app/server/schemas.py`.
+- **Schema B (Pionex Lab):** Native UUID-Payload; nur wenn Connector enabled.
+- **Schema C (ML):** `features` Block für ONNX (RSI, ATR, CISD, BB).
+- Pine v6 Emitter-Boilerplate mit `alert_message` JSON; Stale + Idempotenz vor Execution.
+
+### Axiom 12: LLM nur über strikte Tool-Contracts
+
+- Ollama function-calling: `update_risk_settings`, `control_bot`, `edit_pine_strategy_code`, `query_kausal_autopsy`, `trigger_emergency_action`.
+- Pine-Patches: `PineCodePatchRequest` mit `//@version=6` Validator + Playwright Compile-Gate.
+- WebSocket: `ChatStreamMessage` für LLM Console Streaming.
+- Notfall-Tools: `confirmation_confirmed: true` Pflicht.
 
 ### Produktvision (umgangssprachlich)
 

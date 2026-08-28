@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze v3.2 (Strategy Triggers, Lifecycle Pipeline, Kraken Paper Lab) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.3 (Webhook Schemas, LLM Tool Contracts, Streaming) — `docs/BLUEPRINT-SIGMA.md`  
 > **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
@@ -232,19 +232,11 @@ Der Webhook ersetzt die Kraken-CLI **nicht**. Die CLI bleibt der Executor. Der W
 
 Paper-Modus: gleicher Webhook; Executor = native **Kraken CLI Paper** (`kraken futures paper order`) via `KrakenCliBridge` — siehe §32. Scout Loop D ist paper-only; Live erst nach Graduation oder Operator-Freigabe.
 
-### 4.1 Pine Alert Payload (Pydantic)
+### 4.1 Webhook Alert Payload (kanonisch)
 
-```python
-class PineAlertPayload(BaseModel):
-    symbol: str                    # "KRAKEN:XBTUSD" oder "XBTUSD"
-    action: Literal["BUY","SELL","CLOSE"]
-    price: float
-    rsi: float
-    atr: float
-    cisd_score: float = 0.5
-    timestamp: int                 # ms oder s — normalisieren
-    strategy_id: str | None = None
-```
+**Vollständige Schemata:** §33 (`SigmaL4AlertPayload`, Pionex, Pine-Emitter, `SignalExecutionResponse`).
+
+Kurz: Jedes TV-Signal ist typisiertes JSON mit `secret`, `idempotency_key`, `strategy_id`, `bot_id`, `action`, `stop_loss`, `fixed_leverage`, `timestamp`, optional `features` (ONNX). Validierung in [`app/server/schemas.py`](app/server/schemas.py) (Pydantic V2 strict).
 
 ### 4.2 Endpoint
 
@@ -1077,6 +1069,8 @@ kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 | Flywheel | `app/execution/capital_flywheel_engine.py` | 100% Deposit→Futures; 50/50 Profit-Split |
 | Strategy Lifecycle | `app/services/strategy_lifecycle_service.py` | 3 Trigger-Pfade → TV Placement |
 | Kraken Paper | `app/execution/KrakenCliBridge.py` | Dual-Mode: `paper` vs `live`; Graduation |
+| Webhook Schemas | `app/server/schemas.py` | SigmaL4, Pionex, ML features; Pydantic V2 |
+| LLM Schemas | `app/llm/schemas_llm.py` | Tools, Pine patch, WebSocket stream |
 
 systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
 
@@ -1420,5 +1414,245 @@ kraken_paper_engine:
 | Execution | Simuliert | Echte CLI + Latenz + Spread |
 | Academy/ONNX | Backtest-CSV | Echte Fill-Telemetrie |
 | Risiko | 0 € | 0 € |
+
+---
+
+## 33. Standardisierte Webhook-Alert-Schemata
+
+Pfad: [`app/server/schemas.py`](app/server/schemas.py).
+
+Drei Schema-Familien; Ingestion-Router auf `:8000` erkennt Format und validiert strikt (Pydantic V2).
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA STANDARDIZED WEBHOOK ALERT SCHEMATA                   │
+│                     (Pine Script v6 ──► Ingestion Router)                   │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ Schema A: Sigma L4 Master     │             │ Schema B: Pionex Native       │
+│ • secret + idempotency_key    │             │ • UUID signal_type            │
+│ • bot_id, SL/TP, fixed_leverage│            │ • TV-Platzhalter direkt       │
+│ • features (ONNX/ML)          │             │ • optional Lab-Routing only   │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                │                                             │
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ Pydantic V2 Strict Validator      │
+                     │ + exchange_clock stale gate       │
+                     │ + idempotency (reliable_dispatcher)│
+                     └───────────────────────────────────┘
+```
+
+### 33.1 Schema A — Sigma L4 Master Signal (Kraken Live & Paper)
+
+```json
+{
+  "secret": "sigma_prod_secure_token_8849",
+  "idempotency_key": "sig_cisd_v6_XRPUSD_1787786800",
+  "strategy_id": "cisd_sniper_breakout_v6",
+  "bot_id": "bot_xrp_01",
+  "symbol": "KRAKEN:XRPUSD.P",
+  "action": "BUY",
+  "order_type": "MARKET",
+  "price": 0.5842,
+  "stop_loss": 0.5765,
+  "take_profit": 0.6050,
+  "fixed_leverage": 5,
+  "timestamp": 1787786800,
+  "features": {
+    "rsi": 28.4,
+    "atr": 0.0052,
+    "cisd_score": 0.88,
+    "bb_bandwidth": 0.024
+  }
+}
+```
+
+| Feld | Pflicht | Zweck |
+|------|---------|-------|
+| `secret` | ja | Shared Secret; HTTP 401 bei Mismatch |
+| `idempotency_key` | ja | Duplikat → `DUPLICATE_IGNORED` |
+| `strategy_id` / `bot_id` | ja | Routing zu Virtual Bot + M8 |
+| `stop_loss` | ja | Native Bracket-SL an Kraken CLI |
+| `fixed_leverage` | ja | Strategy-bound; 1–5 |
+| `features` | optional | ONNX-Inferenz (Schema C embedded) |
+
+**Pydantic-Modelle:**
+
+```python
+class MLFeaturePayload(BaseModel):
+    rsi: float = Field(..., ge=0.0, le=100.0)
+    atr: float = Field(..., gt=0.0)
+    cisd_score: Optional[float] = 0.5
+    bb_bandwidth: Optional[float] = 0.0
+
+class SigmaL4AlertPayload(BaseModel):
+    secret: str = Field(..., min_length=16)
+    idempotency_key: str = Field(..., min_length=8)
+    strategy_id: str
+    bot_id: str
+    symbol: str
+    action: Literal["BUY", "SELL", "CLOSE"]
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET"
+    price: float = Field(..., gt=0.0)
+    stop_loss: float = Field(..., gt=0.0)
+    take_profit: Optional[float] = None
+    fixed_leverage: int = Field(1, ge=1, le=5)
+    timestamp: int
+    features: Optional[MLFeaturePayload] = None
+    # Validators: timestamp ms→s; symbol KRAKEN:/.P strip
+```
+
+**Response:** `SignalExecutionResponse` — `EXECUTED` | `REJECTED` | `DUPLICATE_IGNORED` | `VETO_ORDERBOOK`.
+
+### 33.2 Schema B — Pionex Signal Bot (optional Lab)
+
+Nur wenn `pionex_connector.enabled: true` (default `false` in DE). Direkt-Routing TV → Pionex:
+
+```json
+{
+  "data": {
+    "action": "{{strategy.order.action}}",
+    "contracts": "{{strategy.order.contracts}}",
+    "position_size": "{{strategy.position_size}}"
+  },
+  "price": "{{close}}",
+  "signal_param": "{}",
+  "signal_type": "8a17bcf9-0d9c-4a09-92ae-27adf755d95d",
+  "symbol": "{{ticker}}",
+  "time": "{{timenow}}"
+}
+```
+
+### 33.3 Schema C — ML/Kausal-Telemetrie
+
+Transportiert in `features` (Schema A) oder separat in Academy-Autopsie-Logs:
+
+- RSI, ATR, CISD-Score, BB-Bandwidth
+- Optional Snapshots: MFE/MAE, Regime-Enum, Glint-Score
+
+### 33.4 Pine v6 Master Emitter (Boilerplate)
+
+Jede Bibliotheks-Strategie bindet den Sigma-Emitter ein:
+
+- TV-Platzhalter: `{{strategy.order.action}}`, `{{close}}`, `{{timenow}}`, `{{ticker}}`
+- `idempotency_key = sig_{strategy_id}_{ticker}_{time_close}`
+- `strategy.entry(..., alert_message=json_msg)` + `alert(json_msg, alert.freq_once_per_bar_close)`
+- Konstanten: `SIGMA_SECRET`, `STRATEGY_ID`, `BOT_ID`, `FIXED_LEVERAGE`
+
+Vollständiges Boilerplate: `./prompts/pine_sigma_l4_emitter_v6.pine` (Template).
+
+### 33.5 Ingestion-Pipeline (nach Validierung)
+
+1. `secret` check → 401
+2. `exchange_clock.is_signal_stale(timestamp)` → `STALE_SIGNAL_REJECT`
+3. Idempotenz-Store → Duplikat
+4. Glint×OB JIT (§24) → optional Veto
+5. `reliable_order_dispatcher` → Kraken Live/Paper
+
+---
+
+## 34. LLM-, Tool-Calling- & Streaming-Schemata
+
+Pfad: [`app/llm/schemas_llm.py`](app/llm/schemas_llm.py).
+
+Offline Ollama (`:11434`) steuert Sigma nur über **typisierte** Tool-Contracts — kein Freitext-Execution.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA LLM & CONVERSATIONAL SCHEMA MATRIX                    │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[Tool Call Contract]            [Pine Code Patch]                 [WebSocket Stream]
+• Ollama function-calling       • strategy_id + edit_mode           • ChatStreamMessage
+• Parameter range validation    • pine v6 enforce //@version=6      • Token chunks + tool_result
+• ToolResultEnvelope            • Playwright compile gate           • ui_component_trigger
+```
+
+### 34.1 Tool-Calling Schemata (Ollama / OpenAI-kompatibel)
+
+| Tool | Params-Model | Wirkung |
+|------|--------------|---------|
+| `update_risk_settings` | `UpdateRiskSettingsParams` | `max_daily_loss_usd`, `kelly_fraction`, `max_open_positions`, `global_max_leverage` (1–5) |
+| `control_bot` | `ControlBotParams` | `START` / `PAUSE` / `STOP` / `QUARANTINE`; optional `adjusted_budget_eur` |
+| `edit_pine_strategy_code` | `PineCodePatchRequest` | `FULL_REPLACE` / `DIFF_PATCH` / `INJECT_TIME_STOP` / `ADJUST_PARAMETERS` |
+| `query_kausal_autopsy` | `QueryKausalAutopsyParams` | strategy_id, symbol, timeframe |
+| `trigger_emergency_action` | `TriggerEmergencyActionParams` | `KILL_SWITCH` / `CANCEL_ALL_ORDERS` / `FLIGHT_TO_CASH`; **`confirmation_confirmed: true` Pflicht** |
+
+**Envelopes:**
+
+```python
+class ToolCallEnvelope(BaseModel):
+    call_id: str
+    tool_name: str
+    arguments: Dict[str, Any]
+    timestamp: int
+
+class ToolResultEnvelope(BaseModel):
+    call_id: str
+    tool_name: str
+    status: Literal["SUCCESS", "FAILED", "CONFIRMATION_REQUIRED"]
+    result_data: Dict[str, Any]
+    error_message: Optional[str] = None
+    execution_time_ms: int
+```
+
+Tool-Registry JSON: `app/llm/tools_registry.json` (OpenAPI-generierbar unter `/docs`).
+
+### 34.2 Pine Code Patch Schema
+
+```python
+class PineCodePatchRequest(BaseModel):
+    strategy_id: str
+    edit_mode: Literal["FULL_REPLACE", "DIFF_PATCH", "INJECT_TIME_STOP", "ADJUST_PARAMETERS"]
+    pine_source_code: str = Field(..., min_length=20)
+    commit_summary: str
+    push_to_tradingview: bool = True
+    # Validator: erzwingt //@version=6
+
+class PineCodePatchResponse(BaseModel):
+    strategy_id: str
+    status: Literal["SUCCESS_COMPILED", "COMPILE_FAILED_ROLLBACK", "SAVED_LOCAL_ONLY"]
+    backup_file_path: str
+    tv_compilation_error: Optional[str] = None
+```
+
+Flow: LLM → Patch → Backup `./data/strategies/{id}/code.pine.bak` → Playwright Compile → Rollback bei Fehler.
+
+### 34.3 WebSocket Streaming Schema (LLM Console)
+
+Endpoint: `WS /api/v1/llm/stream` (React `LLMConsole`).
+
+```python
+class ChatStreamMessage(BaseModel):
+    message_id: str
+    session_id: str
+    sender: Literal["USER", "ASSISTANT", "SYSTEM", "TOOL_EXECUTOR"]
+    content_chunk: Optional[str] = None
+    is_complete: bool = False
+    active_tool_call: Optional[ToolCallEnvelope] = None
+    tool_result: Optional[ToolResultEnvelope] = None
+    ui_component_trigger: Optional[Literal["REFRESH_BOT_DECK", "RELOAD_CHART", "OPEN_INSPECTOR"]] = None
+    timestamp: int
+```
+
+### 34.4 Schema-Vollständigkeits-Matrix
+
+| Schnittstelle | Schema-Datei | Transport |
+|---------------|--------------|-----------|
+| TV Webhook (Kraken) | `app/server/schemas.py` | HTTP POST |
+| Pionex Lab | `app/server/schemas.py` (`PionexSignalPayload`) | HTTP POST |
+| LLM Tools | `app/llm/schemas_llm.py` | Ollama function-calling |
+| Pine Patches | `app/llm/schemas_llm.py` | REST + Playwright |
+| Chat Stream | `app/llm/schemas_llm.py` | WebSocket |
+| Order Receipt | `reliable_order_dispatcher` (§25) | HTTP + Telegram |
+| Orderbook Depth | `glint_orderbook_verifier` (§24) | Internal JIT |
+
+**Noir-Gate:** Irreversible Tools (`trigger_emergency_action`) erfordern `confirmation_confirmed: true`; UI zeigt Confirm-Card vor Ausführung.
 
 ---
