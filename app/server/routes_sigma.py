@@ -10,6 +10,7 @@ Knoten:     Jaune (Carrera-Engine) / API
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -638,6 +639,69 @@ async def telegram_message(body: TelegramIn):
     op = get_telegram_operator(safety_guard=get_safety_guard(),
                                virtual_bots=get_virtual_bot_engine())
     return op.handle(body.chat_id, body.text)
+
+
+# =============================================================================
+# §35 Exact TradingView CSV Roundtrip
+# =============================================================================
+
+class CsvOptimizeIn(BaseModel):
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _strategy_dir(strategy_id: str) -> str:
+    return os.path.join(load_config().strategies_dir, strategy_id)
+
+
+@router.get("/api/strategies/{strategy_id}/csv/meta")
+async def csv_meta(strategy_id: str):
+    """§35.2 — eingefrorener Dateiname, Header und Delimiter."""
+    from app.optimizer.exact_csv_serializer import CsvHeaderMismatch, load_handler
+
+    try:
+        handler = load_handler(_strategy_dir(strategy_id))
+    except (CsvHeaderMismatch, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail={
+            "code": bp.CSV_HEADER_MISMATCH_CODE, "reason": str(exc)})
+    return {**handler.meta().as_dict(), "parameters": handler.parameters(),
+            "baseline_dir": bp.CSV_BASELINE_DIR, "optimized_dir": bp.CSV_OPTIMIZED_DIR}
+
+
+@router.get("/api/strategies/{strategy_id}/csv/diff")
+async def csv_diff(strategy_id: str):
+    """§35.6 — Baseline vs Optimized (gleicher Dateiname, andere Ordner)."""
+    from app.optimizer.exact_csv_serializer import (CsvHeaderMismatch,
+                                                    ExactTradingViewCSVHandler,
+                                                    load_handler, optimized_path)
+
+    strategy_dir = _strategy_dir(strategy_id)
+    try:
+        baseline = load_handler(strategy_dir)
+    except (CsvHeaderMismatch, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail={
+            "code": bp.CSV_HEADER_MISMATCH_CODE, "reason": str(exc)})
+    target = optimized_path(strategy_dir, baseline.original_filename)
+    base_params = baseline.parameters()
+    if not os.path.exists(target):
+        return {"filename": baseline.original_filename, "has_optimized": False,
+                "baseline": base_params, "optimized": {}, "changed": {}}
+    optimized = ExactTradingViewCSVHandler(target).parameters()
+    changed = {k: {"baseline": base_params.get(k), "optimized": v}
+               for k, v in optimized.items() if base_params.get(k) != v}
+    return {"filename": baseline.original_filename, "has_optimized": True,
+            "baseline": base_params, "optimized": optimized, "changed": changed}
+
+
+@router.post("/api/strategies/{strategy_id}/csv/optimized")
+async def csv_write_optimized(strategy_id: str, body: CsvOptimizeIn):
+    """GA-Ergebnis schreiben — Header-Assertion inklusive (§35.4)."""
+    from app.optimizer.exact_csv_serializer import CsvHeaderMismatch, emit_optimized
+
+    try:
+        return emit_optimized(_strategy_dir(strategy_id), body.params)
+    except (CsvHeaderMismatch, FileNotFoundError) as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": bp.CSV_HEADER_MISMATCH_CODE, "reason": str(exc)})
 
 
 # =============================================================================

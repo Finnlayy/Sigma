@@ -192,10 +192,32 @@ class TvJobQueue:
         drv.open_chart(job.symbol, job.interval)
         job.progress = 0.5
         csv_text = drv.export_parameters()
-        path = self._write_artifact(job, "parameters.csv", csv_text)
+        # §35: Original-Dateiname des TV-Exports beibehalten, nie umbenennen.
+        original_name = getattr(drv, "last_export_filename", "") or \
+            f"{job.strategy_id or job.symbol}_properties.csv"
+        path = self._write_artifact(job, original_name, csv_text)
         from app.backtest.tv_csv import parse_parameter_csv
 
-        return {"parameters_csv": path, "parameters": parse_parameter_csv(csv_text)}
+        payload: Dict[str, Any] = {
+            "parameters_csv": path,
+            "original_csv_filename": original_name,
+            "parameters": parse_parameter_csv(csv_text),
+        }
+        if job.strategy_id:
+            from app.optimizer.exact_csv_serializer import (CsvHeaderMismatch,
+                                                            ingest_tv_export)
+            strategy_dir = os.path.join(self.config.strategies_dir, job.strategy_id)
+            try:
+                handler, baseline = ingest_tv_export(strategy_dir, csv_text,
+                                                     original_name)
+                payload["baseline_csv"] = baseline
+                payload["exact_csv_header"] = handler.exact_header_row
+                payload["delimiter"] = handler.delimiter
+            except (CsvHeaderMismatch, OSError) as exc:
+                logger.warning("baseline freeze failed for %s: %s",
+                               job.strategy_id, exc)
+                payload["baseline_error"] = str(exc)
+        return payload
 
     def _do_backtest(self, drv, job: TvJob) -> Dict[str, Any]:
         key = cache_key(job.strategy_id or job.symbol, job.params, job.symbol,

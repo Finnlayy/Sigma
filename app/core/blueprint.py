@@ -45,7 +45,6 @@ DOCS_SECTION_RANGE = (1, 38)
 DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
     "32 Kraken Paper Trading Lab",
     "34 LLM-, Tool-Calling- & Streaming-Schemata",
-    "35 Exact TradingView CSV Roundtrip Protocol",
     "36 Unified Error Taxonomy & Diagnostics Desk",
     "37 Live Process & AI Log Console",
     "38 Netron ONNX Visualization & Inspection Stack",
@@ -61,6 +60,7 @@ DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
 #   §30 TERMINAL_PANELS_EXTENDED / TERMINAL_PRESETS_EXTENDED
 #   §31 app/services/strategy_lifecycle_service.py
 #   §33 app/server/schemas.py + POST /api/v1/signal/ingest
+#   §35 app/optimizer/exact_csv_serializer.py
 AUTONOMY_LEVEL = 4
 AUTONOMY_LABEL = "L4 — High Operational Autonomy"
 LINEAGE = "Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4"
