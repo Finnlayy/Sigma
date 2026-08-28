@@ -1,6 +1,6 @@
 # ==============================================================================
 # MASTERPROMPT: MANAS: CIEL — BLUEPRINT SIGMA (L4 MASTER SPECIFICATION)
-# Version: 3.1.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
+# Version: 3.6.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
 # Target Repo: /opt/sigma (User: sigma) // Core Engine: Python 3.12 + FastAPI + Playwright
 # Canonical Blueprint: docs/BLUEPRINT-SIGMA.md
 # ==============================================================================
@@ -63,11 +63,58 @@ Du koordinierst ein synchronisiertes Netzwerk aus vier Primordialen Subagenten:
 - **Realisierte Gewinne:** 50% Bot-Reinvest (Compounding), 50% Spot-Tresor (physisches Asset).
 - **Einbahnstraße:** Spot → Futures niemals automatisch.
 
-### Axiom 8: Fester Hebel pro Strategie (Strategy-Bound Fixed Leverage)
+### Axiom 9: Drei Trigger-Pfade zur Strategie-Platzierung
 
-- `fixed_leverage` in `profile.json` — **nicht** pro Trade dynamisch.
-- Muss 1:1 mit TradingView Strategy Tester übereinstimmen.
-- Sniper-Strategien (eng SL, Squeeze) nutzen z. B. festes 5×; Swing 1×–2× — Design-Entscheidung, keine Laufzeit-Umschaltung.
+- **Pfad 1 (Manuell):** UI / LLM-Chat / Telegram → `POST /api/strategies/{id}/start`.
+- **Pfad 2 (Autonom):** `RegimeStrategyDispatcher` — Glint ≥8/10 oder Makro-Regime-Shift → JIT OB-Audit → Live.
+- **Pfad 3 (Scout):** `ScoutIncubator` alle 30 min — **immer Kraken Paper**, kein Live-Budget.
+- Alle Pfade laufen durch `StrategyLifecycleService`: Playwright (Pine → Chart → Alert) + Core (Budget, M8 ACTIVE, Hebel).
+
+### Axiom 10: Kraken Paper als Forward-Test-Stufe
+
+- **Stufe 1:** TV Backtest (Loop B) — historisch, DSR-Gate.
+- **Stufe 2:** Kraken CLI Paper (`kraken futures paper order`) — Live-Ticker, 0€ Risiko, Academy/ONNX-Training.
+- **Stufe 3:** Live Production — erst nach Graduation (≥20 Paper-Trades, PF≥1.6, WR≥55%).
+- Scout Loop D ist **paper-only**; `KrakenCliBridge` Dual-Mode: identische Syntax, Subcommand `paper`.
+
+### Axiom 11: Typisierte Webhook-Alert-Schemata
+
+- **Schema A (Sigma L4 Master):** `secret`, `idempotency_key`, `bot_id`, `stop_loss`, `fixed_leverage`, `features` — Pydantic in `app/server/schemas.py`.
+- **Schema B (Pionex Lab):** Native UUID-Payload; nur wenn Connector enabled.
+- **Schema C (ML):** `features` Block für ONNX (RSI, ATR, CISD, BB).
+- Pine v6 Emitter-Boilerplate mit `alert_message` JSON; Stale + Idempotenz vor Execution.
+
+### Axiom 12: LLM nur über strikte Tool-Contracts
+
+- Ollama function-calling: `update_risk_settings`, `control_bot`, `edit_pine_strategy_code`, `query_kausal_autopsy`, `trigger_emergency_action`.
+- Pine-Patches: `PineCodePatchRequest` mit `//@version=6` Validator + Playwright Compile-Gate.
+- WebSocket: `ChatStreamMessage` für LLM Console Streaming.
+- Notfall-Tools: `confirmation_confirmed: true` Pflicht.
+
+### Axiom 13: Exact TradingView CSV Roundtrip
+
+- Original-Dateiname aus TV-Export **1:1** beibehalten (z. B. `Strategy_properties.csv`).
+- Header Zeile 1 **byte-identisch** — keine erfundenen Namen (`parameters_optimized.csv` verboten).
+- Versionierung: `./data/strategies/{id}/baseline/` vs `optimized/` — gleicher Dateiname in beiden.
+- `ExactTradingViewCSVHandler` + Pre-Upload Header-Assertion vor Playwright Re-Upload.
+
+### Axiom 14: Unified Error Taxonomy (E1000–E5000)
+
+- Jeder Fehler: `ErrorDetail` mit `error_code`, `remediation_hint`, `subsystem`, `technical_context`.
+- `app/core/error_engine.py` + `errors.jsonl`; kein unhandled crash.
+- UI `DiagnosticsErrorPanel`; Telegram Push bei HIGH/CRITICAL.
+
+### Axiom 15: Live Process & AI Log Console
+
+- Route `/logs`; WS `/api/v1/logs/stream` tailt CORE, ORDERS, TV_WORKER, ERRORS, AI_LAYER, SCRAPER.
+- `ProcessLogView`: Filter, Auto-Scroll, Ringpuffer 2.000 Zeilen.
+- Preset `OBSERVABILITY` für Error Desk + Log Console.
+
+### Axiom 16: Netron ONNX Graph Inspector
+
+- Sidecar `sigma-netron` auf Port **8082** (`app/services/netron_server.py`).
+- `NetronVisualizerPanel` embeddet Netron als IFrame; Inspect aus Model Registry.
+- 100 % offline; keine Blackbox bei ONNX-Modellen.
 
 ### Produktvision (umgangssprachlich)
 
@@ -230,8 +277,9 @@ Panels (Factory-IDs):
 | `RateLimiterPanel` | TV-Tier, Kraken Token-Bucket |
 | `ContagionRadarPanel` | SIR R₀, Hedge/Cash-Modus |
 | `FlywheelBudgetPanel` | Futures/Spot Split, Flywheel-Ledger |
+| `PaperLabPanel` | Kraken Paper Lab, Graduation, Scout Loop D |
 
-Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_OPS`.
+Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_OPS` | `PAPER_LAB`.
 
 ### E. Prozesse & Ports
 
@@ -239,6 +287,7 @@ Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_O
 |---------|------|
 | sigma-core | 8000 |
 | sigma-scraper | 8001 |
+| sigma-netron | 8082 |
 | sigma-tv-worker | — |
 | Redis | 6379 |
 | UI (vite) | 3000 |

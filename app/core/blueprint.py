@@ -39,18 +39,28 @@ MASTERPROMPT_VERSION = "3.0.0-SIGMA-RELEASE"
 
 # Stand der eingefrorenen Dokumente in docs/. Liegt DOCS_* vor BLUEPRINT_VERSION,
 # sind die in DOCS_PENDING_SECTIONS gelisteten Kapitel noch nicht implementiert.
-DOCS_BLUEPRINT_VERSION = "3.1"
-DOCS_MASTERPROMPT_VERSION = "3.1.0-SIGMA-RELEASE"
+DOCS_BLUEPRINT_VERSION = "3.6"
+DOCS_MASTERPROMPT_VERSION = "3.6.0-SIGMA-RELEASE"
+DOCS_SECTION_RANGE = (1, 38)
 DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
-    "23 Zeit-Anker & Scheduler-Matrix",
-    "24 Glint x Orderbook Confluence",
-    "25 Closed-Loop Order ACK & Retry",
-    "26 Multi-Provider Rate Limiter",
-    "27 Epidemic SIR Contagion",
-    "28 50/50 Flywheel",
-    "29 Fester Hebel pro Strategie",
-    "30 Erweiterte UI-Panels",
+    "31 Die 3 Trigger-Pfade zur Strategie-Platzierung",
+    "32 Kraken Paper Trading Lab",
+    "33 Standardisierte Webhook-Alert-Schemata",
+    "34 LLM-, Tool-Calling- & Streaming-Schemata",
+    "35 Exact TradingView CSV Roundtrip Protocol",
+    "36 Unified Error Taxonomy & Diagnostics Desk",
+    "37 Live Process & AI Log Console",
+    "38 Netron ONNX Visualization & Inspection Stack",
 )
+# §23-§30 sind als Konstanten + Laufzeitmodule implementiert:
+#   §23 app/core/exchange_clock.py + app/core/scheduler_matrix.py
+#   §24 app/quant/glint_orderbook_verifier.py
+#   §25 app/execution/reliable_order_dispatcher.py
+#   §26 app/core/rate_limiter.py
+#   §27 app/quant/epidemic_contagion_engine.py
+#   §28 app/execution/capital_flywheel_engine.py
+#   §29 app/execution/fixed_leverage.py
+#   §30 TERMINAL_PANELS_EXTENDED / TERMINAL_PRESETS_EXTENDED
 AUTONOMY_LEVEL = 4
 AUTONOMY_LABEL = "L4 — High Operational Autonomy"
 LINEAGE = "Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4"
@@ -864,3 +874,381 @@ def spec_summary() -> Dict[str, Any]:
         "panels": list(TERMINAL_PANELS),
         "presets": list(TERMINAL_PRESETS),
     }
+
+
+# =============================================================================
+# 23. Zeit-Anker & Scheduler-Matrix (§23, Masterprompt Axiom 4/5)
+# =============================================================================
+
+KRAKEN_TIME_URL = "https://api.kraken.com/0/public/Time"
+CLOCK_RESYNC_INTERVAL_S = 3600          # stündlicher Re-Sync
+CLOCK_MAX_OFFSET_WARN_S = 2.0           # Drift-Warnung ab 2 s
+CLOCK_SYNC_TIMEOUT_S = 5.0
+STALE_SIGNAL_MAX_LATENCY_S = 60         # Webhook älter -> STALE_SIGNAL_REJECT
+STALE_SIGNAL_REJECT_CODE = "STALE_SIGNAL_REJECT"
+
+
+class SchedulerTier(int, Enum):
+    T0_EVENT = 0
+    T1_FAST_PULSE = 1
+    T2_MID = 2
+    T3_REGIME = 3
+    T4_DAILY = 4
+    T5_WEEKLY = 5
+
+
+@dataclass(frozen=True)
+class TierSpec:
+    tier: SchedulerTier
+    label: str
+    cadence_s: float | None          # None = event-driven / cron
+    cron: str | None
+    tasks: Tuple[str, ...]
+
+
+SCHEDULER_MATRIX: Tuple[TierSpec, ...] = (
+    TierSpec(SchedulerTier.T0_EVENT, "Event-Driven (Just-in-Time)", None, None,
+             ("glint_orderbook_verify", "webhook_execution", "kill_switch",
+              "playwright_compile")),
+    TierSpec(SchedulerTier.T1_FAST_PULSE, "Fast Pulse", 20.0, None,
+             ("deadman_heartbeat", "memory_watchdog")),
+    TierSpec(SchedulerTier.T2_MID, "Mid", 300.0, None,
+             ("macro_radar_scraper",)),
+    TierSpec(SchedulerTier.T3_REGIME, "Regime", 14400.0, None,
+             ("strategy_allocator", "regime_recheck", "brier_drift",
+              "regime_strategy_dispatcher")),
+    TierSpec(SchedulerTier.T4_DAILY, "Daily", None, "05 00 * * *",
+             ("spot_rebalance", "eod_profit_factor", "flywheel_sweep")),
+    TierSpec(SchedulerTier.T5_WEEKLY, "Weekly", None, "00 23 * * 0",
+             ("academy_badge_recalibration", "kausal_audit")),
+)
+SCHEDULER_TIMEZONE = "UTC"
+MAX_CACHED_DEPTH_AGE_S = 3              # kein Dauer-Orderbuch-Scan (§23.2)
+SCOUT_INCUBATOR_CYCLE_MINUTES = 30      # §31.3
+
+# =============================================================================
+# 24. Glint x Orderbook Confluence (§24)
+# =============================================================================
+
+DEPTH_BAND_PCT = 0.02                   # 2 % Tiefe je Seite
+DEPTH_IMBALANCE_CONFIRM = 0.30          # I_depth >= +0.30 -> bestätigt
+DEPTH_IMBALANCE_VETO = -0.20            # I_depth <= -0.20 -> Liquidity Trap
+CONFLUENCE_MAX_SPREAD_BPS = 15.0
+CONFLUENCE_SIZE_MULTIPLIER = 1.25
+GLINT_SCORE_AUTONOMOUS_ENTRY = 8.0      # §31.2 Score >= 8/10
+
+
+class ConfluenceVerdict(str, Enum):
+    CONFLUENCE_CONFIRMED = "CONFLUENCE_CONFIRMED"
+    NEUTRAL = "NEUTRAL"
+    LIQUIDITY_TRAP_VETO = "LIQUIDITY_TRAP_VETO"
+
+
+ORDERBOOK_WALL_REJECT = "ORDERBOOK_WALL_REJECT"
+
+# =============================================================================
+# 25. Closed-Loop Order ACK & Retry (§25, Axiom 6)
+# =============================================================================
+
+
+class OrderAck(str, Enum):
+    FILLED = "FILLED"
+    RETRY_SUCCESS = "RETRY_SUCCESS"
+    FAILED_REJECTED = "FAILED_REJECTED"
+    DUPLICATE_IGNORED = "DUPLICATE_IGNORED"
+    VETO_ORDERBOOK = "VETO_ORDERBOOK"
+
+
+ORDER_MAX_RETRIES = 2
+ORDER_GHOST_FILL_CHECK_TIMEOUT_MS = 200
+ORDER_NON_RETRYABLE_PATTERNS: Tuple[str, ...] = (
+    "insufficient funds", "invalid arguments", "invalid key", "permission denied",
+    "unknown asset pair", "order minimum not met",
+)
+ORDER_RECEIPTS_ROUTE = "/api/orders/receipts"
+ORDER_RECEIPT_LOG = "./data/logs/orders.jsonl"
+IDEMPOTENCY_KEY_TEMPLATE = "sig_{strategy_id}_{ticker}_{bar_time}"
+
+# =============================================================================
+# 26. Multi-Provider Rate Limiter (§26)
+# =============================================================================
+
+TV_SUBSCRIPTION_TIERS: Mapping[str, int] = MappingProxyType({
+    "free": 1, "essential": 5, "plus": 10, "premium": 20,
+})
+TV_SUBSCRIPTION_TIER_DEFAULT = "essential"
+TV_ALERT_ROTATION_ENABLED = True
+KRAKEN_MAX_CALL_COUNTER = 15.0
+KRAKEN_COUNTER_DECAY_PER_S = 0.50
+KRAKEN_EMERGENCY_RESERVE_TOKENS = 3.0
+KRAKEN_SOFT_CAP_PCT = 0.80              # ab 80 % Hintergrund-Polls pausieren
+TELEGRAM_MAX_MESSAGES_PER_S = 1.0
+HTTP_429_BACKOFF_S: Tuple[float, ...] = (10.0, 30.0, 60.0)
+
+# =============================================================================
+# 27. Epidemic SIR Contagion (§27)
+# =============================================================================
+
+SIR_R0_HEDGE_THRESHOLD = 1.5            # >= 1.5 -> FLIGHT_TO_CASH_AND_HEDGE
+SIR_R0_DERISK_THRESHOLD = 1.0           # >= 1.0 -> Futures-Sizing -50 %
+SIR_DERISK_SIZE_MULTIPLIER = 0.5
+SIR_INPUTS: Tuple[str, ...] = (
+    "oil_vol_zscore", "gold_dxy_ratio", "cross_asset_correlation",
+    "orderbook_absorption",
+)
+
+
+class ContagionMode(str, Enum):
+    NORMAL = "NORMAL"
+    DERISK = "DERISK"
+    FLIGHT_TO_CASH_AND_HEDGE = "FLIGHT_TO_CASH_AND_HEDGE"
+
+
+CONTAGION_VETO_CODE = "ERR_CONTAGION_VETO_R0"
+
+# =============================================================================
+# 28. 50/50 Flywheel (§28, Axiom 7)
+# =============================================================================
+
+FLYWHEEL_DEPOSIT_TO_FUTURES_PCT = 1.0   # 100 % Einzahlung -> Futures
+FLYWHEEL_PROFIT_REINVEST_PCT = 0.5      # 50 % Bot-Reinvest
+FLYWHEEL_PROFIT_VAULT_PCT = 0.5         # 50 % Spot-Tresor
+FLYWHEEL_MIN_SPLIT_TRIGGER_EUR = 10.0
+FLYWHEEL_DEFAULT_VAULT_ASSET = "XBT"
+FLYWHEEL_VAULT_QUOTE = "EUR"
+FLYWHEEL_ONE_WAY = True                 # Spot -> Futures niemals automatisch
+FLYWHEEL_LEDGER_TABLE = "flywheel_ledger"
+
+# =============================================================================
+# 29. Fester Hebel pro Strategie (§29, Axiom 8)
+# =============================================================================
+
+FIXED_LEVERAGE_MIN = 1
+FIXED_LEVERAGE_MAX = 5
+FIXED_LEVERAGE_DEFAULT = 1
+DYNAMIC_LEVERAGE_REJECTED = True        # verworfen: per-Trade Neuberechnung
+STYLE_DEFAULT_LEVERAGE: Mapping[str, int] = MappingProxyType({
+    "STYLE_MICRO_SCALP": 5,
+    "STYLE_INTRADAY_MOMENT": 3,
+    "STYLE_SWING_CAMPAIGN": 2,
+    "STYLE_POSITION_INVEST": 1,
+})
+
+# =============================================================================
+# 30. Erweiterte UI-Panels (§30, §37.4, §38.4)
+# =============================================================================
+
+TERMINAL_PANELS_EXTENDED: Tuple[str, ...] = (
+    "OrderbookConfluencePanel",
+    "SchedulerTelemetryPanel",
+    "OrderReceiptsPanel",
+    "RateLimiterPanel",
+    "ContagionRadarPanel",
+    "FlywheelBudgetPanel",
+    "PaperLabPanel",
+    "DiagnosticsErrorPanel",
+    "ProcessLogView",
+    "NetronVisualizerPanel",
+)
+TERMINAL_PRESETS_EXTENDED: Tuple[str, ...] = (
+    "CAPITAL_OPS", "PAPER_LAB", "OBSERVABILITY", "ML_INSPECTOR",
+)
+ALL_TERMINAL_PANELS: Tuple[str, ...] = TERMINAL_PANELS + TERMINAL_PANELS_EXTENDED
+ALL_TERMINAL_PRESETS: Tuple[str, ...] = TERMINAL_PRESETS + TERMINAL_PRESETS_EXTENDED
+
+# =============================================================================
+# 31. Die 3 Trigger-Pfade (§31, Axiom 9)
+# =============================================================================
+
+
+class TriggerPath(str, Enum):
+    MANUAL = "MANUAL"                    # UI / LLM-Chat / Telegram
+    AUTONOMOUS_REGIME = "AUTONOMOUS_REGIME"   # RegimeStrategyDispatcher (Tier 3)
+    SCOUT_INCUBATOR = "SCOUT_INCUBATOR"       # Loop D, paper-only
+
+
+TRIGGER_PATH_MODES: Mapping[str, Tuple[str, ...]] = MappingProxyType({
+    TriggerPath.MANUAL.value: ("live", "kraken_paper"),
+    TriggerPath.AUTONOMOUS_REGIME.value: ("live",),
+    TriggerPath.SCOUT_INCUBATOR.value: ("kraken_paper",),
+})
+LIFECYCLE_STEPS: Tuple[str, ...] = (
+    "budget_reservation", "chart_navigation", "pine_injection_compile",
+    "webhook_alert_provisioning", "arming_m8_active",
+)
+STRATEGY_START_ROUTE = "/api/strategies/{id}/start"
+
+# =============================================================================
+# 32. Kraken Paper Trading Lab (§32, Axiom 10)
+# =============================================================================
+
+
+class ExecutionMode(str, Enum):
+    LIVE = "live"
+    KRAKEN_PAPER = "kraken_paper"
+    HYBRID_SCOUT = "hybrid_scout"
+    DRY_RUN = "dry_run"
+
+
+EXECUTION_MODE_DEFAULT = ExecutionMode.LIVE.value
+KRAKEN_PAPER_ENABLED = True
+KRAKEN_PAPER_INITIAL_BALANCE_USD = 10_000.0
+KRAKEN_DEMO_FUTURES_URL = "https://demo-futures.kraken.com/api/v3"
+PAPER_GRADUATION_MIN_TRADES = 20
+PAPER_GRADUATION_MIN_PROFIT_FACTOR = 1.6
+PAPER_GRADUATION_MIN_WIN_RATE_PCT = 55.0
+KRAKEN_PAPER_COMMANDS: Mapping[str, str] = MappingProxyType({
+    "spot_balance": "kraken paper balance",
+    "spot_order": "kraken paper order {side} {pair} {volume} --type {ordertype} --price {price}",
+    "futures_balance": "kraken futures paper balance",
+    "futures_order": "kraken futures paper order {side} {pair} {volume} --type {ordertype} --price {price}",
+})
+
+# =============================================================================
+# 33. Webhook-Alert-Schemata (§33, Axiom 11)
+# =============================================================================
+
+WEBHOOK_SCHEMAS: Tuple[str, ...] = ("SIGMA_L4_MASTER", "PIONEX_NATIVE", "ML_TELEMETRY")
+SIGMA_L4_REQUIRED_FIELDS: Tuple[str, ...] = (
+    "secret", "idempotency_key", "strategy_id", "bot_id", "symbol", "action",
+    "price", "stop_loss", "fixed_leverage", "timestamp",
+)
+SIGMA_L4_ACTIONS: Tuple[str, ...] = ("BUY", "SELL", "CLOSE")
+SIGMA_L4_ORDER_TYPES: Tuple[str, ...] = ("MARKET", "LIMIT")
+SIGMA_SECRET_MIN_LENGTH = 16
+IDEMPOTENCY_KEY_MIN_LENGTH = 8
+ML_FEATURE_FIELDS: Tuple[str, ...] = ("rsi", "atr", "cisd_score", "bb_bandwidth")
+PINE_EMITTER_TEMPLATE_PATH = "./prompts/pine_sigma_l4_emitter_v6.pine"
+INGESTION_PIPELINE_STEPS: Tuple[str, ...] = (
+    "secret_check", "stale_gate", "idempotency", "glint_orderbook_jit",
+    "reliable_dispatch",
+)
+
+# =============================================================================
+# 34. LLM Tool-Contracts (§34, Axiom 12)
+# =============================================================================
+
+LLM_TOOLS: Mapping[str, str] = MappingProxyType({
+    "update_risk_settings": "max_daily_loss_usd, kelly_fraction, max_open_positions, global_max_leverage",
+    "control_bot": "START | PAUSE | STOP | QUARANTINE (+ adjusted_budget_eur)",
+    "edit_pine_strategy_code": "FULL_REPLACE | DIFF_PATCH | INJECT_TIME_STOP | ADJUST_PARAMETERS",
+    "query_kausal_autopsy": "strategy_id, symbol, timeframe",
+    "trigger_emergency_action": "KILL_SWITCH | CANCEL_ALL_ORDERS | FLIGHT_TO_CASH",
+})
+LLM_TOOLS_REQUIRING_CONFIRMATION: Tuple[str, ...] = ("trigger_emergency_action",)
+PINE_EDIT_MODES: Tuple[str, ...] = (
+    "FULL_REPLACE", "DIFF_PATCH", "INJECT_TIME_STOP", "ADJUST_PARAMETERS",
+)
+PINE_VERSION_HEADER = "//@version=6"
+LLM_STREAM_ROUTE = "/api/v1/llm/stream"
+LLM_STREAM_SENDERS: Tuple[str, ...] = ("USER", "ASSISTANT", "SYSTEM", "TOOL_EXECUTOR")
+LLM_UI_TRIGGERS: Tuple[str, ...] = ("REFRESH_BOT_DECK", "RELOAD_CHART", "OPEN_INSPECTOR")
+LLM_TOOL_STATUSES: Tuple[str, ...] = ("SUCCESS", "FAILED", "CONFIRMATION_REQUIRED")
+
+# =============================================================================
+# 35. Exact TradingView CSV Roundtrip (§35, Axiom 13)
+# =============================================================================
+
+CSV_KEEP_ORIGINAL_FILENAME = True
+CSV_HEADER_MUST_MATCH_BYTEWISE = True
+CSV_ALLOWED_DELIMITERS: Tuple[str, ...] = (",", ";")
+CSV_HEADER_MISMATCH_CODE = "CSV_HEADER_MISMATCH"
+CSV_BASELINE_DIR = "baseline"
+CSV_OPTIMIZED_DIR = "optimized"
+CSV_META_FILE = "meta.json"
+CSV_META_FIELDS: Tuple[str, ...] = (
+    "original_csv_filename", "exact_csv_header", "delimiter",
+)
+CSV_FORBIDDEN_FILENAMES: Tuple[str, ...] = ("parameters_optimized.csv",)
+
+# =============================================================================
+# 36. Unified Error Taxonomy (§36, Axiom 14)
+# =============================================================================
+
+ERROR_LOG_PATH = "./data/logs/errors.jsonl"
+ERROR_CATEGORIES: Mapping[str, str] = MappingProxyType({
+    "E1000": "AUTHENTICATION",
+    "E2000": "TRADINGVIEW",
+    "E3000": "KRAKEN",
+    "E4000": "RISK_GUARD",
+    "E5000": "SYSTEM",
+})
+ERROR_CATALOG: Mapping[str, Tuple[str, str, str]] = MappingProxyType({
+    # code: (range, subsystem, remediation_hint)
+    "ERR_AUTH_INVALID_SECRET": ("E1000", "sigma-core",
+                                "SIGMA_SECRET in Pine-Alert und .env abgleichen"),
+    "ERR_AUTH_TV_SESSION_EXPIRED": ("E1000", "playwright-worker",
+                                    "bin/sigma-tv-login erneut ausfuehren (tv_storage_state.json)"),
+    "ERR_AUTH_WHITELIST_BLOCKED": ("E1000", "sigma-core",
+                                   "Telegram chat_id in die Whitelist aufnehmen"),
+    "ERR_TV_SELECTOR_NOT_FOUND": ("E2000", "playwright-worker",
+                                  "DynamicYamlResolver Selector-Update anstossen"),
+    "ERR_TV_PINE_COMPILE_ERROR": ("E2000", "playwright-worker",
+                                  "Pine v6 Syntax im Monaco Editor pruefen"),
+    "ERR_TV_ALERT_QUOTA_EXCEEDED": ("E2000", "playwright-worker",
+                                    "TV-Tier erhoehen oder Alert-Rotation aktivieren"),
+    "ERR_TV_EXPORT_TIMEOUT": ("E2000", "playwright-worker",
+                              "Job erneut einreihen; Netz/TV-Latenz pruefen"),
+    "ERR_TV_CSV_HEADER_MISMATCH": ("E2000", "sigma-core",
+                                   "Original-Header aus baseline/ uebernehmen"),
+    "ERR_KRAKEN_INSUFFICIENT_FUNDS": ("E3000", "kraken-bridge",
+                                      "Einzahlung oder Bot-Budget senken"),
+    "ERR_KRAKEN_RATE_LIMIT_429": ("E3000", "kraken-bridge",
+                                  "Backoff abwarten (10s/30s/60s)"),
+    "ERR_KRAKEN_DEADMAN_TIMEOUT": ("E3000", "kraken-bridge",
+                                   "Heartbeat-Quelle pruefen; offene Limits wurden gecancelt"),
+    "ERR_KRAKEN_CLI_NOT_FOUND": ("E3000", "kraken-bridge",
+                                 "kraken CLI installieren und SIGMA_KRAKEN_CLI setzen"),
+    "ERR_RISK_MAX_DAILY_LOSS": ("E4000", "sigma-core",
+                                "Handelstag beendet; Release erst nach Review"),
+    "ERR_RISK_KILL_SWITCH_ACTIVE": ("E4000", "sigma-core",
+                                    "KILL_SWITCH-Datei entfernen (bin/m8-ctl resume)"),
+    "ERR_ORDERBOOK_LIQUIDITY_TRAP": ("E4000", "sigma-core",
+                                     "Schutz-Veto - kein Eingriff noetig"),
+    "ERR_CONTAGION_VETO_R0": ("E4000", "sigma-core",
+                              "Makro-Kontagion aktiv; Sizing reduziert"),
+    "ERR_STALE_SIGNAL_REJECT": ("E4000", "sigma-core",
+                                "Signalzeit gegen Kraken-Serverzeit pruefen (NTP/Clock)"),
+    "ERR_SYS_RAM_SOFT_CAP": ("E5000", "sigma-core",
+                             "Memory Watchdog Stufe erreicht; Chromium-Zombies reapen"),
+    "ERR_SYS_DUCKDB_LOCK": ("E5000", "sigma-core",
+                            "Konkurrierende DuckDB-Verbindung schliessen"),
+    "ERR_SYS_OLLAMA_OFFLINE": ("E5000", "sigma-core",
+                               "ollama serve starten (:11434)"),
+    "ERR_SYS_UNHANDLED_EXCEPTION": ("E5000", "sigma-core",
+                                    "errors.jsonl + Stacktrace pruefen"),
+})
+ERROR_SEVERITIES: Tuple[str, ...] = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+ERROR_TELEGRAM_PUSH_SEVERITIES: Tuple[str, ...] = ("HIGH", "CRITICAL")
+
+# =============================================================================
+# 37. Live Process & AI Log Console (§37, Axiom 15)
+# =============================================================================
+
+LOG_STREAM_ROUTE = "/api/v1/logs/stream"
+LOG_VIEW_ROUTE = "/logs"
+LOG_SOURCES: Mapping[str, str] = MappingProxyType({
+    "CORE": "./data/logs/sigma_core.log",
+    "ORDERS": "./data/logs/orders.jsonl",
+    "TV_WORKER": "./data/logs/tv_worker.log",
+    "ERRORS": "./data/logs/errors.jsonl",
+    "AI_LAYER": "./data/logs/ai_layer.log",
+    "SCRAPER": "./data/logs/scraper.log",
+})
+LOG_POLL_INTERVAL_MS = 250
+LOG_CLIENT_RING_BUFFER_LINES = 2000
+LOG_MASK_KEYS: Tuple[str, ...] = ("secret", "token", "api_key", "private_key", "password")
+
+# =============================================================================
+# 38. Netron ONNX Visualization (§38, Axiom 16)
+# =============================================================================
+
+PORT_NETRON = 8082
+NETRON_DEFAULT_MODEL = "./models/regime_classifier.onnx"
+NETRON_MODELS_DIR = "./models"
+NETRON_BROWSE = False
+NETRON_INSPECT_ROUTE = "/api/v1/models/inspect/{version_tag}"
+NETRON_STATUS_ROUTE = "/api/v1/models/netron/status"
+NETRON_BIND_PROD = "127.0.0.1"
+NETRON_BIND_DEV = "0.0.0.0"
+NETRON_ALLOWED_SUFFIX = ".onnx"

@@ -607,6 +607,215 @@ export function MarketRadarPanel() {
   );
 }
 
+
+/* ------------------------------------------- 14 OrderbookConfluencePanel §24 */
+
+export function OrderbookConfluencePanel() {
+  const [data, refresh] = usePoll(sigmaApi.confluence, 6000);
+  const audits: any[] = data?.recent_audits ?? [];
+  return (
+    <PanelShell title="Orderbook Confluence" icon={<Radar size={13} className="text-sky-400" />}
+      actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
+      <div className="grid grid-cols-3 gap-2">
+        <Stat label="Confirm ≥" value={data?.confirm_threshold ?? '0.30'} />
+        <Stat label="Veto ≤" value={data?.veto_threshold ?? '-0.20'} tone="text-rose-400" />
+        <Stat label="Max Spread" value={`${data?.max_spread_bps ?? 15} bps`} />
+      </div>
+      <div className="mt-2 text-[10px] text-zinc-500">
+        JIT only — Depth-Snapshot max {data?.max_cached_depth_age_seconds ?? 3}s alt · Bonus ×{data?.size_multiplier ?? 1.25}
+      </div>
+      <table className="mt-2 w-full text-left font-mono text-[11px]">
+        <thead className="text-zinc-500"><tr><th>Symbol</th><th>Dir</th><th>I_depth</th><th>Spread</th><th>Verdict</th></tr></thead>
+        <tbody>
+          {audits.slice().reverse().map((a, i) => (
+            <tr key={i} className="border-t border-zinc-800/60">
+              <td>{a.symbol}</td><td>{a.direction}</td>
+              <td className={a.depth_imbalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                {Number(a.depth_imbalance).toFixed(2)}
+              </td>
+              <td>{Number(a.spread_bps).toFixed(1)}</td>
+              <td className={a.verdict === 'LIQUIDITY_TRAP_VETO' ? 'text-rose-400'
+                : a.verdict === 'CONFLUENCE_CONFIRMED' ? 'text-emerald-400' : 'text-zinc-400'}>
+                {a.verdict}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!audits.length && <div className="mt-2 text-zinc-600">Noch kein JIT-Audit ausgeführt.</div>}
+    </PanelShell>
+  );
+}
+
+/* ------------------------------------------ 15 SchedulerTelemetryPanel §23.2 */
+
+export function SchedulerTelemetryPanel() {
+  const [data, refresh] = usePoll(sigmaApi.scheduler, 5000);
+  const tiers: any[] = data?.tiers ?? [];
+  const clock = data?.clock;
+  return (
+    <PanelShell title="Scheduler Matrix" icon={<Activity size={13} className="text-violet-400" />}
+      actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
+      <div className="grid grid-cols-3 gap-2">
+        <Stat label="Zeitbasis" value={clock?.synced ? 'KRAKEN' : 'HOST'}
+          tone={clock?.synced ? 'text-emerald-400' : 'text-amber-400'} />
+        <Stat label="Offset" value={`${clock?.offset_s ?? 0}s`}
+          tone={clock?.drift_warning ? 'text-amber-400' : 'text-zinc-100'} />
+        <Stat label="TZ" value={data?.timezone ?? 'UTC'} />
+      </div>
+      <div className="mt-2 space-y-1">
+        {tiers.map((t) => (
+          <div key={t.tier} className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1">
+            <div className="flex justify-between">
+              <span className="font-semibold text-zinc-300">T{t.tier} · {t.label}</span>
+              <span className="font-mono text-[10px] text-zinc-500">
+                {t.cron ? `cron ${t.cron}` : t.cadence_s ? `${t.cadence_s}s` : 'event'}
+              </span>
+            </div>
+            <div className="font-mono text-[10px] text-zinc-500">{t.spec_tasks.join(' · ')}</div>
+            {t.registered.map((r: any) => (
+              <div key={r.name} className="font-mono text-[10px] text-sky-400">
+                {r.name} · runs {r.runs} · err {r.errors}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </PanelShell>
+  );
+}
+
+/* ----------------------------------------------- 16 OrderReceiptsPanel §25 */
+
+export function OrderReceiptsPanel() {
+  const [data, refresh] = usePoll(() => sigmaApi.receipts(50), 5000);
+  const rows: any[] = data?.receipts ?? [];
+  const tone = (ack: string) => ack === 'FILLED' || ack === 'RETRY_SUCCESS' ? 'text-emerald-400'
+    : ack === 'DUPLICATE_IGNORED' ? 'text-zinc-400'
+      : ack === 'VETO_ORDERBOOK' ? 'text-amber-400' : 'text-rose-400';
+  return (
+    <PanelShell title="Order Receipts" icon={<Zap size={13} className="text-emerald-400" />}
+      actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
+      <div className="grid grid-cols-3 gap-2">
+        <Stat label="Max Retries" value={data?.max_retries ?? 2} />
+        <Stat label="Ghost-Check" value={`${data?.ghost_fill_timeout_ms ?? 200} ms`} />
+        <Stat label="Receipts" value={rows.length} />
+      </div>
+      <table className="mt-2 w-full text-left font-mono text-[11px]">
+        <thead className="text-zinc-500"><tr><th>Pair</th><th>Side</th><th>ACK</th><th>Try</th><th>Order</th></tr></thead>
+        <tbody>
+          {rows.slice().reverse().map((r, i) => (
+            <tr key={i} className="border-t border-zinc-800/60">
+              <td>{r.pair}</td><td>{r.side}</td>
+              <td className={tone(r.ack)}>{r.ack}</td>
+              <td>{r.attempts}</td>
+              <td className="truncate text-zinc-500">{r.order_id || r.error_code}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length && <div className="mt-2 text-zinc-600">Keine Orders im Closed Loop.</div>}
+    </PanelShell>
+  );
+}
+
+/* -------------------------------------------------- 17 RateLimiterPanel §26 */
+
+export function RateLimiterPanel() {
+  const [data, refresh] = usePoll(sigmaApi.rateLimiter, 4000);
+  const kraken = data?.kraken_api;
+  const tv = data?.tradingview_subscription;
+  const pct = Math.round((kraken?.utilisation ?? 0) * 100);
+  return (
+    <PanelShell title="Rate Limiter" icon={<Gauge size={13} className="text-amber-400" />}
+      actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
+      <div className="grid grid-cols-2 gap-2">
+        <Stat label="Kraken Counter" value={`${kraken?.counter ?? 0} / ${kraken?.max_counter ?? 15}`}
+          tone={kraken?.soft_cap_reached ? 'text-amber-400' : 'text-zinc-100'} />
+        <Stat label="Reserve" value={kraken?.reserve_emergency_tokens ?? 3} />
+      </div>
+      <div className="mt-2 h-1.5 w-full rounded bg-zinc-800">
+        <div className={`h-1.5 rounded ${pct >= 80 ? 'bg-amber-500' : 'bg-sky-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <div className="mt-1 text-[10px] text-zinc-500">
+        Soft-Cap bei {Math.round((kraken?.soft_cap_pct ?? 0.8) * 100)}% · Backoff {(data?.backoff_ladder_s ?? []).join('s / ')}s
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Stat label={`TV Tier (${tv?.tier ?? '-'})`} value={`${Object.keys(tv?.active ?? {}).length} / ${tv?.max_active_alerts ?? 0}`} />
+        <Stat label="Rotation Queue" value={(tv?.rotation_queue ?? []).length} />
+      </div>
+      <div className="mt-2 font-mono text-[10px] text-zinc-500">
+        {Object.entries(tv?.active ?? {}).map(([sid, score]) => `${sid}:${score}`).join(' · ') || 'keine aktiven Alerts'}
+      </div>
+    </PanelShell>
+  );
+}
+
+/* ------------------------------------------------ 18 ContagionRadarPanel §27 */
+
+export function ContagionRadarPanel() {
+  const [data, refresh] = usePoll(sigmaApi.contagion, 8000);
+  const cur = data?.current;
+  const tone = cur?.mode === 'FLIGHT_TO_CASH_AND_HEDGE' ? 'text-rose-400'
+    : cur?.mode === 'DERISK' ? 'text-amber-400' : 'text-emerald-400';
+  return (
+    <PanelShell title="Contagion Radar" icon={<AlertTriangle size={13} className="text-rose-400" />}
+      actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
+      <div className="grid grid-cols-3 gap-2">
+        <Stat label="R₀" value={cur?.r0 ?? '—'} tone={tone} />
+        <Stat label="β" value={cur?.beta ?? '—'} />
+        <Stat label="γ" value={cur?.gamma ?? '—'} />
+      </div>
+      <div className={`mt-2 rounded border border-zinc-800 bg-zinc-900/50 px-2 py-1.5 ${tone}`}>
+        {cur?.mode ?? 'NORMAL'} · Sizing ×{cur?.size_multiplier ?? 1}
+      </div>
+      <div className="mt-1 text-[11px] text-zinc-400">{cur?.reason}</div>
+      <div className="mt-2 font-mono text-[10px] text-zinc-500">
+        {Object.entries(cur?.inputs ?? {}).map(([k, v]) => `${k}=${v}`).join(' · ')}
+      </div>
+      <div className="mt-2 text-[10px] text-zinc-500">
+        Hedge ≥ {cur?.thresholds?.hedge ?? 1.5} · Derisk ≥ {cur?.thresholds?.derisk ?? 1.0}
+      </div>
+    </PanelShell>
+  );
+}
+
+/* ----------------------------------------------- 19 FlywheelBudgetPanel §28 */
+
+export function FlywheelBudgetPanel() {
+  const [data, refresh] = usePoll(sigmaApi.flywheel, 6000);
+  const sweep = async () => { await sigmaApi.flywheelSweep(); refresh(); };
+  return (
+    <PanelShell title="Flywheel Budget" icon={<Trophy size={13} className="text-emerald-400" />}
+      actions={<>
+        <IconBtn onClick={sweep} title="50/50 Sweep"><Sparkles size={12} /></IconBtn>
+        <IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>
+      </>}>
+      <div className="grid grid-cols-2 gap-2">
+        <Stat label="Futures" value={`${data?.futures_balance_eur ?? 0} €`} />
+        <Stat label="Spot-Tresor" value={`${data?.vault_balance_eur ?? 0} €`} tone="text-emerald-400" />
+        <Stat label="Frei" value={`${data?.free_futures_eur ?? 0} €`} />
+        <Stat label="Reserviert" value={`${data?.allocated_eur ?? 0} €`} />
+      </div>
+      <div className="mt-2 text-[10px] text-zinc-500">
+        Split {Math.round((data?.split?.reinvest_pct ?? 0.5) * 100)}/{Math.round((data?.split?.vault_pct ?? 0.5) * 100)} ab{' '}
+        {data?.split?.min_split_trigger_eur ?? 10} € · Tresor {data?.vault_asset ?? 'XBT'} · Einbahnstraße{' '}
+        {data?.one_way ? 'aktiv' : 'aus'} · pending {data?.pending_profit_eur ?? 0} €
+      </div>
+      <table className="mt-2 w-full text-left font-mono text-[11px]">
+        <thead className="text-zinc-500"><tr><th>Typ</th><th>Betrag</th><th>Futures</th><th>Vault</th></tr></thead>
+        <tbody>
+          {(data?.recent_entries ?? []).slice().reverse().map((e: any) => (
+            <tr key={e.entry_id} className="border-t border-zinc-800/60">
+              <td>{e.kind}</td><td>{e.amount_eur}</td><td>{e.futures_delta_eur}</td><td>{e.vault_delta_eur}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </PanelShell>
+  );
+}
+
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
   PineStudio,
@@ -621,6 +830,12 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   MemoryWatchdogPanel,
   TvJobsPanel,
   MarketRadarPanel,
+  OrderbookConfluencePanel,
+  SchedulerTelemetryPanel,
+  OrderReceiptsPanel,
+  RateLimiterPanel,
+  ContagionRadarPanel,
+  FlywheelBudgetPanel,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -637,4 +852,10 @@ export const PANEL_TITLES: Record<string, string> = {
   MemoryWatchdogPanel: 'Memory',
   TvJobsPanel: 'TV Jobs',
   MarketRadarPanel: 'Market Radar',
+  OrderbookConfluencePanel: 'OB Confluence',
+  SchedulerTelemetryPanel: 'Scheduler',
+  OrderReceiptsPanel: 'Order Receipts',
+  RateLimiterPanel: 'Rate Limiter',
+  ContagionRadarPanel: 'Contagion',
+  FlywheelBudgetPanel: 'Flywheel',
 };

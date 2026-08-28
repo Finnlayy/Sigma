@@ -54,11 +54,29 @@ def test_every_preset_has_a_layout(preset: str):
     assert f"'{preset}'" in src or f"{preset}:" in src, f"preset {preset} missing"
 
 
-def test_presets_are_exactly_the_blueprint_four():
+def test_presets_cover_blueprint_core_plus_capital_ops():
+    """§8 Presets + §30 CAPITAL_OPS (Execution-Plane-Panels)."""
     src = _read(TERMINAL_TSX)
     listed = src.split("export const PRESETS = [", 1)[1].split("]", 1)[0]
     names = [p.strip().strip("'\"") for p in listed.split(",") if p.strip()]
-    assert names == list(bp.TERMINAL_PRESETS)
+    assert names[:len(bp.TERMINAL_PRESETS)] == list(bp.TERMINAL_PRESETS)
+    assert "CAPITAL_OPS" in names
+    for preset in names:
+        assert preset in bp.ALL_TERMINAL_PRESETS
+        assert f"  {preset}: {{" in src
+
+
+@pytest.mark.parametrize("panel", [
+    "OrderbookConfluencePanel", "SchedulerTelemetryPanel", "OrderReceiptsPanel",
+    "RateLimiterPanel", "ContagionRadarPanel", "FlywheelBudgetPanel",
+])
+def test_extended_panels_are_registered(panel):
+    """§30 — die Execution-Plane-Panels haengen in der FlexLayout-Registry."""
+    src = _read(PANELS_TSX)
+    assert f"export function {panel}()" in src
+    registry = src.split("PANEL_REGISTRY", 1)[1].split("};", 1)[0]
+    assert f"  {panel},\n" in registry
+    assert panel in bp.ALL_TERMINAL_PANELS
 
 
 def test_terminal_is_wired_into_app_navigation():

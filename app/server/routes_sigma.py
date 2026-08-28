@@ -492,3 +492,167 @@ async def telegram_message(body: TelegramIn):
     op = get_telegram_operator(safety_guard=get_safety_guard(),
                                virtual_bots=get_virtual_bot_engine())
     return op.handle(body.chat_id, body.text)
+
+
+# =============================================================================
+# Execution Plane §23-§29 — Telemetrie fuer die erweiterten Panels (§30)
+# =============================================================================
+
+_ORDER_DISPATCHER: Optional[Any] = None
+_FLYWHEEL: Optional[Any] = None
+
+
+def get_order_dispatcher():
+    """Lazy Singleton — teilt sich die KrakenCliBridge mit Loop A."""
+    global _ORDER_DISPATCHER
+    if _ORDER_DISPATCHER is None:
+        from app.execution.reliable_order_dispatcher import ReliableOrderDispatcher
+        _ORDER_DISPATCHER = ReliableOrderDispatcher(KrakenCliBridge(load_config()))
+    return _ORDER_DISPATCHER
+
+
+def get_flywheel():
+    global _FLYWHEEL
+    if _FLYWHEEL is None:
+        from app.execution.capital_flywheel_engine import CapitalFlywheelEngine
+        _FLYWHEEL = CapitalFlywheelEngine()
+    return _FLYWHEEL
+
+
+class DepthLevel(BaseModel):
+    price: float
+    volume: float
+
+
+class ConfluenceIn(BaseModel):
+    symbol: str
+    direction: str = "BUY"
+    bids: List[DepthLevel] = Field(default_factory=list)
+    asks: List[DepthLevel] = Field(default_factory=list)
+    timestamp: float = 0.0
+
+
+class ContagionIn(BaseModel):
+    oil_vol_zscore: float = 0.0
+    gold_dxy_ratio_change: float = 0.0
+    cross_asset_correlation: float = 0.0
+    orderbook_absorption: float = 1.0
+
+
+class FlywheelDepositIn(BaseModel):
+    amount_eur: float
+    note: str = "operator deposit"
+
+
+class FlywheelProfitIn(BaseModel):
+    amount_eur: float
+    strategy_id: str = ""
+
+
+@router.get("/api/v1/clock")
+async def exchange_clock_state():
+    """§23.1 — Kraken-Serverzeit als Single Source of Truth."""
+    from app.core.exchange_clock import get_exchange_clock
+
+    clock = get_exchange_clock()
+    status = clock.maybe_resync().as_dict()
+    status["now"] = clock.now()
+    status["host_now"] = time.time()
+    status["stale_signal_max_latency_s"] = bp.STALE_SIGNAL_MAX_LATENCY_S
+    return status
+
+
+@router.get("/api/v1/scheduler")
+async def scheduler_telemetry():
+    """§23.2 — Tier 0-5 Cadence-Matrix (SchedulerTelemetryPanel)."""
+    from app.core.scheduler_matrix import get_scheduler
+
+    return get_scheduler().telemetry()
+
+
+@router.post("/api/v1/orderbook/confluence")
+async def orderbook_confluence(body: ConfluenceIn):
+    """§24 — JIT Glint x Orderbook Audit (nie als Poll-Loop aufrufen)."""
+    from app.quant.glint_orderbook_verifier import OrderbookSnapshot, get_verifier
+
+    snapshot = OrderbookSnapshot(
+        symbol=body.symbol,
+        bids=[(lvl.price, lvl.volume) for lvl in body.bids],
+        asks=[(lvl.price, lvl.volume) for lvl in body.asks],
+        timestamp=body.timestamp or time.time(),
+    )
+    return get_verifier().verify(snapshot, body.direction).as_dict()
+
+
+@router.get("/api/v1/orderbook/confluence")
+async def orderbook_confluence_state():
+    from app.quant.glint_orderbook_verifier import get_verifier
+
+    return get_verifier().panel_state()
+
+
+@router.get("/api/orders/receipts")
+async def order_receipts(limit: int = 50):
+    """§25 — Closed-Loop Receipts (OrderReceiptsPanel)."""
+    state = get_order_dispatcher().panel_state()
+    state["receipts"] = get_order_dispatcher().receipts(limit)
+    return state
+
+
+@router.get("/api/v1/rate-limiter")
+async def rate_limiter_state():
+    """§26 — Token-Bucket-Status je Provider (RateLimiterPanel)."""
+    from app.core.rate_limiter import get_rate_limiter
+
+    return get_rate_limiter().status()
+
+
+@router.get("/api/v1/contagion")
+async def contagion_state():
+    """§27 — SIR-Fruehwarnung (ContagionRadarPanel)."""
+    from app.quant.epidemic_contagion_engine import get_contagion_engine
+
+    return get_contagion_engine().panel_state()
+
+
+@router.post("/api/v1/contagion")
+async def contagion_update(body: ContagionIn):
+    from app.quant.epidemic_contagion_engine import (ContagionInputs,
+                                                     get_contagion_engine)
+
+    state = get_contagion_engine().evaluate(ContagionInputs(**body.model_dump()))
+    return state.as_dict()
+
+
+@router.get("/api/v1/flywheel")
+async def flywheel_state():
+    """§28 — 50/50 Kapitalarchitektur (FlywheelBudgetPanel)."""
+    return get_flywheel().panel_state()
+
+
+@router.post("/api/v1/flywheel/deposit")
+async def flywheel_deposit(body: FlywheelDepositIn):
+    entry = get_flywheel().deposit(body.amount_eur, body.note)
+    return {"entry": entry.as_dict(), "state": get_flywheel().panel_state()}
+
+
+@router.post("/api/v1/flywheel/profit")
+async def flywheel_profit(body: FlywheelProfitIn):
+    outcome = get_flywheel().register_realized_profit(
+        body.amount_eur, strategy_id=body.strategy_id)
+    return {"result": outcome, "state": get_flywheel().panel_state()}
+
+
+@router.post("/api/v1/flywheel/sweep")
+async def flywheel_sweep():
+    return {"result": get_flywheel().sweep(), "state": get_flywheel().panel_state()}
+
+
+@router.get("/api/v1/leverage/{strategy_id}")
+async def leverage_profile(strategy_id: str, style: Optional[str] = None):
+    """§29 — fester Hebel pro Strategie inkl. Strategy-Card-Badge."""
+    from app.execution.fixed_leverage import load_profile
+
+    cfg = load_config()
+    root = getattr(cfg, "strategies_dir", "./data/strategies")
+    return load_profile(strategy_id, strategies_root=root, style=style).as_dict()

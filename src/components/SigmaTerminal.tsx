@@ -18,7 +18,7 @@ import { sigmaApi, type HealthResponse } from '../lib/sigmaApi';
 const STORAGE_KEY = 'sigma.terminal.layout.v1';
 const PRESET_KEY = 'sigma.terminal.preset.v1';
 
-export const PRESETS = ['BOT_COCKPIT', 'PINE_IDE', 'RISK_RADAR', 'SENTINEL_OPS'] as const;
+export const PRESETS = ['BOT_COCKPIT', 'PINE_IDE', 'RISK_RADAR', 'SENTINEL_OPS', 'CAPITAL_OPS'] as const;
 export type Preset = (typeof PRESETS)[number];
 
 const tab = (component: string) => ({
@@ -86,6 +86,23 @@ const PRESET_LAYOUTS: Record<Preset, IJsonModel> = {
       row(45, [
         set(50, ['TelegramOperatorPanel', 'LLMConsole']),
         set(50, ['TvJobsPanel', 'SelfOptimizingMLPanel']),
+      ]),
+    ]) as IJsonModel['layout'],
+  },
+  // §30 — Kapital- & Execution-Plane (Blueprint v3.6 §23-§29)
+  CAPITAL_OPS: {
+    global: {},
+    borders: [],
+    layout: row(100, [
+      row(55, [
+        set(34, ['FlywheelBudgetPanel']),
+        set(33, ['OrderReceiptsPanel']),
+        set(33, ['ContagionRadarPanel']),
+      ]),
+      row(45, [
+        set(34, ['OrderbookConfluencePanel']),
+        set(33, ['SchedulerTelemetryPanel']),
+        set(33, ['RateLimiterPanel']),
       ]),
     ]) as IJsonModel['layout'],
   },

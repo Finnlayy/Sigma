@@ -299,6 +299,19 @@ export const sigmaApi = {
   scout: () => request<any>('/api/v1/scout'),
   scoutPlan: (ids: string[]) => post<any>('/api/v1/scout/plan', ids),
 
+  // Execution Plane §23-§29 (erweiterte Panels §30)
+  clock: () => request<any>('/api/v1/clock'),
+  scheduler: () => request<any>('/api/v1/scheduler'),
+  confluence: () => request<any>('/api/v1/orderbook/confluence'),
+  auditConfluence: (body: { symbol: string; direction: string; bids: Array<{ price: number; volume: number }>; asks: Array<{ price: number; volume: number }> }) =>
+    post<any>('/api/v1/orderbook/confluence', body),
+  receipts: (limit = 50) => request<any>(`/api/orders/receipts?limit=${limit}`),
+  rateLimiter: () => request<any>('/api/v1/rate-limiter'),
+  contagion: () => request<any>('/api/v1/contagion'),
+  flywheel: () => request<any>('/api/v1/flywheel'),
+  flywheelSweep: () => post<any>('/api/v1/flywheel/sweep'),
+  leverage: (strategyId: string) => request<any>(`/api/v1/leverage/${encodeURIComponent(strategyId)}`),
+
   // Telegram / LLM
   telegram: () => request<TelegramSnapshot>('/api/v1/telegram'),
   telegramSend: (chat_id: string, text: string) => post<any>('/api/v1/telegram/message', { chat_id, text }),

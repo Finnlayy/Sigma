@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze v3.1 (Execution Plane: Scheduler, Glint/OB, ACK/Retry, Flywheel, Fixed Leverage) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.6 (Netron ONNX Graph Inspector) — `docs/BLUEPRINT-SIGMA.md`  
 > **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
@@ -52,6 +52,7 @@ Alles, was „Strategie“ heißt, bezieht sich auf TV und arbeitet darüber:
 |---------|----------------|------|--------------------|
 | **sigma-core** | `uvicorn app.server.main:app` | **8000** | `/opt/sigma` bzw. Repo-Root |
 | **sigma-tv-scraper** | `uvicorn api.main:app` (vendored scraper) | **8001** | `vendor/tradingview-scraper` |
+| **sigma-netron** | `python app/services/netron_server.py` | **8082** | Repo-Root |
 | **sigma-tv-worker** | `python -m app.tv.worker` (Playwright Job-Consumer) | — | Repo-Root |
 | **Redis** | redis-server AOF | **6379** | system |
 | **UI (dev)** | `vite` | **3000** | Repo-Root |
@@ -230,21 +231,13 @@ sequenceDiagram
 
 Der Webhook ersetzt die Kraken-CLI **nicht**. Die CLI bleibt der Executor. Der Webhook ersetzt den früheren „internen Archetyp-Signalgenerator / Windows-Portal“, als Weg wie **Live-Signale von TV in den Core kommen**.
 
-Paper-Modus: gleicher Webhook, Executor = `PaperExecutionEngine` statt Kraken CLI, bis Telemetry `LIVE_APPROVED` + `SIGMA_LIVE_TRADING=1`.
+Paper-Modus: gleicher Webhook; Executor = native **Kraken CLI Paper** (`kraken futures paper order`) via `KrakenCliBridge` — siehe §32. Scout Loop D ist paper-only; Live erst nach Graduation oder Operator-Freigabe.
 
-### 4.1 Pine Alert Payload (Pydantic)
+### 4.1 Webhook Alert Payload (kanonisch)
 
-```python
-class PineAlertPayload(BaseModel):
-    symbol: str                    # "KRAKEN:XBTUSD" oder "XBTUSD"
-    action: Literal["BUY","SELL","CLOSE"]
-    price: float
-    rsi: float
-    atr: float
-    cisd_score: float = 0.5
-    timestamp: int                 # ms oder s — normalisieren
-    strategy_id: str | None = None
-```
+**Vollständige Schemata:** §33 (`SigmaL4AlertPayload`, Pionex, Pine-Emitter, `SignalExecutionResponse`).
+
+Kurz: Jedes TV-Signal ist typisiertes JSON mit `secret`, `idempotency_key`, `strategy_id`, `bot_id`, `action`, `stop_loss`, `fixed_leverage`, `timestamp`, optional `features` (ONNX). Validierung in [`app/server/schemas.py`](app/server/schemas.py) (Pydantic V2 strict).
 
 ### 4.2 Endpoint
 
@@ -419,7 +412,9 @@ Nur retryable Codes → max 2 Attempts. Session/Captcha → Operator-Alert, `sig
 
 ### 5.5 CSV-Verträge (kanonisch)
 
-**Parameters:**
+**Dateiname & Header:** §35 (Exact Roundtrip) — Original-Dateiname und Zeile 1 **buchstabengetreu** aus TV-Export übernehmen; Versionierung nur über `baseline/` vs `optimized/`.
+
+**Parameters (Beispiel — Header kann je Strategie abweichen, z. B. `Strategy Inputs,Default Value`):**
 
 ```csv
 Parameter,Value
@@ -475,7 +470,7 @@ riskPct,2.5,float,0.1,10,0.1
 
 - Mindestens `Parameter,Value` (wie §5.5).  
 - `Type/Min/Max/Step` wenn aus UI oder Pine-Metadaten ableitbar; sonst Defaults aus `app/tv/param_bounds.yaml` oder Library `pine_inputs_schema`.  
-- CSV landet in `./data/tv_exports/{job_id}/parameters_baseline.csv` **und** wird an die Strategy-Row gespiegelt (`parameters` + `pine_inputs_schema`).
+- CSV landet in `./data/strategies/{id}/baseline/{OriginalName}.csv` (exakter TV-Dateiname) **und** Job-Kopie unter `./data/tv_exports/{job_id}/{OriginalName}.csv`; Strategy-Row: `parameters` + `pine_inputs_schema` + `original_csv_filename` (§35).
 
 Wenn TV keinen nativen „Export Parameters“-Button hat: Playwright **scraped** die Properties-Felder und erzeugt die CSV — gleiche Seam wie manuell exportierte Parameter-CSV.
 
@@ -494,8 +489,8 @@ Baseline-Individuum = exakte Values aus der gelesenen CSV.
 
 Pro Individuum:
 
-1. `params_to_csv(genes)` → Parameter-CSV.  
-2. Driver setzt Properties in der **selben** TV-Session / Chart.  
+1. `ExactTradingViewCSVHandler.serialize_optimized_values()` → CSV mit **unverändertem Header** und Original-Dateiname.  
+2. Driver re-upload via Playwright File-Chooser (§35) oder setzt Properties in der **selben** TV-Session.  
 3. Strategy Tester Run → Trades/Performance-CSV.  
 4. `result_csv_to_backtest_result` → Fitness (IS/OOS Fenster wie bisher).  
 
@@ -525,6 +520,7 @@ GeneticOptimizerPanel: vor Run „Parameters from TradingView“ Status/Preview 
 |------|--------|
 | `app/tv/strategy_tester_driver.py` | `export_parameters`, `apply_parameters`, `run_backtest` |
 | `app/optimizer/gene_schema.py` | CSV → GeneSchema |
+| `app/optimizer/exact_csv_serializer.py` | Header/Dateiname-Freeze; baseline/optimized Export |
 | `app/optimizer/GeneticOptimizer.py` | nutzt GeneSchema + TvBacktestService |
 
 Last weiterhin serialisiert + Cache; erster Job jedes Runs = Parameter-Pull (cacheable bis Code-Hash sich ändert).
@@ -754,6 +750,7 @@ m8:
 2. `sigma-scraper.service` — uvicorn :8001  
 3. `sigma-core.service` — uvicorn :8000, After=redis+scraper  
 4. `sigma-tv-worker.service` — Playwright worker, After=network, Needs display/headless deps  
+5. `sigma-netron.service` — ONNX graph inspector, Port **8082**, After=network  
 
 `Restart=always`, `RestartSec=3`.
 
@@ -1075,8 +1072,16 @@ kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 | Rate Limiter | `app/core/rate_limiter.py` | TV-Tier; Kraken Token-Bucket; Emergency Reserve |
 | SIR Contagion | `app/quant/epidemic_contagion_engine.py` | R₀ Makro; Hedge/Cash-Modi |
 | Flywheel | `app/execution/capital_flywheel_engine.py` | 100% Deposit→Futures; 50/50 Profit-Split |
+| Strategy Lifecycle | `app/services/strategy_lifecycle_service.py` | 3 Trigger-Pfade → TV Placement |
+| Kraken Paper | `app/execution/KrakenCliBridge.py` | Dual-Mode: `paper` vs `live`; Graduation |
+| Webhook Schemas | `app/server/schemas.py` | SigmaL4, Pionex, ML features; Pydantic V2 |
+| LLM Schemas | `app/llm/schemas_llm.py` | Tools, Pine patch, WebSocket stream |
+| Exact CSV | `app/optimizer/exact_csv_serializer.py` | TV filename + header freeze; roundtrip |
+| Error Engine | `app/core/error_engine.py` | E1000–E5000 taxonomy; FastAPI handlers |
+| Log Stream | `app/server/routes_logs.py` | WS `/api/v1/logs/stream`; multi-file tail |
+| Netron | `app/services/netron_server.py` | ONNX graph viewer sidecar :8082 |
 
-systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
+systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`, `sigma-netron`; MemoryMax auf Worker.
 
 **Hebel:** `fixed_leverage` pro Strategie in `profile.json` — siehe §29.
 
@@ -1247,7 +1252,745 @@ Zusätzlich zu §8 / Sentinel-Panels:
 | `RateLimiterPanel` | rate_limiter |
 | `ContagionRadarPanel` | epidemic_contagion_engine |
 | `FlywheelBudgetPanel` | capital_flywheel_engine |
+| `PaperLabPanel` | kraken_paper_engine / Scout graduation |
+| `DiagnosticsErrorPanel` | error_engine; E1000–E5000 + remediation hints |
+| `NetronVisualizerPanel` | Netron iframe :8082; ONNX layer/tensor inspect |
 
-Presets: `SENTINEL_OPS` + `CAPITAL_OPS` (Flywheel + Receipts + Rate Limits).
+Presets: `SENTINEL_OPS` + `CAPITAL_OPS` + `PAPER_LAB` + `OBSERVABILITY` + `ML_INSPECTOR`.
+
+---
+
+## 31. Die 3 Trigger-Pfade zur Strategie-Platzierung
+
+Pfad: [`app/services/strategy_lifecycle_service.py`](app/services/strategy_lifecycle_service.py) (`StrategyLifecycleService`).
+
+Drei kanonische Auslöser starten dieselbe zentrale Dispatcher-Pipeline: Pine aus der Bibliothek → TradingView-Chart → Kompilierung → Webhook-Alert → Bot aktiv.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DIE 3 TRIGGER-PFADE ZUR STRATEGIE-PLATZIERUNG            │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[PFAD 1: USER / UI / CHAT]      [PFAD 2: AUTONOMER AI ALLOC.]    [PFAD 3: SCOUT LABOR LOOP D]
+• 1-Click "Start Bot" im UI     • 4-Stunden Scheduler Matrix     • Autonome Paper-Incubation
+• LLM-Chat / Telegram           • Glint-Wette (Score ≥ 8/10)     • Unprofilierte Skripte
+• Operator wählt Strategie & €  • GMT-Makro Regime-Wechsel       • Neue Asset/TF-Paare
+      │                                │                                │
+      └────────────────────────────────┼────────────────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ StrategyLifecycleService          │
+                     │ (zentrale Dispatcher-Pipeline)    │
+                     └─────────────────┬─────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ SCHRITT A: sigma-tv-worker    │             │ SCHRITT B: sigma-core         │
+│ • Chart-Session (Playwright)  │             │ • Bot-Budget reservieren      │
+│ • Pine v6 injizieren          │             │ • M8 → ACTIVE                 │
+│ • Kompilieren & Add to Chart  │             │ • fixed_leverage zuweisen     │
+│ • Webhook-Alert provisionieren│             │ • execution_mode setzen       │
+└───────────────────────────────┘             └───────────────────────────────┘
+```
+
+### 31.1 Pfad 1 — Manuell (UI / LLM-Chat / Telegram)
+
+| Feld | Wert |
+|------|------|
+| **Wer** | Operator über GMT-Terminal, LLM-Console oder Telegram |
+| **UI** | Virtual Bot Deck → `[+ Neuen Bot starten]` → Skript + Budget + Hebel |
+| **Chat** | z. B. „Starte `CISD_Scalp_v6` auf XRP 5m mit 250 € und 5× Hebel“ |
+| **API** | `POST /api/strategies/{id}/start` |
+| **Modus** | `live` oder `kraken_paper` (Operator-Wahl) |
+
+### 31.2 Pfad 2 — Autonom (Glint & Makro-Regime)
+
+| Feld | Wert |
+|------|------|
+| **Wer** | `RegimeStrategyDispatcher` (Scheduler Tier 3, 4 h) |
+| **Auslöser A** | Glint-Event Score ≥ 8/10 (Telethon UserBot) |
+| **Auslöser B** | Makro-Regime-Shift (Scraper :8001, z. B. A/D 35% → 72%) |
+| **Entscheidung** | Academy-Badge + Note S für Regime; JIT Orderbuch-Audit; dann Pipeline |
+| **Modus** | `live` (nach Orderbuch-Konfluenz) |
+
+### 31.3 Pfad 3 — Scout-Labor (Loop D)
+
+| Feld | Wert |
+|------|------|
+| **Wer** | `ScoutIncubator` (Scheduler: `scout_incubator_cycle_minutes: 30`) |
+| **Zweck** | Bibliothek mit echten Forward-Test-Daten füllen; Academy-Badges sammeln |
+| **Auswahl** | Strategien mit wenigen Trades; zufälliges/liquides Paar (z. B. SOL 15m) |
+| **Modus** | **immer** `kraken_paper` — kein Live-Budget |
+
+### 31.4 Die 5 technischen Schritte (alle Pfade)
+
+Sobald ein Trigger feuert, führen `sigma-tv-worker` und `sigma-core` diese Sequenz aus:
+
+1. **Budget-Reservierung (Core)** — freies Futures-Kapital prüfen; isolierten Topf reservieren (z. B. 250 €).
+2. **Chart-Navigation (Worker)** — `https://www.tradingview.com/chart/?symbol=KRAKEN:XRPUSD` mit `tv_storage_state.json` (2FA-Session).
+3. **Pine v6 Injektion & Kompilierung** — Code aus `./data/strategies/{id}/code.pine` → Save → Add to Chart; bei Compile-Fehler sofortiger Abbruch.
+4. **Webhook-Alert Provisionierung** — URL `http://<host>:8000/api/v1/signal/webhook`; Message: JSON mit `SIGMA_SECRET`, `symbol`, `strategy_id`.
+5. **Scharfschaltung** — M8 `ACTIVE`; ab jetzt wartet Core auf Signale und führt über Kraken CLI mit `fixed_leverage` aus.
+
+### 31.5 Trigger-Matrix (Zusammenfassung)
+
+| Trigger | Initiator | Wann | Modus |
+|---------|-----------|------|-------|
+| Manuell | Operator (UI / Chat / Telegram) | Auf Knopfdruck / Sprachbefehl | Live oder Paper |
+| Autonom Makro | `RegimeStrategyDispatcher` | Alle 4 h bei Regime-Wechsel | Live (im Bot-Budget) |
+| Autonom Event | Glint Radar | Score ≥ 8/10 | Live (nach OB-Audit) |
+| Autonom Scout | `ScoutIncubator` (Loop D) | Alle 30 min | Kraken Paper only |
+
+---
+
+## 32. Kraken Paper Trading Lab (Hybrid Training Pipeline)
+
+**Kanonisch:** Scout-Labor (Loop D) und manuelle Paper-Starts nutzen die **native Kraken CLI Paper Engine** — Forward-Testing am echten Live-Ticker ohne Geldeinsatz.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA HYBRID TRAINING & VALIDATION PIPELINE                 │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ STUFE 1: TV BACKTEST (Loop B) │             │ STUFE 2: KRAKEN LIVE PAPER    │
+│ • Historisch 3–12 Monate      │             │ • Echter Live-Ticker (0€ Risk)│
+│ • GA + DSR Shadow ≥ 0.95      │             │ • Reale Latenz/Spread/Slippage│
+│ • Filtert ~90% untauglich     │             │ • Trainiert Akademie/ONNX     │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                │                                             │
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ STUFE 3: LIVE PRODUCTION          │
+                     │ Kraken Live Futures + 50/50 Spot    │
+                     └───────────────────────────────────┘
+```
+
+### 32.1 Graduation Protocol (Reifegrad)
+
+| Stufe | Gate | Nächster Schritt |
+|-------|------|------------------|
+| 1 → 2 | DSR ≥ 0.95, N ≥ 30 (TV Backtest) | Scout startet Kraken Paper |
+| 2 → 3 | `min_paper_trades: 20`, PF ≥ 1.6, WR ≥ 55% | Operator oder Allocator befördert zu Live |
+
+### 32.2 Kraken CLI Paper-Befehle (Dual-Mode)
+
+Identische Schnittstelle in [`app/execution/KrakenCliBridge.py`](app/execution/KrakenCliBridge.py):
+
+| Aktion | Befehl |
+|--------|--------|
+| Spot Paper Balance | `kraken paper balance` |
+| Spot Paper Order | `kraken paper order buy BTCUSD 0.001 --type limit --price 68000` |
+| Futures Paper Balance | `kraken futures paper balance` |
+| Futures Paper Order | `kraken futures paper order buy PF_XBTUSD 1 --type limit --price 68000` |
+| **Live** (nach Graduation) | `kraken trade add-order --pair=... --leverage=N ...` |
+
+`reliable_order_dispatcher.py` routet nach `execution_mode`: `kraken_paper` vs `live`.
+
+### 32.3 Config (`config/autonomy-level-4.yaml`)
+
+```yaml
+execution_modes:
+  default_mode: "live"                # "live" | "kraken_paper" | "hybrid_scout"
+
+kraken_paper_engine:
+  enabled: true
+  use_cli_paper_subcommand: true
+  demo_futures_sandbox_url: "https://demo-futures.kraken.com/api/v3"
+  initial_paper_balance_usd: 10000.0
+  auto_graduate_to_live:
+    enabled: true
+    min_paper_trades: 20
+    min_paper_profit_factor: 1.6
+    min_paper_win_rate_pct: 55.0
+```
+
+### 32.4 Scout Loop D — Paper-only Binding
+
+- Pfad 3 (§31.3) setzt `execution_mode: kraken_paper` **fest** — kein Live-Budget.
+- Paper-Fills fließen in Academy, Reward Shaping, ONNX Triple-Barrier-Labels.
+- UI `PaperLabPanel`: Trades, Sim-PnL, Winrate, Graduation-Status, Button „Zu Live befördern“.
+
+### 32.5 Warum Kraken Paper > reiner TV-Backtest
+
+| Dimension | TV Strategy Tester | Kraken Paper |
+|-----------|-------------------|--------------|
+| Daten | Historisch | Live-Ticker Forward |
+| Execution | Simuliert | Echte CLI + Latenz + Spread |
+| Academy/ONNX | Backtest-CSV | Echte Fill-Telemetrie |
+| Risiko | 0 € | 0 € |
+
+---
+
+## 33. Standardisierte Webhook-Alert-Schemata
+
+Pfad: [`app/server/schemas.py`](app/server/schemas.py).
+
+Drei Schema-Familien; Ingestion-Router auf `:8000` erkennt Format und validiert strikt (Pydantic V2).
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA STANDARDIZED WEBHOOK ALERT SCHEMATA                   │
+│                     (Pine Script v6 ──► Ingestion Router)                   │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ Schema A: Sigma L4 Master     │             │ Schema B: Pionex Native       │
+│ • secret + idempotency_key    │             │ • UUID signal_type            │
+│ • bot_id, SL/TP, fixed_leverage│            │ • TV-Platzhalter direkt       │
+│ • features (ONNX/ML)          │             │ • optional Lab-Routing only   │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                │                                             │
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ Pydantic V2 Strict Validator      │
+                     │ + exchange_clock stale gate       │
+                     │ + idempotency (reliable_dispatcher)│
+                     └───────────────────────────────────┘
+```
+
+### 33.1 Schema A — Sigma L4 Master Signal (Kraken Live & Paper)
+
+```json
+{
+  "secret": "sigma_prod_secure_token_8849",
+  "idempotency_key": "sig_cisd_v6_XRPUSD_1787786800",
+  "strategy_id": "cisd_sniper_breakout_v6",
+  "bot_id": "bot_xrp_01",
+  "symbol": "KRAKEN:XRPUSD.P",
+  "action": "BUY",
+  "order_type": "MARKET",
+  "price": 0.5842,
+  "stop_loss": 0.5765,
+  "take_profit": 0.6050,
+  "fixed_leverage": 5,
+  "timestamp": 1787786800,
+  "features": {
+    "rsi": 28.4,
+    "atr": 0.0052,
+    "cisd_score": 0.88,
+    "bb_bandwidth": 0.024
+  }
+}
+```
+
+| Feld | Pflicht | Zweck |
+|------|---------|-------|
+| `secret` | ja | Shared Secret; HTTP 401 bei Mismatch |
+| `idempotency_key` | ja | Duplikat → `DUPLICATE_IGNORED` |
+| `strategy_id` / `bot_id` | ja | Routing zu Virtual Bot + M8 |
+| `stop_loss` | ja | Native Bracket-SL an Kraken CLI |
+| `fixed_leverage` | ja | Strategy-bound; 1–5 |
+| `features` | optional | ONNX-Inferenz (Schema C embedded) |
+
+**Pydantic-Modelle:**
+
+```python
+class MLFeaturePayload(BaseModel):
+    rsi: float = Field(..., ge=0.0, le=100.0)
+    atr: float = Field(..., gt=0.0)
+    cisd_score: Optional[float] = 0.5
+    bb_bandwidth: Optional[float] = 0.0
+
+class SigmaL4AlertPayload(BaseModel):
+    secret: str = Field(..., min_length=16)
+    idempotency_key: str = Field(..., min_length=8)
+    strategy_id: str
+    bot_id: str
+    symbol: str
+    action: Literal["BUY", "SELL", "CLOSE"]
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET"
+    price: float = Field(..., gt=0.0)
+    stop_loss: float = Field(..., gt=0.0)
+    take_profit: Optional[float] = None
+    fixed_leverage: int = Field(1, ge=1, le=5)
+    timestamp: int
+    features: Optional[MLFeaturePayload] = None
+    # Validators: timestamp ms→s; symbol KRAKEN:/.P strip
+```
+
+**Response:** `SignalExecutionResponse` — `EXECUTED` | `REJECTED` | `DUPLICATE_IGNORED` | `VETO_ORDERBOOK`.
+
+### 33.2 Schema B — Pionex Signal Bot (optional Lab)
+
+Nur wenn `pionex_connector.enabled: true` (default `false` in DE). Direkt-Routing TV → Pionex:
+
+```json
+{
+  "data": {
+    "action": "{{strategy.order.action}}",
+    "contracts": "{{strategy.order.contracts}}",
+    "position_size": "{{strategy.position_size}}"
+  },
+  "price": "{{close}}",
+  "signal_param": "{}",
+  "signal_type": "8a17bcf9-0d9c-4a09-92ae-27adf755d95d",
+  "symbol": "{{ticker}}",
+  "time": "{{timenow}}"
+}
+```
+
+### 33.3 Schema C — ML/Kausal-Telemetrie
+
+Transportiert in `features` (Schema A) oder separat in Academy-Autopsie-Logs:
+
+- RSI, ATR, CISD-Score, BB-Bandwidth
+- Optional Snapshots: MFE/MAE, Regime-Enum, Glint-Score
+
+### 33.4 Pine v6 Master Emitter (Boilerplate)
+
+Jede Bibliotheks-Strategie bindet den Sigma-Emitter ein:
+
+- TV-Platzhalter: `{{strategy.order.action}}`, `{{close}}`, `{{timenow}}`, `{{ticker}}`
+- `idempotency_key = sig_{strategy_id}_{ticker}_{time_close}`
+- `strategy.entry(..., alert_message=json_msg)` + `alert(json_msg, alert.freq_once_per_bar_close)`
+- Konstanten: `SIGMA_SECRET`, `STRATEGY_ID`, `BOT_ID`, `FIXED_LEVERAGE`
+
+Vollständiges Boilerplate: `./prompts/pine_sigma_l4_emitter_v6.pine` (Template).
+
+### 33.5 Ingestion-Pipeline (nach Validierung)
+
+1. `secret` check → 401
+2. `exchange_clock.is_signal_stale(timestamp)` → `STALE_SIGNAL_REJECT`
+3. Idempotenz-Store → Duplikat
+4. Glint×OB JIT (§24) → optional Veto
+5. `reliable_order_dispatcher` → Kraken Live/Paper
+
+---
+
+## 34. LLM-, Tool-Calling- & Streaming-Schemata
+
+Pfad: [`app/llm/schemas_llm.py`](app/llm/schemas_llm.py).
+
+Offline Ollama (`:11434`) steuert Sigma nur über **typisierte** Tool-Contracts — kein Freitext-Execution.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA LLM & CONVERSATIONAL SCHEMA MATRIX                    │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[Tool Call Contract]            [Pine Code Patch]                 [WebSocket Stream]
+• Ollama function-calling       • strategy_id + edit_mode           • ChatStreamMessage
+• Parameter range validation    • pine v6 enforce //@version=6      • Token chunks + tool_result
+• ToolResultEnvelope            • Playwright compile gate           • ui_component_trigger
+```
+
+### 34.1 Tool-Calling Schemata (Ollama / OpenAI-kompatibel)
+
+| Tool | Params-Model | Wirkung |
+|------|--------------|---------|
+| `update_risk_settings` | `UpdateRiskSettingsParams` | `max_daily_loss_usd`, `kelly_fraction`, `max_open_positions`, `global_max_leverage` (1–5) |
+| `control_bot` | `ControlBotParams` | `START` / `PAUSE` / `STOP` / `QUARANTINE`; optional `adjusted_budget_eur` |
+| `edit_pine_strategy_code` | `PineCodePatchRequest` | `FULL_REPLACE` / `DIFF_PATCH` / `INJECT_TIME_STOP` / `ADJUST_PARAMETERS` |
+| `query_kausal_autopsy` | `QueryKausalAutopsyParams` | strategy_id, symbol, timeframe |
+| `trigger_emergency_action` | `TriggerEmergencyActionParams` | `KILL_SWITCH` / `CANCEL_ALL_ORDERS` / `FLIGHT_TO_CASH`; **`confirmation_confirmed: true` Pflicht** |
+
+**Envelopes:**
+
+```python
+class ToolCallEnvelope(BaseModel):
+    call_id: str
+    tool_name: str
+    arguments: Dict[str, Any]
+    timestamp: int
+
+class ToolResultEnvelope(BaseModel):
+    call_id: str
+    tool_name: str
+    status: Literal["SUCCESS", "FAILED", "CONFIRMATION_REQUIRED"]
+    result_data: Dict[str, Any]
+    error_message: Optional[str] = None
+    execution_time_ms: int
+```
+
+Tool-Registry JSON: `app/llm/tools_registry.json` (OpenAPI-generierbar unter `/docs`).
+
+### 34.2 Pine Code Patch Schema
+
+```python
+class PineCodePatchRequest(BaseModel):
+    strategy_id: str
+    edit_mode: Literal["FULL_REPLACE", "DIFF_PATCH", "INJECT_TIME_STOP", "ADJUST_PARAMETERS"]
+    pine_source_code: str = Field(..., min_length=20)
+    commit_summary: str
+    push_to_tradingview: bool = True
+    # Validator: erzwingt //@version=6
+
+class PineCodePatchResponse(BaseModel):
+    strategy_id: str
+    status: Literal["SUCCESS_COMPILED", "COMPILE_FAILED_ROLLBACK", "SAVED_LOCAL_ONLY"]
+    backup_file_path: str
+    tv_compilation_error: Optional[str] = None
+```
+
+Flow: LLM → Patch → Backup `./data/strategies/{id}/code.pine.bak` → Playwright Compile → Rollback bei Fehler.
+
+### 34.3 WebSocket Streaming Schema (LLM Console)
+
+Endpoint: `WS /api/v1/llm/stream` (React `LLMConsole`).
+
+```python
+class ChatStreamMessage(BaseModel):
+    message_id: str
+    session_id: str
+    sender: Literal["USER", "ASSISTANT", "SYSTEM", "TOOL_EXECUTOR"]
+    content_chunk: Optional[str] = None
+    is_complete: bool = False
+    active_tool_call: Optional[ToolCallEnvelope] = None
+    tool_result: Optional[ToolResultEnvelope] = None
+    ui_component_trigger: Optional[Literal["REFRESH_BOT_DECK", "RELOAD_CHART", "OPEN_INSPECTOR"]] = None
+    timestamp: int
+```
+
+### 34.4 Schema-Vollständigkeits-Matrix
+
+| Schnittstelle | Schema-Datei | Transport |
+|---------------|--------------|-----------|
+| TV Webhook (Kraken) | `app/server/schemas.py` | HTTP POST |
+| Pionex Lab | `app/server/schemas.py` (`PionexSignalPayload`) | HTTP POST |
+| LLM Tools | `app/llm/schemas_llm.py` | Ollama function-calling |
+| Pine Patches | `app/llm/schemas_llm.py` | REST + Playwright |
+| Chat Stream | `app/llm/schemas_llm.py` | WebSocket |
+| Order Receipt | `reliable_order_dispatcher` (§25) | HTTP + Telegram |
+| Orderbook Depth | `glint_orderbook_verifier` (§24) | Internal JIT |
+
+**Noir-Gate:** Irreversible Tools (`trigger_emergency_action`) erfordern `confirmation_confirmed: true`; UI zeigt Confirm-Card vor Ausführung.
+
+---
+
+## 35. Exact TradingView CSV Roundtrip Protocol
+
+Pfad: [`app/optimizer/exact_csv_serializer.py`](app/optimizer/exact_csv_serializer.py).
+
+TradingViews Properties-Import ist strikt: **falscher Dateiname oder abweichender Header = Schema-Mismatch**. Sigma spiegelt TV 1:1 — keine erfundenen Namen wie `parameters_optimized.csv`.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 EXACT TRADINGVIEW CSV ROUNDTRIP PROTOCOL                    │
+│                 (1:1 Dateiname, Header-Integrität & Safe Upload)            │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ 1. TV CSV Export              │             │ 2. Exact Header & Name Freeze │
+│ • z.B. `Strategy_properties.csv`│           │ • Dateiname unverändert       │
+│ • Header z.B. `Inputs,Value`  │             │ • Zeile 1 byte-identisch      │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                │                                             │
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     [3. GA mutiert nur Werte — Header bleibt]
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ 4. Playwright Re-Upload           │
+                     │ • Original-Dateiname              │
+                     │ • Pre-Upload Header-Assertion     │
+                     └───────────────────────────────────┘
+```
+
+### 35.1 Kanonische Regeln
+
+| Regel | Detail |
+|-------|--------|
+| **Dateiname** | Exakt wie TV-Export (z. B. `CISD_Scalper_v6_properties.csv`) |
+| **Header Zeile 1** | Buchstabengetreu (z. B. `Strategy Inputs,Default Value` oder `Inputs,Value`) |
+| **Delimiter** | `,` oder `;` — aus Original erkannt und beibehalten |
+| **Versionierung** | Über Ordner, **nicht** über Umbenennung |
+
+### 35.2 Verzeichnis-Layout
+
+```text
+./data/strategies/{id}/
+  ├── code.pine
+  ├── meta.json                    # original_csv_filename, exact_csv_header, delimiter
+  ├── baseline/
+  │    └── CISD_Scalper_v6_properties.csv   # Original-Download aus TV
+  └── optimized/
+       └── CISD_Scalper_v6_properties.csv   # gleicher Name + Header, optimierte Werte
+```
+
+**`meta.json` Felder:**
+
+```json
+{
+  "original_csv_filename": "CISD_Scalper_v6_properties.csv",
+  "exact_csv_header": ["Strategy Input", "Value"],
+  "delimiter": ","
+}
+```
+
+GA-Job-Artefakte: `./data/tv_exports/{job_id}/{OriginalName}.csv` (Kopie mit gleichem Dateinamen).
+
+### 35.3 `ExactTradingViewCSVHandler`
+
+```python
+class ExactTradingViewCSVHandler:
+  # __init__(original_csv_path) → liest exact_header_row, delimiter, original_filename
+  # serialize_optimized_values(optimized_params) → Zeile 1 = Original-Header
+  # save_versioned_csv(strategy_dir, params, is_baseline=False) → baseline/ oder optimized/
+```
+
+### 35.4 Pre-Upload Assertion (Noir-Gate)
+
+Vor Playwright-Re-Upload:
+
+```python
+assert new_csv.split("\n")[0] == original_csv.split("\n")[0]
+```
+
+Bei Mismatch: `CSV_HEADER_MISMATCH` — kein Upload, GA-Individuum verworfen.
+
+### 35.5 Playwright Re-Upload (`strategy_tester_driver.py`)
+
+`upload_properties_csv_to_tv(strategy_id, csv_file_path)`:
+
+1. Strategy Tester → Properties öffnen
+2. `expect_file_chooser()` → Import-Button
+3. `file_chooser.set_files(str(csv_file_path))` — **Original-Dateiname**
+4. Apply/OK bestätigen
+
+### 35.6 Integration Loop B (GA)
+
+| Schritt | Modul |
+|---------|-------|
+| Export aus TV | `StrategyTesterDriver.export_parameters` → `baseline/{OriginalName}.csv` |
+| Genraum | `GeneSchema.from_parameter_csv` (Header-Zeile überspringen) |
+| Optimierung | Werte mutieren; Header via `ExactTradingViewCSVHandler` frozen |
+| Re-Upload | `upload_properties_csv_to_tv` mit `optimized/{OriginalName}.csv` |
+| Diff UI | Baseline vs Optimized (gleicher Dateiname, verschiedene Ordner) |
+
+---
+
+## 36. Unified Error Taxonomy & Diagnostics Desk
+
+Pfad: [`app/core/error_engine.py`](app/core/error_engine.py).
+
+Jeder Fehler liefert strukturiertes `ErrorDetail` — kein blindes `500 Internal Server Error`. Persistenz: `./data/logs/errors.jsonl`.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA UNIFIED ERROR TAXONOMY & DIAGNOSTICS                  │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[Error Taxonomy E1000–E5000]    [Diagnostics Engine]            [Live Error Desk UI]
+• Kategorisierte ERR_* Codes    • remediation_hint pro Fehler   • DiagnosticsErrorPanel
+• Structured ErrorDetail        • Telegram HIGH/CRITICAL Push     • 1-Click Retry / Export
+• Global FastAPI handler        • trace_id + technical_context  • Stacktrace Drawer
+```
+
+### 36.1 ErrorDetail Schema
+
+```python
+class ErrorDetail(BaseModel):
+    error_code: str           # z.B. ERR_TV_PINE_COMPILE_ERROR
+    category: str             # AUTHENTICATION | TRADINGVIEW | KRAKEN | RISK_GUARD | SYSTEM
+    message: str
+    subsystem: str            # sigma-core | playwright-worker | kraken-bridge | scraper-8001
+    remediation_hint: str       # Konkreter Fix-Schritt für Operator
+    technical_context: Dict[str, Any]
+    trace_id: Optional[str] = None
+    timestamp: int
+```
+
+Alle `SigmaBaseException`-Subklassen → `sigma_global_exception_handler` → JSON-Response + `errors.jsonl`. Unhandled → `ERR_SYS_UNHANDLED_EXCEPTION` (kein Server-Crash).
+
+### 36.2 Fehlercode-Katalog (E1000–E5000)
+
+| Range | Kategorie | Beispiel-Codes |
+|-------|-----------|----------------|
+| **E1000** | Auth & Security | `ERR_AUTH_INVALID_SECRET`, `ERR_AUTH_TV_SESSION_EXPIRED`, `ERR_AUTH_WHITELIST_BLOCKED` |
+| **E2000** | TradingView & Playwright | `ERR_TV_SELECTOR_NOT_FOUND`, `ERR_TV_PINE_COMPILE_ERROR`, `ERR_TV_ALERT_QUOTA_EXCEEDED`, `ERR_TV_EXPORT_TIMEOUT`, `ERR_TV_CSV_HEADER_MISMATCH` |
+| **E3000** | Kraken & Execution | `ERR_KRAKEN_INSUFFICIENT_FUNDS`, `ERR_KRAKEN_RATE_LIMIT_429`, `ERR_KRAKEN_DEADMAN_TIMEOUT`, `ERR_KRAKEN_CLI_NOT_FOUND` |
+| **E4000** | Quant, Risiko & Markt | `ERR_RISK_MAX_DAILY_LOSS`, `ERR_RISK_KILL_SWITCH_ACTIVE`, `ERR_ORDERBOOK_LIQUIDITY_TRAP`, `ERR_CONTAGION_VETO_R0`, `ERR_STALE_SIGNAL_REJECT` |
+| **E5000** | System & Ressourcen | `ERR_SYS_RAM_SOFT_CAP`, `ERR_SYS_DUCKDB_LOCK`, `ERR_SYS_OLLAMA_OFFLINE`, `ERR_SYS_UNHANDLED_EXCEPTION` |
+
+### 36.3 Wichtige Exception-Mappings
+
+| Exception | Code | remediation_hint (Kurz) |
+|-----------|------|-------------------------|
+| `InvalidWebhookSecretException` | `ERR_AUTH_INVALID_SECRET` | `SIGMA_SECRET` in Pine + `.env` abgleichen |
+| `TradingViewSessionExpiredException` | `ERR_AUTH_TV_SESSION_EXPIRED` | `sigma-tv-login` → `tv_storage_state.json` |
+| `PineCompilationException` | `ERR_TV_PINE_COMPILE_ERROR` | Monaco Editor; Pine v6 Syntax prüfen |
+| `DOMSelectorNotFoundException` | `ERR_TV_SELECTOR_NOT_FOUND` | `DynamicYamlResolver` Selector-Update |
+| `KrakenInsufficientFundsException` | `ERR_KRAKEN_INSUFFICIENT_FUNDS` | Einzahlung oder Bot-Budget senken |
+| `LiquidityTrapOrderbookException` | `ERR_ORDERBOOK_LIQUIDITY_TRAP` | Schutz-Veto — kein Eingriff nötig |
+
+### 36.4 UI & Telegram
+
+- **Panel:** `DiagnosticsErrorPanel` — Code, Subsystem, Message, remediation_hint, Severity, Zeit
+- **Actions:** Error-Logs exportieren (`.jsonl`); Diagnose-Selbsttest
+- **Telegram:** Bei `HIGH` / `CRITICAL` — formatierte Push mit Code, Subsystem, Auswirkung, Lösungsempfehlung
+
+---
+
+## 37. Live Process & AI Log Console
+
+Pfad Backend: [`app/server/routes_logs.py`](app/server/routes_logs.py)  
+Pfad Frontend: [`src/pages/ProcessLogView.tsx`](src/pages/ProcessLogView.tsx)  
+Route: **`/logs`** (auch als FlexLayout-Panel `ProcessLogView` dockbar).
+
+Aggregiert alle Subsystem-Logs in Echtzeit — kein SSH `tail -f` nötig.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA LIVE LOG STREAM & OBSERVABILITY DESK                  │
+│                     (Route: /logs // Aggregierter Multi-Log)                │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[WS /api/v1/logs/stream]        [Subsystem-Filter]              [Ringpuffer UI]
+• Async tail aller Log-Files    • AI_LAYER / CORE / ORDERS      • Max 2.000 Zeilen
+• 250ms Poll-Intervall          • TV_WORKER / ERROR / SCRAPER   • Auto-Scroll Lock
+• JSON + Plain Text             • Volltext + Regex-Suche        • Pause / Export
+```
+
+### 37.1 Getailte Log-Quellen
+
+| Tag | Datei | Inhalt |
+|-----|-------|--------|
+| `CORE` | `./data/logs/sigma_core.log` | Webhooks, Pydantic, Kelly, M8 |
+| `ORDERS` | `./data/logs/orders.jsonl` | Kraken CLI, ACK/Retry, Fills |
+| `TV_WORKER` | `./data/logs/tv_worker.log` | Playwright, Pine, CSV |
+| `ERRORS` | `./data/logs/errors.jsonl` | Structured errors (§36) |
+| `AI_LAYER` | `./data/logs/ai_layer.log` | ONNX, Regime, Allocator, Glint, SIR |
+| `SCRAPER` | `./data/logs/scraper.log` | Sidecar :8001, Breadth, Movers |
+
+### 37.2 WebSocket API
+
+`WS /api/v1/logs/stream`
+
+```json
+{
+  "subsystem": "AI_LAYER",
+  "level": "INFO",
+  "raw_line": "ONNX Brier Score: 0.142 | Temperature T=1.05",
+  "timestamp": 1787786800
+}
+```
+
+Optional Query-Params: `?filter=ORDERS,AI_LAYER` (Subsystem-Whitelist).
+
+### 37.3 ProcessLogView UI
+
+| Feature | Detail |
+|---------|--------|
+| **Filter** | Subsystem-Dropdown + Volltextsuche |
+| **Farbcodierung** | AI_LAYER (lila), ORDERS (grün), TV_WORKER (blau), ERROR (rot) |
+| **Auto-Scroll** | Toggle; Pause bei manuellem Scroll |
+| **Buffer** | Ringpuffer max 2.000 Zeilen (Client) |
+| **Actions** | Clear view; Download sichtbarer Logs |
+
+### 37.4 Navigation
+
+- Header-Menü: **Process & AI Logs** in `SigmaTerminal.tsx`
+- URL: `http://localhost:3000/logs`
+- FlexLayout Preset: `OBSERVABILITY` = `DiagnosticsErrorPanel` + `ProcessLogView` + `SchedulerTelemetryPanel`
+
+### 37.5 Noir-Gate
+
+- Log-Streamer darf Core nicht blockieren: async I/O, 250ms Poll
+- Bei WS-Disconnect: File-Pointer bleiben — Reconnect setzt tail fort
+- Keine Secrets in Log-Lines (Webhook `secret` maskiert)
+
+---
+
+## 38. Netron ONNX Visualization & Inspection Stack
+
+Pfad Backend: [`app/services/netron_server.py`](app/services/netron_server.py)  
+Pfad Frontend: [`src/components/panels/NetronVisualizerPanel.tsx`](src/components/panels/NetronVisualizerPanel.tsx)
+
+Netron ist der kanonische ONNX-Graph-Inspector: Layer, Operatoren, Tensor-Shapes und Gewichte interaktiv — 100 % offline auf Ubuntu.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 NETRON ONNX VISUALIZATION & INSPECTION STACK                │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ sigma-netron (Port 8082)      │             │ NetronVisualizerPanel (React) │
+│ netron.start(model_path)      │             │ IFrame http://localhost:8082  │
+│ dynamischer Model-Switch      │             │ Zoom, Pan, Layer-Inspector    │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ OnnxModelRegistry Integration     │
+                     │ Inspect-Button → POST /api/v1/    │
+                     │ models/inspect/{version_tag}      │
+                     └───────────────────────────────────┘
+```
+
+### 38.1 Port-Matrix (ergänzt)
+
+| Service | Port |
+|---------|------|
+| sigma-core | 8000 |
+| sigma-scraper | 8001 |
+| **sigma-netron** | **8082** |
+| UI (vite) | 3000 |
+| Ollama | 11434 |
+
+### 38.2 Backend — `NetronVisualizerService`
+
+```python
+class NetronVisualizerService:
+    def start_server(self, initial_model_path: str = "./models/regime_classifier.onnx")
+    def load_model(self, model_path: str) -> bool  # dynamischer Switch
+```
+
+- Dependency: `pip install netron`
+- Default-Modell: `./models/regime_classifier.onnx` (Self-Optimizing ONNX, §21)
+- `browse=False` — kein Auto-Browser; nur IFrame/UI-Zugriff
+
+### 38.3 API
+
+| Method | Path | Zweck |
+|--------|------|--------|
+| POST | `/api/v1/models/inspect/{version_tag}` | Lädt ONNX aus Registry in Netron |
+| GET | `/api/v1/models/netron/status` | Aktives Modell + Port-Health |
+
+### 38.4 Frontend — `NetronVisualizerPanel`
+
+- IFrame `http://localhost:8082` (GMT Dark Theme Hintergrund `#0e1117`)
+- Toolbar: aktives Modell, Reload, External-Link
+- FlexLayout Preset: `ML_INSPECTOR` = `NetronVisualizerPanel` + `SelfOptimizingMLPanel`
+
+### 38.5 Model Registry Verknüpfung
+
+In `OnnxModelRegistryPanel` / `SelfOptimizingMLPanel`:
+
+- Button **„In Netron betrachten“** pro Modell-Version
+- Flow: Klick → `POST /api/v1/models/inspect/{tag}` → Netron reload → Panel IFrame refresh
+
+### 38.6 Systemd (`sigma-netron.service`)
+
+```ini
+[Service]
+Type=simple
+User=sigma
+WorkingDirectory=/opt/sigma
+ExecStart=/opt/sigma/venv/bin/python app/services/netron_server.py
+Restart=always
+RestartSec=3
+```
+
+### 38.7 Noir-Gate
+
+- **Air-gapped:** Netron läuft vollständig lokal — keine Cloud-Calls
+- Nur `.onnx` aus `./models/` und Registry — kein Upload-Pfad von außen
+- Port 8082 bindet `127.0.0.1` in Production (nur UI-Proxy); Dev: `0.0.0.0`
 
 ---
