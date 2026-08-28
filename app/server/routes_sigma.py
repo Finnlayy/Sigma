@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from app.core import blueprint as bp
 from app.core.config import load_config
 from app.core.memory_watchdog import get_memory_watchdog
+from app.server.schemas import SignalExecutionResponse
 from app.execution.KrakenCliBridge import KrakenCliBridge
 from app.execution.LoopAPipeline import LoopAPipeline, SignalRequest
 from app.execution.SafetyGuard import get_safety_guard
@@ -145,6 +146,151 @@ async def signal_webhook(payload: PineAlertPayload, request: Request,
     if not response.accepted and response.status_code >= 400:
         raise HTTPException(status_code=response.status_code, detail=response.to_dict())
     return response.to_dict()
+
+
+# --- §33 Ingestion-Router: strikte Schema-Familien A/B/C ---------------------
+
+@router.post("/api/v1/signal/ingest", response_model=SignalExecutionResponse)
+async def signal_ingest(request: Request,
+                        x_sigma_webhook_secret: Optional[str] = Header(default=None)):
+    """§33.5 — Schema erkennen, strikt validieren, dann Loop A ausfuehren.
+
+    Reihenfolge (kanonisch): secret -> stale gate (Kraken-Zeit) -> Idempotenz
+    -> Glint x Orderbook JIT -> reliable_order_dispatcher.
+    """
+    from app.core.exchange_clock import get_exchange_clock
+    from app.server.schemas import (ERR_PIONEX_DISABLED, ERR_SCHEMA_INVALID,
+                                    SchemaDetectionError, detect_schema,
+                                    PionexSignalPayload, SigmaL4AlertPayload)
+
+    try:
+        raw = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={
+            "code": ERR_SCHEMA_INVALID, "reason": "Body ist kein gueltiges JSON"})
+
+    try:
+        family = detect_schema(raw)
+    except SchemaDetectionError as exc:
+        raise HTTPException(status_code=400, detail={
+            "code": exc.code, "reason": str(exc),
+            "supported": list(bp.WEBHOOK_SCHEMAS)})
+
+    if family == "PIONEX_NATIVE":
+        from app.core import l4_config
+
+        enabled = bool(l4_config.get("execution.pionex.enabled",
+                                     bp.PIONEX_ENABLED_DEFAULT))
+        try:
+            PionexSignalPayload.model_validate(raw)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail={
+                "code": ERR_SCHEMA_INVALID, "reason": str(exc)})
+        if not enabled:
+            raise HTTPException(status_code=403, detail={
+                "code": ERR_PIONEX_DISABLED,
+                "reason": "pionex_connector.enabled=false (DE_BAFIN default)"})
+        return SignalExecutionResponse(
+            status="REJECTED", schema_family=family, code=ERR_PIONEX_DISABLED,
+            reason="Pionex-Lab-Routing ist nicht Teil des Kraken-Execution-Pfads",
+            stage="pionex_lab")
+
+    if family == "ML_TELEMETRY":
+        raise HTTPException(status_code=400, detail={
+            "code": ERR_SCHEMA_INVALID,
+            "reason": "ML-Features sind kein eigenstaendiges Signal — "
+                      "in Schema A unter 'features' einbetten"})
+
+    try:
+        alert = SigmaL4AlertPayload.model_validate(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": ERR_SCHEMA_INVALID, "reason": str(exc)})
+
+    dispatcher = get_order_dispatcher()
+    if dispatcher.seen(alert.idempotency_key):
+        return SignalExecutionResponse(
+            status="DUPLICATE_IGNORED", schema_family=family,
+            strategy_id=alert.strategy_id, bot_id=alert.bot_id, symbol=alert.symbol,
+            action=alert.action, idempotency_key=alert.idempotency_key,
+            execution_mode=alert.execution_mode, fixed_leverage=alert.fixed_leverage,
+            code=bp.OrderAck.DUPLICATE_IGNORED.value,
+            reason="idempotency_key bereits verarbeitet", stage="idempotency")
+
+    clock = get_exchange_clock()
+    if clock.synced and clock.is_signal_stale(alert.timestamp):
+        raise HTTPException(status_code=400, detail={
+            "code": bp.STALE_SIGNAL_REJECT_CODE,
+            "reason": f"Signal {clock.signal_age_s(alert.timestamp):.0f}s alt "
+                      f"(max {bp.STALE_SIGNAL_MAX_LATENCY_S}s gegen Kraken-Zeit)"})
+
+    features = alert.features
+    sig = SignalRequest(
+        symbol=alert.symbol, action=alert.action, price=alert.price,
+        rsi=features.rsi if features else 50.0,
+        atr=features.atr if features else 0.0,
+        cisd_score=(features.cisd_score if features and features.cisd_score is not None
+                    else 0.5),
+        timestamp=alert.timestamp, strategy_id=alert.strategy_id,
+        interval=alert.interval or 15,
+        secret=alert.secret,
+    )
+    provided = alert.secret or x_sigma_webhook_secret
+    result = pipeline().handle_signal(sig, provided_secret=provided)
+    payload = result.to_dict()
+
+    if not result.accepted:
+        response = SignalExecutionResponse(
+            status="REJECTED", schema_family=family, strategy_id=alert.strategy_id,
+            bot_id=alert.bot_id, symbol=alert.symbol, action=alert.action,
+            idempotency_key=alert.idempotency_key, execution_mode=alert.execution_mode,
+            fixed_leverage=alert.fixed_leverage, code=result.code,
+            reason=result.reason, stage=result.stage, price=alert.price,
+            stop_loss=alert.stop_loss, take_profit=alert.take_profit,
+        )
+        if result.status_code >= 400:
+            raise HTTPException(status_code=result.status_code,
+                                detail=response.model_dump())
+        return response
+
+    order_id = str(payload.get("txid") or payload.get("order_id") or "")
+    dispatcher.remember(
+        alert.idempotency_key, order_id=order_id, strategy_id=alert.strategy_id,
+        bot_id=alert.bot_id, pair=str(payload.get("pair") or alert.symbol),
+        side=alert.side, volume=float(payload.get("quantity") or 0.0),
+        execution_mode=alert.execution_mode, fixed_leverage=alert.fixed_leverage,
+        detail=f"Loop A stage={result.stage}",
+    )
+    return SignalExecutionResponse(
+        status="EXECUTED", schema_family=family, strategy_id=alert.strategy_id,
+        bot_id=alert.bot_id, symbol=alert.symbol, action=alert.action,
+        order_id=order_id, idempotency_key=alert.idempotency_key,
+        execution_mode=str(payload.get("mode") or alert.execution_mode),
+        fixed_leverage=alert.fixed_leverage, code=result.code, reason=result.reason,
+        stage=result.stage, quantity=float(payload.get("quantity") or 0.0),
+        price=alert.price, stop_loss=alert.stop_loss, take_profit=alert.take_profit,
+    )
+
+
+@router.get("/api/v1/signal/schemas")
+async def signal_schema_catalog():
+    """§33 — maschinenlesbarer Katalog der drei Schema-Familien."""
+    from app.server.schemas import (MLFeaturePayload, PionexSignalPayload,
+                                    SigmaL4AlertPayload)
+
+    return {
+        "families": list(bp.WEBHOOK_SCHEMAS),
+        "required_fields": list(bp.SIGMA_L4_REQUIRED_FIELDS),
+        "actions": list(bp.SIGMA_L4_ACTIONS),
+        "order_types": list(bp.SIGMA_L4_ORDER_TYPES),
+        "ingestion_steps": list(bp.INGESTION_PIPELINE_STEPS),
+        "pine_emitter_template": bp.PINE_EMITTER_TEMPLATE_PATH,
+        "json_schema": {
+            "SIGMA_L4_MASTER": SigmaL4AlertPayload.model_json_schema(),
+            "PIONEX_NATIVE": PionexSignalPayload.model_json_schema(),
+            "ML_TELEMETRY": MLFeaturePayload.model_json_schema(),
+        },
+    }
 
 
 @router.get("/api/v1/signal/pipeline")

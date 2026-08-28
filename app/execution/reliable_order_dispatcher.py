@@ -266,6 +266,32 @@ class ReliableOrderDispatcher:
     def receipts(self, limit: int = 50) -> List[Dict[str, Any]]:
         return [r.as_dict() for r in self._receipts[-limit:]]
 
+    def remember(self, idempotency_key: str, order_id: str = "",
+                 ack: str = bp.OrderAck.FILLED.value, **meta: Any) -> OrderReceipt:
+        """Idempotenz fuer extern ausgefuehrte Signale (§33.5 Ingestion-Router).
+
+        Der Ingestion-Router fuehrt manche Signale ueber die Loop-A-Pipeline aus;
+        damit ein Replay trotzdem ``DUPLICATE_IGNORED`` liefert, wird der
+        Schluessel hier registriert — ohne zweite Order zu senden.
+        """
+        receipt = OrderReceipt(
+            idempotency_key=idempotency_key,
+            strategy_id=str(meta.get("strategy_id", "")),
+            bot_id=str(meta.get("bot_id", "")),
+            pair=str(meta.get("pair", "")),
+            side=str(meta.get("side", "")),
+            volume=float(meta.get("volume", 0.0) or 0.0),
+            ack=ack, order_id=order_id, attempts=1,
+            execution_mode=str(meta.get("execution_mode", bp.EXECUTION_MODE_DEFAULT)),
+            fixed_leverage=int(meta.get("fixed_leverage", bp.FIXED_LEVERAGE_DEFAULT)),
+            detail=str(meta.get("detail", "ausgefuehrt via Loop-A-Pipeline")),
+            ts=self._clock(),
+        )
+        self._seen[idempotency_key] = receipt
+        self._receipts.append(receipt)
+        del self._receipts[:-500]
+        return receipt
+
     def seen(self, idempotency_key: str) -> bool:
         return idempotency_key in self._seen
 

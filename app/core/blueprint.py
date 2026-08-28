@@ -45,7 +45,6 @@ DOCS_SECTION_RANGE = (1, 38)
 DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
     "31 Die 3 Trigger-Pfade zur Strategie-Platzierung",
     "32 Kraken Paper Trading Lab",
-    "33 Standardisierte Webhook-Alert-Schemata",
     "34 LLM-, Tool-Calling- & Streaming-Schemata",
     "35 Exact TradingView CSV Roundtrip Protocol",
     "36 Unified Error Taxonomy & Diagnostics Desk",
@@ -61,6 +60,7 @@ DOCS_PENDING_SECTIONS: Tuple[str, ...] = (
 #   §28 app/execution/capital_flywheel_engine.py
 #   §29 app/execution/fixed_leverage.py
 #   §30 TERMINAL_PANELS_EXTENDED / TERMINAL_PRESETS_EXTENDED
+#   §33 app/server/schemas.py + POST /api/v1/signal/ingest
 AUTONOMY_LEVEL = 4
 AUTONOMY_LABEL = "L4 — High Operational Autonomy"
 LINEAGE = "Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4"
