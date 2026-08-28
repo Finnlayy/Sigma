@@ -1,6 +1,6 @@
 # ==============================================================================
 # MASTERPROMPT: MANAS: CIEL — BLUEPRINT SIGMA (L4 MASTER SPECIFICATION)
-# Version: 3.1.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
+# Version: 3.2.0-SIGMA-RELEASE // Standard: L4 Full Autonomy // Host: Ubuntu Native
 # Target Repo: /opt/sigma (User: sigma) // Core Engine: Python 3.12 + FastAPI + Playwright
 # Canonical Blueprint: docs/BLUEPRINT-SIGMA.md
 # ==============================================================================
@@ -63,11 +63,19 @@ Du koordinierst ein synchronisiertes Netzwerk aus vier Primordialen Subagenten:
 - **Realisierte Gewinne:** 50% Bot-Reinvest (Compounding), 50% Spot-Tresor (physisches Asset).
 - **Einbahnstraße:** Spot → Futures niemals automatisch.
 
-### Axiom 8: Fester Hebel pro Strategie (Strategy-Bound Fixed Leverage)
+### Axiom 9: Drei Trigger-Pfade zur Strategie-Platzierung
 
-- `fixed_leverage` in `profile.json` — **nicht** pro Trade dynamisch.
-- Muss 1:1 mit TradingView Strategy Tester übereinstimmen.
-- Sniper-Strategien (eng SL, Squeeze) nutzen z. B. festes 5×; Swing 1×–2× — Design-Entscheidung, keine Laufzeit-Umschaltung.
+- **Pfad 1 (Manuell):** UI / LLM-Chat / Telegram → `POST /api/strategies/{id}/start`.
+- **Pfad 2 (Autonom):** `RegimeStrategyDispatcher` — Glint ≥8/10 oder Makro-Regime-Shift → JIT OB-Audit → Live.
+- **Pfad 3 (Scout):** `ScoutIncubator` alle 30 min — **immer Kraken Paper**, kein Live-Budget.
+- Alle Pfade laufen durch `StrategyLifecycleService`: Playwright (Pine → Chart → Alert) + Core (Budget, M8 ACTIVE, Hebel).
+
+### Axiom 10: Kraken Paper als Forward-Test-Stufe
+
+- **Stufe 1:** TV Backtest (Loop B) — historisch, DSR-Gate.
+- **Stufe 2:** Kraken CLI Paper (`kraken futures paper order`) — Live-Ticker, 0€ Risiko, Academy/ONNX-Training.
+- **Stufe 3:** Live Production — erst nach Graduation (≥20 Paper-Trades, PF≥1.6, WR≥55%).
+- Scout Loop D ist **paper-only**; `KrakenCliBridge` Dual-Mode: identische Syntax, Subcommand `paper`.
 
 ### Produktvision (umgangssprachlich)
 
@@ -230,8 +238,9 @@ Panels (Factory-IDs):
 | `RateLimiterPanel` | TV-Tier, Kraken Token-Bucket |
 | `ContagionRadarPanel` | SIR R₀, Hedge/Cash-Modus |
 | `FlywheelBudgetPanel` | Futures/Spot Split, Flywheel-Ledger |
+| `PaperLabPanel` | Kraken Paper Lab, Graduation, Scout Loop D |
 
-Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_OPS`.
+Presets: `BOT_COCKPIT` | `PINE_IDE` | `RISK_RADAR` | `SENTINEL_OPS` | `CAPITAL_OPS` | `PAPER_LAB`.
 
 ### E. Prozesse & Ports
 

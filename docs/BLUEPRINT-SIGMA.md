@@ -1,6 +1,6 @@
 # Projekt:Sigma — Vollständige System-Blaupause (L4)
 
-> **Status:** Canonical Spec Freeze v3.1 (Execution Plane: Scheduler, Glint/OB, ACK/Retry, Flywheel, Fixed Leverage) — `docs/BLUEPRINT-SIGMA.md`  
+> **Status:** Canonical Spec Freeze v3.2 (Strategy Triggers, Lifecycle Pipeline, Kraken Paper Lab) — `docs/BLUEPRINT-SIGMA.md`  
 > **Masterprompt (KI-Persona):** [`docs/MASTERPROMPT.md`](MASTERPROMPT.md) — Ciel Core Matrix 3.0  
 > **Lineage:** Fork von Alpha M8 Blueprint v1.2.0 / Skeleton v1.6.4  
 > **Repo:** https://github.com/Finnlayy/Sigma  
@@ -230,7 +230,7 @@ sequenceDiagram
 
 Der Webhook ersetzt die Kraken-CLI **nicht**. Die CLI bleibt der Executor. Der Webhook ersetzt den früheren „internen Archetyp-Signalgenerator / Windows-Portal“, als Weg wie **Live-Signale von TV in den Core kommen**.
 
-Paper-Modus: gleicher Webhook, Executor = `PaperExecutionEngine` statt Kraken CLI, bis Telemetry `LIVE_APPROVED` + `SIGMA_LIVE_TRADING=1`.
+Paper-Modus: gleicher Webhook; Executor = native **Kraken CLI Paper** (`kraken futures paper order`) via `KrakenCliBridge` — siehe §32. Scout Loop D ist paper-only; Live erst nach Graduation oder Operator-Freigabe.
 
 ### 4.1 Pine Alert Payload (Pydantic)
 
@@ -1075,6 +1075,8 @@ kraken trade add-order ... --close-ordertype=stop-loss --close-price=...
 | Rate Limiter | `app/core/rate_limiter.py` | TV-Tier; Kraken Token-Bucket; Emergency Reserve |
 | SIR Contagion | `app/quant/epidemic_contagion_engine.py` | R₀ Makro; Hedge/Cash-Modi |
 | Flywheel | `app/execution/capital_flywheel_engine.py` | 100% Deposit→Futures; 50/50 Profit-Split |
+| Strategy Lifecycle | `app/services/strategy_lifecycle_service.py` | 3 Trigger-Pfade → TV Placement |
+| Kraken Paper | `app/execution/KrakenCliBridge.py` | Dual-Mode: `paper` vs `live`; Graduation |
 
 systemd: `sigma-core`, `sigma-tv-worker`, `sigma-scraper`, `sigma-telegram`; MemoryMax auf Worker.
 
@@ -1247,7 +1249,176 @@ Zusätzlich zu §8 / Sentinel-Panels:
 | `RateLimiterPanel` | rate_limiter |
 | `ContagionRadarPanel` | epidemic_contagion_engine |
 | `FlywheelBudgetPanel` | capital_flywheel_engine |
+| `PaperLabPanel` | kraken_paper_engine / Scout graduation |
 
-Presets: `SENTINEL_OPS` + `CAPITAL_OPS` (Flywheel + Receipts + Rate Limits).
+Presets: `SENTINEL_OPS` + `CAPITAL_OPS` + `PAPER_LAB`.
+
+---
+
+## 31. Die 3 Trigger-Pfade zur Strategie-Platzierung
+
+Pfad: [`app/services/strategy_lifecycle_service.py`](app/services/strategy_lifecycle_service.py) (`StrategyLifecycleService`).
+
+Drei kanonische Auslöser starten dieselbe zentrale Dispatcher-Pipeline: Pine aus der Bibliothek → TradingView-Chart → Kompilierung → Webhook-Alert → Bot aktiv.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DIE 3 TRIGGER-PFADE ZUR STRATEGIE-PLATZIERUNG            │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+      ┌────────────────────────────────┼────────────────────────────────┐
+      ▼                                ▼                                ▼
+[PFAD 1: USER / UI / CHAT]      [PFAD 2: AUTONOMER AI ALLOC.]    [PFAD 3: SCOUT LABOR LOOP D]
+• 1-Click "Start Bot" im UI     • 4-Stunden Scheduler Matrix     • Autonome Paper-Incubation
+• LLM-Chat / Telegram           • Glint-Wette (Score ≥ 8/10)     • Unprofilierte Skripte
+• Operator wählt Strategie & €  • GMT-Makro Regime-Wechsel       • Neue Asset/TF-Paare
+      │                                │                                │
+      └────────────────────────────────┼────────────────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ StrategyLifecycleService          │
+                     │ (zentrale Dispatcher-Pipeline)    │
+                     └─────────────────┬─────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ SCHRITT A: sigma-tv-worker    │             │ SCHRITT B: sigma-core         │
+│ • Chart-Session (Playwright)  │             │ • Bot-Budget reservieren      │
+│ • Pine v6 injizieren          │             │ • M8 → ACTIVE                 │
+│ • Kompilieren & Add to Chart  │             │ • fixed_leverage zuweisen     │
+│ • Webhook-Alert provisionieren│             │ • execution_mode setzen       │
+└───────────────────────────────┘             └───────────────────────────────┘
+```
+
+### 31.1 Pfad 1 — Manuell (UI / LLM-Chat / Telegram)
+
+| Feld | Wert |
+|------|------|
+| **Wer** | Operator über GMT-Terminal, LLM-Console oder Telegram |
+| **UI** | Virtual Bot Deck → `[+ Neuen Bot starten]` → Skript + Budget + Hebel |
+| **Chat** | z. B. „Starte `CISD_Scalp_v6` auf XRP 5m mit 250 € und 5× Hebel“ |
+| **API** | `POST /api/strategies/{id}/start` |
+| **Modus** | `live` oder `kraken_paper` (Operator-Wahl) |
+
+### 31.2 Pfad 2 — Autonom (Glint & Makro-Regime)
+
+| Feld | Wert |
+|------|------|
+| **Wer** | `RegimeStrategyDispatcher` (Scheduler Tier 3, 4 h) |
+| **Auslöser A** | Glint-Event Score ≥ 8/10 (Telethon UserBot) |
+| **Auslöser B** | Makro-Regime-Shift (Scraper :8001, z. B. A/D 35% → 72%) |
+| **Entscheidung** | Academy-Badge + Note S für Regime; JIT Orderbuch-Audit; dann Pipeline |
+| **Modus** | `live` (nach Orderbuch-Konfluenz) |
+
+### 31.3 Pfad 3 — Scout-Labor (Loop D)
+
+| Feld | Wert |
+|------|------|
+| **Wer** | `ScoutIncubator` (Scheduler: `scout_incubator_cycle_minutes: 30`) |
+| **Zweck** | Bibliothek mit echten Forward-Test-Daten füllen; Academy-Badges sammeln |
+| **Auswahl** | Strategien mit wenigen Trades; zufälliges/liquides Paar (z. B. SOL 15m) |
+| **Modus** | **immer** `kraken_paper` — kein Live-Budget |
+
+### 31.4 Die 5 technischen Schritte (alle Pfade)
+
+Sobald ein Trigger feuert, führen `sigma-tv-worker` und `sigma-core` diese Sequenz aus:
+
+1. **Budget-Reservierung (Core)** — freies Futures-Kapital prüfen; isolierten Topf reservieren (z. B. 250 €).
+2. **Chart-Navigation (Worker)** — `https://www.tradingview.com/chart/?symbol=KRAKEN:XRPUSD` mit `tv_storage_state.json` (2FA-Session).
+3. **Pine v6 Injektion & Kompilierung** — Code aus `./data/strategies/{id}/code.pine` → Save → Add to Chart; bei Compile-Fehler sofortiger Abbruch.
+4. **Webhook-Alert Provisionierung** — URL `http://<host>:8000/api/v1/signal/webhook`; Message: JSON mit `SIGMA_SECRET`, `symbol`, `strategy_id`.
+5. **Scharfschaltung** — M8 `ACTIVE`; ab jetzt wartet Core auf Signale und führt über Kraken CLI mit `fixed_leverage` aus.
+
+### 31.5 Trigger-Matrix (Zusammenfassung)
+
+| Trigger | Initiator | Wann | Modus |
+|---------|-----------|------|-------|
+| Manuell | Operator (UI / Chat / Telegram) | Auf Knopfdruck / Sprachbefehl | Live oder Paper |
+| Autonom Makro | `RegimeStrategyDispatcher` | Alle 4 h bei Regime-Wechsel | Live (im Bot-Budget) |
+| Autonom Event | Glint Radar | Score ≥ 8/10 | Live (nach OB-Audit) |
+| Autonom Scout | `ScoutIncubator` (Loop D) | Alle 30 min | Kraken Paper only |
+
+---
+
+## 32. Kraken Paper Trading Lab (Hybrid Training Pipeline)
+
+**Kanonisch:** Scout-Labor (Loop D) und manuelle Paper-Starts nutzen die **native Kraken CLI Paper Engine** — Forward-Testing am echten Live-Ticker ohne Geldeinsatz.
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SIGMA HYBRID TRAINING & VALIDATION PIPELINE                 │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+┌───────────────────────────────┐             ┌───────────────────────────────┐
+│ STUFE 1: TV BACKTEST (Loop B) │             │ STUFE 2: KRAKEN LIVE PAPER    │
+│ • Historisch 3–12 Monate      │             │ • Echter Live-Ticker (0€ Risk)│
+│ • GA + DSR Shadow ≥ 0.95      │             │ • Reale Latenz/Spread/Slippage│
+│ • Filtert ~90% untauglich     │             │ • Trainiert Akademie/ONNX     │
+└───────────────┬───────────────┘             └───────────────┬───────────────┘
+                │                                             │
+                └──────────────────────┬──────────────────────┘
+                                       ▼
+                     ┌───────────────────────────────────┐
+                     │ STUFE 3: LIVE PRODUCTION          │
+                     │ Kraken Live Futures + 50/50 Spot    │
+                     └───────────────────────────────────┘
+```
+
+### 32.1 Graduation Protocol (Reifegrad)
+
+| Stufe | Gate | Nächster Schritt |
+|-------|------|------------------|
+| 1 → 2 | DSR ≥ 0.95, N ≥ 30 (TV Backtest) | Scout startet Kraken Paper |
+| 2 → 3 | `min_paper_trades: 20`, PF ≥ 1.6, WR ≥ 55% | Operator oder Allocator befördert zu Live |
+
+### 32.2 Kraken CLI Paper-Befehle (Dual-Mode)
+
+Identische Schnittstelle in [`app/execution/KrakenCliBridge.py`](app/execution/KrakenCliBridge.py):
+
+| Aktion | Befehl |
+|--------|--------|
+| Spot Paper Balance | `kraken paper balance` |
+| Spot Paper Order | `kraken paper order buy BTCUSD 0.001 --type limit --price 68000` |
+| Futures Paper Balance | `kraken futures paper balance` |
+| Futures Paper Order | `kraken futures paper order buy PF_XBTUSD 1 --type limit --price 68000` |
+| **Live** (nach Graduation) | `kraken trade add-order --pair=... --leverage=N ...` |
+
+`reliable_order_dispatcher.py` routet nach `execution_mode`: `kraken_paper` vs `live`.
+
+### 32.3 Config (`config/autonomy-level-4.yaml`)
+
+```yaml
+execution_modes:
+  default_mode: "live"                # "live" | "kraken_paper" | "hybrid_scout"
+
+kraken_paper_engine:
+  enabled: true
+  use_cli_paper_subcommand: true
+  demo_futures_sandbox_url: "https://demo-futures.kraken.com/api/v3"
+  initial_paper_balance_usd: 10000.0
+  auto_graduate_to_live:
+    enabled: true
+    min_paper_trades: 20
+    min_paper_profit_factor: 1.6
+    min_paper_win_rate_pct: 55.0
+```
+
+### 32.4 Scout Loop D — Paper-only Binding
+
+- Pfad 3 (§31.3) setzt `execution_mode: kraken_paper` **fest** — kein Live-Budget.
+- Paper-Fills fließen in Academy, Reward Shaping, ONNX Triple-Barrier-Labels.
+- UI `PaperLabPanel`: Trades, Sim-PnL, Winrate, Graduation-Status, Button „Zu Live befördern“.
+
+### 32.5 Warum Kraken Paper > reiner TV-Backtest
+
+| Dimension | TV Strategy Tester | Kraken Paper |
+|-----------|-------------------|--------------|
+| Daten | Historisch | Live-Ticker Forward |
+| Execution | Simuliert | Echte CLI + Latenz + Spread |
+| Academy/ONNX | Backtest-CSV | Echte Fill-Telemetrie |
+| Risiko | 0 € | 0 € |
 
 ---
