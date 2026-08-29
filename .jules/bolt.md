@@ -1,0 +1,3 @@
+## 2024-03-24 - Lightweight Charts Unnecessary Re-Initialization
+**Learning:** In a React application, repeatedly initializing the TradingView `lightweight-charts` instance on data updates causes severe thrashing by repeatedly deleting and recreating DOM nodes and WebGL contexts. It results in noticeable unresponsiveness for frequently updating data (e.g., market tickers).
+**Action:** Always decouple chart instance creation from data updates. Use a setup `useEffect` with an empty dependency array for initialization and a separate `useEffect` to call `setData` and `applyOptions` when reactive props like candles and layout dimensions change. Combine this with `React.memo` to avoid re-renders unless actual input data shifts.
