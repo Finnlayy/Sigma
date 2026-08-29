@@ -109,13 +109,15 @@ Ciel-Review „5 Fixes“ gegen den echten Stand:
 
 | # | Ciel-Ziel | Stand im Repo |
 |---|-----------|----------------|
-| 1 | O(N²) Strategy-PnL-Index | **Offen.** `_strategy_pnl` in `app/server/main.py` filtert je Strategie linear über alle Closed Trades. |
-| 2 | N+1 `pnl_daily` | **Offen.** `pnl_daily` ruft `store.trades(strategy_id=…)` pro Pool-Mitglied. `DuckDBStore.trades` hat kein `strategy_id IN (?,?,…)`. |
-| 3 | Fail-closed Webhook-Secret wenn live | **Offen.** `SafetyGuard.verify_webhook_secret` erlaubt leeres Secret (`OK`, „no secret configured“) unabhängig von `live_trading`. |
-| 4 | ScoutDaemon Exception-Pfad + Tests in bestehenden Dateien | **Teilweise.** `ScoutDaemon.run_task` fängt Runner-Exceptions. `tests/test_loops_cde.py` hat keinen Exception-Pfad-Test. |
-| 5 | Genetic-Optimizer Crash / Stall | **Weitgehend da.** `GeneticOptimizer` early-stop Stall 3, `except` um Live-Trade-Lookup. Kein eigener Crash-Regressionstest gefunden. |
+| 1 | O(N²) Strategy-PnL-Index | **Erledigt.** `_strategy_pnl` indexiert Closed Trades und Open Positions per `defaultdict`. |
+| 2 | N+1 `pnl_daily` | **Erledigt.** `DuckDBStore.trades(strategy_ids=)` + ein Query. |
+| 3 | Fail-closed Webhook-Secret wenn live | **Erledigt.** `live_trading` ohne Secret → 401. |
+| 4 | ScoutDaemon Exception-Pfad + Tests | **Erledigt.** `run_task` fängt Runner-Exceptions; Test in `tests/test_loops_cde.py`. |
+| 5 | Genetic-Optimizer Crash / Stall + Driver | **Erledigt.** Stall-3, Store-Crash, `DriverError` quarantine/retry; Caps 15/5 an API/UI. |
 
-Mock-Seams aus dem Thread (Regex-Copilot, FinBERT-Lexikon, rclone, CCXT-WS, Passkey degraded, MetricsPanel-Hardcodes, `liveKrakenBalances`) sind **nicht** automatisch Produktions-Soll. Erst belegen, dann ersetzen. `liveKrakenBalances` ist in `_build_metrics` noch `{}`.
+Ingest Schema A ist verdrahtet (`build_alert_message` + `/api/v1/signal/ingest`). `liveKrakenBalances` kommt aus CLI-Cache + DuckDB-`latest`-Snapshot, nicht aus Paper-Seeds.
+
+**Nächster Stub (Audit, nicht gebaut):** `/api/kraken/positions/pro` mapped Paper-Positionen; MetricsPanel-Pro fällt auf `25000`/`21500` zurück. Danach rclone-MOCK, Copilot-Regex-Seam, Default `SIGMA_MARKET_SOURCE=synthetic`.
 
 ---
 

@@ -21,8 +21,46 @@ from typing import Any, Dict, List, Optional
 
 from app.backtest.TvMcpBacktest import run_backtest
 from app.backtest.tv_csv import params_to_csv, genes_from_parameter_csv
+from app.tv.strategy_tester_driver import DriverError
 
 logger = logging.getLogger("app.optimizer.ga")
+
+_RETRYABLE_DRIVER_CODES = frozenset({
+    "TV_DRIVER_ERROR", "ERR_TV_EXPORT_TIMEOUT", "ERR_TV_SELECTOR_NOT_FOUND",
+    "TARGET_CLOSED",
+})
+_TERMINAL_DRIVER_CODES = frozenset({
+    "TV_SESSION_MISSING", "PLAYWRIGHT_MISSING", "ERR_TV_PINE_COMPILE_ERROR",
+    "NO_PINE_INPUTS",
+})
+_EMPTY_BT_SUMMARY = {
+    "totalTrades": 0, "totalReturnUSD": 0.0, "totalReturnPercent": 0.0,
+    "sharpeRatio": 0.0, "winRate": 0.0, "maxDrawdownPercent": 0.0,
+    "finalBalance": 0.0, "profitFactor": 0.0, "equityCurve": [],
+}
+
+
+class _QuarantineCandidate(Exception):
+    def __init__(self, code: str, reason: str):
+        super().__init__(reason)
+        self.code = code
+        self.reason = reason
+
+
+def _driver_error_code(exc: BaseException) -> str:
+    code = str(getattr(exc, "code", "") or "")
+    blob = f"{code} {exc}".upper().replace(" ", "")
+    if "TARGETCLOSED" in blob or "BROWSERHASBEENCLOSED" in blob:
+        return "TARGET_CLOSED"
+    return code or "TV_DRIVER_ERROR"
+
+
+def _is_driver_failure(exc: BaseException) -> bool:
+    try:
+        from app.mcp.TradingViewMCPClient import TvMcpError
+    except Exception:  # pragma: no cover
+        TvMcpError = ()  # type: ignore
+    return isinstance(exc, (DriverError, TvMcpError))
 
 GENE_RANGES: Dict[str, tuple] = {
     "atrPeriod": (7, 30),
@@ -224,10 +262,36 @@ def cadence_score(trades_per_day: float, cfg) -> float:
 
 # ------------------------------------------------------------------- GA Runner
 class GeneticOptimizer:
-    def __init__(self, config=None):
+    def __init__(self, config=None, driver_restart=None):
         from app.core.config import load_config
 
         self.config = config or load_config()
+        self.driver_restart = driver_restart
+
+    def _run_wfo_pair(self, is_candles, oos_candles, bt_cfg_is, bt_cfg_oos):
+        def once():
+            return run_backtest(is_candles, bt_cfg_is), run_backtest(oos_candles, bt_cfg_oos)
+
+        try:
+            return once()
+        except Exception as exc:
+            if not _is_driver_failure(exc):
+                raise
+            code = _driver_error_code(exc)
+            if code in _TERMINAL_DRIVER_CODES:
+                raise _QuarantineCandidate(code, str(exc)) from exc
+            if self.driver_restart is not None:
+                try:
+                    self.driver_restart()
+                except Exception as restart_exc:
+                    logger.warning("GA driver restart failed: %s", restart_exc)
+                    raise _QuarantineCandidate(code, str(exc)) from exc
+            try:
+                return once()
+            except Exception as exc2:
+                qcode = _driver_error_code(exc2) if _is_driver_failure(exc2) else code
+                logger.warning("GA individual quarantined after driver retry: %s", exc2)
+                raise _QuarantineCandidate(qcode, str(exc2)) from exc2
 
     def run(self, cfg: Dict[str, Any], candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Vollständiger WFO-Run. candles = vollständiger 1m-Historie (ts, o,h,l,c,v).
@@ -297,8 +361,23 @@ class GeneticOptimizer:
                 bt_cfg_oos = {**bt_cfg_is, "split": "oos",
                               "windowFrom": oos_candles[0]["ts"] if oos_candles else None,
                               "windowTo": oos_candles[-1]["ts"] if oos_candles else None}
-                is_bt = run_backtest(is_candles, bt_cfg_is)
-                oos_bt = run_backtest(oos_candles, bt_cfg_oos)
+                try:
+                    is_bt, oos_bt = self._run_wfo_pair(
+                        is_candles, oos_candles, bt_cfg_is, bt_cfg_oos)
+                except _QuarantineCandidate as q:
+                    ind.update({
+                        "generation": gen, "fitness": -1.0,
+                        "status": "quarantined", "rejectionReason": q.code,
+                        "isValidCandidate": False,
+                        "inSampleSummary": dict(_EMPTY_BT_SUMMARY),
+                        "outOfSampleSummary": dict(_EMPTY_BT_SUMMARY),
+                        "overallReturn": 0.0, "overallDrawdown": 0.0,
+                        "sharpeRatio": 0.0, "winRate": 0.0, "tradesCount": 0,
+                        "tradesPerDay": 0.0, "dsr": 0.0, "dsrInSample": 0.0,
+                        "dsrOutOfSample": 0.0, "robustnessIndex": 0.0,
+                    })
+                    logger.warning("GA quarantined %s (%s)", ind.get("id"), q.code)
+                    continue
                 is_returns = self._equity_returns(is_bt["equityCurve"])
                 oos_returns = self._equity_returns(oos_bt["equityCurve"])
                 dsr_is = deflated_sharpe_ratio(is_returns, trials=pop_size * max_gens)
@@ -350,10 +429,20 @@ class GeneticOptimizer:
                     "dsrInSample": round(dsr_is, 4),
                     "dsrOutOfSample": round(dsr_oos, 4),
                     "robustnessIndex": round(robustness, 2),
+                    "status": "evaluated",
                 })
                 gen_fitness.append(fitness["fitnessScore"])
 
-            population.sort(key=lambda x: x["fitness"], reverse=True)
+            if not gen_fitness:
+                history.append({
+                    "generation": gen, "bestFitness": 0.0, "avgFitness": 0.0,
+                    "bestReturn": 0.0, "bestSharpe": 0.0, "bestDrawdown": 0.0,
+                    "bestIndividualId": "", "stallCounter": stall_counter,
+                    "cacheHits": 0, "quarantined": True,
+                })
+                break
+
+            population.sort(key=lambda x: x.get("fitness") if x.get("fitness") is not None else -1.0, reverse=True)
             for i, ind in enumerate(population):
                 ind["rank"] = i + 1
                 ind["isSurvivor"] = i < survivors
@@ -397,8 +486,36 @@ class GeneticOptimizer:
             population = new_pop
 
         # ------------------------------------------------------------------ Gate
+        if best_individual is None:
+            return {
+                "id": f"ga_{uuid.uuid4().hex[:10]}",
+                "assetPair": cfg.get("assetPair"),
+                "interval": cfg.get("interval"),
+                "totalGenerationsCompleted": len(history),
+                "populationSize": pop_size,
+                "survivorCount": survivors,
+                "bestIndividual": None,
+                "topSurvivors": [],
+                "population": population,
+                "history": history,
+                "inSampleCandles": split,
+                "outOfSampleCandles": len(oos_candles),
+                "generatedCode": "",
+                "baselineStrategyId": cfg.get("baselineStrategyId"),
+                "baselineStrategyName": cfg.get("baselineStrategyName"),
+                "baselineIndividual": None,
+                "baselineComparison": None,
+                "shadowGate": {"passed": False, "verdict": "NO_CANDIDATES",
+                               "checks": {}},
+                "counterfactualReplay": {},
+                "earlyStopped": True,
+                "stallCounter": stall_counter,
+                "blueprintCaps": {"max_population": pop_size,
+                                  "max_generations": max_gens,
+                                  "stall_limit": stall_limit, "concurrency": 1},
+            }
+
         gate = self.shadow_gate(best_individual)
-        # Counterfactual Replay: Best-Genom auf den letzten 200 Candles (Shadow-Überlappung)
         replay = self.counterfactual_replay(best_individual, candles,
                                             fee_pct=fee_pct, slippage=slippage_pct,
                                             initial_balance=initial_balance)

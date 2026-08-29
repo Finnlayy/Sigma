@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.backtest.BacktestEngine import resample_candles
+from app.core import blueprint as bp
 from app.core.event_bus import EventBus
 from app.quant.RegimeEngine import (ampel_status, dfa_hurst,
                                     lead_lag_matrix, sentiment_score)
@@ -241,8 +242,8 @@ async def postmortem(body: PostmortemBody):
 
 
 class EvolutionBody(BaseModel):
-    maxGenerations: int = 10
-    populationSize: int = 12
+    maxGenerations: int = bp.GA_MAX_GENERATIONS
+    populationSize: int = bp.GA_MAX_POPULATION
     assetPair: str = "BTC/USD"
     interval: int = 15
     candleCount: int = 500
@@ -257,8 +258,8 @@ async def evolution_run(body: EvolutionBody):
     if len(candles) < 240:
         raise HTTPException(400, f"WFO benötigt ≥240 Candles — vorhanden: {len(candles)}.")
     result = await asyncio.to_thread(state.ga.run, {
-        "populationSize": body.populationSize,
-        "maxGenerations": body.maxGenerations,
+        "populationSize": min(max(1, int(body.populationSize)), bp.GA_MAX_POPULATION),
+        "maxGenerations": min(max(1, int(body.maxGenerations)), bp.GA_MAX_GENERATIONS),
         "survivorsCount": 3,
         "mutationRate": 0.25,
         "crossoverRate": 0.7,

@@ -291,6 +291,15 @@ class DuckDBStore:
               net_pnl DOUBLE, trade_count INTEGER, win_rate DOUBLE, updated_at DOUBLE
             )"""
         )
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS live_kraken_snapshots (
+              snapshot_id VARCHAR PRIMARY KEY,
+              ts DOUBLE,
+              balances_json VARCHAR,
+              error VARCHAR,
+              has_credentials INTEGER
+            )"""
+        )
 
     # ------------------------------------------------------------------ helpers
     def _rows(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
@@ -341,6 +350,43 @@ class DuckDBStore:
     def vault_balance(self) -> float:
         row = self._one("SELECT COALESCE(SUM(amount_usd), 0) AS b FROM vault_ledger")
         return float(row["b"]) if row else 0.0
+
+    def put_live_kraken_snapshot(self, *, balances: Dict[str, float],
+                                 ts: Optional[float], error: Optional[str],
+                                 has_credentials: bool) -> None:
+        self._exec(
+            """INSERT OR REPLACE INTO live_kraken_snapshots
+               (snapshot_id, ts, balances_json, error, has_credentials)
+               VALUES (?, ?, ?, ?, ?)""",
+            ["latest", ts, json.dumps(balances or {}), error or "",
+             1 if has_credentials else 0],
+        )
+
+    def get_live_kraken_snapshot(self) -> Optional[Dict[str, Any]]:
+        row = self._one(
+            "SELECT ts, balances_json, error, has_credentials "
+            "FROM live_kraken_snapshots WHERE snapshot_id = ?",
+            ["latest"],
+        )
+        if not row:
+            return None
+        try:
+            raw = json.loads(row.get("balances_json") or "{}")
+        except json.JSONDecodeError:
+            raw = {}
+        balances: Dict[str, float] = {}
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                try:
+                    balances[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+        return {
+            "ts": row.get("ts"),
+            "balances": balances,
+            "error": row.get("error") or None,
+            "has_credentials": bool(row.get("has_credentials")),
+        }
 
     def vault_entries(self, limit: int = 50) -> List[Dict[str, Any]]:
         rows = self._rows(

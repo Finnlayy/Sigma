@@ -48,6 +48,7 @@ class StrategyTesterDriver(Protocol):  # pragma: no cover - reine Typ-Deklaratio
     def apply_parameters(self, params: Mapping[str, Any]) -> Dict[str, Any]: ...
     def run_backtest(self, window: Optional[Mapping[str, Any]] = None) -> Dict[str, str]: ...
     def close(self) -> None: ...
+    def restart(self) -> None: ...
 
 
 # =============================================================================
@@ -123,6 +124,10 @@ class FakeStrategyTesterDriver:
     def close(self) -> None:
         self.calls.append("close")
 
+    def restart(self) -> None:
+        self.calls.append("restart")
+        self.close()
+
 
 # =============================================================================
 # Playwright-Driver (P3) — echte TV-Session
@@ -177,6 +182,10 @@ class PlaywrightStrategyTesterDriver:
         except Exception:  # pragma: no cover
             pass
         self._pw = self._browser = self._context = self.page = None
+
+    def restart(self) -> None:
+        self.close()
+        self.start()
 
     def __enter__(self) -> "PlaywrightStrategyTesterDriver":
         self.start()

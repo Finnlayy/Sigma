@@ -490,8 +490,8 @@ export interface GeneticIndividual {
 }
 
 export interface GeneticConfig {
-  populationSize: number; // 30 individuals
-  maxGenerations: number; // 50 generations
+  populationSize: number; // max/default 15 — Blueprint §17.4
+  maxGenerations: number; // max/default 5 — Blueprint §17.4
   survivorsCount: number; // 3 survivors
   mutationRate: number; // e.g. 0.18
   crossoverRate: number; // e.g. 0.80

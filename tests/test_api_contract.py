@@ -472,6 +472,41 @@ def test_sync_balance_cli_error_clears_without_paper_seed(client, monkeypatch):
         paper = client.get("/api/logs").json()["balances"]
         assert paper != {}
         assert body["balances"] != paper
+        snap = main.state.store.get_live_kraken_snapshot()
+        assert snap is not None
+        assert snap["balances"] == {}
+        assert snap["error"]
+    finally:
+        main.state.kraken_cli = original
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+
+
+def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
+    monkeypatch.setenv("KRAKEN_API_KEY", "k")
+    monkeypatch.setenv("KRAKEN_API_SECRET", "s")
+    import app.server.main as main
+    from app.execution.KrakenCliBridge import OrderResult
+
+    class FakeBridge:
+        def balance(self):
+            return OrderResult(True, "live", stdout=json.dumps({"XXBT": "0.25"}))
+
+    original = main.state.kraken_cli
+    main.state.kraken_cli = FakeBridge()
+    try:
+        client.post("/api/kraken/sync-balance")
+        snap = main.state.store.get_live_kraken_snapshot()
+        assert snap["balances"]["BTC"] == 0.25
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+        main.state.has_credentials = True
+        main.state._hydrate_live_kraken_cache()
+        assert main.state.live_kraken_balances["BTC"] == 0.25
+        main.state.has_credentials = False
+        main.state._hydrate_live_kraken_cache()
+        assert main.state.live_kraken_balances == {}
     finally:
         main.state.kraken_cli = original
         main.state.has_credentials = False

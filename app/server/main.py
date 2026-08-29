@@ -268,6 +268,19 @@ class AppState:
         self._scheduler_work: Optional[asyncio.Task] = None
         self._last_eod_day: Optional[str] = None
 
+    def _hydrate_live_kraken_cache(self) -> None:
+        if not self.has_credentials or self.store is None:
+            self.live_kraken_balances = {}
+            self.live_kraken_sync_ts = None
+            self.live_kraken_sync_error = None
+            return
+        snap = self.store.get_live_kraken_snapshot()
+        if not snap:
+            return
+        self.live_kraken_balances = snap.get("balances") or {}
+        self.live_kraken_sync_ts = snap.get("ts")
+        self.live_kraken_sync_error = snap.get("error")
+
     # ------------------------------------------------------------- lifecycle
     async def startup(self) -> None:
         cfg = load_config()
@@ -298,6 +311,7 @@ class AppState:
         self.passkey = PasskeyAuthEngine(self.redis, cfg)
         self.settings = SettingsEnvManager(cfg)
         self.has_credentials = _kraken_credentials_present()
+        self._hydrate_live_kraken_cache()
         self.mcp = KrakenMCPBridge(cfg, self.passkey, None, self.store)
         self.telegram = TelegramBotEngine(cfg)
         # §36 — HIGH/CRITICAL Fehler pushen ueber denselben Bot
@@ -2017,8 +2031,8 @@ async def backtest_ai_analyze(body: AiAnalyzeBody):
 # GENETIC OPTIMIZER
 # =====================================================================
 class GeneticRunBody(BaseModel):
-    populationSize: Optional[int] = 30
-    maxGenerations: Optional[int] = 50
+    populationSize: Optional[int] = bp.GA_MAX_POPULATION
+    maxGenerations: Optional[int] = bp.GA_MAX_GENERATIONS
     survivorsCount: Optional[int] = 3
     mutationRate: Optional[float] = 0.18
     crossoverRate: Optional[float] = 0.80
@@ -2042,32 +2056,39 @@ async def genetic_run(body: GeneticRunBody):
     candles = resample_candles(candles, max(1, body.interval or 15))[-count:]
     if len(candles) < 240:
         raise HTTPException(400, f"WFO benötigt ≥240 Candles — vorhanden: {len(candles)}.")
+    payload = body.model_dump(exclude_none=True)
+    payload["populationSize"] = min(
+        max(1, int(payload.get("populationSize") or bp.GA_MAX_POPULATION)),
+        bp.GA_MAX_POPULATION)
+    payload["maxGenerations"] = min(
+        max(1, int(payload.get("maxGenerations") or bp.GA_MAX_GENERATIONS)),
+        bp.GA_MAX_GENERATIONS)
     state.bus.log("info",
-                  f"GA-Run gestartet: {pair} {body.interval}m, Pop={body.populationSize}, "
-                  f"Gens={body.maxGenerations}, WFO={body.walkForwardSplitPercent}%",
+                  f"GA-Run gestartet: {pair} {body.interval}m, Pop={payload['populationSize']}, "
+                  f"Gens={payload['maxGenerations']}, WFO={body.walkForwardSplitPercent}%",
                   category="GA")
     try:
-        result = await asyncio.to_thread(state.ga.run, body.model_dump(exclude_none=True), candles)
+        result = await asyncio.to_thread(state.ga.run, payload, candles)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    # Beste Genome persistieren
-    best = result["bestIndividual"]
-    state.store.upsert_genome({
-        "genome_id": best["id"],
-        "strategy_id": body.baselineStrategyId,
-        "asset_pair": pair,
-        "interval_min": body.interval,
-        "genes": best["genes"],
-        "generation": best.get("generation"),
-        "fitness": best.get("fitness"),
-        "dsr": best.get("dsr"),
-        "cadence_per_day": best.get("tradesPerDay"),
-        "in_sample_summary": best.get("inSampleSummary"),
-        "oos_sample_summary": best.get("outOfSampleSummary"),
-    })
+    best = result.get("bestIndividual")
+    if best and best.get("status") != "quarantined":
+        state.store.upsert_genome({
+            "genome_id": best["id"],
+            "strategy_id": body.baselineStrategyId,
+            "asset_pair": pair,
+            "interval_min": body.interval,
+            "genes": best["genes"],
+            "generation": best.get("generation"),
+            "fitness": best.get("fitness"),
+            "dsr": best.get("dsr"),
+            "cadence_per_day": best.get("tradesPerDay"),
+            "in_sample_summary": best.get("inSampleSummary"),
+            "oos_sample_summary": best.get("outOfSampleSummary"),
+        })
     state.bus.log("info",
-                  f"GA-Run fertig: best fitness={best.get('fitness')} DSR={best.get('dsr')} "
-                  f"Gate={'PASS' if result['shadowGate']['passed'] else 'FAIL'}",
+                  f"GA-Run fertig: best fitness={(best or {}).get('fitness')} DSR={(best or {}).get('dsr')} "
+                  f"Gate={'PASS' if result.get('shadowGate', {}).get('passed') else 'FAIL'}",
                   category="GA")
     return result
 
@@ -2154,6 +2175,22 @@ def _kraken_credentials_present() -> bool:
     return bool(key and secret)
 
 
+def _persist_live_kraken_snapshot(st: AppState, out: Dict[str, Any]) -> Dict[str, Any]:
+    store = getattr(st, "store", None)
+    if store is None:
+        return out
+    try:
+        store.put_live_kraken_snapshot(
+            balances=out.get("liveKrakenBalances") or {},
+            ts=out.get("lastSyncTimestamp"),
+            error=out.get("error"),
+            has_credentials=bool(out.get("hasCredentials")),
+        )
+    except Exception as exc:
+        logger.warning("live kraken snapshot persist failed: %s", exc)
+    return out
+
+
 def _refresh_live_kraken_balances(st: AppState) -> Dict[str, Any]:
     """CLI snapshot into AppState cache. Never falls back to paper seeds."""
     from app.execution.KrakenCliBridge import parse_balance_stdout
@@ -2164,23 +2201,23 @@ def _refresh_live_kraken_balances(st: AppState) -> Dict[str, Any]:
         st.live_kraken_balances = {}
         st.live_kraken_sync_ts = None
         st.live_kraken_sync_error = None
-        return {
+        return _persist_live_kraken_snapshot(st, {
             "hasCredentials": False,
             "liveKrakenBalances": {},
             "lastSyncTimestamp": None,
-        }
+        })
     bridge = st.kraken_cli
     if bridge is None:
         st.live_kraken_balances = {}
         st.live_kraken_sync_ts = None
         st.live_kraken_sync_error = "bridge_unavailable"
         logger.warning("live kraken balance skipped: bridge unavailable")
-        return {
+        return _persist_live_kraken_snapshot(st, {
             "hasCredentials": True,
             "liveKrakenBalances": {},
             "lastSyncTimestamp": None,
             "error": "bridge_unavailable",
-        }
+        })
     try:
         result = bridge.balance()
         if not getattr(result, "ok", False):
@@ -2189,32 +2226,32 @@ def _refresh_live_kraken_balances(st: AppState) -> Dict[str, Any]:
             st.live_kraken_sync_ts = None
             st.live_kraken_sync_error = err
             logger.warning("live kraken balance failed: %s", err)
-            return {
+            return _persist_live_kraken_snapshot(st, {
                 "hasCredentials": True,
                 "liveKrakenBalances": {},
                 "lastSyncTimestamp": None,
                 "error": err,
-            }
+            })
         parsed = parse_balance_stdout(getattr(result, "stdout", "") or "")
         st.live_kraken_balances = parsed
         st.live_kraken_sync_ts = time.time()
         st.live_kraken_sync_error = None
-        return {
+        return _persist_live_kraken_snapshot(st, {
             "hasCredentials": True,
             "liveKrakenBalances": dict(parsed),
             "lastSyncTimestamp": st.live_kraken_sync_ts,
-        }
+        })
     except Exception as exc:
         st.live_kraken_balances = {}
         st.live_kraken_sync_ts = None
         st.live_kraken_sync_error = str(exc)
         logger.warning("live kraken balance error: %s", exc)
-        return {
+        return _persist_live_kraken_snapshot(st, {
             "hasCredentials": True,
             "liveKrakenBalances": {},
             "lastSyncTimestamp": None,
             "error": str(exc),
-        }
+        })
 
 
 def _is_loopback(request: Request) -> bool:

@@ -273,6 +273,21 @@ def test_scout_runs_paper_only_and_feeds_academy():
     assert scout.snapshot()["by_status"].get("graduated", 0) == 1
 
 
+def test_scout_run_task_survives_runner_exception():
+    alloc = StrategyAllocator()
+
+    def boom(sid, symbol, tf):
+        raise RuntimeError("tv tester crashed")
+
+    scout = ScoutDaemon(allocator=alloc, backtest_runner=boom,
+                        symbols=["ETH/USD"], timeframes=[15])
+    tasks = scout.plan(["s_err"], bp.Regime.WEAK_BULL.value)
+    out = scout.run_task(tasks[0], bp.Regime.WEAK_BULL.value)
+    assert out["ok"] is False
+    assert tasks[0].status == "pending"
+    assert alloc.get_profile("s_err", "ETH/USD", 15, bp.Regime.WEAK_BULL.value) is None
+
+
 # --------------------------------------------------------- memory watchdog ---
 
 def test_memory_stages_escalate():
