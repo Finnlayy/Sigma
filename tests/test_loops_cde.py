@@ -247,6 +247,74 @@ def test_training_dataset_export_needs_sample():
 
 # ------------------------------------------------------------------- scout ---
 
+def test_math_engine_sharpe_and_nan_penalty():
+    from sigma.core.math_engine import NAN_PENALTY, clamp, nan_penalty, sharpe
+
+    assert nan_penalty(float("nan")) == NAN_PENALTY == -1e9
+    assert clamp(12, 0, 5) == 5
+    assert sharpe([0.01, 0.02, -0.005, 0.015]) != 0.0
+
+
+def test_sigma_loop_ports_import():
+    from sigma.loops import LoopAPort, LoopBPort, LoopCPort, LoopDPort, LoopEPort
+    from sigma.orchestration import MasterOrchestrator
+
+    assert LoopAPort and LoopBPort and LoopCPort and LoopDPort and LoopEPort
+    status = MasterOrchestrator().tick()["status"]
+    assert status in ("htf_not_ready", "unwind_only", "tick")
+
+
+def test_loop_c_port_degraded_empty_when_sidecar_down():
+    from sigma.loops import LoopCPort
+
+    class _Down:
+        def health(self):
+            return {"ok": False, "degraded": True}
+
+        def fetch_ohlc_with_meta(self, *args, **kwargs):
+            raise AssertionError("Loop C must not fetch when sidecar is down")
+
+    snap = LoopCPort(scraper=_Down(), store=None).poll()
+    assert snap.degraded is True
+    assert snap.series == {}
+    assert snap.symbols == []
+    assert snap.regime is None
+
+
+def test_loop_c_port_rejects_synthetic_source():
+    from sigma.loops import LoopCPort
+
+    class _Synth:
+        def health(self):
+            return {"ok": True, "degraded": False}
+
+        def fetch_ohlc_with_meta(self, *args, **kwargs):
+            candles = [{"ts": 1.0, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]
+            return candles, {"source": "synthetic", "degraded": False}
+
+    snap = LoopCPort(scraper=_Synth(), store=None, symbols=["BTC/USD"]).poll()
+    assert snap.degraded is True
+    assert snap.series == {}
+
+
+def test_loop_d_port_is_paper_only():
+    from sigma.loops import LoopDPort
+
+    alloc = StrategyAllocator()
+
+    def runner(sid, symbol, tf):
+        return {"trades": [{"pnlPercent": 1.5} for _ in range(bp.BADGE_MIN_SAMPLE + 2)]}
+
+    scout = ScoutDaemon(
+        allocator=alloc, backtest_runner=runner,
+        symbols=["ETH/USD"], timeframes=[15],
+    )
+    scout.plan(["s2"], bp.Regime.WEAK_BULL.value)
+    grads = LoopDPort(daemon=scout).tick(regime=bp.Regime.WEAK_BULL.value)
+    assert grads
+    assert all(g.paper_only and not g.live_capital for g in grads)
+
+
 def test_scout_plans_only_unprofiled_pairs():
     alloc = StrategyAllocator()
     _feed(alloc, "s1", "BTC/USD", 15, bp.Regime.RANGING_CHOP.value, 25, 10)
@@ -453,3 +521,171 @@ def test_explicit_bounds_override_heuristics():
     schema = GeneSchema.from_parameter_csv(PARAM_CSV, bounds={"trendFastEma": (5, 20)})
     assert schema.genes["trendFastEma"].low == 5 and schema.genes["trendFastEma"].high == 20
     assert schema.clamp_all({"trendFastEma": 100})["trendFastEma"] == 20
+
+
+# --------------------------------------------------------- HTF / LTF harmonics ---
+
+def _bars(n=20, start=1_700_000_000, step=900, price=100.0):
+    out = []
+    for i in range(n):
+        p = price * (1.0 + 0.001 * i)
+        out.append({
+            "ts": start + i * step, "o": p, "h": p * 1.01, "l": p * 0.99,
+            "c": p, "v": 100.0 + i,
+        })
+    return out
+
+
+def test_timeframe_ladder_rejects_unmatched_and_m15_m5():
+    from sigma.signals.timeframe_ladder import (
+        bias_tf, classify_pair, exec_tf, reject_unpaired, session_exec_pair,
+    )
+    assert bias_tf(15) == 60 and exec_tf(60) == 15
+    assert classify_pair(60, 15).kind == "bias"
+    assert classify_pair(60, 5).kind == "execution"
+    assert reject_unpaired(15, 5) is True
+    assert classify_pair(15, 5) is None
+    ny = session_exec_pair("NEW_YORK_EXPANSION")
+    assert ny.bias_minutes == 60 and ny.exec_minutes == 15
+
+
+def test_session_clock_21utc_gap_and_weekend_alts():
+    from datetime import datetime, timezone
+    from sigma.signals.session_clock import SessionClock
+    clock = SessionClock()
+    gap = clock.evaluate(datetime(2026, 8, 28, 21, 10, tzinfo=timezone.utc).timestamp())
+    assert gap.liquidity_gap is True
+    assert gap.session == "US_CLOSE_TRANSITION"
+    sat = clock.evaluate(datetime(2026, 8, 29, 15, 0, tzinfo=timezone.utc).timestamp())
+    assert sat.weekend_alts_paper_only is True
+    london = clock.evaluate(datetime(2026, 8, 28, 9, 0, tzinfo=timezone.utc).timestamp())
+    assert london.session == "LONDON_MANIPULATION"
+
+
+def test_dual_hurst_fail_closed_on_open_htf():
+    from sigma.signals.dual_hurst import evaluate_dual_hurst, htf_ready
+    bars = _bars(10, start=1_000_000, step=3600)
+    now = 1_000_000 + 9 * 3600 + 60  # last bar still open (close at +3600)
+    assert htf_ready(bars, 60, now=now) is False
+    dual = evaluate_dual_hurst(bars, bars, htf_interval_min=60, now=now)
+    assert dual.htf_ready is False and dual.complementary is False
+    closed = 1_000_000 + 10 * 3600
+    assert htf_ready(bars, 60, now=closed) is True
+
+
+def test_htf_flags_never_live_gates():
+    from sigma.signals.htf_features import extract_htf_flags
+    flags = extract_htf_flags(_bars(8), interval_min=60, now=1_700_000_000 + 8 * 900 + 3600)
+    assert flags.get("live_gate") is False
+    assert flags.get("valid") is True
+    assert "bullish_fvg" in flags
+
+
+def test_scale_features_reject_open_bar():
+    from sigma.signals.scale_features import scale_invariant_features
+    bars = _bars(20)
+    open_now = bars[-1]["ts"] + 10
+    assert scale_invariant_features(bars, interval_min=15, now=open_now)["valid"] is False
+    closed = bars[-1]["ts"] + 900
+    feat = scale_invariant_features(bars, interval_min=15, now=closed)
+    assert feat["valid"] is True
+    assert "log_return_z" in feat and "atr_over_price" in feat
+
+
+def test_templates_paper_only_and_gap_flat():
+    from datetime import datetime, timezone
+    from sigma.strategies import DualHedgeGrid, DynamicChannelDCA, HtfTrendLtfReversion
+    gap_ts = datetime(2026, 8, 28, 21, 5, tzinfo=timezone.utc).timestamp()
+    ctx = {
+        "symbol": "ETH/USD",
+        "htf_candles": _bars(12, step=3600),
+        "ltf_candles": _bars(12),
+        "now": gap_ts,
+        "htf_interval_min": 60,
+    }
+    for tmpl in (HtfTrendLtfReversion(), DynamicChannelDCA(), DualHedgeGrid()):
+        intent = tmpl.plan(ctx)
+        assert intent.execution_mode == "kraken_paper"
+        assert intent.action == "FLAT"
+        assert intent.details.get("reason") in ("utc_21_gap", "missing_data", "htf_open", "not_london")
+
+
+def test_loop_b_h_tests_h3_h4_default_off():
+    from sigma.loops.loop_b import LoopBPort
+    closed = _bars(12)
+    now = closed[-1]["ts"] + 900
+    out = LoopBPort().paper_hypotheses(
+        closed, closed, htf_interval_min=60, ltf_interval_min=15, now=now,
+    )
+    assert out["live"] is False and out["mode"] == "paper"
+    by_id = {r["hypothesis"]: r for r in out["results"]}
+    assert by_id["H3"]["enabled"] is False and by_id["H3"]["reason"] == "default_off"
+    assert by_id["H4"]["enabled"] is False and by_id["H4"]["reason"] == "default_off"
+    assert by_id["H2"]["passed"] is True
+    assert by_id["H5"]["passed"] is True
+
+
+def test_loop_c_poll_pair_fetches_both_legs():
+    from sigma.loops.loop_c import LoopCPort
+    seen = []
+
+    class _Ok:
+        def health(self):
+            return {"ok": True, "degraded": False}
+
+        def fetch_ohlc_with_meta(self, symbol, interval, count):
+            seen.append(interval)
+            return _bars(4, step=interval * 60), {"source": "tv_scraper"}
+
+    snap = LoopCPort(scraper=_Ok(), store=None, symbols=["BTC/USD"]).poll_pair(15, 60)
+    assert snap.degraded is False
+    assert 15 in seen and 60 in seen
+    assert "BTC/USD" in snap.series
+    assert snap.htf_interval_min == 60
+
+
+def test_orchestrator_fail_closed_when_htf_open():
+    from types import SimpleNamespace
+    from sigma.orchestration import MasterOrchestrator
+    bars = _bars(8)
+    snap = SimpleNamespace(
+        series={"BTC/USD": bars},
+        htf_series={"BTC/USD": bars},
+        degraded=False,
+    )
+    orch = MasterOrchestrator(ports={"polymarket": None})
+    # open HTF: now is inside last hour bar
+    out = orch.tick(snap)
+    assert out["deployed"] == 0
+    assert out["status"] in ("htf_not_ready", "unwind_only", "tick")
+
+
+def test_multi_asset_router_weekend_alts_paper_only():
+    from datetime import datetime, timezone
+    from sigma.orchestration.multi_asset_router import MultiAssetRouter
+    from sigma.signals.session_clock import SessionClock
+    series = {"BTC/USD": _bars(50), "ETH/USD": _bars(50)}
+    sat = SessionClock().evaluate(datetime(2026, 8, 29, 16, 0, tzinfo=timezone.utc).timestamp())
+    rows = MultiAssetRouter().route(series, session=sat)
+    by_sym = {r.symbol: r for r in rows}
+    assert by_sym["ETH/USD"].paper_only is True
+    assert by_sym["ETH/USD"].live_a is False
+    assert by_sym["BTC/USD"].paper_only is False
+
+
+def test_polymarket_layer0_fail_closed():
+    from sigma.signals.polymarket_layer0 import layer0_pre_regime
+    empty = layer0_pre_regime(None)
+    assert empty.valid is False and empty.reason == "missing_data"
+    ok = layer0_pre_regime({"event_id": "e1", "implied_prob": 0.72, "title": "risk"})
+    assert ok.valid is True and ok.regime_hint == "RISK_ON"
+    synth = layer0_pre_regime({"implied_prob": 0.8, "source": "synthetic"})
+    assert synth.valid is False
+
+
+def test_pine_generator_requires_confirmed_bars():
+    from sigma.strategies.pine_v6_generator import generate_htf_ltf_pine
+    code = generate_htf_ltf_pine("htf_trend_ltf_reversion")
+    assert code.startswith("//@version=6")
+    assert "barstate.isconfirmed" in code
+    assert "lookahead=barmerge.lookahead_off" in code

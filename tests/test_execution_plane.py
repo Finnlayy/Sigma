@@ -108,6 +108,47 @@ def _scheduler(host: _FakeHostClock) -> SchedulerMatrix:
     return SchedulerMatrix(clock=clock)
 
 
+def test_install_canonical_tasks_registers_loop_graph():
+    from app.core.scheduler_matrix import install_canonical_tasks
+    from app.execution.deadman_switch_daemon import DeadmanSwitchDaemon
+
+    class _Mem:
+        def check(self):
+            return {"stage": 0}
+
+    class _Card:
+        def idle_stage1_tick(self):
+            return {"skipped": True}
+
+    host = _FakeHostClock(1_700_000_000.0)
+    sched = _scheduler(host)
+    install_canonical_tasks(
+        sched, deadman=DeadmanSwitchDaemon(), memory=_Mem(), scorecard=_Card(),
+    )
+    names = {task.name for task in sched.tasks}
+    for expected in (
+        "glint_orderbook_verify",
+        "webhook_execution",
+        "playwright_compile",
+        "deadman_heartbeat",
+        "memory_watchdog",
+        "scorecard_stage1_idle",
+        "loop_c_feed_poll",
+        "scout_incubator_cycle",
+        "master_orchestrator_tick",
+        "strategy_allocator",
+        "regime_recheck",
+        "academy_badge_recalibration",
+    ):
+        assert expected in names, expected
+    scout = sched.get("scout_incubator_cycle")
+    assert scout is not None
+    assert scout.cadence_s == float(bp.SCOUT_INCUBATOR_CYCLE_MINUTES) * 60.0
+    assert sched.get("webhook_execution").tier == 0
+    assert sched.get("playwright_compile").tier == 0
+    assert sched.get("academy_badge_recalibration").tier == 5
+
+
 def test_scheduler_matrix_covers_all_six_tiers():
     assert [int(spec.tier) for spec in bp.SCHEDULER_MATRIX] == [0, 1, 2, 3, 4, 5]
     tier1 = next(s for s in bp.SCHEDULER_MATRIX if int(s.tier) == 1)

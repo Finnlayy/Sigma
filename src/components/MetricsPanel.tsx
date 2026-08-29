@@ -834,13 +834,17 @@ export default function MetricsPanel({
               <div className="flex justify-between text-zinc-400">
                 <span>Total Collateral:</span>
                 <span className="text-purple-300 font-bold">
-                  ${(proData?.totalCollateralUSD || 25000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {proData?.totalCollateralUSD == null
+                    ? "—"
+                    : `$${proData.totalCollateralUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </span>
               </div>
               <div className="flex justify-between text-zinc-400">
                 <span>Free Margin:</span>
                 <span className="text-emerald-400 font-bold">
-                  ${(proData?.freeMarginUSD || 21500).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {proData?.freeMarginUSD == null
+                    ? "—"
+                    : `$${proData.freeMarginUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </span>
               </div>
               <div className="flex justify-between text-zinc-400">
@@ -876,7 +880,9 @@ export default function MetricsPanel({
               })
             ) : (
               <div className="text-center py-2 text-xs text-zinc-400">
-                No active Pro / Futures positions.
+                {proData?.reason === "live_futures_not_wired"
+                  ? "Live futures book unavailable — paper is not shown as live."
+                  : "No active Pro / Futures positions."}
               </div>
             )}
           </div>

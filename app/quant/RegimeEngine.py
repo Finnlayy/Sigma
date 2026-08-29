@@ -190,27 +190,17 @@ NEGATIVE_WORDS = {
 
 
 def sentiment_score(text: str) -> Dict[str, Any]:
-    """Lexikon-Scorer (FinBERT-Proxy).
-    [MOCK-SEAM] Für Produktionsqualität hier echten FinBERT-Inferrance anbinden
-    (transformers on Windows-Host, API-Call vom Core)."""
-    words = [w.strip(".,;:!?()\"'").lower() for w in (text or "").split()]
-    pos = sum(1 for w in words if w in POSITIVE_WORDS)
-    neg = sum(1 for w in words if w in NEGATIVE_WORDS)
-    total = max(1, pos + neg)
-    score = (pos - neg) / total
-    hits = [w for w in words if w in POSITIVE_WORDS or w in NEGATIVE_WORDS]
-    if score > 0.15:
-        label = "POSITIVE"
-    elif score < -0.15:
-        label = "NEGATIVE"
-    else:
-        label = "NEUTRAL"
+    """FinBERT is not wired. Honest empty — no lexicon proxy scores."""
+    _ = text
     return {
-        "score": round(score, 4),
-        "label": label,
-        "confidence": round(min(1.0, (pos + neg) / 8.0), 2),
-        "positive_hits": pos,
-        "negative_hits": neg,
-        "keywords": hits[:12],
-        "model": "lexicon-v1 (FinBERT-Proxy [MOCK])",
+        "score": None,
+        "sentiment_score": None,
+        "label": "UNAVAILABLE",
+        "confidence": None,
+        "positive_hits": 0,
+        "negative_hits": 0,
+        "keywords": [],
+        "model": "unavailable",
+        "reason": "finbert_not_configured",
+        "available": False,
     }
