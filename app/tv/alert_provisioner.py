@@ -44,27 +44,61 @@ class AlertRecord:
         return d
 
 
-def build_alert_message(strategy_id: str, secret: str = "") -> str:
-    """Pine `alert_message` Template — enthält das Webhook-Secret (§17.1).
-    Secret is mandatory in prod; placeholder warns operator if missing.
+def build_alert_payload(
+    strategy_id: str,
+    secret: str = "",
+    *,
+    execution_mode: Optional[str] = None,
+    fixed_leverage: Optional[int] = None,
+    bot_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Schema-A JSON (``SigmaL4AlertPayload``) mit TV-Platzhaltern.
+
+    TradingView substituiert ``{{…}}`` beim Feuern. SL/TP kommen aus den
+    Pine-Plots 3/4; fehlen die Plots, füllt der Ingest-Router ATR-Brackets.
     """
     if not secret:
-        logger.warning("SIGMA_WEBHOOK_SECRET not set — alert %s will contain placeholder; webhook auth disabled (dev only)", strategy_id)
-    payload = {
-        "symbol": "{{ticker}}",
-        "action": "{{strategy.order.action}}",
-        "price": "{{close}}",
-        "rsi": "{{plot_0}}",
-        "atr": "{{plot_1}}",
-        "cisd_score": "{{plot_2}}",
-        "timestamp": "{{timenow}}",
-        "strategy_id": strategy_id,
+        logger.warning(
+            "SIGMA_WEBHOOK_SECRET not set — alert %s will contain placeholder; "
+            "webhook auth disabled (dev only)", strategy_id)
+    mode = execution_mode or bp.ExecutionMode.KRAKEN_PAPER.value
+    leverage = (bp.FIXED_LEVERAGE_DEFAULT if fixed_leverage is None
+                else int(fixed_leverage))
+    return {
         "secret": secret or "<SIGMA_WEBHOOK_SECRET>",
         "idempotency_key": "{{strategy.order.id}}",
-        "bot_id": strategy_id,
+        "strategy_id": strategy_id,
+        "bot_id": bot_id or strategy_id,
+        "symbol": "{{ticker}}",
+        "action": "{{strategy.order.action}}",
+        "order_type": "MARKET",
+        "price": "{{close}}",
+        "stop_loss": "{{plot_3}}",
+        "take_profit": "{{plot_4}}",
+        "fixed_leverage": leverage,
+        "timestamp": "{{timenow}}",
         "interval": "{{interval}}",
+        "execution_mode": mode,
+        "features": {
+            "rsi": "{{plot_0}}",
+            "atr": "{{plot_1}}",
+            "cisd_score": "{{plot_2}}",
+        },
     }
-    return json.dumps(payload)
+
+
+def build_alert_message(
+    strategy_id: str,
+    secret: str = "",
+    *,
+    execution_mode: Optional[str] = None,
+    fixed_leverage: Optional[int] = None,
+    bot_id: Optional[str] = None,
+) -> str:
+    """Pine ``alert_message`` — Schema A, kein Legacy-Top-Level mehr."""
+    return json.dumps(build_alert_payload(
+        strategy_id, secret, execution_mode=execution_mode,
+        fixed_leverage=fixed_leverage, bot_id=bot_id))
 
 
 class AlertProvisioner:
@@ -106,7 +140,7 @@ class AlertProvisioner:
         return bp.ALERT_NAME_TEMPLATE.format(strategy_id=strategy_id)
 
     def webhook_url(self) -> str:
-        return f"{self.public_webhook_base.rstrip('/')}{bp.WEBHOOK_ROUTE}"
+        return f"{self.public_webhook_base.rstrip('/')}{bp.WEBHOOK_INGEST_ROUTE}"
 
     def get(self, strategy_id: str) -> Optional[AlertRecord]:
         return self._alerts.get(strategy_id)
@@ -122,7 +156,11 @@ class AlertProvisioner:
             strategy_id=strategy_id, name=name, symbol=symbol, interval=str(interval))
         rec.symbol, rec.interval, rec.name = symbol, str(interval), name
         rec.webhook_url = self.webhook_url()
-        rec.message_template = build_alert_message(strategy_id, self.config.webhook_secret)
+        rec.message_template = build_alert_message(
+            strategy_id, self.config.webhook_secret,
+            execution_mode=(bp.ExecutionMode.LIVE.value if self.config.live_trading
+                            else bp.ExecutionMode.KRAKEN_PAPER.value),
+        )
         rec.updated_at = time.time()
         self._alerts[strategy_id] = rec
 

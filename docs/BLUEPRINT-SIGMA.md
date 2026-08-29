@@ -181,7 +181,7 @@ flowchart TB
 | Scout Daemon | `app/scout/ScoutDaemon.py` | Loop D Paper Pairing |
 | YAML Resolver | `app/tv/yaml_resolver.py` | Self-Heal selectors/param_bounds |
 | Sigma Terminal | `src/components/SigmaTerminal.tsx` | FlexLayout 11-Panel Workspace |
-| Webhook | Route in `app/server/main.py` | `POST /api/v1/signal/webhook` |
+| Webhook | Route in `app/server/main.py` | `POST /api/v1/signal/ingest` (Schema A); Legacy `POST /api/v1/signal/webhook` forwarded |
 | Kraken Bridge | `app/execution/KrakenCliBridge.py` | `kraken trade add-order` Subprocess |
 | Safety | `app/execution/SafetyGuard.py` | KILL_SWITCH / PAUSE / daily loss / consecutive errors |
 | Config | `config/autonomy-level-4.yaml` + `app/core/config.py` `SigmaConfig` | `SIGMA_*` Env |
@@ -221,7 +221,7 @@ sequenceDiagram
   participant Safety as Safety_ONNX_Kelly_Judge
   participant K as Kraken_CLI
 
-  TV->>Core: POST /api/v1/signal/webhook JSON alert_message
+  TV->>Core: POST /api/v1/signal/ingest JSON alert_message
   Core->>Safety: validate size risk
   Safety-->>Core: approved volume SL TP
   Core->>K: subprocess kraken trade add-order
@@ -241,7 +241,7 @@ Kurz: Jedes TV-Signal ist typisiertes JSON mit `secret`, `idempotency_key`, `str
 
 ### 4.2 Endpoint
 
-`POST /api/v1/signal/webhook` → `ExecutionResponse`
+`POST /api/v1/signal/ingest` → `SignalExecutionResponse` (Schema A). Legacy `POST /api/v1/signal/webhook` bleibt und reicht Schema A an Ingest weiter.
 
 Pipeline (Reihenfolge fest):
 
@@ -559,7 +559,8 @@ Alle M8-/Academy-/Lake-/Strategy-CRUD-/Dashboard-Routen aus Alpha `main.py` + `r
 
 | Method | Path | Verhalten |
 |--------|------|-----------|
-| POST | `/api/v1/signal/webhook` | Loop A |
+| POST | `/api/v1/signal/ingest` | Loop A Schema A (`SigmaL4AlertPayload`) |
+| POST | `/api/v1/signal/webhook` | Loop A Legacy + Schema-A Forward |
 | GET | `/api/v1/health` | status, kill_switch, scraper_ok, tv_worker_ok |
 | POST | `/api/backtest/run` | TV-Job (Playwright), nicht BacktestEngine |
 | GET | `/api/backtest/ohlc` | Scraper `:8001` |
@@ -1332,7 +1333,7 @@ Sobald ein Trigger feuert, führen `sigma-tv-worker` und `sigma-core` diese Sequ
 1. **Budget-Reservierung (Core)** — freies Futures-Kapital prüfen; isolierten Topf reservieren (z. B. 250 €).
 2. **Chart-Navigation (Worker)** — `https://www.tradingview.com/chart/?symbol=KRAKEN:XRPUSD` mit `tv_storage_state.json` (2FA-Session).
 3. **Pine v6 Injektion & Kompilierung** — Code aus `./data/strategies/{id}/code.pine` → Save → Add to Chart; bei Compile-Fehler sofortiger Abbruch.
-4. **Webhook-Alert Provisionierung** — URL `http://<host>:8000/api/v1/signal/webhook`; Message: JSON mit `SIGMA_SECRET`, `symbol`, `strategy_id`.
+4. **Webhook-Alert Provisionierung** — URL `http://<host>:8000/api/v1/signal/ingest`; Message: Schema-A JSON (`secret`, `idempotency_key`, `stop_loss`, `fixed_leverage`, `strategy_id`).
 5. **Scharfschaltung** — M8 `ACTIVE`; ab jetzt wartet Core auf Signale und führt über Kraken CLI mit `fixed_leverage` aus.
 
 ### 31.5 Trigger-Matrix (Zusammenfassung)

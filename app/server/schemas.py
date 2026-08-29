@@ -40,6 +40,20 @@ ERR_AUTH_INVALID_SECRET = "ERR_AUTH_INVALID_SECRET"
 ERR_PIONEX_DISABLED = "ERR_TV_PIONEX_CONNECTOR_DISABLED"
 
 _SYMBOL_PREFIX = re.compile(r"^[A-Z0-9_]+:")
+_TV_PLACEHOLDER = re.compile(r"^\{\{[^}]+\}\}$")
+
+
+def _is_tv_placeholder(value: Any) -> bool:
+    return isinstance(value, str) and bool(_TV_PLACEHOLDER.match(value.strip()))
+
+
+def _maybe_float(value: Any) -> Optional[float]:
+    if value is None or _is_tv_placeholder(value) or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def normalize_symbol(raw: str) -> str:
@@ -115,8 +129,38 @@ class SigmaL4AlertPayload(StrictModel):
     def _preserve_market_type(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        raw = str(value.get("symbol") or "").strip().upper()
         data = dict(value)
+        features = data.get("features")
+        if isinstance(features, dict):
+            cleaned = dict(features)
+            for key in ("rsi", "atr", "cisd_score", "bb_bandwidth"):
+                if _is_tv_placeholder(cleaned.get(key)):
+                    cleaned.pop(key, None)
+            data["features"] = cleaned or None
+        action = str(data.get("action") or "BUY").upper()
+        price_f = _maybe_float(data.get("price"))
+        atr_f = None
+        if isinstance(data.get("features"), dict):
+            atr_f = _maybe_float(data["features"].get("atr"))
+        sl_f = _maybe_float(data.get("stop_loss"))
+        tp_f = _maybe_float(data.get("take_profit"))
+        if (sl_f is None and _is_tv_placeholder(data.get("stop_loss"))
+                and price_f and atr_f and atr_f > 0 and action != "CLOSE"):
+            sl_f = (price_f - bp.ATR_STOP_MULTIPLIER * atr_f if action == "BUY"
+                    else price_f + bp.ATR_STOP_MULTIPLIER * atr_f)
+            data["stop_loss"] = sl_f
+        elif sl_f is not None:
+            data["stop_loss"] = sl_f
+        if (tp_f is None and _is_tv_placeholder(data.get("take_profit"))
+                and price_f and atr_f and atr_f > 0 and action != "CLOSE"):
+            tp_f = (price_f + bp.ATR_TAKE_PROFIT_MULTIPLIER * atr_f if action == "BUY"
+                    else price_f - bp.ATR_TAKE_PROFIT_MULTIPLIER * atr_f)
+            data["take_profit"] = tp_f
+        elif tp_f is not None:
+            data["take_profit"] = tp_f
+        if action == "CLOSE" and sl_f is None and price_f:
+            data["stop_loss"] = price_f
+        raw = str(data.get("symbol") or "").strip().upper()
         inferred_futures = (
             raw.endswith(".P") or raw.startswith(("PI_", "PF_"))
             or ":PI_" in raw or ":PF_" in raw
@@ -140,7 +184,18 @@ class SigmaL4AlertPayload(StrictModel):
     @field_validator("timestamp", mode="before")
     @classmethod
     def _ms_to_seconds(cls, value: Any) -> int:
+        if _is_tv_placeholder(value) or value in (None, ""):
+            import time as _time
+            return int(_time.time())
         return normalize_epoch(value)
+
+    @field_validator("idempotency_key", mode="before")
+    @classmethod
+    def _idempotency_placeholder(cls, value: Any) -> Any:
+        if _is_tv_placeholder(value):
+            import uuid as _uuid
+            return f"tv_{_uuid.uuid4().hex[:16]}"
+        return value
 
     @field_validator("action", "order_type", mode="before")
     @classmethod
@@ -150,6 +205,8 @@ class SigmaL4AlertPayload(StrictModel):
     @model_validator(mode="after")
     def _bracket_is_plausible(self) -> "SigmaL4AlertPayload":
         """§20 Bracket-SL: Stop muss auf der richtigen Seite des Entries liegen."""
+        if self.action == "CLOSE":
+            return self
         if self.action == "BUY":
             if self.stop_loss >= self.price:
                 raise ValueError("stop_loss muss bei BUY unter dem Entry liegen")

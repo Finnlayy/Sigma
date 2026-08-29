@@ -126,6 +126,28 @@ def test_error_text_beats_exit_code(cfg):
     assert not res.ok and res.error_code.startswith("EOrder:")
 
 
+def test_futures_live_attaches_reduce_only_stop(cfg):
+    class Telemetry:
+        class state:
+            state = "LIVE_APPROVED"
+
+    cfg.live_trading = True
+    calls = []
+
+    def runner(argv, timeout):
+        calls.append(list(argv))
+        return "txid=FT-ENTRY-1", "", 0
+
+    bridge = KrakenCliBridge(cfg, telemetry=Telemetry(), runner=runner, futures=True)
+    res = bridge.add_order(pair="PF_XBTUSD", side="buy", volume=0.01,
+                           stop_price=67_000, strategy_id="s1")
+    assert res.ok and res.mode == "live" and res.has_native_stop_loss
+    assert len(calls) == 2
+    assert calls[0][:3] == ["kraken", "futures", "order"]
+    assert "--reduce-only" in calls[1]
+    assert any(a.startswith("--stop-price=") for a in calls[1])
+
+
 def test_shadow_mode_when_telemetry_not_approved(cfg):
     class Telemetry:
         class state:

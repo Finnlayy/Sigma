@@ -104,7 +104,7 @@ class KrakenCliBridge:
         """Authenticated recent futures fills; no simulated records are ever returned.
 
         Spot ``trades-history`` is not a realized-PnL source: the CLI yields
-        price/volume/cost/fee, not cost-basis gains. Live spot stays disabled.
+        price/volume/cost/fee, not cost-basis gains. Spot PnL uses fill receipts.
         """
         if not self.futures or self.paper_mode or not self.live_enabled:
             return []
@@ -173,22 +173,46 @@ class KrakenCliBridge:
                 )
                 self._audit(result, strategy_id)
                 return result
-            if stop_price is not None:
+            stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+            failed = bp.kraken_output_is_error(stdout, stderr, code)
+            if failed:
                 result = OrderResult(
-                    ok=False, mode="live", pair=pair, side=side, volume=volume,
-                    ordertype=ordertype, has_native_stop_loss=False, argv=argv,
-                    error_code="FUTURES_NATIVE_BRACKET_UNSUPPORTED",
-                    stderr="Atomic futures entry + native stop is not supported by Kraken CLI",
+                    ok=False, mode="live", txid=_extract_txid(stdout),
+                    pair=pair, side=side, volume=volume, ordertype=ordertype,
+                    stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                    error_code=_extract_error(stdout, stderr),
                 )
                 self._audit(result, strategy_id)
                 return result
-            stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
-            failed = bp.kraken_output_is_error(stdout, stderr, code)
+            has_stop = False
+            stop_argv: List[str] = []
+            if stop_price is not None:
+                close_side = "sell" if side == "buy" else "buy"
+                stop_argv = self._prefix() + [
+                    close_side, pair, f"{volume:g}",
+                    "--type=stop", f"--stop-price={stop_price:g}", "--reduce-only",
+                ]
+                if strategy_id:
+                    stop_argv.append(f"--client-order-id={(strategy_id[:28] + '-sl')[:32]}")
+                s_out, s_err, s_code = self._runner(stop_argv, self.config.tv_scraper_timeout_s)
+                if bp.kraken_output_is_error(s_out, s_err, s_code):
+                    result = OrderResult(
+                        ok=False, mode="live", txid=_extract_txid(stdout),
+                        pair=pair, side=side, volume=volume, ordertype=ordertype,
+                        has_native_stop_loss=False,
+                        stdout=stdout + "\n" + s_out, stderr=s_err, exit_code=s_code,
+                        argv=argv + stop_argv,
+                        error_code="FUTURES_STOP_ATTACH_FAILED",
+                    )
+                    self._audit(result, strategy_id)
+                    return result
+                has_stop = True
+                argv = argv + stop_argv
             result = OrderResult(
-                ok=not failed, mode="live", txid=_extract_txid(stdout),
+                ok=True, mode="live", txid=_extract_txid(stdout),
                 pair=pair, side=side, volume=volume, ordertype=ordertype,
+                has_native_stop_loss=has_stop or stop_price is None,
                 stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
-                error_code=_extract_error(stdout, stderr) if failed else "",
             )
             self._audit(result, strategy_id)
             return result
@@ -323,7 +347,7 @@ ALLOWED_FLAGS_PREFIXES = (
     "--type=", "--price=", "--stop-price=", "--leverage=", "--client-order-id=",
     "--pair=", "--ordertype=", "--volume=", "--close-ordertype=", "--close-price=",
     "--output=", "--since=", "--validate", "--price", "--type", "--leverage",
-    "--client-order-id",
+    "--client-order-id", "--reduce-only",
 )
 
 def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int]:

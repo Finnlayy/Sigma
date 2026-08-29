@@ -271,6 +271,7 @@ MODULES_DROP: Mapping[str, str] = MappingProxyType({
 # =============================================================================
 
 WEBHOOK_ROUTE = "/api/v1/signal/webhook"
+WEBHOOK_INGEST_ROUTE = "/api/v1/signal/ingest"
 WEBHOOK_SECRET_ENV = "SIGMA_WEBHOOK_SECRET"
 WEBHOOK_SECRET_HEADER = "X-Sigma-Webhook-Secret"
 WEBHOOK_UNAUTHORIZED_STATUS = 401
@@ -431,7 +432,8 @@ MARKET_SOURCE_PROD = "tv_scraper"
 # =============================================================================
 
 API_ROUTES: Mapping[str, str] = MappingProxyType({
-    "POST /api/v1/signal/webhook": "Loop A Signaleingang",
+    "POST /api/v1/signal/webhook": "Loop A Signaleingang (Legacy + Schema-A Forward)",
+    "POST /api/v1/signal/ingest": "Loop A Schema-A Ingest (SigmaL4AlertPayload)",
     "GET /api/v1/health": "status, kill_switch, scraper_ok, tv_worker_ok",
     "POST /api/backtest/run": "TV-Job (Playwright)",
     "GET /api/backtest/ohlc": "Scraper :8001",

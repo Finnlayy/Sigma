@@ -24,6 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from app.tv.alert_provisioner import build_alert_message
 from app.core import blueprint as bp
 from app.core.config import AlphaConfig, load_config
 from app.core.l4_config import load_l4_config
@@ -54,12 +55,26 @@ from app.telegram.TelegramBotEngine import TelegramBotEngine
 
 logger = logging.getLogger("app.server.main")
 
+
+def _tv_schema_a(strategy_id: str) -> str:
+    return build_alert_message(
+        strategy_id, "<SIGMA_WEBHOOK_SECRET>", execution_mode="kraken_paper")
+
+
+_PINE_FEATURE_PLOTS = """
+plot(ta.rsi(close, 14), "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMultSL, "sl", display=display.none)
+plot(close + atr * atrMultTP, "tp", display=display.none)
+"""
+
 FACTORY_STRATEGIES: List[Dict[str, Any]] = [
     {
         "id": "MEAN_REV_V3__BTC-USDT__15m__PAPER",
         "name": "BTC Mean-Reversion V3",
         "description": "RSI-Reversion Pine v6 auf BTC/USD mit ATR-Stop 1.5x und TP 2.2x. Seed-Manifest — Strategy≡TV.",
-        "code": """//@version=6
+        "code": ("""//@version=6
 strategy("BTC Mean-Reversion V3", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
 // Sigma L4 — RSI Reversion + ATR Bracket (BaFin/MiCA Kraken CLI)
 rsiLength = input.int(14, "RSI Length", minval=2)
@@ -73,13 +88,14 @@ rsi = ta.rsi(close, rsiLength)
 atr = ta.atr(atrLength)
 longCond = ta.crossover(rsi, rsiLower) or (rsi < rsiLower and ta.crossover(ta.sma(close, 12), ta.sma(close, 48)))
 shortCond = ta.crossunder(rsi, rsiUpper) or (rsi > rsiUpper and ta.crossunder(ta.sma(close, 12), ta.sma(close, 48)))
+""" + _PINE_FEATURE_PLOTS + """
 if longCond
-    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"MEAN_REV_V3__BTC-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("LONG", strategy.long, alert_message='%s')
     strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
 if shortCond
-    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"MEAN_REV_V3__BTC-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("SHORT", strategy.short, alert_message='%s')
     strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
-""",
+""" % ((_tv_schema_a("MEAN_REV_V3__BTC-USDT__15m__PAPER"),) * 2)),
         "status": "active",
         "assetPair": "BTC/USD",
         "interval": 15,
@@ -95,7 +111,7 @@ if shortCond
         "id": "SMA_CROSS_V2__ETH-USDT__15m__PAPER",
         "name": "ETH Momentum SMA-Cross",
         "description": "SMA 12/48 Golden- & Death-Cross Pine v6 auf ETH/USD, ATR-gestoppt. Strategy≡TV.",
-        "code": """//@version=6
+        "code": ("""//@version=6
 strategy("ETH Momentum SMA-Cross", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
 // Sigma L4 — SMA Cross Momentum
 fastLen = input.int(12, "Fast SMA", minval=2)
@@ -109,13 +125,14 @@ slow = ta.sma(close, slowLen)
 atr = ta.atr(atrLen)
 longCond = ta.crossover(fast, slow)
 shortCond = ta.crossunder(fast, slow)
+""" + _PINE_FEATURE_PLOTS + """
 if longCond
-    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"SMA_CROSS_V2__ETH-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("LONG", strategy.long, alert_message='%s')
     strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
 if shortCond
-    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"SMA_CROSS_V2__ETH-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("SHORT", strategy.short, alert_message='%s')
     strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
-""",
+""" % ((_tv_schema_a("SMA_CROSS_V2__ETH-USDT__15m__PAPER"),) * 2)),
         "status": "active",
         "assetPair": "ETH/USD",
         "interval": 15,
@@ -131,7 +148,7 @@ if shortCond
         "id": "EMA_TREND_V1__SOL-USDT__15m__PAPER",
         "name": "SOL EMA Trend Rider",
         "description": "EMA 12/60 Trend-Following Pine v6 auf SOL/USD mit 1.5x-ATR-Stop. Strategy≡TV.",
-        "code": """//@version=6
+        "code": ("""//@version=6
 strategy("SOL EMA Trend Rider", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
 // Sigma L4 — EMA Trend
 fastLen = input.int(12, "Fast EMA", minval=2)
@@ -145,13 +162,14 @@ slow = ta.ema(close, slowLen)
 atr = ta.atr(atrLen)
 longCond = ta.crossover(fast, slow)
 shortCond = ta.crossunder(fast, slow)
+""" + _PINE_FEATURE_PLOTS + """
 if longCond
-    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"EMA_TREND_V1__SOL-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("LONG", strategy.long, alert_message='%s')
     strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
 if shortCond
-    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"EMA_TREND_V1__SOL-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("SHORT", strategy.short, alert_message='%s')
     strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
-""",
+""" % ((_tv_schema_a("EMA_TREND_V1__SOL-USDT__15m__PAPER"),) * 2)),
         "status": "active",
         "assetPair": "SOL/USD",
         "interval": 15,
@@ -1128,11 +1146,7 @@ async def create_strategy(body: StrategyBody):
     return state.store.get_strategy(sid)
 
 
-_PINE_ALERT_JSON = (
-    '{"symbol":"{{ticker}}","action":"%s","price":{{close}},'
-    '"rsi":50,"atr":0,"timestamp":{{timenow}},'
-    '"strategy_id":"REPLACE_ME","secret":"REPLACE_SECRET"}'
-)
+_SCHEMA_A_ALERT = _tv_schema_a("REPLACE_ME")
 
 _PINE_CISD = f'''//@version=6
 strategy("Sigma CISD Momentum", overlay=true, initial_capital=1000, pyramiding=0)
@@ -1152,13 +1166,18 @@ bullDisp = (close - open) > avgBody * cisdDisp and close > ta.highest(high, cisd
 bearDisp = (open - close) > avgBody * cisdDisp and close < ta.lowest(low, cisdLookback)[1]
 cisdBull = bullDisp and fast > slow
 cisdBear = bearDisp and fast < slow
+plot(ta.rsi(close, 14), "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMult, "sl", display=display.none)
+plot(close + atr * atrMult * 2, "tp", display=display.none)
 
 if ta.crossover(fast, slow) or cisdBull
-    strategy.entry("L", strategy.long, alert_message = '{_PINE_ALERT_JSON % "BUY"}')
+    strategy.entry("L", strategy.long, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XL", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
 
 if ta.crossunder(fast, slow) or cisdBear
-    strategy.entry("S", strategy.short, alert_message = '{_PINE_ALERT_JSON % "SELL"}')
+    strategy.entry("S", strategy.short, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XS", "S", stop = close + atr * atrMult, limit = close - atr * atrMult * 2)
 '''
 
@@ -1173,13 +1192,18 @@ atrMult  = input.float(1.5, "ATR Stop Multiplier")
 
 rsi = ta.rsi(close, rsiLen)
 atr = ta.atr(atrLen)
+plot(rsi, "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMult, "sl", display=display.none)
+plot(close + atr * atrMult * 2, "tp", display=display.none)
 
 if ta.crossunder(rsi, rsiLower)
-    strategy.entry("L", strategy.long, alert_message = '{_PINE_ALERT_JSON % "BUY"}')
+    strategy.entry("L", strategy.long, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XL", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
 
 if ta.crossover(rsi, rsiUpper)
-    strategy.entry("S", strategy.short, alert_message = '{_PINE_ALERT_JSON % "SELL"}')
+    strategy.entry("S", strategy.short, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XS", "S", stop = close + atr * atrMult, limit = close - atr * atrMult * 2)
 '''
 

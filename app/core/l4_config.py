@@ -166,7 +166,7 @@ def _builtin() -> Dict[str, Any]:
             "fast_path_budget_ms": bp.TELEGRAM_FAST_PATH_BUDGET_MS,
         },
         "webhook": {
-            "route": bp.WEBHOOK_ROUTE,
+            "route": bp.WEBHOOK_INGEST_ROUTE,
             "secret_env": bp.WEBHOOK_SECRET_ENV,
             "secret_header": bp.WEBHOOK_SECRET_HEADER,
             "stale_min_seconds": bp.SIGNAL_STALE_MIN_SECONDS,

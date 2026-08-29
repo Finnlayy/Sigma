@@ -118,7 +118,9 @@ def test_pipeline_order_is_normative():
 
 def test_webhook_contract(blueprint_text):
     assert bp.WEBHOOK_ROUTE == "/api/v1/signal/webhook"
+    assert bp.WEBHOOK_INGEST_ROUTE == "/api/v1/signal/ingest"
     assert bp.WEBHOOK_ROUTE in blueprint_text
+    assert bp.WEBHOOK_INGEST_ROUTE in blueprint_text or "/api/v1/signal/ingest" in blueprint_text
     assert bp.WEBHOOK_SECRET_ENV in blueprint_text
     assert bp.WEBHOOK_UNAUTHORIZED_STATUS == 401
     assert "secret" in bp.PINE_ALERT_FIELDS

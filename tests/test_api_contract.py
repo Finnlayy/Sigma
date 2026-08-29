@@ -55,6 +55,7 @@ def test_health_and_blueprint(client):
     assert set(b["loops"]) == {"A", "B", "C", "D", "E"}
     assert b["m8_alert_matrix"]["THROTTLED"]["budget_multiplier"] == 0.5
     assert f"POST {bp.WEBHOOK_ROUTE}" in b["api_contract"]
+    assert f"POST {bp.WEBHOOK_INGEST_ROUTE}" in b["api_contract"]
 
 
 # ------------------------------------------------------------------ webhook ---
@@ -79,18 +80,54 @@ def test_webhook_happy_path_returns_sizing(client):
     assert body["mode"] in ("sim", "paper", "dry_run")
 
 
-def test_legacy_webhook_is_disabled_when_live_trading(client):
+def test_legacy_webhook_forwards_schema_a_when_live_trading(client):
     import app.server.routes_sigma as routes
+    from app.quant.glint_orderbook_verifier import OrderbookSnapshot
 
     pipe = routes.pipeline()
     previous = pipe.config.live_trading
+    previous_secret = pipe.config.webhook_secret
+    previous_open = pipe.open_positions
+    long_secret = "api-secret-token16"
     pipe.config.live_trading = True
+    pipe.config.webhook_secret = long_secret
+    pipe.safety.config.webhook_secret = long_secret
+    routes.set_depth_adapter(type("_Depth", (), {
+        "fetch": staticmethod(lambda symbol: OrderbookSnapshot(
+            symbol, [(49_999.0, 80.0)], [(50_001.0, 20.0)], time.time()
+        ))
+    })())
     try:
-        response = client.post(bp.WEBHOOK_ROUTE, json=_alert())
-        assert response.status_code == 503
-        assert response.json()["detail"]["code"] == "LEGACY_WEBHOOK_LIVE_DISABLED"
+        response = client.post(bp.WEBHOOK_ROUTE, json=_alert(secret=long_secret),
+                               headers={bp.WEBHOOK_SECRET_HEADER: long_secret})
+        assert response.status_code == 200
+        assert response.json()["accepted"] is True
+        schema_a = {
+            "secret": long_secret,
+            "idempotency_key": f"sig_live_fwd_{int(time.time())}_ok",
+            "strategy_id": "api_strat",
+            "bot_id": "bot_api",
+            "symbol": "KRAKEN:XBTUSD",
+            "action": "BUY",
+            "order_type": "MARKET",
+            "price": 50_000.0,
+            "stop_loss": 49_000.0,
+            "take_profit": 52_000.0,
+            "fixed_leverage": 1,
+            "execution_mode": "live",
+            "timestamp": int(time.time()),
+            "features": {"rsi": 28.0, "atr": 500.0, "cisd_score": 0.7},
+        }
+        forwarded = client.post(bp.WEBHOOK_ROUTE, json=schema_a)
+        assert forwarded.status_code == 200, forwarded.json()
+        assert forwarded.json()["status"] == "EXECUTED"
+        assert forwarded.json()["schema_family"] == "SIGMA_L4_MASTER"
     finally:
         pipe.config.live_trading = previous
+        pipe.config.webhook_secret = previous_secret
+        pipe.safety.config.webhook_secret = previous_secret
+        pipe.open_positions = previous_open
+        routes.set_depth_adapter(None)
 
 
 def test_webhook_rejects_stale_and_unknown_symbol(client):
@@ -138,7 +175,7 @@ def test_alert_sync_and_switch(client):
                 params={"symbol": "ETH/USD", "interval": 15})
     enabled = client.post("/api/strategies/alerts_strat/alerts/enable").json()
     assert enabled["status"] == "ENABLED"
-    assert enabled["webhook_url"].endswith(bp.WEBHOOK_ROUTE)
+    assert enabled["webhook_url"].endswith(bp.WEBHOOK_INGEST_ROUTE)
     disabled = client.post("/api/strategies/alerts_strat/alerts/disable").json()
     assert disabled["status"] == "DISABLED"
     assert client.post("/api/strategies/alerts_strat/alerts/bogus").status_code == 400
