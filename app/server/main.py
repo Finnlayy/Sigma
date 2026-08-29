@@ -867,14 +867,14 @@ def _paper_balances(
     for seed in state.config.paper_seeds:
         asset, amt = seed.split(":")
         balances[asset] = float(amt)
-    rows = (
-        closed_trades
-        if closed_trades is not None
-        else state.store.trades(status="closed", limit=10000)
-    )
-    for t in rows:
-        if (t.get("execution_mode") or "paper") == "paper":
-            balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
+    if closed_trades is not None:
+        for t in closed_trades:
+            if (t.get("execution_mode") or "paper") == "paper":
+                balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
+    else:
+        # /api/kraken/ledgers polls this every 12s and only needs the SUM.
+        # SQL aggregate ~0.5 ms vs ~22 ms pulling 4k full trade rows.
+        balances["USD"] = balances.get("USD", 0.0) + state.store.sum_closed_pnl("paper")
     return balances
 
 
