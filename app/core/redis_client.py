@@ -56,7 +56,14 @@ async def get_redis(config: AlphaConfig, force_reconnect: bool = False):
         return client
 
 
-def is_fake_redis() -> bool:
+def is_fake_redis(client=None) -> bool:
+    """True when get_redis() fell back, or when *client* is a FakeRedis instance.
+
+    fakeredis does not implement SCRIPT LOAD / EVALSHA. Callers must use the
+    local Python fallback instead of loading Lua.
+    """
+    if client is not None:
+        return "fakeredis" in getattr(type(client), "__module__", "")
     return _is_fake
 
 
