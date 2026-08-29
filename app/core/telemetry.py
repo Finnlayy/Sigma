@@ -90,6 +90,9 @@ class TelemetryCenter:
 
     def build_frame(self, store=None, log_bus=None) -> Dict[str, Any]:
         mem = _mem_usage_percent()
+        # One parquet-only snapshot. Used to call lake_summary() twice
+        # (_l2_files + _l2_mb) — two full ohlcv scans per 2s SSE tick.
+        l2_files, l2_mb = _l2_stats(store)
         return {
             "timestamp": time.time(),
             "state_machine": self.system.to_dict(),
@@ -103,8 +106,8 @@ class TelemetryCenter:
             "storage_tiering": {
                 "l1_shm_ringbuffer_bytes": int(self.l1_ringbuffer_bytes),
                 "l1_capacity_bytes": int(self.l1_capacity_bytes),
-                "l2_duckdb_parquet_files": _l2_files(store),
-                "l2_total_mb": _l2_mb(store),
+                "l2_duckdb_parquet_files": l2_files,
+                "l2_total_mb": l2_mb,
                 "l3_rclone_sync_status": self.l3_rclone_sync_status,
                 "ingestion_rate_events_per_sec": round(self.ingestion_rate_events_per_sec, 1),
                 "avg_latency_microseconds": round(self.avg_latency_microseconds, 1),
@@ -148,18 +151,21 @@ def _mem_usage_percent() -> float:
         return 38.0
 
 
-def _l2_files(store) -> int:
+def _l2_stats(store) -> tuple:
+    """Parquet file count + size. Prefers lake_storage_stats() so SSE
+    never full-scans ohlcv. Falls back to lake_summary() for older stores.
+    """
+    if store is None:
+        return 0, 0.0
     try:
-        return store.lake_summary()["total_files"]
+        stats = (
+            store.lake_storage_stats()
+            if hasattr(store, "lake_storage_stats")
+            else store.lake_summary()
+        )
+        return int(stats.get("total_files") or 0), float(stats.get("total_size_mb") or 0.0)
     except Exception:
-        return 0
-
-
-def _l2_mb(store) -> float:
-    try:
-        return store.lake_summary()["total_size_mb"]
-    except Exception:
-        return 0.0
+        return 0, 0.0
 
 
 _center: Optional[TelemetryCenter] = None

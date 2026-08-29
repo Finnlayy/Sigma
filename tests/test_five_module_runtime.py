@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import datetime
 
 import pytest
 
@@ -440,6 +441,46 @@ def test_telemetry_center_can_enable_live_bridge():
     telemetry = TelemetryCenter()
     telemetry.set_state("LIVE_APPROVED")
     assert KrakenCliBridge(cfg, telemetry=telemetry).live_enabled is True
+
+
+def test_lake_storage_stats_matches_summary_files(tmp_path):
+    store = DuckDBStore(str(tmp_path / "lake.duckdb"))
+    store.seed_ohlcv("BTC/USD", 60, [
+        {"ts": datetime(2026, 1, 1),
+         "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 10},
+    ])
+    summary = store.lake_summary()
+    stats = store.lake_storage_stats()
+    assert stats["total_files"] == summary["total_files"]
+    assert stats["total_size_mb"] == summary["total_size_mb"]
+    assert set(stats) == {"total_files", "total_size_mb"}
+
+
+def test_build_frame_uses_storage_stats_once_not_lake_summary(tmp_path):
+    """SSE must not full-scan ohlcv just to report parquet file count/size."""
+    store = DuckDBStore(str(tmp_path / "lake.duckdb"))
+    calls = {"summary": 0, "storage": 0}
+    orig_summary = store.lake_summary
+    orig_storage = store.lake_storage_stats
+
+    def summary():
+        calls["summary"] += 1
+        return orig_summary()
+
+    def storage():
+        calls["storage"] += 1
+        return orig_storage()
+
+    store.lake_summary = summary
+    store.lake_storage_stats = storage
+    frame = TelemetryCenter().build_frame(store=store)
+    assert calls["storage"] == 1
+    assert calls["summary"] == 0
+    tier = frame["storage_tiering"]
+    assert "l2_duckdb_parquet_files" in tier
+    assert "l2_total_mb" in tier
+    assert isinstance(tier["l2_duckdb_parquet_files"], int)
+    assert isinstance(tier["l2_total_mb"], float)
 
 
 def test_dispatcher_routes_futures_without_falling_back_to_spot(tmp_path):
