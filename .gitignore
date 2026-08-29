@@ -6,6 +6,7 @@ __pycache__/
 venv/
 .env
 .env.*
+!.env.example
 node_modules/
 dist/
 *.parquet
@@ -16,3 +17,4 @@ dist/
 models/*.onnx
 .vercel
 .env*
+!.env.example

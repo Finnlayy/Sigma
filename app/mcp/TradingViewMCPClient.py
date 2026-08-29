@@ -91,6 +91,8 @@ class FakeTvMcpTransport:
             return {
                 "tradesCsv": self._synth(parsed, initial_balance=float(params.get("initialBalance") or 10000), seed=seed),
                 "performanceCsv": "Metric,Value\nTotal Trades,10\n",
+                "source": "fake",
+                "driver": "fake",
             }
         raise TvMcpError(f"FakeTvMcpTransport: unknown method {method}")
 
@@ -161,4 +163,9 @@ class TradingViewMCPClient:
         if not perf and result.get("performanceCsvPath"):
             with open(result["performanceCsvPath"], "r", encoding="utf-8-sig") as f:
                 perf = f.read()
-        return {"tradesCsv": trades, "performanceCsv": perf}
+        return {
+            "tradesCsv": trades,
+            "performanceCsv": perf,
+            "source": result.get("source", "tradingview"),
+            "driver": result.get("driver", "playwright"),
+        }

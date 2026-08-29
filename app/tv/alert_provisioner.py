@@ -45,7 +45,11 @@ class AlertRecord:
 
 
 def build_alert_message(strategy_id: str, secret: str = "") -> str:
-    """Pine `alert_message` Template — enthält das Webhook-Secret (§17.1)."""
+    """Pine `alert_message` Template — enthält das Webhook-Secret (§17.1).
+    Secret is mandatory in prod; placeholder warns operator if missing.
+    """
+    if not secret:
+        logger.warning("SIGMA_WEBHOOK_SECRET not set — alert %s will contain placeholder; webhook auth disabled (dev only)", strategy_id)
     payload = {
         "symbol": "{{ticker}}",
         "action": "{{strategy.order.action}}",
@@ -56,6 +60,9 @@ def build_alert_message(strategy_id: str, secret: str = "") -> str:
         "timestamp": "{{timenow}}",
         "strategy_id": strategy_id,
         "secret": secret or "<SIGMA_WEBHOOK_SECRET>",
+        "idempotency_key": "{{strategy.order.id}}",
+        "bot_id": strategy_id,
+        "interval": "{{interval}}",
     }
     return json.dumps(payload)
 

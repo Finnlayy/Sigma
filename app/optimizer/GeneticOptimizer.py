@@ -230,11 +230,16 @@ class GeneticOptimizer:
         self.config = config or load_config()
 
     def run(self, cfg: Dict[str, Any], candles: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Vollständiger WFO-Run. candles = vollständiger 1m-Historie (ts, o,h,l,c,v)."""
+        """Vollständiger WFO-Run. candles = vollständiger 1m-Historie (ts, o,h,l,c,v).
+        Blueprint §17.4: population max 15, generations max 5, early termination stall 3 gens.
+        """
+        from app.core import blueprint as bp
         rng = random.Random(int(cfg.get("seed") or 1337))
-        pop_size = int(cfg.get("populationSize") or 30)
-        max_gens = int(cfg.get("maxGenerations") or 50)
+        # Clamp to blueprint caps — env cannot exceed
+        pop_size = min(int(cfg.get("populationSize") or bp.GA_MAX_POPULATION), bp.GA_MAX_POPULATION)
+        max_gens = min(int(cfg.get("maxGenerations") or bp.GA_MAX_GENERATIONS), bp.GA_MAX_GENERATIONS)
         survivors = int(cfg.get("survivorsCount") or 3)
+        stall_limit = int(cfg.get("earlyStopStall") or bp.GA_EARLY_STOP_STALL_GENERATIONS)
         mutation_rate = float(cfg.get("mutationRate") or 0.18)
         crossover_rate = float(cfg.get("crossoverRate") or 0.80)
         wfo_split = float(cfg.get("walkForwardSplitPercent") or 70.0) / 100.0
@@ -265,6 +270,9 @@ class GeneticOptimizer:
 
         history: List[Dict[str, Any]] = []
         best_individual: Optional[Dict[str, Any]] = None
+        best_fitness_seen = -1.0
+        stall_counter = 0
+        early_stopped = False
 
         for gen in range(1, max_gens + 1):
             gen_fitness: List[float] = []
@@ -350,8 +358,13 @@ class GeneticOptimizer:
                 ind["rank"] = i + 1
                 ind["isSurvivor"] = i < survivors
             best = population[0]
-            if best_individual is None or best["fitness"] > best_individual["fitness"]:
+            improved = best_individual is None or best["fitness"] > best_fitness_seen + 1e-9
+            if improved:
+                best_fitness_seen = best["fitness"]
                 best_individual = dict(best)
+                stall_counter = 0
+            else:
+                stall_counter += 1
             history.append({
                 "generation": gen,
                 "bestFitness": round(best["fitness"], 4),
@@ -360,7 +373,15 @@ class GeneticOptimizer:
                 "bestSharpe": best["sharpeRatio"],
                 "bestDrawdown": best["overallDrawdown"],
                 "bestIndividualId": best["id"],
+                "stallCounter": stall_counter,
+                "cacheHits": 0,
             })
+
+            # Early termination: no improvement over stall_limit gens (§17.4)
+            if stall_counter >= stall_limit:
+                logger.info("GA early stop at gen %d — no improvement over %d gens (best %.4f)", gen, stall_limit, best_fitness_seen)
+                early_stopped = True
+                break
 
             # Eliten + Crossover + Mutation
             new_pop = [dict(ind) for ind in population[:survivors]]
@@ -423,6 +444,9 @@ class GeneticOptimizer:
             "baselineComparison": baseline_comparison,
             "shadowGate": gate,
             "counterfactualReplay": replay,
+            "earlyStopped": early_stopped,
+            "stallCounter": stall_counter,
+            "blueprintCaps": {"max_population": pop_size, "max_generations": max_gens, "stall_limit": stall_limit, "concurrency": 1},
         }
 
     # ------------------------------------------------------------------ helpers

@@ -73,12 +73,15 @@ BUILTIN_DEFAULT_SELECTORS: Dict[str, Any] = {
 class SelectorManager:
     """Playwright darf an einer fehlenden YAML nicht sterben."""
 
+    DEFAULT_REMOTE_URL = "https://raw.githubusercontent.com/Finnlayy/Sigma/main/app/tv/selectors.yaml"
+
     def __init__(self, local_path: Optional[str] = None, remote_url: Optional[str] = None,
                  sha256: Optional[str] = None, fetcher=None):
         self.local_path = local_path or os.environ.get(
             bp.SELECTORS_LOCAL_PATH_ENV, bp.PATH_SELECTORS_YAML)
-        self.remote_url = remote_url if remote_url is not None else os.environ.get(
-            bp.SELECTORS_REMOTE_URL_ENV, "")
+        env_remote = os.environ.get(bp.SELECTORS_REMOTE_URL_ENV, "")
+        # §16.1 — if no env, use canonical GitHub raw CDN as default self-heal source
+        self.remote_url = remote_url if remote_url is not None else (env_remote or self.DEFAULT_REMOTE_URL)
         self.expected_sha256 = sha256 if sha256 is not None else os.environ.get(
             bp.SELECTORS_SHA256_ENV, "")
         self._fetcher = fetcher                     # Test-Seam: callable(url) -> str
