@@ -299,11 +299,15 @@ export function QuantitativeRegimePanel() {
                 </h4>
               </div>
               <span className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold ${
-                sentimentResult?.circuit_breaker_triggered
+                sentimentResult?.available === false
+                  ? "bg-slate-800 text-slate-400 border border-slate-700"
+                  : sentimentResult?.circuit_breaker_triggered
                   ? "bg-red-950 text-red-300 border border-red-500"
                   : "bg-emerald-950 text-emerald-300 border border-emerald-800"
               }`}>
-                {sentimentResult?.circuit_breaker_triggered ? "SHOCK HALT TRIGGERED" : "CIRCUIT PASS"}
+                {sentimentResult?.available === false
+                  ? "UNAVAILABLE"
+                  : sentimentResult?.circuit_breaker_triggered ? "SHOCK HALT TRIGGERED" : "CIRCUIT PASS"}
               </span>
             </div>
 
@@ -350,21 +354,25 @@ export function QuantitativeRegimePanel() {
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase">Polarity Score</span>
                   <p className={`text-xl font-bold font-mono mt-0.5 ${
-                    (sentimentResult.sentiment_score || 0) > 0.2 ? "text-emerald-400" : (sentimentResult.sentiment_score || 0) < -0.2 ? "text-red-400" : "text-slate-300"
+                    sentimentResult.available === false ? "text-slate-500"
+                    : (sentimentResult.sentiment_score || 0) > 0.2 ? "text-emerald-400"
+                    : (sentimentResult.sentiment_score || 0) < -0.2 ? "text-red-400" : "text-slate-300"
                   }`}>
-                    {(sentimentResult.sentiment_score || 0) > 0 ? `+${(sentimentResult.sentiment_score || 0).toFixed(3)}` : (sentimentResult.sentiment_score || 0).toFixed(3)}
+                    {sentimentResult.available === false || sentimentResult.score == null
+                      ? "—"
+                      : (sentimentResult.score > 0 ? `+${sentimentResult.score.toFixed(3)}` : sentimentResult.score.toFixed(3))}
                   </p>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase">Confidence</span>
                   <p className="text-xl font-bold font-mono text-cyan-400 mt-0.5">
-                    {((sentimentResult.confidence || 0.92) * 100).toFixed(1)}%
+                    {sentimentResult.confidence == null ? "—" : `${(sentimentResult.confidence * 100).toFixed(1)}%`}
                   </p>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase">Action Bias</span>
                   <p className="text-xs font-bold text-slate-200 mt-1 uppercase">
-                    {sentimentResult.label || ((sentimentResult.sentiment_score || 0) > 0.2 ? "BULLISH_SURGE" : (sentimentResult.sentiment_score || 0) < -0.2 ? "BEARISH_DUMP" : "NEUTRAL")}
+                    {sentimentResult.label || "UNAVAILABLE"}
                   </p>
                 </div>
               </div>
@@ -372,7 +380,7 @@ export function QuantitativeRegimePanel() {
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-400 flex justify-between">
-            <span>Model: <strong className="text-slate-200 font-mono">Prosus/FinBERT-Crypto</strong></span>
+            <span>Model: <strong className="text-slate-200 font-mono">{sentimentResult?.model || "unavailable"}</strong></span>
             <span>Threshold Gate: <strong className="text-amber-400 font-mono">|Score| &gt; 0.85</strong></span>
           </div>
         </div>

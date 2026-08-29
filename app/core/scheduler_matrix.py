@@ -257,11 +257,19 @@ def install_canonical_tasks(
     fill_reconciler=None,
     glint_event: Optional[TaskFn] = None,
     scorecard=None,
+    scout=None,
+    allocator=None,
+    academy=None,
+    scraper=None,
+    lake=None,
+    orchestrator=None,
+    webhook_event: Optional[TaskFn] = None,
+    playwright_event: Optional[TaskFn] = None,
 ) -> SchedulerMatrix:
-    """Wire the implemented T0/T1/T2/T4 jobs into the production scheduler.
+    """Wire T0–T5 jobs so loops A–E are on the scheduler graph.
 
-    Ohne diese Registrierung altert ``last_beat`` unbegrenzt — der Operator
-    müsste dann manuell BEAT drücken. Der Core erneuert den Puls selbst.
+    Fehlende Sidecars/Services: no-op oder lazy Import (wie contagion/flywheel).
+    Loop C sidecar down → degraded empty snapshot, kein Synthetic im Prod-Pfad.
     """
     sched = scheduler or get_scheduler()
     if sched.get("glint_orderbook_verify") is None:
@@ -269,6 +277,18 @@ def install_canonical_tasks(
             "glint_orderbook_verify",
             bp.SchedulerTier.T0_EVENT,
             glint_event or (lambda: None),
+        )
+    if sched.get("webhook_execution") is None:
+        sched.register(
+            "webhook_execution",
+            bp.SchedulerTier.T0_EVENT,
+            webhook_event or (lambda: None),
+        )
+    if sched.get("playwright_compile") is None:
+        sched.register(
+            "playwright_compile",
+            bp.SchedulerTier.T0_EVENT,
+            playwright_event or (lambda: None),
         )
     if sched.get("deadman_heartbeat") is None:
         if deadman is None:
@@ -339,5 +359,82 @@ def install_canonical_tasks(
             "flywheel_sweep",
             bp.SchedulerTier.T4_DAILY,
             flywheel.sweep,
+        )
+    if sched.get("loop_c_feed_poll") is None:
+        def _loop_c_feed_poll() -> None:
+            from sigma.loops.loop_c import LoopCPort
+
+            LoopCPort(scraper=scraper, store=lake).poll_pair()
+
+        sched.register(
+            "loop_c_feed_poll",
+            bp.SchedulerTier.T2_MID,
+            _loop_c_feed_poll,
+            start_immediately=False,
+        )
+    if sched.get("scout_incubator_cycle") is None:
+        def _scout_incubator_cycle() -> None:
+            from sigma.loops.loop_d import LoopDPort
+
+            LoopDPort(daemon=scout).tick()
+
+        sched.register(
+            "scout_incubator_cycle",
+            bp.SchedulerTier.T2_MID,
+            _scout_incubator_cycle,
+            cadence_s=float(bp.SCOUT_INCUBATOR_CYCLE_MINUTES) * 60.0,
+            start_immediately=False,
+        )
+    if sched.get("master_orchestrator_tick") is None:
+        orch = orchestrator
+
+        def _master_orchestrator_tick() -> None:
+            conductor = orch
+            if conductor is None:
+                from sigma.orchestration import MasterOrchestrator
+
+                conductor = MasterOrchestrator()
+            conductor.tick()
+
+        sched.register(
+            "master_orchestrator_tick",
+            bp.SchedulerTier.T2_MID,
+            _master_orchestrator_tick,
+            start_immediately=False,
+        )
+    if sched.get("strategy_allocator") is None:
+        def _strategy_allocator() -> None:
+            from sigma.loops.loop_e import LoopEPort
+
+            LoopEPort(allocator=allocator, academy=academy).allocate()
+
+        sched.register(
+            "strategy_allocator",
+            bp.SchedulerTier.T3_REGIME,
+            _strategy_allocator,
+            start_immediately=False,
+        )
+    if sched.get("regime_recheck") is None:
+        def _regime_recheck() -> None:
+            from sigma.loops.loop_c import LoopCPort
+
+            LoopCPort(scraper=scraper, store=lake).poll_pair()
+
+        sched.register(
+            "regime_recheck",
+            bp.SchedulerTier.T3_REGIME,
+            _regime_recheck,
+            start_immediately=False,
+        )
+    if sched.get("academy_badge_recalibration") is None:
+        def _academy_badge_recalibration() -> None:
+            from sigma.loops.loop_e import LoopEPort
+
+            LoopEPort(allocator=allocator, academy=academy).recalibrate_badges()
+
+        sched.register(
+            "academy_badge_recalibration",
+            bp.SchedulerTier.T5_WEEKLY,
+            _academy_badge_recalibration,
         )
     return sched

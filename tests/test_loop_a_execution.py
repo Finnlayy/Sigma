@@ -455,3 +455,30 @@ def test_trades_strategy_ids_in_query(tmp_path):
     assert {r["strategy_id"] for r in rows} == {"s1", "s2"}
     single = store.trades(strategy_id="s3", status="closed")
     assert [r["strategy_id"] for r in single] == ["s3"]
+
+
+def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "pnl.duckdb"))
+    store.upsert_trade({
+        "trade_id": "a", "strategy_id": "s", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+    })
+    store.upsert_trade({
+        "trade_id": "b", "strategy_id": "s", "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 3.0,
+    })
+    store.upsert_trade({
+        "trade_id": "c", "strategy_id": "s", "status": "closed",
+        "execution_mode": "live", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+    })
+    store.upsert_trade({
+        "trade_id": "d", "strategy_id": "s", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
+    })
+    assert store.sum_closed_pnl("paper") == 13.0

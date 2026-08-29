@@ -800,6 +800,15 @@ class AppState:
     async def _scheduler_loop(self) -> None:
         """§23.2 Tier-1 Fast Pulse — Deadman erneuert sich selbst, Memory-Watchdog tickt."""
         from app.core.scheduler_matrix import install_canonical_tasks
+        from app.optimizer.StrategyAllocator import get_allocator
+        from app.scout.ScoutDaemon import get_scout
+
+        try:
+            from app.tv.scraper_client import get_scraper_client
+
+            scraper = get_scraper_client()
+        except Exception:
+            scraper = None
         sched = install_canonical_tasks(
             deadman=self.deadman,
             memory=self.memory_watchdog,
@@ -808,6 +817,11 @@ class AppState:
             flywheel=self.flywheel,
             fill_reconciler=self.fill_reconciler,
             scorecard=self.scorecard,
+            scout=get_scout(),
+            allocator=get_allocator(),
+            academy=self.academy,
+            scraper=scraper,
+            lake=self.store,
         )
         self.deadman.start()
         logger.info("Scheduler matrix online (%d tasks)", len(sched.tasks))
@@ -867,14 +881,14 @@ def _paper_balances(
     for seed in state.config.paper_seeds:
         asset, amt = seed.split(":")
         balances[asset] = float(amt)
-    rows = (
-        closed_trades
-        if closed_trades is not None
-        else state.store.trades(status="closed", limit=10000)
-    )
-    for t in rows:
-        if (t.get("execution_mode") or "paper") == "paper":
-            balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
+    if closed_trades is not None:
+        for t in closed_trades:
+            if (t.get("execution_mode") or "paper") == "paper":
+                balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
+    else:
+        # /api/kraken/ledgers polls this every 12s and only needs the SUM.
+        # SQL aggregate ~0.5 ms vs ~22 ms pulling 4k full trade rows.
+        balances["USD"] = balances.get("USD", 0.0) + state.store.sum_closed_pnl("paper")
     return balances
 
 
@@ -1301,6 +1315,18 @@ PINE_STRATEGY_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "assetPair": "BTC/USD",
         "parameters": {"template": "empty"},
     },
+    "htf_trend_ltf_reversion": {
+        "name": "HTF Trend LTF Reversion",
+        "description": "HTF bias + LTF sweep/reclaim. Confirmed bars only. Paper until E graduates.",
+        "code": "",
+        "assetPair": "BTC/USD",
+        "parameters": {
+            "template": "htf_trend_ltf_reversion",
+            "biasMinutes": 60,
+            "useIctLadder": False,
+            "enableFvgLocator": False,
+        },
+    },
 }
 
 
@@ -1316,6 +1342,9 @@ async def create_strategy_from_template(body: FromTemplateBody):
     spec = PINE_STRATEGY_TEMPLATES.get((body.template or "").strip().lower())
     if spec is None:
         raise HTTPException(400, f"unknown template: {body.template!r}")
+    if (body.template or "").strip().lower() == "htf_trend_ltf_reversion":
+        from sigma.strategies.pine_v6_generator import pine_spec
+        spec = pine_spec("htf_trend_ltf_reversion")
     sid = uuid.uuid4().hex[:12]
     s = {
         "id": sid,
@@ -1816,7 +1845,17 @@ async def kraken_sync_balance():
 
 @app.get("/api/kraken/positions/pro")
 async def kraken_positions_pro():
-    return [ _pro_position(p) for p in state.paper.all_positions()]
+    """Live futures book is not wired. Paper is not a live substitute."""
+    return {
+        "ok": False,
+        "source": "unavailable",
+        "live": False,
+        "reason": "live_futures_not_wired",
+        "positions": [],
+        "totalCollateralUSD": None,
+        "freeMarginUSD": None,
+        "totalUnrealizedPnL": None,
+    }
 
 
 @app.get("/api/kraken/symbols")
@@ -2367,50 +2406,20 @@ class AiSuggestBody(BaseModel):
 
 @app.post("/api/ai/suggest")
 async def ai_suggest(body: AiSuggestBody):
-    prompt = body.prompt.lower()
-    # [MOCK-SEAM] Regex-Archetyp-Resolver — echte LLM-Anbindung hier anbinden.
-    if "rsi" in prompt or "reversion" in prompt or "mean" in prompt:
-        archetype, pair, interval = "rsi_reversion", "BTC/USD", 15
-        params = {"archetype": "rsi_reversion", "rsiPeriod": 14, "rsiLower": 33,
-                  "rsiUpper": 67, "hardStopPercent": 4.0}
-        desc = "RSI-Mean-Reversion mit 33/67-Gates und 4% Hard-Stop."
-    elif "momentum" in prompt or "trend" in prompt or "ema" in prompt:
-        archetype, pair, interval = "ema_trend", "ETH/USD", 15
-        params = {"archetype": "ema_trend", "trendFastEma": 12, "trendSlowEma": 60,
-                  "hardStopPercent": 5.0}
-        desc = "EMA 12/60 Trend-Following mit 1.5x-ATR-Stop."
-    else:
-        archetype, pair, interval = "sma_cross", "BTC/USD", 15
-        params = {"archetype": "sma_cross", "smaFast": 12, "smaSlow": 48,
-                  "hardStopPercent": 4.5}
-        desc = "SMA 12/48 Golden- & Death-Cross mit ATR-gestopptem TP."
-    if "eth" in prompt:
-        pair = "ETH/USD"
-    elif "sol" in prompt:
-        pair = "SOL/USD"
-    elif "xrp" in prompt:
-        pair = "XRP/USD"
-    for tf, name in ((5, "5m"), (15, "15m"), (30, "30m"), (60, "1h"), (240, "4h")):
-        if name in prompt:
-            interval = tf
-    code = f"""// AI-generated strategy ({archetype})
-function onCandle(ctx) {{
-  // {desc}
-  const entry = ctx.close;
-  const stop = entry * (1 - {params['hardStopPercent']}/100);
-  const tp = entry * (1 + {params['hardStopPercent']*2.2/100});
-  return {{ direction: 'LONG', stop, tp }};
-}}"""
+    """LLM is not configured. Honest empty — no regex archetype seeds."""
+    _ = body.prompt
     return {
-        "name": f"AI {archetype.replace('_', ' ').title()} {pair} {interval}m",
-        "description": desc,
-        "assetPair": pair,
-        "interval": interval,
-        "parameters": params,
-        "code": code,
-        "tweaksApplied": ["Archetyp-Erkennung", "Hard-Stop kalibriert"],
-        "reasoning": f"Prompt '{body.prompt[:80]}' → {archetype}-Archetyp mit konservativer Risikokalibrierung.",
-        "expectedImprovement": "+0.2 PF im Backtest-Referenzfenster (Schätzung)",
+        "ok": False,
+        "reason": "llm_unavailable",
+        "name": "",
+        "description": "",
+        "assetPair": "",
+        "interval": None,
+        "parameters": {},
+        "code": "",
+        "tweaksApplied": [],
+        "reasoning": "",
+        "expectedImprovement": None,
     }
 
 

@@ -512,3 +512,22 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.has_credentials = False
         main.state.live_kraken_balances = {}
         main.state.live_kraken_sync_ts = None
+
+
+def test_zero_mock_seams_are_honest_empty(client):
+    sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
+    assert sent.get("available") is False
+    assert sent.get("score") is None
+    assert sent.get("model") == "unavailable"
+    ai = client.post("/api/ai/suggest", json={"prompt": "rsi mean reversion btc 15m"}).json()
+    assert ai.get("ok") is False and ai.get("code") == ""
+    assert "rsi_reversion" not in str(ai.get("parameters"))
+    pro = client.get("/api/kraken/positions/pro").json()
+    assert pro.get("live") is False and pro.get("positions") == []
+    assert pro.get("totalCollateralUSD") is None
+    rl = client.post("/api/quant/engine/rl-fast-path").json()
+    assert rl.get("q_value") is None and rl.get("available") is False
+    lake = client.post("/api/lake/sync", json={}).json()
+    assert lake.get("ok") is False and lake.get("mode") == "disabled"
+    poly = client.get("/api/quant/polymarket/layer0").json()
+    assert poly.get("valid") is False and poly.get("reason") == "missing_data"

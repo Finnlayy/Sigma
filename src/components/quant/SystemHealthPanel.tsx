@@ -83,11 +83,11 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const storageTiering = telemetry?.storage_tiering || {
     l1_shm_ringbuffer_bytes: 4194304,
     l1_capacity_bytes: 33554432,
-    l2_duckdb_parquet_files: 14,
-    l2_total_mb: 84.5,
-    l3_rclone_sync_status: "SYNCHRONIZED",
-    ingestion_rate_events_per_sec: 1450,
-    avg_latency_microseconds: 45
+    l2_duckdb_parquet_files: 0,
+    l2_total_mb: 0,
+    l3_rclone_sync_status: "DISABLED",
+    ingestion_rate_events_per_sec: 0,
+    avg_latency_microseconds: 0
   };
 
   const watchdog = telemetry?.watchdog || {
@@ -220,18 +220,18 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
 
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">L2 DuckDB Parquet:</span>
-                <span className="font-mono text-slate-200">{storageTiering.l2_duckdb_parquet_files || 14} files ({storageTiering.l2_total_mb || 84.5} MB)</span>
+                <span className="font-mono text-slate-200">{storageTiering.l2_duckdb_parquet_files || 0} files ({storageTiering.l2_total_mb || 0} MB)</span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">L3 Remote Sync:</span>
-                <span className="font-mono text-emerald-400">{storageTiering.l3_rclone_sync_status || "SYNCHRONIZED"}</span>
+                <span className="font-mono text-zinc-400">{storageTiering.l3_rclone_sync_status || "DISABLED"}</span>
               </div>
             </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-between text-[11px] text-slate-400">
-            <span>Throughput: <strong className="text-slate-200 font-mono">{storageTiering.ingestion_rate_events_per_sec || 1450} ev/s</strong></span>
-            <span>Latency: <strong className="text-slate-200 font-mono">{storageTiering.avg_latency_microseconds || 45} µs</strong></span>
+            <span>Throughput: <strong className="text-slate-200 font-mono">{storageTiering.ingestion_rate_events_per_sec || 0} ev/s</strong></span>
+            <span>Latency: <strong className="text-slate-200 font-mono">{storageTiering.avg_latency_microseconds || 0} µs</strong></span>
           </div>
         </div>
 

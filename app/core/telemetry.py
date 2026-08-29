@@ -53,7 +53,7 @@ class TelemetryCenter:
         self.active_threads = 4
         self.l1_ringbuffer_bytes = 0
         self.l1_capacity_bytes = 32 * 1024 * 1024
-        self.l3_rclone_sync_status = "SYNCHRONIZED"  # [MOCK] rclone status
+        self.l3_rclone_sync_status = "DISABLED"
         self.ingestion_rate_events_per_sec = 0.0
         self.avg_latency_microseconds = 0.0
 
