@@ -455,3 +455,30 @@ def test_trades_strategy_ids_in_query(tmp_path):
     assert {r["strategy_id"] for r in rows} == {"s1", "s2"}
     single = store.trades(strategy_id="s3", status="closed")
     assert [r["strategy_id"] for r in single] == ["s3"]
+
+
+def test_closed_trade_aggregates_match_python_scan(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    rows = (
+        ("s1", "t1", "paper", 2.0, 100.0),
+        ("s1", "t2", "paper", -0.5, 80.0),
+        ("s2", "t3", "live", 1.25, 50.0),
+        ("s2", "t4", None, 0.0, 10.0),  # NULL mode counts as paper
+        ("s3", "t5", "", -1.0, 20.0),   # empty mode counts as paper
+    )
+    for sid, tid, mode, pnl, notional in rows:
+        store.upsert_trade({
+            "trade_id": tid, "strategy_id": sid, "status": "closed",
+            "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+            "execution_mode": mode, "net_pnl_usd": pnl, "notional_usd": notional,
+        })
+    aggs = store.closed_trade_aggregates()
+    assert aggs["paper_count"] == 4
+    assert aggs["paper_pnl"] == pytest.approx(0.5)
+    assert aggs["by_strategy"]["s1"] == {"n": 2, "pnl": 1.5, "wins": 1, "vol": 180.0}
+    assert aggs["by_strategy"]["s2"]["n"] == 2
+    assert aggs["by_strategy"]["s2"]["wins"] == 1
+    assert aggs["by_strategy"]["s3"]["n"] == 1
+    assert aggs["by_strategy"]["s3"]["wins"] == 0

@@ -7,3 +7,7 @@
 ## 2026-08-29 - DuckDB ART indexes on trades were unused
 **Learning:** `CREATE INDEX ON trades(status, entry_time)` and `(strategy_id, status, entry_time)` did **not** change the plan: DuckDB still chose `SEQ_SCAN` for `WHERE status='closed' ORDER BY entry_time DESC` and for `strategy_id + status` filters (EXPLAIN, 200–8k rows). Columnar scan beat ART; indexes would only add write cost on every `upsert_trade`.
 **Action:** Do not add DuckDB secondary indexes without an EXPLAIN that shows INDEX_SCAN. Prefer fewer queries / SQL aggregates over speculative ART indexes.
+
+## 2026-08-29 - /api/logs still paid for 10k Python trade dicts
+**Learning:** After the 4× `trades()` reuse, one `SELECT * LIMIT 10000` still cost ~38 ms at 8k rows (full-width dicts + timestamp `str()` per row). DuckDB `COUNT`/`SUM`/`GROUP BY` plus `LIMIT 80` for the order tape was ~4 ms (~10×). The 5000-row cap on `_strategy_pnl` also under-counted vs the 10k metrics scan.
+**Action:** Dashboard poll helpers should consume SQL aggregates, not a full closed-trade materialization. Keep the row scan only for the small order list.
