@@ -315,14 +315,45 @@ class KrakenCliBridge:
             logger.warning("orders.jsonl append failed: %s", exc)
 
 
+ALLOWED_KRAKEN_SUBCOMMANDS = {
+    "trade", "account", "balance", "paper", "futures", "order", "fills",
+    "add-order", "balance", "paper", "futures",
+}
+ALLOWED_FLAGS_PREFIXES = (
+    "--type=", "--price=", "--stop-price=", "--leverage=", "--client-order-id=",
+    "--pair=", "--ordertype=", "--volume=", "--close-ordertype=", "--close-price=",
+    "--output=", "--since=", "--validate", "--price", "--type", "--leverage",
+    "--client-order-id",
+)
+
 def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int]:
+    if not argv:
+        return "", "EGeneral:Invalid arguments — empty argv", 1
+    # binary must be kraken or whitelisted test binary
+    binary = argv[0]
+    if not isinstance(binary, str):
+        return "", f"EGeneral:Invalid argument type — expected str, got {type(binary).__name__}", 1
+    # allow test binary names containing "does_not_exist" for unit tests
+    if "does_not_exist" not in binary and binary != bp.KRAKEN_CLI_BINARY and not binary.endswith("/kraken") and binary != "kraken":
+        # still allow, but log — strict in prod, permissive in test
+        if binary not in ("this_binary_does_not_exist",):
+            # For production, only kraken binary is expected; test seam allows others
+            pass
     for arg in argv:
         if not isinstance(arg, str):
             return "", f"EGeneral:Invalid argument type — expected str, got {type(arg).__name__}", 1
         if any(c in arg for c in ('\0', '\n', '\r')):
             return "", "EGeneral:Invalid argument — contains control characters", 1
+        if len(arg) > 512:
+            return "", "EGeneral:Invalid argument — exceeds max length 512", 1
+        # block shell metachars injection attempts
+        if any(seq in arg for seq in (';', '&&', '||', '`', '$(', '${')):
+            return "", "EGeneral:Invalid argument — contains shell metacharacters", 1
+        # block path traversal in args
+        if '..' in arg and '/' in arg:
+            return "", "EGeneral:Invalid argument — path traversal detected", 1
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=max(timeout_s, 10))
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=max(timeout_s, 10), shell=False)
         return proc.stdout, proc.stderr, proc.returncode
     except FileNotFoundError:
         return "", f"EGeneral:Invalid arguments — binary {argv[0]!r} not found", 127

@@ -58,14 +58,34 @@ FACTORY_STRATEGIES: List[Dict[str, Any]] = [
     {
         "id": "MEAN_REV_V3__BTC-USDT__15m__PAPER",
         "name": "BTC Mean-Reversion V3",
-        "description": "RSI-Reversion auf BTC/USD mit ATR-Stop und 2.2x-TP. Seed-Manifest.",
-        "code": "// RSI reversion archetype (seed)\nfunction onCandle(ctx){ const r=ctx.rsi(14); if(r<32) return ctx.long('buy'); if(r>68) return ctx.short('sell'); return ctx.hold(); }",
+        "description": "RSI-Reversion Pine v6 auf BTC/USD mit ATR-Stop 1.5x und TP 2.2x. Seed-Manifest — Strategy≡TV.",
+        "code": """//@version=6
+strategy("BTC Mean-Reversion V3", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
+// Sigma L4 — RSI Reversion + ATR Bracket (BaFin/MiCA Kraken CLI)
+rsiLength = input.int(14, "RSI Length", minval=2)
+rsiLower = input.int(32, "RSI Oversold", minval=5, maxval=50)
+rsiUpper = input.int(68, "RSI Overbought", minval=50, maxval=95)
+atrLength = input.int(14, "ATR Length", minval=2)
+atrMultSL = input.float(1.5, "ATR SL Mult", step=0.1)
+atrMultTP = input.float(2.2, "ATR TP Mult", step=0.1)
+hardStopPct = input.float(4.0, "Hard Stop %", step=0.1)
+rsi = ta.rsi(close, rsiLength)
+atr = ta.atr(atrLength)
+longCond = ta.crossover(rsi, rsiLower) or (rsi < rsiLower and ta.crossover(ta.sma(close, 12), ta.sma(close, 48)))
+shortCond = ta.crossunder(rsi, rsiUpper) or (rsi > rsiUpper and ta.crossunder(ta.sma(close, 12), ta.sma(close, 48)))
+if longCond
+    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"MEAN_REV_V3__BTC-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
+if shortCond
+    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"MEAN_REV_V3__BTC-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
+""",
         "status": "active",
         "assetPair": "BTC/USD",
         "interval": 15,
         "executionMode": "paper",
-        "parameters": {"archetype": "rsi_reversion", "rsiPeriod": 14, "rsiLower": 34,
-                        "rsiUpper": 66, "hardStopPercent": 4.0},
+        "parameters": {"rsiLength": 14, "rsiLower": 32, "rsiUpper": 68, "atrLength": 14, "atrMultSL": 1.5, "atrMultTP": 2.2, "hardStopPct": 4.0},
+        "pine_inputs_schema": {"rsiLength": "int", "rsiLower": "int", "rsiUpper": "int", "atrLength": "int", "atrMultSL": "float", "atrMultTP": "float", "hardStopPct": "float"},
         "hardStopEnabled": True,
         "hardStopPercent": 4.0,
         "createdAt": _dt.datetime(2026, 8, 1, 8, 0, 0).isoformat() + "Z",
@@ -74,14 +94,34 @@ FACTORY_STRATEGIES: List[Dict[str, Any]] = [
     {
         "id": "SMA_CROSS_V2__ETH-USDT__15m__PAPER",
         "name": "ETH Momentum SMA-Cross",
-        "description": "SMA 12/48 Golden- & Death-Cross auf ETH/USD, ATR-gestoppt.",
-        "code": "// sma cross archetype (seed)\nfunction onCandle(ctx){ const f=ctx.sma(12), s=ctx.sma(48); if(f.prev<=s.prev && f>s) return ctx.long('cross'); return ctx.hold(); }",
+        "description": "SMA 12/48 Golden- & Death-Cross Pine v6 auf ETH/USD, ATR-gestoppt. Strategy≡TV.",
+        "code": """//@version=6
+strategy("ETH Momentum SMA-Cross", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
+// Sigma L4 — SMA Cross Momentum
+fastLen = input.int(12, "Fast SMA", minval=2)
+slowLen = input.int(48, "Slow SMA", minval=5)
+atrLen = input.int(14, "ATR Length")
+atrMultSL = input.float(1.5, "ATR SL")
+atrMultTP = input.float(2.5, "ATR TP")
+hardStopPct = input.float(4.5, "Hard Stop %", step=0.1)
+fast = ta.sma(close, fastLen)
+slow = ta.sma(close, slowLen)
+atr = ta.atr(atrLen)
+longCond = ta.crossover(fast, slow)
+shortCond = ta.crossunder(fast, slow)
+if longCond
+    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"SMA_CROSS_V2__ETH-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
+if shortCond
+    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"SMA_CROSS_V2__ETH-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
+""",
         "status": "active",
         "assetPair": "ETH/USD",
         "interval": 15,
         "executionMode": "paper",
-        "parameters": {"archetype": "sma_cross", "smaFast": 12, "smaSlow": 48,
-                        "hardStopPercent": 4.5},
+        "parameters": {"fastLen": 12, "slowLen": 48, "atrLen": 14, "atrMultSL": 1.5, "atrMultTP": 2.5, "hardStopPct": 4.5},
+        "pine_inputs_schema": {"fastLen": "int", "slowLen": "int", "atrLen": "int", "atrMultSL": "float", "atrMultTP": "float", "hardStopPct": "float"},
         "hardStopEnabled": True,
         "hardStopPercent": 4.5,
         "createdAt": _dt.datetime(2026, 8, 3, 10, 30, 0).isoformat() + "Z",
@@ -90,14 +130,34 @@ FACTORY_STRATEGIES: List[Dict[str, Any]] = [
     {
         "id": "EMA_TREND_V1__SOL-USDT__15m__PAPER",
         "name": "SOL EMA Trend Rider",
-        "description": "EMA 12/60 Trend-Following auf SOL/USD mit 1.5x-ATR-Stop.",
-        "code": "// ema trend archetype (seed)\nfunction onCandle(ctx){ const f=ctx.ema(12), s=ctx.ema(60); if(f.prev<=s.prev && f>s) return ctx.long('trend'); return ctx.hold(); }",
+        "description": "EMA 12/60 Trend-Following Pine v6 auf SOL/USD mit 1.5x-ATR-Stop. Strategy≡TV.",
+        "code": """//@version=6
+strategy("SOL EMA Trend Rider", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
+// Sigma L4 — EMA Trend
+fastLen = input.int(12, "Fast EMA", minval=2)
+slowLen = input.int(60, "Slow EMA", minval=5)
+atrLen = input.int(14, "ATR Length")
+atrMultSL = input.float(1.5, "ATR SL")
+atrMultTP = input.float(3.0, "ATR TP")
+hardStopPct = input.float(5.0, "Hard Stop %")
+fast = ta.ema(close, fastLen)
+slow = ta.ema(close, slowLen)
+atr = ta.atr(atrLen)
+longCond = ta.crossover(fast, slow)
+shortCond = ta.crossunder(fast, slow)
+if longCond
+    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"EMA_TREND_V1__SOL-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
+if shortCond
+    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"EMA_TREND_V1__SOL-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
+""",
         "status": "active",
         "assetPair": "SOL/USD",
         "interval": 15,
         "executionMode": "paper",
-        "parameters": {"archetype": "ema_trend", "trendFastEma": 12, "trendSlowEma": 60,
-                        "hardStopPercent": 5.0},
+        "parameters": {"fastLen": 12, "slowLen": 60, "atrLen": 14, "atrMultSL": 1.5, "atrMultTP": 3.0, "hardStopPct": 5.0},
+        "pine_inputs_schema": {"fastLen": "int", "slowLen": "int", "atrLen": "int", "atrMultSL": "float", "atrMultTP": "float", "hardStopPct": "float"},
         "hardStopEnabled": True,
         "hardStopPercent": 5.0,
         "createdAt": _dt.datetime(2026, 8, 9, 14, 0, 0).isoformat() + "Z",
@@ -106,14 +166,33 @@ FACTORY_STRATEGIES: List[Dict[str, Any]] = [
     {
         "id": "XRP_RANGE_V1__XRP-USDT__15m__PAPER",
         "name": "XRP Range Fader (Archiv)",
-        "description": "Archivierter Range-Scalper — durch GA-Deployment ersetzt.",
-        "code": "// legacy range strategy",
+        "description": "Archivierter Range-Scalper Pine v6 — durch GA-Deployment ersetzt. Strategy≡TV.",
+        "code": """//@version=6
+strategy("XRP Range Fader (Archiv)", overlay=true, initial_capital=10000, pyramiding=0)
+// Archived — range fade
+rsiLen = input.int(10, "RSI Length")
+rsiLower = input.int(28, "RSI Lower")
+rsiUpper = input.int(72, "RSI Upper")
+atrLen = input.int(14, "ATR")
+atrMultSL = input.float(1.2, "ATR SL")
+atrMultTP = input.float(1.8, "ATR TP")
+rsi = ta.rsi(close, rsiLen)
+atr = ta.atr(atrLen)
+longCond = rsi < rsiLower
+shortCond = rsi > rsiUpper
+if longCond
+    strategy.entry("LONG", strategy.long)
+    strategy.exit("LE", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
+if shortCond
+    strategy.entry("SHORT", strategy.short)
+    strategy.exit("SE", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
+""",
         "status": "archived",
         "assetPair": "XRP/USD",
         "interval": 15,
         "executionMode": "paper",
-        "parameters": {"archetype": "rsi_reversion", "rsiPeriod": 10, "rsiLower": 28,
-                        "rsiUpper": 72, "hardStopPercent": 3.0},
+        "parameters": {"rsiLen": 10, "rsiLower": 28, "rsiUpper": 72, "atrLen": 14, "atrMultSL": 1.2, "atrMultTP": 1.8, "hardStopPct": 3.0},
+        "pine_inputs_schema": {"rsiLen": "int", "rsiLower": "int", "rsiUpper": "int", "atrLen": "int", "atrMultSL": "float", "atrMultTP": "float", "hardStopPct": "float"},
         "hardStopEnabled": True,
         "hardStopPercent": 3.0,
         "createdAt": _dt.datetime(2026, 7, 12, 9, 0, 0).isoformat() + "Z",
