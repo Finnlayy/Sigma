@@ -78,6 +78,23 @@ def test_webhook_secret_timing_safe(guard):
     assert not bad.allowed and bad.status_code == 401
 
 
+def test_webhook_secret_live_without_secret_blocks(cfg):
+    cfg.webhook_secret = ""
+    cfg.live_trading = True
+    verdict = SafetyGuard(cfg).verify_webhook_secret(None)
+    assert not verdict.allowed
+    assert verdict.code == "UNAUTHORIZED"
+    assert verdict.status_code == bp.WEBHOOK_UNAUTHORIZED_STATUS
+
+
+def test_webhook_secret_paper_without_secret_allows(cfg):
+    cfg.webhook_secret = ""
+    cfg.live_trading = False
+    verdict = SafetyGuard(cfg).verify_webhook_secret(None)
+    assert verdict.allowed
+    assert verdict.code == "OK"
+
+
 def test_signal_freshness(guard):
     now = time.time()
     assert guard.check_signal_freshness(now * 1000, 60, now=now).allowed     # ms input
@@ -409,3 +426,32 @@ def test_pipeline_caps_notional(pipeline):
     res = pipeline.handle_signal(_signal(price=1.0, atr=0.01))
     limit = bp.EXCHANGE_SPOT["max_order_notional_usd"]
     assert res.notional <= limit + 1e-6
+
+
+def test_parse_balance_stdout_normalizes_assets():
+    from app.execution.KrakenCliBridge import parse_balance_stdout
+
+    mapped = parse_balance_stdout('{"result": {"XXBT": "0.5", "ZUSD": "1000"}}')
+    assert mapped["BTC"] == 0.5
+    assert mapped["USD"] == 1000.0
+    table = parse_balance_stdout("XXBT    0.25\nZUSD    50")
+    assert table["BTC"] == 0.25
+    assert table["USD"] == 50.0
+    assert parse_balance_stdout("") == {}
+
+
+def test_trades_strategy_ids_in_query(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "in.duckdb"))
+    for sid, tid in (("s1", "t1"), ("s2", "t2"), ("s3", "t3")):
+        store.upsert_trade({
+            "trade_id": tid, "strategy_id": sid, "status": "closed",
+            "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+            "net_pnl_usd": 1.0,
+        })
+    assert store.trades(strategy_ids=[]) == []
+    rows = store.trades(strategy_ids=["s1", "s2"], status="closed")
+    assert {r["strategy_id"] for r in rows} == {"s1", "s2"}
+    single = store.trades(strategy_id="s3", status="closed")
+    assert [r["strategy_id"] for r in single] == ["s3"]

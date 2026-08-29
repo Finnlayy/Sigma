@@ -17,6 +17,7 @@ import math
 import os
 import time
 import uuid
+from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -260,6 +261,9 @@ class AppState:
         self.started_at = time.time()
         self.is_paper_trading = True
         self.has_credentials = False
+        self.live_kraken_balances: Dict[str, float] = {}
+        self.live_kraken_sync_ts: Optional[float] = None
+        self.live_kraken_sync_error: Optional[str] = None
         self._tasks: List[asyncio.Task] = []
         self._scheduler_work: Optional[asyncio.Task] = None
         self._last_eod_day: Optional[str] = None
@@ -1048,8 +1052,9 @@ def _build_metrics(st: AppState, strategies: List[Dict[str, Any]]) -> Dict[str, 
                                 else "Level 4 Live Capital Execution",
         "activeLedgerMode": "paper" if st.is_paper_trading else "live",
         "paperBalances": {k: round(v, 2) for k, v in balances.items()},
-        "liveKrakenBalances": {},
+        "liveKrakenBalances": dict(st.live_kraken_balances) if st.has_credentials else {},
         "hasCredentials": st.has_credentials,
+        "lastSyncTimestamp": st.live_kraken_sync_ts if st.has_credentials else None,
     }
 
 
@@ -1074,20 +1079,25 @@ def _strategy_pnl(st: AppState) -> List[Dict[str, Any]]:
     strategies = st.store.list_strategies()
     closed = st.store.trades(status="closed", limit=5000)
     open_positions = st.paper.all_positions()
+    by_sid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for t in closed:
+        by_sid[str(t.get("strategy_id") or "")].append(t)
+    pos_by_sid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for p in open_positions:
+        pos_by_sid[str(p.get("strategy_id") or "")].append(p)
     out = []
     for s in strategies:
-        mine = [t for t in closed if t.get("strategy_id") == s["id"]]
+        mine = by_sid.get(s["id"], [])
         realized = sum(float(t.get("net_pnl_usd") or 0.0) for t in mine)
         wins = sum(1 for t in mine if float(t.get("net_pnl_usd") or 0) > 0)
         unrealized = 0.0
-        for p in open_positions:
-            if p.get("strategy_id") == s["id"]:
-                price = st.ingestor.last_price(p["symbol"])
-                qty = float(p.get("quantity") or 0.0)
-                if p["direction"] == "LONG":
-                    unrealized += (price - float(p.get("entry_price") or price)) * qty
-                else:
-                    unrealized += (float(p.get("entry_price") or price) - price) * qty
+        for p in pos_by_sid.get(s["id"], []):
+            price = st.ingestor.last_price(p["symbol"])
+            qty = float(p.get("quantity") or 0.0)
+            if p["direction"] == "LONG":
+                unrealized += (price - float(p.get("entry_price") or price)) * qty
+            else:
+                unrealized += (float(p.get("entry_price") or price) - price) * qty
         volume = sum(float(t.get("notional_usd") or 0.0) for t in mine)
         out.append({
             "strategyId": s["id"],
@@ -1570,9 +1580,12 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
             raise HTTPException(404, "Strategy not found")
         pool, name, pair = [s], s["name"], s["assetPair"]
 
-    closed = []
-    for s in pool:
-        closed += st.store.trades(strategy_id=s["id"], status="closed", limit=5000)
+    pool_ids = [s["id"] for s in pool]
+    closed = st.store.trades(
+        strategy_ids=pool_ids,
+        status="closed",
+        limit=min(5000 * max(1, len(pool_ids)), 50_000),
+    ) if pool_ids else []
     by_day: Dict[str, Dict[str, float]] = {}
     for t in closed:
         day = str(t.get("exit_time") or t.get("entry_time") or "")[:10]
@@ -1743,8 +1756,17 @@ async def kraken_ledgers_sync():
 
 @app.post("/api/kraken/sync-balance")
 async def kraken_sync_balance():
-    return {"ok": True, "balances": _paper_balances(state),
-            "portfolioUSD": round(_portfolio_value(state, _paper_balances(state)), 2)}
+    out = _refresh_live_kraken_balances(state)
+    live = out.get("liveKrakenBalances") or {}
+    return {
+        "ok": bool(out.get("hasCredentials") and not out.get("error")),
+        "hasCredentials": out["hasCredentials"],
+        "liveKrakenBalances": live,
+        "lastSyncTimestamp": out.get("lastSyncTimestamp"),
+        "balances": live,
+        "portfolioUSD": round(_portfolio_value(state, live), 2) if live else 0.0,
+        **({"error": out["error"]} if out.get("error") else {}),
+    }
 
 
 @app.get("/api/kraken/positions/pro")
@@ -2130,6 +2152,69 @@ def _kraken_credentials_present() -> bool:
     key = os.environ.get("KRAKEN_API_KEY", "").strip()
     secret = os.environ.get("KRAKEN_API_SECRET", "").strip()
     return bool(key and secret)
+
+
+def _refresh_live_kraken_balances(st: AppState) -> Dict[str, Any]:
+    """CLI snapshot into AppState cache. Never falls back to paper seeds."""
+    from app.execution.KrakenCliBridge import parse_balance_stdout
+
+    creds = _kraken_credentials_present()
+    st.has_credentials = creds
+    if not creds:
+        st.live_kraken_balances = {}
+        st.live_kraken_sync_ts = None
+        st.live_kraken_sync_error = None
+        return {
+            "hasCredentials": False,
+            "liveKrakenBalances": {},
+            "lastSyncTimestamp": None,
+        }
+    bridge = st.kraken_cli
+    if bridge is None:
+        st.live_kraken_balances = {}
+        st.live_kraken_sync_ts = None
+        st.live_kraken_sync_error = "bridge_unavailable"
+        logger.warning("live kraken balance skipped: bridge unavailable")
+        return {
+            "hasCredentials": True,
+            "liveKrakenBalances": {},
+            "lastSyncTimestamp": None,
+            "error": "bridge_unavailable",
+        }
+    try:
+        result = bridge.balance()
+        if not getattr(result, "ok", False):
+            err = getattr(result, "error_code", None) or "balance_failed"
+            st.live_kraken_balances = {}
+            st.live_kraken_sync_ts = None
+            st.live_kraken_sync_error = err
+            logger.warning("live kraken balance failed: %s", err)
+            return {
+                "hasCredentials": True,
+                "liveKrakenBalances": {},
+                "lastSyncTimestamp": None,
+                "error": err,
+            }
+        parsed = parse_balance_stdout(getattr(result, "stdout", "") or "")
+        st.live_kraken_balances = parsed
+        st.live_kraken_sync_ts = time.time()
+        st.live_kraken_sync_error = None
+        return {
+            "hasCredentials": True,
+            "liveKrakenBalances": dict(parsed),
+            "lastSyncTimestamp": st.live_kraken_sync_ts,
+        }
+    except Exception as exc:
+        st.live_kraken_balances = {}
+        st.live_kraken_sync_ts = None
+        st.live_kraken_sync_error = str(exc)
+        logger.warning("live kraken balance error: %s", exc)
+        return {
+            "hasCredentials": True,
+            "liveKrakenBalances": {},
+            "lastSyncTimestamp": None,
+            "error": str(exc),
+        }
 
 
 def _is_loopback(request: Request) -> bool:

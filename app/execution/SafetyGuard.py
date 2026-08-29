@@ -118,7 +118,10 @@ class SafetyGuard:
     def verify_webhook_secret(self, provided: Optional[str]) -> SafetyVerdict:
         expected = self.config.webhook_secret
         if not expected:
-            # Kein Secret konfiguriert -> offen (Dev), aber laut protokolliert.
+            if getattr(self.config, "live_trading", False):
+                return SafetyVerdict(
+                    False, "UNAUTHORIZED", "webhook secret required in live trading",
+                    bp.WEBHOOK_UNAUTHORIZED_STATUS)
             logger.warning("%s not set — webhook auth disabled (dev only)", bp.WEBHOOK_SECRET_ENV)
             return SafetyVerdict(True, "OK", "no secret configured")
         if not provided or not hmac.compare_digest(str(provided), str(expected)):

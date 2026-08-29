@@ -392,3 +392,88 @@ def test_tv_library_list_and_import_is_idempotent_paper(client):
         assert "POST /api/strategies/tv/sync-library" in contract
     finally:
         tvlib.set_tv_library_driver_factory(None)
+
+
+def test_sync_balance_without_keys_is_empty(client, monkeypatch):
+    monkeypatch.delenv("KRAKEN_API_KEY", raising=False)
+    monkeypatch.delenv("KRAKEN_API_SECRET", raising=False)
+    import app.server.main as main
+
+    main.state.has_credentials = True
+    main.state.live_kraken_balances = {"USD": 99.0}
+    main.state.live_kraken_sync_ts = 1.0
+    try:
+        body = client.post("/api/kraken/sync-balance").json()
+        assert body["hasCredentials"] is False
+        assert body["liveKrakenBalances"] == {}
+        assert body["lastSyncTimestamp"] is None
+        assert body["balances"] == {}
+        assert body.get("portfolioUSD") == 0.0
+        metrics = client.get("/api/logs").json()["metrics"]
+        assert metrics["liveKrakenBalances"] == {}
+        assert metrics["hasCredentials"] is False
+    finally:
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+
+
+def test_sync_balance_with_keys_normalizes_and_logs_use_cache(client, monkeypatch):
+    monkeypatch.setenv("KRAKEN_API_KEY", "k")
+    monkeypatch.setenv("KRAKEN_API_SECRET", "s")
+    import app.server.main as main
+    from app.execution.KrakenCliBridge import OrderResult
+
+    calls = []
+
+    class FakeBridge:
+        def balance(self):
+            calls.append(1)
+            return OrderResult(True, "live", stdout=json.dumps({"XXBT": "0.5", "ZUSD": "1000"}))
+
+    original = main.state.kraken_cli
+    main.state.kraken_cli = FakeBridge()
+    try:
+        body = client.post("/api/kraken/sync-balance").json()
+        assert body["hasCredentials"] is True
+        assert body["liveKrakenBalances"] == {"BTC": 0.5, "USD": 1000.0}
+        assert body["lastSyncTimestamp"] is not None
+        assert calls == [1]
+        metrics = client.get("/api/logs").json()["metrics"]
+        assert metrics["liveKrakenBalances"] == {"BTC": 0.5, "USD": 1000.0}
+        assert metrics["hasCredentials"] is True
+        assert calls == [1]
+    finally:
+        main.state.kraken_cli = original
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+
+
+def test_sync_balance_cli_error_clears_without_paper_seed(client, monkeypatch):
+    monkeypatch.setenv("KRAKEN_API_KEY", "k")
+    monkeypatch.setenv("KRAKEN_API_SECRET", "s")
+    import app.server.main as main
+    from app.execution.KrakenCliBridge import OrderResult
+
+    class FakeBridge:
+        def balance(self):
+            return OrderResult(False, "live", error_code="EAPI:Invalid key")
+
+    original = main.state.kraken_cli
+    main.state.kraken_cli = FakeBridge()
+    main.state.live_kraken_balances = {"BTC": 9.0}
+    try:
+        body = client.post("/api/kraken/sync-balance").json()
+        assert body["hasCredentials"] is True
+        assert body["liveKrakenBalances"] == {}
+        assert body["lastSyncTimestamp"] is None
+        assert body["balances"] == {}
+        paper = client.get("/api/logs").json()["balances"]
+        assert paper != {}
+        assert body["balances"] != paper
+    finally:
+        main.state.kraken_cli = original
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None

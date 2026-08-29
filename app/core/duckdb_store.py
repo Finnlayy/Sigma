@@ -515,10 +515,17 @@ class DuckDBStore:
         )
 
     def trades(self, strategy_id: Optional[str] = None, status: Optional[str] = None,
-               limit: int = 500, execution_mode: Optional[str] = None) -> List[Dict[str, Any]]:
+               limit: int = 500, execution_mode: Optional[str] = None,
+               strategy_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        if strategy_ids is not None and len(strategy_ids) == 0:
+            return []
         sql = "SELECT * FROM trades WHERE 1=1"
         params: List[Any] = []
-        if strategy_id:
+        if strategy_ids:
+            placeholders = ", ".join("?" for _ in strategy_ids)
+            sql += f" AND strategy_id IN ({placeholders})"
+            params.extend(strategy_ids)
+        elif strategy_id:
             sql += " AND strategy_id = ?"
             params.append(strategy_id)
         if status:

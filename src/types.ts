@@ -275,6 +275,7 @@ export interface RunnerMetrics {
   paperBalances?: Record<string, number>;
   liveKrakenBalances?: Record<string, number>;
   hasCredentials?: boolean;
+  lastSyncTimestamp?: number | null;
 }
 
 export interface StrategyManifest {

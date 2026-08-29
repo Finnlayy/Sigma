@@ -65,8 +65,21 @@ export default function MetricsPanel({
 
   const [isSyncingBalance, setIsSyncingBalance] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [syncedLiveBalances, setSyncedLiveBalances] = useState<Record<string, number> | null>(null);
   const [walletTab, setWalletTab] = useState<'spot' | 'pro'>('spot');
   const [proData, setProData] = useState<any>(null);
+
+  const displayBalances = useMemo(() => {
+    if (defaultMetrics.hasCredentials) {
+      return syncedLiveBalances ?? defaultMetrics.liveKrakenBalances ?? {};
+    }
+    return balances;
+  }, [
+    defaultMetrics.hasCredentials,
+    defaultMetrics.liveKrakenBalances,
+    syncedLiveBalances,
+    balances,
+  ]);
 
   useEffect(() => {
     const fetchPro = async () => {
@@ -100,9 +113,13 @@ export default function MetricsPanel({
       const res = await fetch("/api/kraken/sync-balance", { method: "POST" });
       const data = await res.json();
       if (data.hasCredentials) {
-        setSyncFeedback("Synced with Kraken Pro account!");
+        setSyncedLiveBalances(data.liveKrakenBalances || {});
+        setSyncFeedback(data.error
+          ? "Kraken sync failed. Live balances cleared — no paper fallback."
+          : "Synced with Kraken Pro account!");
       } else {
-        setSyncFeedback("Simulated ledger. Add KRAKEN_API_KEY & SECRET in Settings to sync your Kraken Pro assets.");
+        setSyncedLiveBalances(null);
+        setSyncFeedback("Awaiting API keys. Add KRAKEN_API_KEY & SECRET in Settings to sync live balances.");
       }
       setTimeout(() => setSyncFeedback(null), 5000);
     } catch {
@@ -751,23 +768,23 @@ export default function MetricsPanel({
         {/* Tab 1: Spot Ledger View */}
         {walletTab === 'spot' && (
           <div className="space-y-2 max-h-52 overflow-y-auto pr-1 font-mono">
-            {balances && Object.keys(balances).length > 0 ? (
+            {displayBalances && Object.keys(displayBalances).length > 0 ? (
               <>
                 <div className="flex justify-between items-center text-xs font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/50 p-2 rounded mb-2">
                   <span>Total Spot USD:</span>
                   <span>
-                    ${Object.keys(balances).reduce((acc, asset) => {
-                      const amount = balances[asset] || 0;
+                    ${Object.keys(displayBalances).reduce((acc, asset) => {
+                      const amount = displayBalances[asset] || 0;
                       if (asset === 'USD') return acc + amount;
                       const ticker = tickers.find(t => t.pair === `${asset}USD` || t.pair === `${asset}/USD`);
                       return acc + (ticker ? amount * ticker.price : 0);
                     }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
-                {Object.keys(balances)
-                  .filter(asset => (balances[asset] || 0) > 0.000001 || asset === 'USD' || asset === 'EUR' || asset === 'GBP')
+                {Object.keys(displayBalances)
+                  .filter(asset => (displayBalances[asset] || 0) > 0.000001 || asset === 'USD' || asset === 'EUR' || asset === 'GBP')
                   .map((asset) => {
-                    const val = balances[asset] || 0;
+                    const val = displayBalances[asset] || 0;
                     const isFiat = asset === 'USD' || asset === 'EUR' || asset === 'GBP' || asset === 'CAD';
                     const symbol = asset === 'USD' ? '$' : asset === 'EUR' ? '€' : asset === 'GBP' ? '£' : asset === 'CAD' ? 'C$' : '';
                     const ticker = !isFiat ? tickers.find(t => t.pair === `${asset}USD` || t.pair === `${asset}/USD`) : undefined;
@@ -801,7 +818,9 @@ export default function MetricsPanel({
               </>
             ) : (
               <div className="text-center py-2 text-xs text-zinc-400">
-                Syncing Kraken balances...
+                {defaultMetrics.hasCredentials
+                  ? "Awaiting API — no live balances yet. Click sync."
+                  : "Syncing Kraken balances..."}
               </div>
             )}
           </div>
