@@ -377,7 +377,15 @@ def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int
         if '..' in arg and '/' in arg:
             return "", "EGeneral:Invalid argument — path traversal detected", 1
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=max(timeout_s, 10), shell=False)
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(timeout_s, 10),
+            shell=False,
+        )
         return proc.stdout, proc.stderr, proc.returncode
     except FileNotFoundError:
         return "", f"EGeneral:Invalid arguments — binary {argv[0]!r} not found", 127
