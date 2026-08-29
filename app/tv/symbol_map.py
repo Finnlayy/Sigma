@@ -17,6 +17,12 @@ _BASE_ALIASES: Dict[str, str] = {
     "BTC": "XBT", "XBT": "XBT", "ETH": "ETH", "SOL": "SOL", "XRP": "XRP",
     "ADA": "ADA", "DOT": "DOT", "LINK": "LINK", "AVAX": "AVAX", "DOGE": "XDG",
 }
+
+# Rückrichtung: Venue-Basis -> kanonische Sigma-Basis (XBT -> BTC, XDG -> DOGE)
+_CANONICAL_BASE: Dict[str, str] = {
+    "XBT": "BTC", "XDG": "DOGE", "BTC": "BTC", "ETH": "ETH", "SOL": "SOL",
+    "XRP": "XRP", "ADA": "ADA", "DOT": "DOT", "LINK": "LINK", "AVAX": "AVAX",
+}
 _QUOTE_ALIASES: Dict[str, str] = {
     "USD": "USD", "USDT": "USD", "USDC": "USD", "EUR": "EUR",
 }
@@ -50,6 +56,26 @@ def to_kraken_pair(symbol: str) -> str:
     """Sigma-Symbol -> Kraken CLI `--pair` (z. B. `XBTUSD`)."""
     base, quote = split_pair(symbol)
     return f"{base}{quote}"
+
+
+def to_sigma_symbol(pair: str) -> str:
+    """Kraken-Pair -> kanonische Sigma-Form (`XBTUSD` -> `BTC/USD`,
+    `PI_XBTUSD` -> `PI_BTC/USD`).
+
+    Der Execution-Port darf nie rohe Venue-Ticker nach Scout/Academy
+    durchreichen, sonst divergieren Loop C (Sigma-Form) und Loop A.
+    """
+    raw = pair.strip().upper()
+    futures = raw.startswith("PI_") or raw.startswith("PF_")
+    raw = raw.replace("PI_", "").replace("PF_", "").replace(".P", "")
+    for q in ("USDT", "USDC", "USD", "EUR"):
+        if raw.endswith(q):
+            base, quote = raw[: -len(q)], q
+            break
+    else:
+        base, quote = raw, "USD"
+    base = _CANONICAL_BASE.get(base, base)
+    return f"{'PI_' if futures else ''}{base}/{quote}"
 
 
 def to_tradingview(symbol: str, *, exchange: str = "KRAKEN", futures: bool = False) -> str:
