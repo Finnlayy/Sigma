@@ -11,7 +11,12 @@ from sigma.signals.correlation_scout import CorrelationScout, ScoutResult
 from sigma.signals.dual_hurst import DualHurst, evaluate_dual_hurst, htf_ready
 from sigma.signals.htf_features import extract_htf_flags
 from sigma.signals.lead_lag_detector import LeadLagDetector
-from sigma.signals.quantum_wave_collider import QuantumWaveCollider, WaveCollapseState
+from sigma.signals.quantum_wave_collider import (
+    QuantumWaveCollider,
+    WaveCollapseState,
+    WaveScreen,
+    WaveScreenCandidate,
+)
 from sigma.signals.scale_features import scale_invariant_features
 from sigma.signals.session_clock import SessionClock, SessionState, get_current_market_session
 from sigma.signals.timeframe_ladder import (
@@ -37,6 +42,8 @@ __all__ = (
     "QuantumWaveCollider",
     "ScoutResult",
     "WaveCollapseState",
+    "WaveScreen",
+    "WaveScreenCandidate",
     "SessionClock",
     "SessionState",
     "ThrottleState",

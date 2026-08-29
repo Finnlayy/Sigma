@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.core import blueprint as bp
 
@@ -98,6 +99,68 @@ class LoopCPort:
         if htf.degraded:
             ltf.source = f"{ltf.source}+htf_empty"
         return ltf
+
+    def hydrate_htf(
+        self,
+        symbols: Sequence[str],
+        interval_min: Optional[int] = None,
+        workers: int = 4,
+        count: Optional[int] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Paralleler Gap-Fill für fehlende wanted-Symbole (Fail-Closed wie poll()).
+
+        Reuse-Regel: vorhandene htf_series aus poll_pair() bleiben der
+        Cache — aufgerufen wird das nur mit den *fehlenden* Symbolen.
+
+        * Sidecar down / degraded → {} (keine Fetches, kein Fake).
+        * ``source`` in synthetic|synth|seed oder ``degraded`` → Symbol
+          wird verworfen (gleiche Regel wie poll()).
+        * Worker-Cap (default 4) gegen das Scraper-Rate-Limit.
+        """
+        interval = int(interval_min or self.htf_interval_min)
+        limit = int(count or self.count)
+        targets = [s for s in (symbols or []) if s]
+        if not targets:
+            return {}
+        client = self._scraper()
+        if client is None:
+            return {}
+        try:
+            health = client.health() if hasattr(client, "health") else {"ok": True}
+        except Exception as exc:
+            logger.info("loop C hydrate health failed: %s", exc)
+            return {}
+        if not health or not health.get("ok") or health.get("degraded"):
+            return {}
+
+        def _one(symbol: str) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+            try:
+                candles, meta = self._fetch(client, symbol, interval)
+            except Exception as exc:
+                logger.info("loop C hydrate fetch failed for %s: %s", symbol, exc)
+                return symbol, None
+            origin = str((meta or {}).get("source") or "").lower()
+            if (meta or {}).get("degraded") or origin in _SYNTHETIC_SOURCES:
+                logger.info("loop C hydrate skip %s source=%s degraded=%s",
+                            symbol, origin, (meta or {}).get("degraded"))
+                return symbol, None
+            if not candles:
+                return symbol, None
+            return symbol, candles
+
+        results: List[Tuple[str, Optional[List[Dict[str, Any]]]]] = []
+        with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
+            for symbol, candles in pool.map(_one, targets):
+                results.append((symbol, candles))
+
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for symbol, candles in results:
+            if candles is None:
+                continue
+            out[symbol] = candles
+            # Lake-Writes seriell nach dem parallelen Fetch (DuckDB-Lock-sicher).
+            self._write_lake(symbol, candles, interval)
+        return out
 
     def poll(self, interval_min: Optional[int] = None) -> MarketSnapshot:
         interval = int(interval_min or self.interval_min)

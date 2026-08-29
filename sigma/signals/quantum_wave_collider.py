@@ -10,8 +10,8 @@ Knoten:     Blanche (Regime) / Noir (Look-ahead)
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from sigma.core.fractal_scaling import (
     SigmaFractalCore,
@@ -21,6 +21,9 @@ from sigma.core.fractal_scaling import (
 )
 from sigma.signals.dual_hurst import htf_ready
 from sigma.signals.htf_features import fvg_flags
+
+if TYPE_CHECKING:  # pragma: no cover - reine Annotations-Typen (Import-Zyklus vermeiden)
+    from sigma.execution.universe import ExecutionUniverse
 
 RANGE_LOOKBACK = 20
 
@@ -47,6 +50,51 @@ class WaveCollapseState:
 
     def to_dict(self) -> Dict[str, Any]:
         return dict(self.__dict__)
+
+
+@dataclass(frozen=True)
+class WaveScreenCandidate:
+    """Tradabler Kollaps: universe.is_tradable(symbol) && COLLAPSED_INTO_ZONE."""
+
+    symbol: str
+    state: WaveCollapseState
+    tradable: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "tradable": self.tradable,
+            "state": self.state.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class WaveScreen:
+    """Ergebnis des Universe-Screens. Kandidaten sind tradable Kollapse.
+
+    ``defaults`` = universe.list_symbols(): leere Kandidatenliste heißt,
+    der Scout fällt auf das Universe zurück (nie auf market_symbols).
+    ``states`` enthält alle bewerteten Serien (Observability, auch
+    nicht-tradable Kollapse — die sind dort als COLLAPSED sichtbar,
+    landen aber nicht in ``candidates``).
+    """
+
+    candidates: Tuple[WaveScreenCandidate, ...] = ()
+    states: Mapping[str, WaveCollapseState] = field(default_factory=dict)
+    defaults: Tuple[str, ...] = ()
+    leader: str = "BTC/USD"
+    interval_min: int = 15
+    now: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "candidates": [c.to_dict() for c in self.candidates],
+            "states": {s: st.to_dict() for s, st in self.states.items()},
+            "defaults": list(self.defaults),
+            "leader": self.leader,
+            "interval_min": self.interval_min,
+            "now": self.now,
+        }
 
 
 def _empty(status: str, reason: str, interval_min: int) -> WaveCollapseState:
@@ -176,3 +224,44 @@ class QuantumWaveCollider:
                 **{**state.to_dict(), "status": STATUS_COLLAPSED, "reason": "collapsed_into_zone"},
             )
         return state
+
+    def screen(
+        self,
+        htf_series: Mapping[str, Sequence[Mapping[str, Any]]],
+        *,
+        universe: "ExecutionUniverse",
+        leader: str = "BTC/USD",
+        interval_min: int = 15,
+        now: Optional[float] = None,
+    ) -> WaveScreen:
+        """Tradable Watchlist über dem Execution-Universe.
+
+        Kandidat ist nur, wer ``universe.is_tradable(symbol)`` UND
+        ``status == COLLAPSED_INTO_ZONE`` ist. Ein Symbol, das Loop C
+        kennt, aber die Venue nicht nimmt (z. B. SOL/USD bei der
+        heutigen Allowlist), bleibt still — kein Academy-Task.
+        ``defaults`` = universe.list_symbols() ist der Scout-Fallback
+        bei leerem Screen (nie market_symbols).
+        """
+        states: Dict[str, WaveCollapseState] = {}
+        candidates: List[WaveScreenCandidate] = []
+        for symbol, candles in (htf_series or {}).items():
+            if not candles:
+                continue
+            state = self.evaluate(candles, interval_min=interval_min, now=now)
+            states[symbol] = state
+            if state.status != STATUS_COLLAPSED:
+                continue
+            tradable = bool(universe.is_tradable(symbol))
+            if tradable:
+                candidates.append(
+                    WaveScreenCandidate(symbol=symbol, state=state, tradable=True)
+                )
+        return WaveScreen(
+            candidates=tuple(candidates),
+            states=states,
+            defaults=tuple(universe.list_symbols()),
+            leader=leader,
+            interval_min=int(interval_min),
+            now=now,
+        )

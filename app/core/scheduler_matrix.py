@@ -387,13 +387,25 @@ def install_canonical_tasks(
         )
     if sched.get("master_orchestrator_tick") is None:
         orch = orchestrator
+        # Conductor wird pro Prozess genau einmal gebaut (Cooldown-Zustand,
+        # Tick-Zähler, Throttle). Ports: Loop C (Cache + Lücken-Hydrate),
+        # Loop D (Screen-Symbole pro Tick), Academy (Watchlist nur tradable
+        # Kollapse). Fehlende Sidecars -> None-Ports, kein Fake.
+        holder: Dict[str, Any] = {"conductor": None}
 
         def _master_orchestrator_tick() -> None:
-            conductor = orch
+            conductor = orch or holder["conductor"]
             if conductor is None:
+                from sigma.loops.loop_c import LoopCPort
+                from sigma.loops.loop_d import LoopDPort
                 from sigma.orchestration import MasterOrchestrator
 
-                conductor = MasterOrchestrator()
+                conductor = MasterOrchestrator(ports={
+                    "loop_c": LoopCPort(scraper=scraper, store=lake),
+                    "loop_d": LoopDPort(daemon=scout),
+                    "academy": academy,
+                })
+                holder["conductor"] = conductor
             conductor.tick()
 
         sched.register(

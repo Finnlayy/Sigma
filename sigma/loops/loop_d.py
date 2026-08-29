@@ -49,11 +49,27 @@ class LoopDPort:
         regime: str = bp.Regime.RANGING_CHOP.value,
         strategy_ids: Optional[Iterable[str]] = None,
         limit: int = 3,
+        symbols: Optional[Iterable[str]] = None,
+        universe: Any = None,
     ) -> List[ScoutGraduation]:
+        """Ein Paper-Scout-Tick.
+
+        ``symbols`` = Screen-Symbole (pro Tick, Singleton bleibt
+        unverändert); ohne Angabe fällt der Daemon auf seine
+        Default-Watchlist zurück. Optional filtert ``universe``
+        untradable Symbole raus — Scout plant nie Tasks, die Loop A
+        nicht handeln kann. Paper only, niemals Live-Kapital.
+        """
         daemon = self._daemon()
         ids = list(strategy_ids) if strategy_ids is not None else []
+        plan_symbols = list(symbols) if symbols is not None else None
+        if universe is not None and plan_symbols is not None:
+            plan_symbols = [s for s in plan_symbols if universe.is_tradable(s)]
         if ids:
-            daemon.plan(ids, regime)
+            if plan_symbols is not None:
+                daemon.plan(ids, regime, symbols=plan_symbols)
+            else:
+                daemon.plan(ids, regime)
         results = daemon.cycle(regime, limit=limit)
         out: List[ScoutGraduation] = []
         for row in results or []:

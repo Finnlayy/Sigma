@@ -48,7 +48,14 @@ class ScoutDaemon:
         self.allocator = allocator
         self.backtest_runner = backtest_runner      # callable(strategy_id, symbol, tf) -> result
         self.virtual_bots = virtual_bots
-        self.symbols = symbols or ["BTC/USD", "ETH/USD", "XRP/USD"]
+        # Defaults = Execution-Universe (BTC/ETH heute), nie market_symbols —
+        # sonst plant der Scout SOL/XRP, die Loop A mit SYMBOL_NOT_ALLOWED
+        # verwirft.
+        if symbols is None:
+            from sigma.execution.universe import default_execution_universe
+
+            symbols = default_execution_universe().list_symbols()
+        self.symbols = list(symbols)
         self.timeframes = timeframes or [5, 15, 60]
         self.target_sample = target_sample
         self.tasks: Dict[Tuple[str, str, str], ScoutTask] = {}
@@ -57,11 +64,19 @@ class ScoutDaemon:
         self.cycles = 0
 
     # -------------------------------------------------------------- planning
-    def plan(self, strategy_ids: Iterable[str], regime: str = bp.Regime.RANGING_CHOP.value
-             ) -> List[ScoutTask]:
-        """Erzeugt Tasks nur für Paarungen ohne ausreichende Stichprobe."""
+    def plan(self, strategy_ids: Iterable[str], regime: str = bp.Regime.RANGING_CHOP.value,
+             symbols: Optional[List[str]] = None) -> List[ScoutTask]:
+        """Erzeugt Tasks nur für Paarungen ohne ausreichende Stichprobe.
+
+        ``symbols`` (Screen-Symbole pro Tick) überschreiben die
+        Default-Watchlist des Daemons, ohne den Singleton zu mutieren —
+        siehe Review: get_scout() nicht dauerhaft anfassen.
+        """
+        universe_symbols = list(symbols) if symbols is not None else self.symbols
+        if not universe_symbols:
+            return []
         created: List[ScoutTask] = []
-        for sid, symbol, tf in itertools.product(strategy_ids, self.symbols, self.timeframes):
+        for sid, symbol, tf in itertools.product(strategy_ids, universe_symbols, self.timeframes):
             key = (sid, symbol, str(tf))
             if key in self.tasks:
                 continue
