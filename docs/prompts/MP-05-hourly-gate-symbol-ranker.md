@@ -69,6 +69,41 @@ duplizieren.**
 - Weekend: reduzierte Größe/Paper-Flag beibehalten (bestehende
   SessionClock-Logik respektieren).
 
+### 2b. Dual-Dirigent (BTC & ETH)
+- Pro Symbol zusätzlich β und r gegen **ETH** berechnen; Dirigent =
+  der Benchmark mit dem höheren |r| (Nutzerbeobachtung §6: KI-/Tech-/
+  DePIN-Assets hängen enger an ETH als an BTC). Die signed-
+  Richtungsregeln aus §2 (Long nur r>0/β>0; Short r>0/β<0; inverse
+  Longs verboten; decoupled fail-closed) gelten identisch gegen den
+  gewählten Dirigenten. Konkrete Schwellenwerte sind zu messen, nicht
+  zu kodieren; die Benchmark-Wahl fließt als Feld in das Ranker-Ergebnis.
+
+### 2c. Nacht-Schattenplan (`sigma/orchestration/shadow_plan.py`)
+- Reiner, nicht bindender Planungs-Output (Orchestrator bleibt
+  klassifizierend/gatend — kein Auto-Deploy, Hartregel 1/12; der Plan
+  löst auch kein Screening außerhalb des 1h-Takts aus).
+- Rhythmus (UTC, MEZ=UTC+2): Überwachung der beim letzten 1h-Screen
+  gewählten Symbole in der Ruhephase **21:00–00:30 UTC** (21:00–22:00 =
+  Quarantäne, nur Beobachtung), Synthese **00:30–01:00 UTC**,
+  Veröffentlichung **~01:00 UTC** (03:00 MEZ).
+- Inhalt (Dataclass, `to_dict()`): Watchlist, pro Symbol antizipierte
+  Szenarien (Sweep-Zone, Breakout-Level, Session-Bias, Dirigent),
+  vorgemerkte Strategie-Option aus den vorhandenen Werkzeugen
+  (Ranker-Empfehlung dca/sniper, SessionClock-Fenster, Wave-Zustand),
+  plus die zwei Ausführungspfade:
+  - **Pfad α (proaktiv, Sniper — Phase 2, MP-07):** Einstieg an der
+    Kante bei passender Konfluenz und niedrigem Risiko.
+  - **Pfad β (reaktiv, Bestätigung):** Einstieg erst im ersten Retest,
+    nachdem **Dirigent UND Alt** den Breakout auf geschlossenen Bars
+    vollzogen haben (Korrelation dann live bestätigt).
+- Sentiment-Abgleich (optional, fail-closed wie Polymarket): Funding/
+  Long-Short-Ratio/OI und — falls Feed existiert — Social-Sentiment als
+  Gegenfilter; Sättigung (Funding extrem, Retail-Long > 4:1, Social >
+  ~85 % bullisch) → Kennzeichnung `mean_reversion_bias` (Kontext für
+  MP-08), nie als harter Trigger.
+- SessionClock ist Eigentümerin der UTC-Fenster (inkl. EU-Open-
+  KI/Tech-Bias und US-Open-Mean-Reversion, §3) — nicht neu bauen.
+
 ### 3. Orchestrator-Anbindung
 - Ranker-Ergebnis als `ctx["screening"]`/Feld im Orchestrator-Kontext;
   Gate blockiert Mehrfach-Scans. **Kein Auto-Deploy neuer Strategien**

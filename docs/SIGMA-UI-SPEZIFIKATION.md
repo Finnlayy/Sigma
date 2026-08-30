@@ -93,6 +93,14 @@ SettingsPanel).
   `addPanelToActive`-Muster).
 - **Leerzustand:** vor erstem Tick „waiting for closed 1h bar …“,
   FeedBadge sichtbar.
+- **Schattenplan-Streifen (Shadow Plan, ~01:00 UTC / 03:00 MEZ):** kompakte
+  Zeile „Schattenplan veröffentlicht 01:00 UTC“ mit Watchlist-Symbolen,
+  je Symbol α/β-Status (α = Pro-Aktiv-Kante bewaffnet emerald-umrandet /
+  β = wartet auf bestätigten Dirigent+Alt-Breakout zinc / verworfen rot);
+  Sentiment-Marker `mean_reversion_bias` als amber Badge (mit Quelle,
+  bei fehlendem Feed grau „sentiment feed unavailable“). Der Plan ist
+  als *nicht bindend* gekennzeichnet; es gibt keinen Deploy-Button im
+  Streifen (Deploy weiter nur über Scout→Modal-Pfad).
 
 ### 3.2 MarketGeometryPanel — Zonen & Tagesanker (MP-03)
 - **Zonentabelle** (pro Symbol/Intervall, umschaltbar 15m/1h):

@@ -32,6 +32,19 @@ Erstelle `sigma/execution/risk_guards.py` mit reinen, testbaren Funktionen:
    auf Notional) kosten bei 30x Hebel ~2,4 % Margin; der 0,05 %-Puffer
    deckt sie vollständig ab. Wird von MP-15 (fraktale Strategie) genutzt.
 
+7. **Wick-/Liquidationsfallen-Guard (§8 Regel 10, Cross-Asset-Beleg über
+   13 Paare):** `wick_buffer_pct(beta, expected_btc_wick_pct, extra_pct=0.01)`
+   — erwarteter Alt-Wick = `β·BTC-Wick`; und
+   `liq_outside_wick_zone(liquidation_price, wick_low_price, side)` prüft,
+   dass der Liquidationspreis **unterhalb** der erwarteten Docht-Zone liegt
+   (long) bzw. oberhalb (short); `assert_leverage_for_depth(beta,
+   grid_depth_pct, leverage, expected_btc_wick_pct)` lehnt Hebel ab, bei
+   denen der Liq-Preis in der Docht-Zone läge (Faustregel:
+   Liq-Abstand ≥ Raster-Tiefe + β·BTC-Wick + Puffer). Hintergrund:
+   BTC-Dips reißen β≈2,8–4,5-Alts in 60–180 s um −3…−8 % (V-Reversal);
+   10x-Grids mit voller Margin wurden darin liquidiert/ausgestoppt,
+   danach +31…+73 % Rebound.
+
 Alle Funktionen sind pure Funktionen ohne Seiteneffekte, mit vollständigen
 Typannotationen und Docstrings. Werte als Prozentsätze als dezimale Floats
 (0,06 = 6 %). Modul-Header nach der im Repo üblichen Konvention
@@ -55,6 +68,12 @@ keine bestehenden Gate-Werte oder Session-Logik.
 - Fee-Covered: long `fee_covered_stop(100, "long") == 100.05`;
   short `== 99.95`; Wert liegt stets auf der sicheren Seite (long über,
   short unter Entry).
+- **Wick-Guard:** Grid mit 8 % Tiefe, β=3,5, erwarteter BTC-Wick 1 %
+  (→ erwarteter Alt-Wick ~3,5 %) bei 10x voller Margin → Konstellation
+  abgelehnt (Liq in der Docht-Zone); gleicher Fall mit ausreichend
+  niedrigem Hebel / Liq unterhalb Docht-Zone → passiert;
+  `liq_outside_wick_zone` long mit Liq über dem erwarteten Docht-Tief
+  → False.
 - Nutze den im Repo üblichen Teststil (synthetische Bars als Listen/Dicts,
   vgl. `tests/test_loops_cde.py`).
 

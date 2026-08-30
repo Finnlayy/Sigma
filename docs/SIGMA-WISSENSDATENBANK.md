@@ -133,6 +133,12 @@ Formel: `N_max = clamp(floor(ATR_aktuell / ATR_basis × N_base), 0, Cap)`.
 - ⚠️ **Wochenende:** Volumen −20–25 %, Ask-Bias, „illusorische Tiefe“
   (unbetreute Orders verdunsten unter Stress) → reduzierte Größe / nur Paper
 - ⚠️ **Montag 10:00 UTC:** Monday-Momentum-Effekt
+- 👁️ **Nutzerbeobachtung (30.08., Sentiment-Faktor, kein harter Trigger):**
+  zum EU-Marktstart (07:00–09:00 UTC) werden KI-/Tech-Assets oft gekauft
+  (europäische Tech-Disk ASML/SAP/Infineon, dünnes Buch vor US-Open,
+  Front-Running der US-Session); ab US-Open (12:30–14:30 UTC) auf diese
+  Morgen-Moves oft Mean-Reversion/Gewinnmitnahmen. SessionClock bleibt
+  Eigentümerin der Fenster; im Shadow-Plan (§4.6) als Bias berücksichtigen.
 
 ---
 
@@ -206,6 +212,45 @@ Formel: `N_max = clamp(floor(ATR_aktuell / ATR_basis × N_base), 0, Cap)`.
 - HTF liefert **Richtung + Zonen**, LTF liefert **Timing + Risiko**
 - MTF-Backtests: chronologische Splits, Walk-Forward, HTF-Werte nur nach
   Kerzenschluss, `request.security_lower_tf()` in Pine v6
+
+### 4.6 Nacht-Schattenplan (Shadow Plan) & α/β-Ausführungspfade (Nutzer, 30.08.2026)
+
+Der Orchestrator ergänzt das reaktive 1h-Screening um einen **vorbereiteten,
+aber nicht bindenden Nachtplan** — ein „Schlachtplan light", der Optionen
+offen hält und nie selbst Orders auslöst (Orchestrator klassifiziert/gatet
+nur, Hartregel 1/12):
+
+- **Rhythmus (UTC; MEZ = UTC+2):** Ruhephase/Überwachung **21:00–00:30 UTC**
+  (23:00–02:30 MEZ; beachte: 21:00–22:00 UTC = Quarantäne, da läuft nur
+  Beobachtung, kein Trading) — die beim letzten 1h-Screening ausgewählten
+  Symbole werden weiter überwacht; Synthese **00:30–01:00 UTC**;
+  Veröffentlichung des Plans **~01:00 UTC** (03:00 MEZ).
+- **Inhalt:** Watchlist + pro Symbol antizipierte Szenarien (Sweep-Zonen,
+  Breakout-Level, Session-Bias) und die vorgemerkten Strategie-Optionen —
+  ausschließlich mit vorhandenen Werkzeugen zusammengestellt (Scout-Ranking,
+  SessionClock, Wave-Zustand, Ranker-Empfehlung, Polymarket-Telemetrie).
+- **Zwei Ausführungspfade je Setup (Entscheidung reaktiv vor Ort, auf
+  geschlossenen Bars):**
+  - **Pfad α — proaktiv (Sniper, MP-07):** Breakout/Sweep an der Kante
+    abfangen, wenn Orderbuch/Konfluenz zum Plan passen **und** das Risiko
+    niedrig bemessen wird; konservativerer Hebel wg. Fakeout-Risiko.
+  - **Pfad β — reaktiv (Bestätigung):** ist die Kante unklar/das Risiko zu
+    hoch, wird α verworfen: das System wartet, bis **BTC (bzw. ETH,
+    s. §6) UND der Alt** den Breakout vollzogen haben, und steigt im ersten
+    Retest/Retrace auf das Ausbruchslevel ein — die Korrelation ist dann
+    live bestätigt (das ist der im Lead-Lag-Beleg gemessene Effekt).
+- Der Plan ist **Shadow**: er bindet nichts, wird bei Datenlage verworfen;
+  kein Auto-Deploy aus dem Plan heraus.
+- **Sentiment-Abgleich (optionaler Layer, fail-closed wie Polymarket):**
+  Der Plan wird über den Tag gegen Social-Media-Sentiment (X/Reddit) und
+  Client-Daten (Funding Rate, Long/Short-Ratio, OI) abgeglichen — als
+  **Gegenfilter/Kontext, nie als primärer Trigger**. Bei extremer
+  Sättigung (Social bullisch > 85–88 %, Funding extrem positiv, OI hoch
+  bei flachem Spot-Volumen, Retail-Long > ~4:1) stellt sich das System auf
+  **Mean-Reversion/Exhaustion** ein (MP-08): keine Longs im Hype,
+  Short- bzw. Discount-Load-Setups vorbereitet — aber nur mit
+  Bar-Close-Bestätigung (1m/5m Structure-Shift/Rejection), nie blind
+  gegen den Hype. Ohne Sentiment-Feed: telemetry-only, kein Gate.
 
 ---
 
@@ -372,6 +417,19 @@ vertretbar — das löst die Margin-Bindung der DCA-Grids.
   BTC-Lead-Signal → High-Beta-Alt-Ausführung funktioniert; Hauptleck ist
   der Exit (siehe §8 Regel 8).
 
+- **Dual-Dirigent BTC/ETH (Nutzerbeobachtung, 30.08.2026 — Hypothese,
+  zu messen, nicht hartzukodieren):** BTC dirigiert Alt/Meme/BRC-20;
+  **ETH dirigiert KI-/Tech-/DePIN-Assets** (KI-Perps, AI-Token) — der
+  Nutzer beobachtet, dass KI-Aktien/-Token enger an ETH hängen
+  (Tech-Risk-On-Proxy, gleiche VC/Käuferschicht, ERC-20-Liquidität) als
+  an BTC. Im Ranker (MP-05) daher pro Symbol Korrelation/Beta gegen
+  **BTC und ETH** berechnen; Dirigent = der mit dem höheren |r|;
+  die signed-Richtungsregeln (§6 oben, Long nur r>0/β>0, Short r>0/β<0,
+  inverse Longs verboten) gelten analog gegen den gewählten Dirigenten.
+  Konkrete Korrelationswerte aus dem Chat (z. B. ρ~0,45–0,58 zu BTC vs.
+  ~0,72–0,84 zu ETH) sind unbelegt und werden über den Scout gemessen.
+
+
 ---
 
 ## 7. Polymarket / Vorhersagemärkte (Layer 0)
@@ -453,6 +511,35 @@ Dichte-Extraktion und Kalibrierung fehlen → MP-06.
    Kill-Switch am oberen Liquidity-Sweep müssen automatisiert feuern;
    der Mensch startet, Sigma beendet.
 9. **Kapitalerhalt schlägt Alles:** „Survive to trade another day.“
+10. **Wick-/Liquidationsfallen-Guard (Cross-Asset-Evidenz, 30.08.2026):**
+    Beobachtet über **13 Paare** (TUT, HEMI, SIREN, SKR, 我踏马来了,
+    RIVER, HUST, TRUMP, HYPER, PENGU, PEPE, ORDI, SAHARA): ein
+    BTC-Dip reißt High-Beta-Alts (β ca. 2,8–4,5) in 60–180 s um
+    −3 % bis −8 % herunter (Liquidity Wick), gefolgt von einem
+    V-Reversal — in durchgehend allen Fällen wurden manuelle
+    Panic-Closes und auch enge Auto-Stops exakt am Docht abgefischt;
+    der Rebound direkt danach betrug +31 % (HEMI) bis +73 % (TUT).
+    Gegenprobe: die Diagnose „erst Sweep, dann Reversal“ war jedes
+    Mal korrekt — der Fehler lag ausschließlich im Margin-/Stop-Setup.
+    Regeln daraus:
+    - **Der Liquidationspreis darf niemals in der erwarteten
+      Docht-Zone liegen.** Bei Grid/DCA ist die Hebelgröße nicht frei
+      wählbar, sondern ergibt sich aus: `Liquidationsabstand ≥
+      Raster-Gesamttiefe + β·erwarteter BTC-Wick + Puffer`. Eine DCA
+      mit 6–10 % Tiefe auf β≈3,5 bei 10x und voller Margin wird im
+      Docht liquidiert — Hebel so wählen, dass der Liq-Preis **unter**
+      dem tiefsten erwarteten Sweep liegt (sonst Grid tiefer / Hebel
+      runter / kleiner dimensionieren).
+    - **Hard-Stop (Regel 1) sitzt außerhalb der Docht-Zone**, nicht
+      0,1–0,3 % unter Support; Stop-Abstand für High-Beta-Alts an
+      β·ATR kalibrieren.
+    - **Freie-Margin-Pflicht:** kein Bot bei 100 % genutzter Margin
+      (kein Nachschuss möglich = Panic-Close vorprogrammiert).
+    - Die 10x-Raster-Erfahrung belegt NICHT „kein Hebel": der fraktale
+      Einzeltrade (§5.5) darf 20–50x fahren, weil dort der harte SL
+      außerhalb der Docht-Zone liegt und keine Nachkauf-Marge gebraucht
+      wird. Risiko wird über **Stop-Abstand + Positionsgröße**
+      kontrolliert, nicht über den Hebel allein.
 
 ---
 
@@ -750,6 +837,17 @@ Perp-Liquidationskaskaden als FVG-Verstärker unerforscht.
 - Gleiche Lead-Lag-DNA: XAU-Lead-Support → XAG-Scale-In
 - Marktzeiten-Kalender nötig (Forex 24/5, Metalle mit Session-Gaps);
   Krypto füllt Wochenenden ab
+
+- **Nutzerbeobachtungen 30.08.2026 (Intermarket-Hypothesen, Kontext,
+  kein v1-Signal — gehört zu MP-13):** (a) schnelle BTC-Bewegung geht
+  oft mit USD-/Stablecoin-Stärke einher (Fiat→USDT-Konversionssog);
+  (b) in parabolischen BTC-Phasen stagniert/korrigiert Gold oft bei
+  einbrechender Gold-Volatilität („digitales Gold" kannibalisiert das
+  Narrativ), während Silber/Kupfer robuster sind (~50 % Silbernachfrage
+  industriell, Kupfer = Konjunkturbarometer); (c) schnelle BTC-Moves
+  und ruhige Rohstoffe treten häufig gemeinsam auf (Risikopräferenz-
+  Umschichtung). Als Messgrößen für später, nicht als Trading-Regel.
+
 - 🟡 Router-Placeholder existiert; Venue-Bridges (MT5/IB) sind optional
 
 ---
@@ -774,6 +872,8 @@ Perp-Liquidationskaskaden als FVG-Verstärker unerforscht.
 | Loop A–E | Execution / Tester / Feed / Scout / Allokations-Gate |
 | cos φ | Leistungsfaktor: echter Trend vs. Chop |
 | Unwind | Geordnete Glattstellung aller Positionen |
+| Schattenplan (Shadow Plan) | Nächtlicher, nicht bindender Vorbereitungsplan (Watchlist/Szenarien/α-β-Pfade, §4.6) |
+| Pfad α / Pfad β | Proaktiver Breakout-Sniper / reaktiver Retest-Einstieg nach bestätigtem Korrelations-Breakout |
 
 ---
 

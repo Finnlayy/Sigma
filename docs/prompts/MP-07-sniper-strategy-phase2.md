@@ -52,6 +52,17 @@ Orchestrator.
 - Ohne Ranker-Freigabe → FLAT.
 - Retest ohne Thrust → kein Entry (erster Touch reicht nicht).
 
+## Pfad α / Pfad β (Schattenplan-Ausführung, §4.6)
+- Die Sniper-Strategie ist **Pfad α** (proaktiver Einstieg an der
+  Kante bei Konfluenz, konservativerer Hebel wg. Fakeout-Risiko).
+- **Pfad β (Fallback, Pflicht):** ist die Kante unklar/das Risiko zu
+  hoch, wird α nicht gezündet; die Strategie steigt erst im ersten
+  Retest/Retrace ein, **nachdem** Dirigent (BTC bzw. ETH, s. MP-05 §2b)
+  UND Alt den Breakout auf geschlossenen Bars bestätigt haben
+  (`confirmed_breakout_retest`-Bedingung im Intent, nicht intrabar).
+- Beide Pfade nur auf geschlossenen Bars, TTL-Hartregel (Min 48/55)
+  gilt für beide.
+
 ## Nicht im Scope
 - Keine Live-Orders (Paper only), kein Pine-Deploy (MP-09),
   keine 1m-Sniper außerhalb des 05–48-Fensters.

@@ -30,11 +30,11 @@
 
 | Phase | Master-Prompt | Inhalt | Hängt von |
 |---|---|---|---|
-| MP-01 | `MP-01-hard-risk-guards.md` | Hard-Risk-Guards: Stop-Pflicht, Rastertiefen-Guard, BTC-Makro-Gate, Liq-Distanz, Cooldown, Exhaustion-Signale | — |
+| MP-01 | `MP-01-hard-risk-guards.md` | Hard-Risk-Guards: Stop-Pflicht, Rastertiefen-Guard, BTC-Makro-Gate, Liq-Distanz, Cooldown, Fee-Covered-BE, **Wick-Guard (Liq-Preis außerhalb der β-skalierten Docht-Zone, §8 R10)** | — |
 | MP-02 | `MP-02-micro-dca-ladder.md` | Micro-DCA-Ladder-Generator (0,15–0,2 % Steps, 1,15x Vol, 1,5 % TP, dynamische Range-Steps, 6–10 %-Tiefen-Guard, TTL) | MP-01 |
 | MP-03 | `MP-03-candle-regime-signals.md` | Two-Bar-Thrust, Marubozu/FVG-Quant, Daily-Open-Envelope (00:00, Volumen-Anker, Outside-Inside) | — |
 | MP-04 | `MP-04-power-phasor-features.md` | Leistungsdreieck (P/Q/S, cos φ), Hilbert-Phasor, MTF-Resonanz, reellwertige Target-Algebra | MP-03 |
-| MP-05 | `MP-05-hourly-gate-symbol-ranker.md` | 1-Scan-pro-1h-Bar-Gate + High-Beta-Symbol-Ranker (signiertes r/β, Long/Short-Richtung, 24h-Top-Gainer-Relativstärke-Vorselektion + Post-Breakout-pos_EQ, RVOL/Spread-Score, Leader-Rotation pro Scan, Strategieempfehlung) | MP-01, MP-03 |
+| MP-05 | `MP-05-hourly-gate-symbol-ranker.md` | 1-Scan-pro-1h-Bar-Gate + High-Beta-Symbol-Ranker (signiertes r/β, Long/Short-Richtung, 24h-Top-Gainer-Vorselektion + pos_EQ, Leader-Rotation, Dual-Dirigent BTC/ETH) + **Nacht-Schattenplan** (Watchlist/Szenarien/α-β-Pfade, nicht bindend, kein Auto-Deploy) | MP-01, MP-03 |
 | MP-06 | `MP-06-polymarket-density.md` | Polymarket-Feed-Adapter (optionaler Port), implizite Dichte, Term-Struktur-Trajektorie, Brier/Platt-Kalibrierung | MP-05 |
 | MP-07 | `MP-07-sniper-strategy-phase2.md` | Quantum-Sniper-Strategie (15m→1m Retest + DCA-Ladder, TTL 45–48 min) als BaseStrategy | MP-02, MP-03, MP-05 |
 | MP-08 | `MP-08-exhaustion-unwind.md` | Volatilitäts-Exhaustion-Detektor (BBW/OI/CVD) + asynchroner Unwind-Template | MP-01, MP-04 |
@@ -67,6 +67,10 @@ Funktionen.
   - `liquidation_proximity(mark_price, liq_price)` → Abstand in %;
     < 5 % → HITL-Flag
   - `cooldown_active(last_exit_ts, min_s=1800)` — Post-Trade-Cooldown
+  - `wick_buffer_pct(beta, btc_wick_pct)` + `liq_outside_wick_zone(...)` /
+    `assert_leverage_for_depth(...)` — Liq-Preis muss außerhalb der
+    β-skalierten Docht-Zone liegen (§8 Regel 10, Cross-Asset-Beleg
+    13 Paare: −3…−8 %-Wicks in 60–180 s vor V-Reversal)
 - `sigma/execution/base_bridge.py` (ergänzen): HITL-Feld im Intent/Dispatch
 - Tests: `tests/test_risk_guards.py`
   - Stop liegt korrekt gepuffert über/unter Liq-Preis
@@ -180,6 +184,15 @@ Konzeptreferenzen — diese eine Modul-Gruppe baut.
     Strategieempfehlung: β ≥ 2,8 & RVOL ≥ 2,5 → Sniper/25x-Modus,
     sonst DCA 5–10x; Blacklist-Gründe (Unlocks/Thin-Book) als Feld
   - baut auf `correlation_scout` auf (ersetzen/erweitern, nicht duplizieren)
+  - Dual-Dirigent: r/β gegen BTC UND ETH; Dirigent = höheres |r|
+    (KI-/Tech-Assets laufen an ETH, §6); signed-Richtungsregeln analog
+  - `sigma/orchestration/shadow_plan.py` (neu): **Nacht-Schattenplan**,
+    nicht bindend — Überwachung 21:00–00:30 UTC, Veröffentlichung
+    ~01:00 UTC (03:00 MEZ); Watchlist + Szenarien + Pfad α (proaktiver
+    Sniper, MP-07) / Pfad β (Retest-Einstieg nach bestätigtem
+    Dirigent+Alt-Breakout); optionaler Sentiment-Abgleich (Funding/
+    Long-Short/Social) als Gegenmarker `mean_reversion_bias`,
+    fail-closed ohne Feed; **kein Auto-Deploy aus dem Plan**
 - Orchestrator: Ranker-Gate nur als Klassifikation/ctx-Feld;
   **kein neuer Auto-Deploy** bis MP-07 existiert
 - Tests: `tests/test_hourly_ranker.py`

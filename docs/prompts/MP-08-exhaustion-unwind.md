@@ -18,6 +18,19 @@ insbesondere `sigma/strategies/dual_hedge_grid.py` (Unwind-relevant).
     aber Score nur gültig, wenn mindestens BBW vorhanden (fail-closed
     ohne Bars).
 
+### 1b. Sentiment-/Sättigungs-Exhaustion (optional, fail-closed, §4.6)
+- Zusätzlicher, rein optionaler Eingang: Funding Rate, Retail-
+  Long/Short-Ratio, Open Interest (Börsen-/Client-Daten) und — falls
+  ein Feed existiert — Social-Sentiment (X/Reddit). Ohne Feed bleibt
+  dieser Teil 0 (Telemetrie wie Polymarket, kein Gate).
+- `sentiment_saturation(funding, ls_ratio, oi_series, social=None)`:
+  Sättigung wenn Funding extrem positiv, Retail-Long > ~4:1, OI hoch
+  bei flachem Spot-Volumen und (optional) Social bullisch > ~0,85.
+  Kennzeichnung `mean_reversion_bias=True` als Kontext — **kein
+  automatischer Short**: ein Mean-Reversion-Trade braucht zusätzlich
+  die Bar-Close-Bestätigung aus §1/MP-03 (1m/5m Structure-Shift/
+  Rejection); Blind-Short gegen laufenden Hype ist verboten.
+
 ### 2. `sigma/strategies/async_unwind.py`
 - `AsyncUnwind(BaseStrategy)` (oder reine Unwind-Planer-Funktion,
   falls besser passend — entscheide nach `base_strategy.py`-Muster):
@@ -40,6 +53,9 @@ insbesondere `sigma/strategies/dual_hedge_grid.py` (Unwind-relevant).
   nachprüfbar (Reihenfolge + Wartebedingung).
 - Guard: Verlust > 50 % des Gewinns → `forced=True`, trotzdem Schließen.
 - Ohne OI/CVD-Daten → Score aus BBW allein möglich; ohne Bars → ungültig.
+- Ohne Sentiment-Feed → Sättigungsanteil 0, kein Fehler (fail-closed);
+  mit extremem Funding/Long-Quote ohne Bar-Close-Bestätigung →
+  `mean_reversion_bias=True`, aber kein Entry-Intent.
 
 ## Nicht im Scope
 - Keine Live-Ausführung, keine neue Entry-Strategie.
