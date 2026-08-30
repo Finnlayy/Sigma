@@ -38,7 +38,8 @@
 | MP-06 | `MP-06-polymarket-density.md` | Polymarket-Feed-Adapter (optionaler Port), implizite Dichte, Term-Struktur-Trajektorie, Brier/Platt-Kalibrierung | MP-05 |
 | MP-07 | `MP-07-sniper-strategy-phase2.md` | Quantum-Sniper-Strategie (15m→1m Retest + DCA-Ladder, TTL 45–48 min) als BaseStrategy | MP-02, MP-03, MP-05 |
 | MP-08 | `MP-08-exhaustion-unwind.md` | Volatilitäts-Exhaustion-Detektor (BBW/OI/CVD) + asynchroner Unwind-Template | MP-01, MP-04 |
-| MP-09 | `MP-09-dynamic-pine-provisioner.md` | Dynamischer Pine-v6-Provisionierer pro gescoutetem Symbol + Schema-A-Webhook | MP-07 |
+| MP-09 | `MP-09-dynamic-pine-provisioner.md` | Dynamischer Pine-v6-Provisionierer pro gescoutetem Symbol + Schema-A-Webhook (inkl. Multi-TP-Fraktal-Payload) | MP-07 |
+| MP-15 | `MP-15-fractal-directional.md` | Fraktale High-Leverage-Einzeltrade-Strategie (TP1 40 % / TP2 30 % / TP3 20 % / Runner 10 %, Fee-Covered Break-Even +0,05 %, 20–50x, ATR-Trailing-Kill-Switch) | MP-01, MP-05, MP-09 |
 | MP-10 | `MP-10-orderflow-validator.md` | L2/Footprint-Orderflow-Validator (Stacked Imbalances, CVD-Absorption, POC-Konfluenz, Iceberg) — optional, fail-closed ohne Tiefe | MP-04 |
 | MP-11 | `MP-11-onnx-tensor.md` | 16-Feature-Observation-Tensor + ONNX-Runtime-Inferenz mit deterministischem Fallback | MP-04, MP-05, MP-06 |
 | MP-12 | `MP-12-backtest-hypotheses.md` | Backtest-Harness: Faktor-Sweep H3, Hypothesen H1–H5, Look-ahead-Pipeline-Test, Walk-Forward | MP-02, MP-07 |
@@ -259,6 +260,45 @@ Horizont T, siehe §9 der Wissensdatenbank).
     zwei verschiedene Requests → zwei verschiedene Skripte
 
 **Nicht im Scope:** TradingView-Upload selbst (Loop B/TV-Seitig vorhanden).
+
+---
+
+## Phase MP-15 — Fraktaler High-Leverage-Einzeltrade
+
+**Warum:** Live-Beleg (§8 Regel 8 der Wissensdatenbank): der größte
+Verlust im erfolgreichen Bot-Run war die manuelle Exit-Latenz
+(15–20 % Peak-PnL). Der fraktale Einzeltrade bindet keine DCA-Marge,
+erlaubt 20–50x Hebel und sichert über gestaffelte TPs + automatischen
+Fee-Covered-Break-Even ab TP1.
+
+**Dateien:**
+- `sigma/execution/fee_covered_breakeven.py` (neu, oder in MP-01
+  `risk_guards.py` integriert — dann importieren):
+  `fee_covered_stop(entry_price, side, offset_pct=0.0005)`;
+  Richtungslogik long `×1,0005` / short `×0,9995`.
+- `sigma/strategies/fractal_directional.py` (neu, `BaseStrategy`):
+  - Entry nur bei Ranker-Freigabe (`sniper_hedge`/High-β) UND
+    BTC-Lead-Signal (Breakout/Retest, MP-03/MP-05) UND Minute 5–48.
+  - Plan-Intent mit TP-Staffel: TP1 40 % bei +1,0 %, TP2 30 % bei
+    +2,0 %, TP3 20 % bei +3,5 % (Defaults als Konstanten, ATR-Skalierung
+    optional), Runner 10 % mit ATR-Trailing.
+  - Initialer SL 0,6 % bzw. MP-01-Liq-Puffer (strengerer gewinnt).
+  - Nach TP1-Fill: `update_sl`-Intent auf Fee-Covered Break-Even
+    (Pflicht, automatisiert, kein manueller Eingriff).
+  - Kill-Switch: Exhaustion (MP-08) ODER Sweep der Zielliquidität ODER
+    Minute 55 → FLAT des Runners; kein Warten auf Menschen.
+- Webhook-Payload nach §12 (open mit tp1..3 + runner + offset;
+  update_sl nach TP1).
+- Tests: `tests/test_fractal_directional.py`
+  - TP-Preise/Mengen-Verhältnisse (40/30/20/10, Summe 100).
+  - Fee-Covered: long SL = entry×1,0005 > entry; short = entry×0,9995.
+  - SL-Logik: Liq-Puffer-Regel schlägt 0,6 % wenn strenger.
+  - TP1-Event → update_sl-Intent existiert zwingend.
+  - Minute 55 / Exhaustion → Runner-FLAT.
+  - Ohne Ranker-Freigabe → kein Entry.
+
+**Nicht im Scope:** Live-Orders (Paper), DCA-Grid-Logik (MP-02 bleibt
+unverändert), keine Hebel-Freigabe > MP-05-Empfehlung.
 
 ---
 

@@ -271,7 +271,37 @@ ohne explizite Ladder-Generierung und Tiefen-Guard → Roadmap-Phase MP-02.
   (Begründung: Der 1h-Vektor gibt Richtungsschild preis; nach Kerzenschluss
   ist der Downscale-Vorteil weg)
 
-### 5.5 Vorhandene Templates ✅
+### 5.5 Fraktaler High-Leverage-Einzeltrade (Directional mit TP-Staffel, ❌ noch nicht gebaut → MP-15)
+
+Vom Nutzer am 30.08.2026 spezifiziert: Übertragung des DCA-Prinzips auf
+**einzelne direktionale Trades** (Long/Short) mit fraktaler
+Teil-Gewinnmitnahme. Da das Risiko über Positionsgröße + harten SL
+definiert ist (statt über Nachkauf-Marge), sind Hebel **20x–50x**
+vertretbar — das löst die Margin-Bindung der DCA-Grids.
+
+- **Entry:** validierter Wendepunkt — Punkt C einer XABCD-Harmonik,
+  Liquidity-Sweep oder Breakout nach BTC-Lead-Signal + Alt-Volume-Surge
+  (Lead-Lag-Beleg: BTC 1m-Break über Neckline 78.124 →
+  我踏马来了 0,01340 → >0,01460, ~+9 % im Move).
+- **TP-Staffel (frak­tale Stückelung):**
+  | Stufe | Anteil | Ziel | Begründung |
+  |---|---|---|---|
+  | TP1 | 40 % | ~+1,0 % | erste Widerstandszone/Schnellgewinn |
+  | TP2 | 30 % | ~+2,0 % | Neckline/FVG |
+  | TP3 | 20 % | ~+3,5 % | harmonisches Ziel D (1,618-Ext.) |
+  | Runner | 10 % | offen | ATR-Trailing für parabolische Züge |
+- **Pflicht-Guardrail nach TP1:** SL der Restposition zwingend auf
+  **Fee-Covered Break-Even** ziehen (siehe §8 Regel 6) — Trade ist ab
+  dann netto risikofrei.
+- **Initialer Hard-SL:** 0,6 % gegen Entry (MP-01-Liq-Puffer-Regel hat
+  Vorrang; SL 0,5 % über Liq-Preis).
+- **Beispielrechnung (30x, 20 USDT Margin = 600 Notional):** SL-Hit
+  −3,60 USDT (−18 % Margin); bei +2,5 % Move: TP1 +2,40 / TP2 +3,60 /
+  TP3 +4,20 USDT = +10,20 USDT (+51 % ROI auf Margin).
+- **Webhook:** `open_long`/`open_short` mit tp1..tp3 je `{price,
+  qty_pct}` + Runner + `update_sl` nach TP1 (Schema in §12).
+
+### 5.6 Vorhandene Templates ✅
 
 - `htf_trend_ltf_reversion` (NY-Momentum, generiert Pine v6)
 - `dynamic_channel_dca` (Asia/Channel-DCA)
@@ -304,6 +334,13 @@ ohne explizite Ladder-Generierung und Tiefen-Guard → Roadmap-Phase MP-02.
   Zuordnung β ≥ 2,8 & RVOL ≥ 2,5 → 25x-Sniper; sonst 10x/5x-DCA
 - **Screening-Takt:** 1× pro geschlossener 1h-BTC-Kerze
   (Minute 00–05 Scan&Deploy, 05–48 Execution, 48–55 Unwind, 55–60 Idle)
+- **Live-Beleg Lead-Lag (30.08.2026):** BTC 1m XABCD-Break über Neckline
+  78.124 → 78.177 (Book 65 % Bids / 35 % Asks); 我踏马来了 reagierte
+  0,01340 → >0,01460. Folge-DCA-Bots: Bot #1 (10x Long, 1h51m)
+  +52,76 % (+7,96 USDT; Arbitrage +66,06 % / Trend −13,31 %, Close 0,014351),
+  Bot #2 (10x Long, 5m31s) +1,51 % (reiner Trend-PnL). Bestätigt:
+  BTC-Lead-Signal → High-Beta-Alt-Ausführung funktioniert; Hauptleck ist
+  der Exit (siehe §8 Regel 8).
 
 ---
 
@@ -364,13 +401,28 @@ Dichte-Extraktion und Kalibrierung fehlen → MP-06.
 5. **Post-Trade-Cooldown:** 30 min Pause nach Verlust-Exit (Anti-Revenge).
 6. **Kein manuelles Überschreiben von TP/Stops im Schmerzpunkt:**
    Take-Profit bleibt bei 1,5–2 % auf Average Price stehen;
-   nach Eintritt ins Plus Stop auf Break-Even nachziehen.
+   nach TP1 wird der Stop **automatisiert** auf Fee-Covered Break-Even
+   gezogen — das ist Pflicht, keine Option.
+   **Fee-Covered Break-Even (Nutzer-Regel, 30.08.2026):** SL nicht auf
+   exaktes Entry, sondern `entry × 1,0005` (Long) bzw.
+   `entry × 0,9995` (Short). Begründung: bei 30x Hebel kosten
+   Roundtrip-Taker-Fees (~0,04 %/Seite auf Notional) ~2,4 % Margin;
+   ein Stop auf 0,00 % ist damit ein Netto-Verlust. +0,05 % deckt die
+   Gebühren vollständig ab und liegt unter dem 1m-Rauschen.
 7. **Volatilitäts-Exhaustion überwachen (Grid-Unwind):** BBW fällt >40 %
    vom Tageshoch, OI fällt bei steigendem Preis, CVD flacht ab →
    asynchrone Glattstellung einleiten (Gewinner-Seite zuerst schließen,
    Verlierer-Seite am VWAP/EMA20-Pullback schließen; das senkt Slippage um
    bis zu ~70 % gegenüber gleichzeitigem Market-Dump).
-8. **Kapitalerhalt schlägt Alles:** „Survive to trade another day.“
+8. **Automatischer Exit/Kill-Switch — keine menschliche Exit-Latenz
+   (Live-Beleg, 30.08.2026):** Pionex-DCA-Bot auf 我踏马来了 (10x Long)
+   schloss mit +52,76 % (+7,96 USDT; Arbitrage-PnL +9,97 USDT, Trend-PnL
+   −2,01 USDT), der Close bei 0,014351 erfolgte aber erst nach dem Spike-Top
+   bei 0,014600 — der manuelle Exit kostete schätzungsweise 15–20 % des
+   Peak-PnL. Regel: TP-Trailing (ATR-basiert am FVG/Widerstand) und
+   Kill-Switch am oberen Liquidity-Sweep müssen automatisiert feuern;
+   der Mensch startet, Sigma beendet.
+9. **Kapitalerhalt schlägt Alles:** „Survive to trade another day.“
 
 ---
 
@@ -471,8 +523,21 @@ Dichte-Extraktion und Kalibrierung fehlen → MP-06.
   `secret`)
 - Nach Move/TTL: Strategie de-provisionieren (ephemere Agenten)
 - Backtest + Live nutzen identischen Code (Loop B testet, Loop A führt aus)
+- **Schema-Erweiterung für fraktale Einzeltrades (MP-15):** Entry-Payload
+  trägt gestaffelte TPs mit:
+  `action` `open_long`/`open_short`, `ticker`, `price` (Close der
+  geschlossenen Bar), `fixed_leverage`, `initial_sl`,
+  `tp1..tp3` je `{price, qty_pct}` (40/30/20), `runner_qty_pct` (10),
+  `fee_covered_be_offset=0.0005`, `strategy_id`, `secret`.
+  Nach TP1 folgt `update_sl` mit `new_sl = entry×(1±0,0005)` und
+  `reason: TP1_HIT_FEE_COVERED_BREAKEVEN`; Exit = CLOSE.
 - 🟡 `pine_v6_generator.py` + `app/tv/alert_provisioner.py` existieren;
   der dynamische Provisionierer fehlt → MP-09
+- **Achtung:** Der im Chat 2 von Gemini erzeugte Pine-v5-Entwurf ist
+  **nicht kanonisch** (falsche alert-Frequenz, intrabar repaint-gefährdet,
+  `strategy.entry` statt Webhook-only, Python-Header in .pine). MP-09
+  erzeugt v6 mit Bar-Close-Alerts (`barstate.isconfirmed`/[1]-Offset,
+  `lookahead_off`) — Entwurf nur als Payload-Feldreferenz nutzen.
 
 ---
 

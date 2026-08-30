@@ -28,6 +28,7 @@ Diese Prompts sind dafür gedacht, **nacheinander von KI-Agenten**
 | MP-07 | Quantum-Sniper-Strategie | ja |
 | MP-08 | Exhaustion + Async-Unwind | ja |
 | MP-09 | Dynamischer Pine-Provisionierer | ja |
+| MP-15 | Fraktaler High-Leverage-Einzeltrade (40/30/20/10, Fee-Covered BE) | ja |
 | MP-10 | Orderflow-Validator | optional |
 | MP-11 | ONNX-Tensor + Inferenz | ja |
 | MP-12 | Backtest-Harness/Hypothesen | ja |

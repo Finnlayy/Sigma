@@ -21,8 +21,18 @@ Alerts, TTL-De-Provisioning) und das API/Webhook-Kapitel im
   - Webhook-Payload exakt Schema A: `action` (BUY/SELL/CLOSE groß),
     `ticker`, `price` (Close der geschlossenen Bar), `stop_loss`,
     `take_profit`, `fixed_leverage`, `strategy_id`, `secret`.
-  - Drei Alert-Zustände: Entry, Stop-Loss, Take-Profit — jeder mit
-    korrekter `action` (CLOSE bei SL/TP).
+  - **Zusätzlich Fraktal-Modus (für MP-15):** Entry-Payload mit
+    gestaffelten TPs `tp1`/`tp2`/`tp3` je `{price, qty_pct}` (40/30/20),
+    `runner_qty_pct` (10), `fee_covered_be_offset=0.0005`; nach
+    TP1-Bar-Close ein Alert `action=UPDATE_SL` mit
+    `new_sl = entry × 1,0005` (long) / `× 0,9995` (short) und
+    `reason: TP1_HIT_FEE_COVERED_BREAKEVEN`.
+  - Alert-Zustände: Entry, Teil-TP1/2/3, SL-Nachführung, Stop/Take-Exit —
+    jeder mit korrekter `action` (CLOSE bei SL/TP).
+  - **Warnung:** Ein im Chat kursierender Gemini-Pine-v5-Entwurf ist
+    fehlerhaft (intrabar-Alerts, `strategy.entry`, Python-Header) und
+    darf nicht kopiert werden; erzeuge sauberes v6 mit
+    Bar-Close-Bedingung.
   - Kopfkommentar mit strategy_id + TTL-Zeitstempel für das
     De-Provisioning nach Move/TTL.
 - `de_provision_hint(request)` erzeugt die Kennung, unter der das
@@ -37,6 +47,9 @@ Alerts, TTL-De-Provisioning) und das API/Webhook-Kapitel im
 - Zwei verschiedene Requests → zwei verschiedene Skripte (Kennzeichnung
   über strategy_id/Konstanten).
 - CLOSE-Payload bei SL/TP enthält korrekte action.
+- Fraktal-Modus: generierter Entry enthält tp1/tp2/tp3 mit Preis+qty_pct
+  (40/30/20) und runner 10; UPDATE_SL-Alert referenziert entry×1,0005
+  (long) bzw. entry×0,9995 (short).
 - Deterministisch: gleiche Eingabe → identischer String.
 
 ## Nicht im Scope

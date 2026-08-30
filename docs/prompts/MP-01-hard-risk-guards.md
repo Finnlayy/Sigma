@@ -25,6 +25,12 @@ Erstelle `sigma/execution/risk_guards.py` mit reinen, testbaren Funktionen:
    `< 0.05` (5 %) gibt `needs_hitl=True` zurück.
 5. `cooldown_active(last_exit_ts, now_ts, min_seconds=1800)` — 30 min
    Cooldown nach einem Exit (Verlust oder TTL-Flat).
+6. `fee_covered_stop(entry_price, side, offset_pct=0.0005)` —
+   **Fee-Covered Break-Even** (Nutzer-Regel): nach TP1 wird der SL auf
+   `entry × 1,0005` (long) bzw. `entry × 0,9995` (short) gezogen, nicht
+   auf das exakte Entry. Begründung: Roundtrip-Taker-Fees (~0,04 %/Seite
+   auf Notional) kosten bei 30x Hebel ~2,4 % Margin; der 0,05 %-Puffer
+   deckt sie vollständig ab. Wird von MP-15 (fraktale Strategie) genutzt.
 
 Alle Funktionen sind pure Funktionen ohne Seiteneffekte, mit vollständigen
 Typannotationen und Docstrings. Werte als Prozentsätze als dezimale Floats
@@ -46,6 +52,9 @@ keine bestehenden Gate-Werte oder Session-Logik.
   Bar wird ignoriert.
 - 4,3 % Liq-Distanz → `needs_hitl=True`; 12 % → False.
 - Cooldown blockiert bei 29 min, erlaubt bei 31 min.
+- Fee-Covered: long `fee_covered_stop(100, "long") == 100.05`;
+  short `== 99.95`; Wert liegt stets auf der sicheren Seite (long über,
+  short unter Entry).
 - Nutze den im Repo üblichen Teststil (synthetische Bars als Listen/Dicts,
   vgl. `tests/test_loops_cde.py`).
 
