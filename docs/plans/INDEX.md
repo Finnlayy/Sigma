@@ -6,7 +6,7 @@
 | MP-02 | PLAN-DONE | `docs/plans/MP-02.md` | — | MP-03 |
 | MP-03 | PLAN-DONE | `docs/plans/MP-03.md` | — | MP-04 |
 | MP-04 | PLAN-DONE | `docs/plans/MP-04.md` | — | MP-05 |
-| MP-05 | OPEN | `docs/plans/MP-05.md` | vorheriger Pflicht-Plan | MP-06 |
+| MP-05 | PLAN-DONE | `docs/plans/MP-05.md` | — | MP-06 |
 | MP-06 | OPEN | `docs/plans/MP-06.md` | vorheriger Pflicht-Plan | MP-07 |
 | MP-07 | OPEN | `docs/plans/MP-07.md` | vorheriger Pflicht-Plan | MP-08 |
 | MP-08 | OPEN | `docs/plans/MP-08.md` | vorheriger Pflicht-Plan | MP-09 |
