@@ -482,3 +482,41 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    summary = store.closed_pnl_summary("paper")
+    assert summary["count"] == 2
+    assert summary["pnl"] == 13.0
+    assert store.closed_pnl_summary("live") == {"count": 1, "pnl": 99.0}
+
+
+def test_closed_stats_by_strategy_matches_python_group(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "stats.duckdb"))
+    rows = [
+        ("a", "s1", 10.0, 100.0),
+        ("b", "s1", -4.0, 80.0),
+        ("c", "s1", 0.0, 20.0),   # flat — not a win (matches Python `> 0`)
+        ("d", "s2", 2.5, 50.0),
+        ("e", "s2", None, None),  # COALESCE to 0
+    ]
+    for tid, sid, pnl, notional in rows:
+        store.upsert_trade({
+            "trade_id": tid, "strategy_id": sid, "status": "closed",
+            "execution_mode": "paper", "symbol": "BTC/USD",
+            "direction": "LONG", "side": "buy",
+            "net_pnl_usd": pnl, "notional_usd": notional,
+        })
+    store.upsert_trade({
+        "trade_id": "open", "strategy_id": "s1", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+    })
+    stats = store.closed_stats_by_strategy()
+    assert stats["s1"]["n"] == 3
+    assert stats["s1"]["wins"] == 1
+    assert stats["s1"]["pnl"] == 6.0
+    assert stats["s1"]["volume"] == 200.0
+    assert stats["s2"]["n"] == 2
+    assert stats["s2"]["wins"] == 1
+    assert stats["s2"]["pnl"] == 2.5
+    assert stats["s2"]["volume"] == 50.0

@@ -514,6 +514,49 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.live_kraken_sync_ts = None
 
 
+def test_logs_poll_uses_sql_aggregates_not_full_scan(client):
+    """GET /api/logs must match the in-memory helpers without a 10k-row pull."""
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "bolt_sql_s1", "name": "Bolt SQL", "status": "inactive",
+        "asset_pair": "BTC/USD", "interval_min": 15, "execution_mode": "paper",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt_a", "strategy_id": "bolt_sql_s1", "status": "closed",
+        "strategy_name": "Bolt SQL", "execution_mode": "paper",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 12.0, "notional_usd": 200.0,
+        "exit_time": "2026-08-30 10:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt_b", "strategy_id": "bolt_sql_s1", "status": "closed",
+        "strategy_name": "Bolt SQL", "execution_mode": "",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": -3.0, "notional_usd": 80.0,
+        "exit_time": "2026-08-30 11:00:00",
+    })
+    body = client.get("/api/logs").json()
+    mine = next(r for r in body["strategyPnL"] if r["strategyId"] == "bolt_sql_s1")
+    assert mine["totalTrades"] == 2
+    assert mine["winningTrades"] == 1
+    assert mine["losingTrades"] == 1
+    assert mine["realizedPnL"] == 9.0
+    assert mine["volumeTradedUSD"] == 280.0
+    assert mine["winRate"] == 50.0
+    paper = store.closed_pnl_summary("paper")
+    assert body["metrics"]["totalTrades"] == paper["count"]
+    assert body["balances"]["USD"] == pytest.approx(50_000.0 + paper["pnl"])
+    # In-memory helper (legacy scan) must agree with the SQL poll path.
+    closed = store.trades(status="closed", limit=10000)
+    via_scan = main._strategy_pnl(main.state, store.list_strategies(), closed)
+    via_sql = main._strategy_pnl(main.state, store.list_strategies())
+    scan_row = next(r for r in via_scan if r["strategyId"] == "bolt_sql_s1")
+    sql_row = next(r for r in via_sql if r["strategyId"] == "bolt_sql_s1")
+    assert sql_row == scan_row == mine
+
+
 def test_zero_mock_seams_are_honest_empty(client):
     sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
     assert sent.get("available") is False
