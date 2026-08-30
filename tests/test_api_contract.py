@@ -514,6 +514,53 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.live_kraken_sync_ts = None
 
 
+def test_logs_metrics_and_strategy_pnl_use_sql_aggregates(client):
+    import app.server.main as main
+
+    sid = "bolt_agg_strat"
+    created = client.post("/api/strategies", json={
+        "id": sid, "name": "Bolt Agg", "assetPair": "BTC/USD",
+        "executionMode": "paper", "status": "inactive",
+    })
+    assert created.status_code == 200
+    store = main.state.store
+    store.upsert_trade({
+        "trade_id": "bolt-a", "strategy_id": sid, "strategy_name": "Bolt Agg",
+        "status": "closed", "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+        "notional_usd": 100.0, "exit_time": "2026-08-30T12:00:00",
+        "entry_time": "2026-08-30T11:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-b", "strategy_id": sid, "strategy_name": "Bolt Agg",
+        "status": "closed", "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -4.0,
+        "notional_usd": 80.0, "exit_time": "2026-08-30T13:00:00",
+        "entry_time": "2026-08-30T12:30:00",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-c", "strategy_id": sid, "strategy_name": "Bolt Agg",
+        "status": "closed", "execution_mode": "live", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+        "notional_usd": 50.0, "exit_time": "2026-08-30T14:00:00",
+        "entry_time": "2026-08-30T13:30:00",
+    })
+
+    body = client.get("/api/logs").json()
+    stats = store.closed_pnl_stats("paper")
+    assert body["metrics"]["totalTrades"] == stats["count"]
+    assert abs(body["balances"]["USD"] - (
+        float(next(s.split(":")[1] for s in main.state.config.paper_seeds if s.startswith("USD:")))
+        + stats["pnl"]
+    )) < 1e-6
+    row = next(r for r in body["strategyPnL"] if r["strategyId"] == sid)
+    assert row["totalTrades"] == 3
+    assert row["winningTrades"] == 2
+    assert row["realizedPnL"] == 105.0
+    assert row["volumeTradedUSD"] == 230.0
+    assert any(o.get("id") == "bolt-a" for o in body["orders"])
+
+
 def test_zero_mock_seams_are_honest_empty(client):
     sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
     assert sent.get("available") is False
