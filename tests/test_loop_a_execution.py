@@ -482,3 +482,55 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_pnl_stats("paper")
+    assert stats["pnl"] == 13.0
+    assert stats["count"] == 2
+    live = store.closed_pnl_stats("live")
+    assert live["pnl"] == 99.0
+    assert live["count"] == 1
+
+
+def test_closed_pnl_by_strategy_matches_python_scan(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "by_sid.duckdb"))
+    rows = [
+        ("t1", "alpha", "paper", 4.0, 100.0),
+        ("t2", "alpha", "", -1.0, 50.0),
+        ("t3", "beta", "paper", 2.5, 80.0),
+        ("t4", "alpha", "live", 9.0, 200.0),
+        ("t5", "beta", "paper", 0.0, 10.0),
+        ("t6", "alpha", "paper", 1.0, 25.0),  # open — must be excluded
+    ]
+    for tid, sid, mode, pnl, notional in rows:
+        store.upsert_trade({
+            "trade_id": tid, "strategy_id": sid,
+            "status": "open" if tid == "t6" else "closed",
+            "execution_mode": mode, "symbol": "BTC/USD",
+            "direction": "LONG", "side": "buy",
+            "net_pnl_usd": pnl, "notional_usd": notional,
+        })
+
+    closed = store.trades(status="closed", limit=10000)
+    expected: dict = {}
+    for t in closed:
+        sid = str(t.get("strategy_id") or "")
+        rec = expected.setdefault(sid, {"realized": 0.0, "wins": 0, "trades": 0, "volume": 0.0})
+        pnl = float(t.get("net_pnl_usd") or 0.0)
+        rec["realized"] += pnl
+        rec["wins"] += 1 if pnl > 0 else 0
+        rec["trades"] += 1
+        rec["volume"] += float(t.get("notional_usd") or 0.0)
+
+    got = {r["strategy_id"]: r for r in store.closed_pnl_by_strategy()}
+    assert set(got) == set(expected)
+    for sid, rec in expected.items():
+        assert got[sid]["realized"] == rec["realized"]
+        assert got[sid]["wins"] == rec["wins"]
+        assert got[sid]["trades"] == rec["trades"]
+        assert got[sid]["volume"] == rec["volume"]
+    # alpha closed: 4 + (-1) + 9 = 12; 2 wins; 3 trades; vol 350
+    assert got["alpha"]["realized"] == 12.0
+    assert got["alpha"]["wins"] == 2
+    assert got["alpha"]["trades"] == 3
+    assert got["alpha"]["volume"] == 350.0

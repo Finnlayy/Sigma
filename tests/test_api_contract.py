@@ -531,3 +531,39 @@ def test_zero_mock_seams_are_honest_empty(client):
     assert lake.get("ok") is False and lake.get("mode") == "disabled"
     poly = client.get("/api/quant/polymarket/layer0").json()
     assert poly.get("valid") is False and poly.get("reason") == "missing_data"
+
+
+def test_logs_strategy_pnl_sql_aggregates(client):
+    """GET /api/logs must match DuckDB GROUP BY, not a stale 10k-row Python scan."""
+    import app.server.main as main
+
+    sid = "bolt-pnl-alpha"
+    main.state.store.upsert_strategy({
+        "id": sid, "name": "Bolt Alpha", "status": "inactive",
+        "assetPair": "BTC/USD", "executionMode": "paper",
+    })
+    for tid, mode, pnl, notional, status in (
+        ("bolt-t1", "paper", 4.0, 100.0, "closed"),
+        ("bolt-t2", "", -1.0, 50.0, "closed"),
+        ("bolt-t3", "live", 99.0, 200.0, "closed"),
+        ("bolt-t4", "paper", 2.0, 25.0, "open"),
+    ):
+        main.state.store.upsert_trade({
+            "trade_id": tid, "strategy_id": sid, "strategy_name": "Bolt Alpha",
+            "status": status, "execution_mode": mode, "symbol": "BTC/USD",
+            "direction": "LONG", "side": "buy",
+            "net_pnl_usd": pnl, "notional_usd": notional,
+            "exit_time": "2026-08-30 12:00:00" if status == "closed" else None,
+        })
+
+    body = client.get("/api/logs").json()
+    row = next(r for r in body["strategyPnL"] if r["strategyId"] == sid)
+    assert row["realizedPnL"] == 102.0  # 4 + (-1) + 99; open row excluded
+    assert row["totalTrades"] == 3
+    assert row["winningTrades"] == 2
+    assert row["losingTrades"] == 1
+    assert row["volumeTradedUSD"] == 350.0
+    assert row["winRate"] == 66.7
+    paper_stats = main.state.store.closed_pnl_stats("paper")
+    assert body["metrics"]["totalTrades"] == paper_stats["count"]
+    assert abs(body["metrics"]["balanceUSD"] - body["balances"]["USD"]) < 0.011

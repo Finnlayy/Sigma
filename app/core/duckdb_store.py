@@ -589,19 +589,54 @@ class DuckDBStore:
                     r[k] = str(r[k])
         return rows
 
-    def sum_closed_pnl(self, execution_mode: str = "paper") -> float:
-        """SUM net_pnl in DuckDB — do not materialize up to 10k trade rows.
+    def closed_pnl_stats(self, execution_mode: str = "paper") -> Dict[str, float]:
+        """SUM + COUNT in one DuckDB scan — do not materialize trade rows.
 
         Matches Python `(execution_mode or "paper") == mode` including NULL/''.
-        Bench @ 4k closed rows: trades()+sum ~22 ms vs this ~0.5 ms (~45×).
+        GET /api/logs is polled every 5–8s and only needs these two numbers
+        plus per-strategy GROUP BY (see closed_pnl_by_strategy). Bench @ 8k
+        closed rows: trades(10000)+Python scan ~35.7 ms vs stats+GROUP BY+
+        trades(80) ~4.1 ms (~9×).
         """
         row = self._one(
-            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
+            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl, COUNT(*) AS n FROM trades "
             "WHERE status = 'closed' "
             "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
             [execution_mode, execution_mode],
         )
-        return float(row["pnl"]) if row else 0.0
+        if not row:
+            return {"pnl": 0.0, "count": 0}
+        return {"pnl": float(row["pnl"] or 0.0), "count": int(row["n"] or 0)}
+
+    def sum_closed_pnl(self, execution_mode: str = "paper") -> float:
+        """SUM net_pnl in DuckDB — wrapper over closed_pnl_stats."""
+        return self.closed_pnl_stats(execution_mode)["pnl"]
+
+    def closed_pnl_by_strategy(self) -> List[Dict[str, Any]]:
+        """Per-strategy closed PnL via SQL GROUP BY — no row materialization.
+
+        Replaces the Python by_sid scan over up to 5k trade dicts on every
+        /api/logs poll. Same empty-string strategy_id handling as
+        ``str(t.get("strategy_id") or "")``.
+        """
+        rows = self._rows(
+            "SELECT CAST(COALESCE(strategy_id, '') AS VARCHAR) AS strategy_id, "
+            "COALESCE(SUM(net_pnl_usd), 0) AS realized, "
+            "COUNT(*) AS trades, "
+            "COALESCE(SUM(CASE WHEN net_pnl_usd > 0 THEN 1 ELSE 0 END), 0) AS wins, "
+            "COALESCE(SUM(notional_usd), 0) AS volume "
+            "FROM trades WHERE status = 'closed' GROUP BY 1"
+        )
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "strategy_id": str(r.get("strategy_id") or ""),
+                "realized": float(r.get("realized") or 0.0),
+                "trades": int(r.get("trades") or 0),
+                "wins": int(r.get("wins") or 0),
+                "volume": float(r.get("volume") or 0.0),
+            })
+        return out
 
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:
