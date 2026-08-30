@@ -10,7 +10,7 @@ Diese Prompts sind dafür gedacht, **nacheinander von KI-Agenten**
 2. Der bestehende Code unter `sigma/` ist maßgeblich — erfinde keine
    Module/Pfade, prüfe mit `find`/`grep`, was existiert.
 3. Eine Phase = ein PR. Phasen in numerischer Reihenfolge; optionale Phasen
-   (MP-13, MP-14) nur auf explizite Anforderung.
+   (MP-10, MP-13, MP-14) nur auf explizite Anforderung.
 4. Globale Definition of Done: siehe Ende der Roadmap
    (Pytest grün, Typen, `to_dict()`, fail-closed, kein Look-Ahead,
    Paper-only, keine Duplizierung, Modul-Header-Konvention).
@@ -19,18 +19,19 @@ Diese Prompts sind dafür gedacht, **nacheinander von KI-Agenten**
 
 | Prompt | Phase | Pflicht? |
 |---|---|---|
-| MP-01 | Hard Risk Guards | ja, zuerst |
+| MP-01 | Hard Risk Guards (inkl. Fee-Covered Break-Even) | ja, zuerst |
 | MP-02 | Micro-DCA-Ladder | ja |
-| MP-03 | Candle-/Regime-Signale | ja |
-| MP-04 | Power-Triangle/Phasor | ja |
-| MP-05 | Hourly Gate + Symbol-Ranker | ja |
+| MP-03 | Candle-/Regime-Signale (Thrust, Marubozu/FVG, 00:00-Envelope) | ja |
+| MP-04 | Price-Action-Physics (S/P/Q_norm, η, cos φ Pfad+Bar), Hilbert-Phasor, MTF-Resonanz | ja |
+| MP-05 | Hourly Gate + High-Beta-Symbol-Ranker (Stufe 2 der Pipeline) | ja |
 | MP-06 | Polymarket Feed/Dichte/Trajektorie | ja |
-| MP-07 | Quantum-Sniper-Strategie | ja |
+| MP-07 | Quantum-Sniper-Strategie (Phase 2) | ja |
 | MP-08 | Exhaustion + Async-Unwind | ja |
-| MP-09 | Dynamischer Pine-Provisionierer | ja |
+| MP-09 | Dynamischer Pine-v6-Provisionierer (inkl. Fraktal-Multi-TP) | ja |
 | MP-15 | Fraktaler High-Leverage-Einzeltrade (40/30/20/10, Fee-Covered BE) | ja |
+| MP-11 | ONNX 16-Feature-Tensor (Formeln nach §11) + Dual-Head-Fallback | ja |
+| MP-12 | Backtest-Harness (VectorBT), Hypothesen H1–H7, Look-ahead-Check | ja |
+| MP-16 | Lightweight-Charts-Dashboard + cos-φ-Hysterese-Backtester | ja |
 | MP-10 | Orderflow-Validator | optional |
-| MP-11 | ONNX-Tensor + Inferenz | ja |
-| MP-12 | Backtest-Harness/Hypothesen | ja |
 | MP-13 | Multi-Asset XAU/Forex | optional |
 | MP-14 | Event-Straddle | optional |

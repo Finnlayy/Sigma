@@ -1,52 +1,68 @@
 # Master-Prompt MP-11 — ONNX-Observation-Tensor & Inferenz
 
-Lies `docs/SIGMA-WISSENSDATENBANK.md` §11 (ONNX-Tensor, 16 Features,
-Determinismus, Fallback-Policy). Voraussetzungen: MP-03/MP-04 (Signale),
-MP-05 (Ranker/Screening), MP-06 (Polymarket-Bias) liefern die
-Eingabewerte. Prüfe, ob `onnxruntime` in `requirements.txt` steht bzw.
-als optionale Abhängigkeit geführt werden kann.
+Lies `docs/SIGMA-WISSENSDATENBANK.md` §11 (ONNX-Tensor mit den
+kanonischen 9-Kern-Feature-Formeln, Dual-Head-Modellarchitektur,
+Bar-Lock, Zwei-Stufen-Grenze) und §9.5 (Price-Action-Physics-Features).
+Voraussetzungen: MP-04 (cos φ / P_norm / Q_norm / η), MP-05
+(Ranker/Screening), MP-06 (Polymarket-Kalibrierung) liefern die Eingaben.
+Prüfe, ob `onnxruntime` in `requirements.txt` steht bzw. als optionale
+Abhängigkeit geführt werden kann. Chat-Module
+(`onnx_quantum_tensor_pipeline.py` o.ä.) sind Referenzen, keine Basis —
+ihr 9D-Tensor mit teils kaputten Indizierungen (`tensor =` statt
+`tensor[0,k] =`) darf nicht kopiert werden.
 
 ## Auftrag — `sigma/core/onnx_quantum_tensor.py`
 
-1. **Feature-Builder** (reine Funktion, deterministisch):
-   Tensor `[1,16]` float32 mit den 16 Werten aus §11:
-   cos φ, Resonanz, Δμ, FVG-Tiefe (ATR), Hurst, Walk-Ratio,
-   Session-Aktivität, Minuten-nach-Open, TTL, Throttle-Level,
-   Wellenzone/-breite, 21:00-Flag, Ranker-Score, Liquidation-Puffer,
-   Makro-Bias, ATR-Ratio.
-   - Alle Werte auf definierte Bereiche clippen/normalisieren
-     ([0,1] oder [−1,1]); skaleninvariant: BTC bei 78.000 $ und ein
-     Alt bei 0,014 $ müssen identische Feature-Wertbereiche liefern.
-   - Fehlt eine Quelle → sicherer Default (fail-closed: z. B.
-     Gate-Wert = 0 statt 1).
-2. **Inferenz-Wrapper**:
-   - Lädt ONNX-Modell nur, wenn Datei konfiguriert UND onnxruntime
-     importierbar; sonst `model_available=False`.
-   - Inferenz-Ausgabe: Aktion {OPEN_LONG, OPEN_SHORT, HOLD, FLAT} +
-     Konfidenz; FLAT erzwingt Unwind.
-   - Latenz: p99 < 2 ms (Test mit Zeitmessung, tolerante Schwelle im CI).
-3. **Deterministische Fallback-Policy** (reine Regel-Funktion,
-   läuft ohne Modell): UTC-safe (21:00–22:00 Quarantäne → FLAT),
-   TTL ≥ 10 min, Polymarket-Bias ≥ 0,65 UND (cos φ ≥ 0,75 oder
-   Discount-Konfluenz) → OPEN; sonst HOLD/FLAT nach Rangfolge.
-4. Orchestrator: `ctx["onnx"]`-Feld befüllen (hinter bestehendem
-   Port-/Feature-Muster); FLAT aus dem Modell → bestehender
-   Unwind-Pfad. Keine neuen Orders im Orchestrator.
+1. **Feature-Builder (reine Einzelfunktionen + Gesamt-Tensor):**
+   Tensor `[1,16]` float32, Kern-Features exakt nach §11:
+   - `cos_phi = clip((C−O)/(H−L+ε), −1, 1)`
+   - `P_norm = |C−O|/ATR14`, `Q_norm = (upper+lower wick)/ATR14`
+   - `pos_00 = tanh((C − open_00:00)/(2·ATR))`
+   - `m_tangent = arctan((C − open_00:00)/min_since_00) · 2/π`
+   - `P_cal = clip(platt_scale(poly_raw), 0, 1)`
+   - `pos_EQ = clip((C − range_low)/(range_high − range_low + ε), 0, 1)`
+   - `d_CE = tanh((C − ce50)/ATR)`
+   - `TTL_norm = restminuten_der_1h_Bar/60`
+   - Features 10–16 nach §11 (UTC-Safe-Flag, RVOL, CVD, Hurst,
+     Liq-Distanz, Two-Bar-Thrust, FVG-Touch).
+   - Fehlt eine Quelle → sicherer Default (fail-closed, Gate-Wert 0).
+   - Skaleninvarianz zwingend: BTC 78.000 und Alt 0,014 mit gleichen
+     Ratios → gleiche Tensorwerte (Test).
+2. **Inferenz-Wrapper:** onnxruntime nur, wenn Pfad konfiguriert UND
+   importierbar; sonst `model_available=False`. Erwartete Modell-
+   Schnittstelle (späteres Training, in dieser Phase NICHT trainieren):
+   Input `tensor_x [N,16]`; Outputs `action_probs` (Softmax über
+   Long/Flat/Short) und `leverage_factor` (10 + 15·sigmoid ∈ [10,25]).
+   Ein Dummy-Modell (gleiche I/O-Spezifikation) darf nur für Tests
+   erzeugt werden.
+3. **Deterministische Fallback-Policy (produktiv ohne Modell):**
+   TTL_norm < 0,15 oder UTC 21:00–22:00 → FLAT; P_cal ≥ 0,65 und
+   (cos_phi ≥ 0,75 oder pos_EQ im Discount mit Kauf-Tail Q_bias) → LONG;
+   spiegelbildlich SHORT; sonst FLAT/HOLD.
+4. **Bar-Level Lock:** pro Bar-Zeitstempel höchstens eine Aktion;
+   wiederholter Aufruf innerhalb des Bars → `BLOCKED_BY_BAR_LOCK`.
+5. **Zwei-Stufen-Grenze:** der Wrapper kennt KEINE Symbole; er
+   klassifiziert nur das BTC-Makro-Regime. Symbol-Auswahl bleibt beim
+   Ranker (MP-05). Keine Ticker-Strings im Tensor.
+6. Orchestrator: `ctx["onnx"]` befüllen; FLAT aus Modell/Fallback →
+   bestehender unwind-Pfad; keine Orders aus dem Orchestrator.
 
 ## Tests (`tests/test_onnx_tensor.py`)
 - Shape `(1,16)`, dtype float32, alle Werte im definierten Bereich.
-- Skaleninvarianz: zwei Eingaben mit gleichen Ratios, aber 10⁶-fach
-  verschiedenen Preisen → gleiche Tensorwerte.
-- Fallback-Policy: 21:30 UTC → FLAT; TTL 8 min → FLAT; alle
-  Bedingungen erfüllt → OPEN_LONG; ohne Poly-Bias → HOLD.
-- Ohne onnxruntime/Modell → Fallback läuft, kein Absturz.
-- Determinismus: 100 Aufrufe gleiche Eingabe → identische Ausgabe.
+- Jede Feature-Funktion einzeln gegen konstruierte Kerzen
+  (Marubozu → cos_phi≈1, P_norm hoch; Doji → ~0; pos_EQ unter 0,5 in
+  Discount; TTL_norm = Rest/60; pos_00 Vorzeichen korrekt).
+- Skaleninvarianz wie oben.
+- Fallback ohne Modell: 21:30 UTC → FLAT; TTL 8 min → FLAT;
+  alle Long-Bedingungen erfüllt → LONG; ohne P_cal → FLAT.
+- Bar-Lock: zweiter Aufruf mit gleichem Bar-Timestamp → BLOCKED.
+- Determinismus: 100 Aufrufe gleiche Eingabe → gleiche Ausgabe.
+- Latenz: Builder+Fallback p99 < 2 ms (tolerante CI-Schwelle).
 
 ## Nicht im Scope
-- Kein Training eines Modells (es wird nur konsumiert; ein
-  Dummy-/Identitätsmodell darf für Tests erzeugt werden).
-- Keine neuen Strategien.
+- Modelltraining, Echt-Markt-Feeds, neue Strategien,
+- Symbol-Logik im Tensor (ausschließliche Ranker-Zuständigkeit).
 
 ## Abnahme
-Pytest grün; ohne installiertes onnxruntime und ohne Modell-Datei
-darf nichts abstürzen.
+Pytest grün; ohne onnxruntime/Modell-Datei läuft alles über die
+Fallback-Policy, nichts darf abstürzen.

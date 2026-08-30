@@ -42,7 +42,8 @@
 | MP-15 | `MP-15-fractal-directional.md` | Fraktale High-Leverage-Einzeltrade-Strategie (TP1 40 % / TP2 30 % / TP3 20 % / Runner 10 %, Fee-Covered Break-Even +0,05 %, 20–50x, ATR-Trailing-Kill-Switch) | MP-01, MP-05, MP-09 |
 | MP-10 | `MP-10-orderflow-validator.md` | L2/Footprint-Orderflow-Validator (Stacked Imbalances, CVD-Absorption, POC-Konfluenz, Iceberg) — optional, fail-closed ohne Tiefe | MP-04 |
 | MP-11 | `MP-11-onnx-tensor.md` | 16-Feature-Observation-Tensor + ONNX-Runtime-Inferenz mit deterministischem Fallback | MP-04, MP-05, MP-06 |
-| MP-12 | `MP-12-backtest-hypotheses.md` | Backtest-Harness: Faktor-Sweep H3, Hypothesen H1–H5, Look-ahead-Pipeline-Test, Walk-Forward | MP-02, MP-07 |
+| MP-12 | `MP-12-backtest-hypotheses.md` | Backtest-Harness (VectorBT): Faktor-Sweep H3, Hypothesen H1–H7 (inkl. Weekend-Fakeout, cos-φ-Strategie), Look-ahead-Pipeline-Test, Walk-Forward | MP-02, MP-04, MP-07 |
+| MP-16 | `MP-16-research-dashboard.md` | Lightweight-Charts-Dashboard (3 Pane, Marker, Equity) + cos-φ-Pfad-Backtester mit Hysterese | MP-04, MP-12 |
 | MP-13 (optional) | `MP-13-multi-asset.md` | Multi-Asset-Erweiterung XAU/XAG/Forex (Venue-Ports, Marktzeiten) | MP-05 |
 | MP-14 (optional) | `MP-14-event-straddle.md` | Pre-Event Doppel-Hedge-Straddle-Template (Event-Waffe mit TTL/Net-Profit-Guarantee) | MP-01, MP-08 |
 
@@ -130,28 +131,37 @@ Sniper-Strategie (MP-07).
 ## Phase MP-04 — Leistungsdreieck & Phasor-Features
 
 **Dateien:**
-- `sigma/signals/power_triangle.py` (neu):
-  - `power_triangle(candle, atr, volume_ratio)` → P (Körper),
-    Q (Docht), S = √(P²+Q²), `cos_phi = P/S`
-  - Klassifikation: `cos_phi ≥ 0,85` → fester Move;
-    `< 0,30` → Docht-Fakeout; Zielzonen P (Rekalibrierung) und S (TP)
-  - Alles skaleninvariant (ATR-Einheiten)
+- `sigma/signals/power_triangle.py` (neu) — Formeln exakt nach
+  Wissensdatenbank §9.5 (Price-Action-Physics-Featurevektor):
+  - `price_action_physics(candles_df, atr_period=14)` → DataFrame/Dataclass
+    mit S_norm, P_norm (Betrag + signed), Q_norm, Q_upper_norm,
+    Q_lower_norm, Q_bias, eta_efficiency — ATR als Wilder-RMA,
+    ε-Schutz auf jeden Nenner
+  - `cos_phi_bar` = sign(Close−Open)·|Close−Open|/(High−Low)
+  - `cos_phi_path(close, window=20)` = (C_t−C_{t−N})/Σ|ΔC|
+    (Kaufman-Efficiency-Ratio; TR-Variante als Option)
+  - Klassifikation: η ≥ 0,85 fester Move; < 0,30 Docht-Fakeout;
+    P_norm > 1,2 Expansion; S_norm > 2,0 Climax; Cluster-Tabelle aus §9.2
 - `sigma/signals/hilbert_phasor.py` (neu):
   - In-Phase I / Quadratur Q (vereinfachte Hilbert/Differenz-Approximation),
     Amplitude, Phasenwinkel; keine Abhängigkeit von externen Libs
 - `sigma/signals/mtf_resonance.py` (neu):
-  - HTF-/LTF-Phasor → Winkeldifferenz via Konjugat-Produkt;
+  - HTF-/LTF-Phasor → Winkeldifferenz via **Konjugatprodukt**
+    `S = U·I*` (NICHT U·I — Winkelsumme ist sinnlos);
     `resonance = cos(Δφ)`; ≥ 0,75 konstruktive Resonanz,
     < −0,5 Dip-Charging (HTF bullish, LTF gegenläufig)
 - Tests: `tests/test_power_phasor.py`
-  - Reine Marubozu-Kerze: cos φ ≈ 1, Q ≈ 0
-  - Docht-Kerze: cos φ klein, S > P
+  - Reine Marubozu-Kerze: cos φ ≈ 1, Q ≈ 0, η ≈ 1
+  - Docht-Kerze: cos φ klein, S > P, Q_upper/Q_lower korrekt
+  - Pfad-Effizienz: monotone Serie → +1; Rundreise auf Start → 0
   - Gleichgerichtete Phasoren → Resonanz ≈ 1; gegenläufige → Dip-State
   - Determinismus: identische Eingaben → identische Ausgaben
 
 **Hinweis:** Phasor-Metapher ist bewusst einfach zu halten; operative
 Targets werden in reeller Algebra gerechnet (Winkel = fester Wert aus
-Horizont T, siehe §9 der Wissensdatenbank).
+Horizont T, siehe §9.6 der Wissensdatenbank). Die im Chat entstandenen
+Module `breakout_power_triangle.py`/`complex_power_engine.py` sind
+Konzeptreferenzen — diese eine Modul-Gruppe baut.
 
 ---
 
@@ -320,15 +330,31 @@ unverändert), keine Hebel-Freigabe > MP-05-Empfehlung.
 
 **Dateien:**
 - `sigma/core/onnx_quantum_tensor.py` (neu):
-  - 16-Feature-Tensor `[1,16]` float32, strikt auf [−1,1]/[0,1] geclipt
-    (Feature-Liste siehe Wissensdatenbank §11), skaleninvariant
-  - onnxruntime-Session optional; deterministische Regel-Fallback-Policy
-    (UTC-safe, TTL ≥ 0,15, poly ≥ 0,65 + cos φ ≥ 0,75 bzw. Discount → Aktion)
+  - 16-Feature-Tensor `[1,16]` float32, strikt auf [−1,1]/[0,1] geclipt;
+    die Kern-9-Features mit den Formeln aus Wissensdatenbank §11
+    (cos_φ-Bar, P_norm, Q_norm, pos_00=tanh, m_tangent=arctan·2/π,
+    P_cal, pos_EQ, d_CE=tanh, TTL_norm), Features 10–16 wie dort gelistet
+  - Jede Feature-Berechnung als reine, einzeln testbare Funktion
+  - onnxruntime-Session optional (Modell-Pfad konfiguriert + importierbar);
+    deterministische Regel-Fallback-Policy (UTC-safe, TTL_norm ≥ 0,15,
+    P_cal ≥ 0,65 + (cos φ ≥ 0,75 oder Discount/Tail) → LONG; symm. SHORT;
+    sonst FLAT)
+  - **Bar-Lock:** höchstens eine Inferenz-Aktion je Bar-Zeitstempel
+  - **Zwei-Stufen-Grenze:** Tensor/Inferenz klassifiziert nur das
+    BTC-Makro-Regime (Long/Flat/Short + Hebel); KEINE Symbolauswahl —
+    die macht der Ranker (MP-05)
+  - Modell-Architektur (für späteres Training, NICHT in dieser Phase zu
+    trainieren): Dual-Head 2×(Linear(16→64)+LayerNorm+GELU), Policy-Head
+    Softmax(3), Leverage-Head Sigmoid → 10+15·σ; opset 14, Ein-/Ausgänge
+    `tensor_x`/`action_probs`/`leverage_factor`; Dummy-Export nur für
+    Tests erlaubt
   - Latenz-Test: < 2 ms p99
 - Orchestrator: `ctx["onnx"]`, FLAT-Entscheidung erzwingt unwind
 - Tests: `tests/test_onnx_tensor.py`
-  - Shape/Dtype; Preis-Skalen-Invarianz (78.000 vs 0,014 → selbe Feature-Wertebereiche)
-  - Fallback-Policy ohne Modell
+  - Shape `(1,16)`/float32; jede Feature-Funktion gegen Konstruktion
+    (z. B. Marubozu → cos_φ≈1; pos_EQ in Discount < 0,5; TTL_norm=rest/60)
+  - Preis-Skalen-Invarianz (78.000 vs 0,014 → selbe Feature-Wertebereiche)
+  - Fallback-Policy ohne Modell; Bar-Lock sperrt zweite Aktion
   - 21:00-UTC / TTL < 10 min → FLAT
 
 ---
@@ -336,15 +362,52 @@ unverändert), keine Hebel-Freigabe > MP-05-Empfehlung.
 ## Phase MP-12 — Backtest-Harness & Hypothesen
 
 **Dateien:**
-- `tests/backtest/test_hypotheses_h1_h5.py` (neu):
+- `tests/backtest/test_hypotheses_h1_h6.py` (neu):
   - H1 bias-aligned vs. counter-trend FVGs; H2 Overlap-vs-Off-Session-Fill-Raten;
     H3 Faktor-Sweep 2x–30x mit Walk-Forward; H4 Weekend-Alt-Longs
-    (Slippage-Sensitivität); H5 Hurst/MFDFA-Gate-Drawdown-Vergleich
+    (Slippage-Sensitivität); H5 Hurst/MFDFA-Gate-Drawdown-Vergleich;
+    **H6 Wochenend-Fakeout-These (Nutzer):** Breakout-Signale Sa/So vs.
+    Mo–Fr, inkl. Montag-10:00-UTC-Momentum und Sweep-Reclaim-Muster,
+    Slippage-Szenarien (+0,1/+0,3/+0,6 %)
+  - H7 (neu): cos-φ-Pfad-Strategie (Efficiency-Ratio): Entry |cos φ| ≥ 0,40
+    mit Hysterese, Exit |cos φ| ≤ 0,15, Window-Sweep N = 10/14/20/30,
+    Fee 0,06 %/Roundtrip, 1-Bar-Lag — Erwartungswert vs. Benchmark
 - `sigma/backtest/lookahead_pipeline_check.py` (neu):
   - „Break the pipeline on purpose“: bewusstes Leck muss erkannt werden
   - HTF-Closed-Bar-Invariante als Assertion über alle Ticks
-- Nutzung bestehender TV-CSV/VectorBT-Infrastruktur (`app/backtest/`,
-  `app/optimizer/`), keine Doppelung
+- **VectorBT als Standard-Backtest-Engine** (vektorisierte Sweeps);
+  bestehende TV-CSV-Infrastruktur (`app/backtest/`, `app/optimizer/`)
+  als Datenquelle, keine Doppelung
+
+## Phase MP-16 — Research-Dashboard (Lightweight Charts) & cos-φ-Backtest
+
+**Warum:** Hypothesen brauchen ein visuelles Prüfwerkzeug; die im Chat
+konzipierte Lightweight-Charts-App validiert Features (cos φ, P/Q/S,
+Signale/Marker/Equity) unabhängig von der Live-Pipeline.
+
+**Dateien:**
+- `sigma/backtest/power_factor_backtest.py` (neu):
+  - cos-φ-Strategie (Pfad-Wirkungsgrad) mit Hysterese-State-Machine:
+    long ≥ +0,40 / short ≤ −0,40 / flat bei |cos φ| ≤ 0,15;
+    Position mit 1-Bar-Lag, Roundtrip-Fee 0,06 %;
+    Metriken: Return, Max-DD, Sharpe (8760 1h-Bars/Jahr), Win-Rate,
+    Profit-Faktor, Trade-Zahl; Parameter (N, Schwellen) als Sweep
+- `app/dashboard/tv_lightweight_export.py` (neu):
+  - Export Kerzen/Indikator/Equity/Marker als JSON (UNIX-Sekunden,
+    aufsteigend); eigenständiges HTML/JS mit 3 synchronisierten Panes
+    (Candles+Marker, cos φ mit Schwellenlinien, Equity vs. Benchmark)
+  - Reines CDN-Dashboard, kein Build-Prozess; Daten aus TV-CSV/
+    Backtest-Results, keine Live-Verbindung
+- Tests: `tests/backtest/test_power_factor_dashboard.py`
+  - Marker nur an Positionswechseln; Zeitreihe streng sortiert;
+    Backtest auf synthetischen Trend-/Chop-/Bär-Sequenzen (Stil §MP-12):
+    Trend → long-Gewinne, Chop → flat (kein Whip-Saw-Tod), Bär → short
+  - Hysterese: Signal bleibt bis Exit-Schwelle bestehen
+- **Nicht im Scope:** Live-Daten, Orderausführung, Alert-Versand.
+
+---
+
+## Phase MP-13 (optional) — Multi-Asset XAU/XAG/Forex
 
 ---
 

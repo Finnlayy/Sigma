@@ -455,6 +455,24 @@ Dichte-Extraktion und Kalibrierung fehlen → MP-06.
   < 0,30 = Chop/Fakeout
 - Regel: TP an die Scheinleistungs-Spitze S; Wiedereinstieg erst nach
   Rekalibrierung auf Körperebene P
+- **Zwei Berechnungsarten für cos φ (beide nutzen, verschiedene Horizonte):**
+  1. **Kerzen-Effizienz (Bar-Level):** η = |Close−Open| / (High−Low) ∈ [0,1],
+     vorzeichenbehaftet `cos_φ_bar = sign(Close−Open)·η`
+  2. **Pfad-Effizienz (Window-Level, Kaufman Efficiency Ratio):**
+     `cos_φ_path = (Close_t − Close_{t−N}) / Σ|Close_i − Close_{i−1}|` ∈ [−1,1];
+     True-Range-Variante: Nenner = Σ TR_i. +1 = monotoner Trend,
+     0 = reines Chop (Netto 0 bei langer Wegstrecke)
+- **Signal-Schwellen (Hysterese, aus Backtest-Diskussion):**
+  Long-Entry bei cos_φ_path ≥ +0,40; Short bei ≤ −0,40;
+  Exit/Flat wenn |cos_φ_path| ≤ 0,15 (zurück in Blindleistung/Chop);
+  Hysterese verhindert Whip-Saws. Strategie in MP-12 zu backtesten (H6).
+- **KNN/ML-Cluster-Tabelle (Price-Action-Physik):**
+  | Cluster | P_norm | Q_norm | η | Deutung |
+  |---|---|---|---|---|
+  | Reiner Trend/Impuls | >0,8 | <0,3 | >0,7 | Marubozu, Trendfolge |
+  | Liquidity Trap/Pin Bar | <0,2 | >0,8 | <0,2 | Fakeout/Umkehr (Q_upper vs Q_lower prüfen) |
+  | Battleground/Doji | <0,2 | >0,8 | <0,2 | beidseitige Dochte → Kompression vor Breakout |
+  | Volatility Climax | >1,2 | >0,8 | ~0,5 | Blow-off/Exhaustion (S_norm > 2,0) |
 - ❌ zu bauen → MP-04
 
 ### 9.3 Hilbert-Phasor & MTF-Resonanz
@@ -478,6 +496,43 @@ Dichte-Extraktion und Kalibrierung fehlen → MP-06.
 - **Der Trader/das System ist der geerdete Sternpunkt (Neutralleiter):**
   nicht mitschwingen, nach Trade sofort zurück in 100 % Cash (Flat-State)
 - Erdung = Disziplin/Stop-Loss/Sofort-Flat nach TTL
+
+### 9.5 Price-Action-Physics-Featurevektor (kanonische Formeln)
+
+Komplettes skaleninvariantes Feature-Set pro Bar aus OHLCV
+(alle Nenner mit ε-Schutz; ATR als Wilder-RMA, Periode 14):
+
+| Feature | Formel | Bedeutung |
+|---|---|---|
+| `S_norm` | `(High−Low)/ATR` | Scheinleistung: Gesamtspanne der Kerze |
+| `P_norm` | `|Close−Open|/ATR` | Wirkleistung: Körper-Stärke (Betrag) |
+| `P_norm_signed` | `(Close−Open)/ATR` | Wirkleistung mit Richtung |
+| `Q_norm` | `((High−Low)−|Close−Open|)/ATR` | Blindleistung: beide Dochte |
+| `Q_upper_norm` | `(High−max(Open,Close))/ATR` | obere Rejection (Bär-Absorption) |
+| `Q_lower_norm` | `(min(Open,Close)−Low)/ATR` | untere Rejection (Bull-Absorption/Tail) |
+| `Q_bias` | `Q_lower−Q_upper` | Rejection-Asymmetrie (+ = Kaufdruck) |
+| `eta_efficiency` | `|Close−Open|/(High−Low)` | Kerzen-Wirkungsgrad ∈ [0,1] |
+
+Schwellen: P_norm 0–0,2 Kompression/Doji; 0,5–0,9 gesunder Trend;
+>1,2 explosive Expansion (Körper > ATR). S_norm > 2,0 = Climax.
+Vektorisierte Berechnung O(N) pro Feature, reelle Zahlen, kein j im
+operativen Pfad. → MP-04 (Formeln dorthin als Akzeptanzgrundlage).
+
+### 9.6 Komplexe Zeigerrechnung & MTF-Harmonik (Theorie-Skelett)
+
+- `S = U · I*` (konjugiert komplex); naiv `U·I` addiert Winkel
+  (φ_u+φ_i = sinnlos, referenzpunktabhängig); nur die **Winkeldifferenz**
+  φ = φ_U − φ_I misst die Energieübertragung (wie Strom/Spannung im Netz)
+- Imaginäre Achse j = √−1 ist nur der 90°-Rotationsoperator; mit
+  **festem Zeithorizont T** (Polymarket-Expiry, TTL-Fenster) ist
+  ω·T ein fester Winkel → e^{jωT} ist Skalar → sämtliche Berechnung
+  fällt in reelle Algebra zurück: Wirkanteil = U·cos(φ),
+  Blindanteil = U·sin(φ)
+- MTF-Harmonik: HTF = Grundwelle, LTF = Oberwelle/Epizykel (Zeiger auf
+  Zeiger); Resonanz via `HTF · LTF*` (Konjugatprodukt),
+  resonance = cos(Δφ); ≥ 0,75 konstruktiv (Entry-Zustand),
+  < −0,5 bei HTF-bullisch/LTF-bärisch = Dip-Charging (Limit-Leiter
+  vorbereiten). TTL-Regel: Trade-Fenster = verbleibende HTF-Zeit × 0,75
 
 ---
 
@@ -504,11 +559,40 @@ Dichte-Extraktion und Kalibrierung fehlen → MP-06.
   FVG-CE50-Touch, Two-Bar-Thrust, Polymarket-Wahrscheinlichkeit,
   Poly-Zieldelta, TTL-normalisiert, UTC-Safe-Flag, RVOL, CVD-Absorption,
   Hurst, Liquidationsdistanz
-- Inferenz < 1 ms (onnxruntime, CPU, 1 Thread); deterministische
-  Regel-Policy als Fallback wenn kein Modell vorhanden
-- Modell-Ausgabe: Long/Flat/Short + Hebelempfehlung; unsichere Verteilung
-  (Entropie > 0,65) oder TTL < 10 min → Zwangs-Flat
-- ❌ zu bauen → MP-11
+- **Kern-9-Feature-Formeln (aus Chat-Forschungsdossier, kanonisch):**
+  1. `cos_φ` = (Close−Open)/(High−Low+ε), geclipped [−1,1]
+  2. `P_norm` = |Close−Open|/ATR₁₄
+  3. `Q_norm` = (obere+untere Dochte)/ATR₁₄ (siehe §9.5)
+  4. `pos_00` = tanh((Close−Open₀₀:₀₀)/(2·ATR₁₄))
+  5. `m_tangent` = arctan((Close−Open₀₀)/Minuten_seit_00) · 2/π
+  6. `P_cal` = PlattScale(Polymarket-Rohquote), geclipped [0,1]
+  7. `pos_EQ` = (Close−Range_Low)/(Range_High−Range_Low+ε), [0,1]
+  8. `d_CE` = tanh((Close−CE50)/ATR₁₄)
+  9. `TTL_norm` = Restminuten bis 1h-Bar-Close / 60
+  (Features 10–16: RVOL, CVD-Score, Hurst, Liq-Distanz, UTC-Flag,
+  Two-Bar-Thrust, FVG-Touch — nach MP-11-Liste)
+- **Modellarchitektur (PyTorch → ONNX-Export):**
+  Dual-Head: Backbone 2× (Linear(16→64) + LayerNorm + GELU);
+  Policy-Head: Linear(64→3) + Softmax → [P(Long), P(Flat), P(Short)];
+  Leverage-Head: Linear(64→1) + Sigmoid → Hebel = 10 + 15·σ ∈ [10x,25x].
+  opset 14, dynamische Batch-Achse, Input-Name `tensor_x`,
+  Outputs `action_probs`, `leverage_factor`.
+- Inferenz < 1–2 ms p99 (onnxruntime, CPU, intra-op 1–2 Threads,
+  ORT_ENABLE_ALL); **deterministische Fallback-Policy ohne Modell:**
+  TTL_norm < 0,15 oder UTC unsicher → FLAT; P_cal ≥ 0,65 und
+  (cos_φ ≥ 0,75 oder Discount/Kauf-Tail) → LONG (symm. SHORT);
+  sonst FLAT/DCA-scaled.
+- **Bar-Level Execution Lock:** höchstens eine Aktion pro
+  Bar-Zeitstempel (Duplikats-Sperre im Inferenz-Wrapper).
+- **Zwei-Stufen-Architektur (Nutzer-Korrektur):** Das ONNX/der Orchestrator
+  klassifiziert nur BTC-Makro-Regime + Long/Flat/Short — **keine
+  Symbolauswahl im Tensor**. Welcher Alt gehandelt wird, entscheidet der
+  High-Beta-Ranker (MP-05) in Stufe 2; erst dann wird die Strategie
+  gedroppt (MP-09).
+- Unsichere Verteilung (Entropie > 0,65) oder TTL < 10 min → Zwangs-Flat
+- ❌ zu bauen → MP-11 (Tensor-Formeln sind damit Abnahmegrundlage;
+  Modell-Training selbst ist nicht Teil der Roadmap, Fallback-Policy
+  produktiv)
 
 ---
 
@@ -627,3 +711,41 @@ Perp-Liquidationskaskaden als FVG-Verstärker unerforscht.
 | Loop A–E | Execution / Tester / Feed / Scout / Allokations-Gate |
 | cos φ | Leistungsfaktor: echter Trend vs. Chop |
 | Unwind | Geordnete Glattstellung aller Positionen |
+
+---
+
+## 17. Forschungs-/Backtest-Werkzeuge (Zielbild)
+
+- **VectorBT als primäre Backtest-Engine** (vektorisiert, schnell für
+  Faktor-Sweeps); TV-CSV-Exporte aus Loop B als Datenbasis;
+  GA-Optimizer (`app/optimizer/`) bleibt Parameter-Such-Schicht.
+- **Lightweight-Charts-Dashboard (Forschung/Validierung):** eigenständige
+  HTML/JS-App (CDN `lightweight-charts`, kein Build) mit drei synchronisierten
+  Panes: Candles + Entry-/Exit-Marker (grün Long/rot Short/grau Chop-Exit),
+  cos φ-Subpane mit Schwellenlinien (±0,40 Entry, ±0,15 Exit), Equity-Curve
+  vs. Benchmark. Python-Export der Kerzen-/Indikator-/Marker-Serien
+  (UNIX-Sekunden, aufsteigend). Dient der visuellen Hypothesenprüfung
+  (H1–H6), nicht dem Live-Trading. → MP-16.
+- **H6 (neue Hypothese, Nutzer-These 30.08.2026):** Wochenend-Breakouts
+  überwiegen als Fakeout (dünnes Volumen, illusorische Tiefe,
+  Ask-Bias Sonntag); der nachhaltige Move kommt erst nach dem
+  Montags-Sweep (Monday-Momentum 10:00 UTC). Backtest: Long-Breakout-Signale
+  Samstag/Sonntag vs. Montag–Freitag, mit Slippage-Szenarien
+  (+0,1/+0,3/+0,6 %) — Deckung mit H4 (Weekend-Sizing-Regel) und der
+  SessionClock-Wochenend-Reduktion.
+- **cos-φ-Strategie-Praxisparameter (für MP-16-Backtest):** Window N = 20
+  (1h-Bars); Entry |cos φ_path| ≥ 0,40 mit Hysterese; Exit bei |cos φ| ≤ 0,15;
+  1-Bar-Lag-Ausführung (Signal T → Ausführung T+1); Taker-Fee/Slippage
+  0,06 % pro Roundtrip; Metriken Return, Max-DD, Sharpe, Win-Rate,
+  Profit-Faktor, Trade-Zahl. ACHTUNG: Schwelle/N = Faktor-Sweep-Kandidaten
+  (kein „Magic-Threshold“ ohne Sweep, vgl. §15-Methodik/Red-Flags).
+
+> **Hinweis zu Chat-Code:** Die im Chat 3 von Gemini entworfenen Module
+> (`quantum_power_orchestration.py`, `high_beta_symbol_screener.py`,
+> `onnx_quantum_tensor_pipeline.py` mit 9D-Tensor, `power_factor_backtest.py`,
+> HTML-Dashboard) sind **Konzeptreferenzen**, nicht kanonisch: teils
+> syntaktisch defekt (z. B. `tensor =` statt `tensor[0,k]`-Indizierung,
+> `/* */`-Kommentare in .py), doppeln bestehende sigma/-Module
+> (orchestrator, correlation_scout) und umgehen das Zwei-Stufen-Prinzip.
+> Die Formeln sind übernommen (§9.5/§11), die Implementierung folgt den
+> Master-Prompts MP-04/MP-05/MP-11/MP-16 auf den echten Modulstand.
