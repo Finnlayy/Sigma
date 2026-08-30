@@ -11,3 +11,7 @@
 ## 2026-08-29 - empty execution_mode vs SQL COALESCE
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
+
+## 2026-08-30 - /api/logs snapshot defeated SQL SUM
+**Learning:** After the 4→1 `trades()` reuse and `sum_closed_pnl`, GET /api/logs still `SELECT * LIMIT 10000` every 5–8s and passed that list into `_paper_balances` / `_build_metrics` / `_strategy_pnl`. The snapshot path skipped the SQL aggregate, so the hottest poll still paid ~37 ms (8k rows) to produce COUNT/SUM + per-strategy rollups. Only the order tape needs recent rows (80).
+**Action:** On dashboard polls, default helpers to SQL aggregates (`closed_pnl_stats`, `strategy_closed_stats`). Fetch `trades()` only for the rows the UI lists. Do not pass a fat snapshot just because one field needs recent fills.

@@ -595,13 +595,43 @@ class DuckDBStore:
         Matches Python `(execution_mode or "paper") == mode` including NULL/''.
         Bench @ 4k closed rows: trades()+sum ~22 ms vs this ~0.5 ms (~45×).
         """
+        return float(self.closed_pnl_stats(execution_mode)["pnl"])
+
+    def closed_pnl_stats(self, execution_mode: str = "paper") -> Dict[str, Any]:
+        """COUNT + SUM for dashboard polls — skip SELECT * of up to 10k rows.
+
+        Matches Python `(execution_mode or "paper") == mode` including NULL/''.
+        GET /api/logs used to materialize 10k full rows then count/sum in Python.
+        Bench @ 8k closed rows: that path ~37 ms; this + strategy_closed_stats
+        + 80-row orders ~5 ms (~7×, ~32 ms/poll).
+        """
         row = self._one(
-            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
+            "SELECT COUNT(*) AS n, COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
             "WHERE status = 'closed' "
             "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
             [execution_mode, execution_mode],
         )
-        return float(row["pnl"]) if row else 0.0
+        return {
+            "count": int(row["n"]) if row else 0,
+            "pnl": float(row["pnl"]) if row else 0.0,
+        }
+
+    def strategy_closed_stats(self) -> List[Dict[str, Any]]:
+        """Per-strategy realized / wins / count / volume in one GROUP BY.
+
+        Replaces a Python group-by over up to 5k SELECT * rows on the 5–8s
+        /api/logs poll. NULL strategy_id matches `str(t.get("strategy_id") or "")`.
+        """
+        return self._rows(
+            "SELECT COALESCE(strategy_id, '') AS strategy_id, "
+            "COALESCE(SUM(net_pnl_usd), 0) AS realized, "
+            "CAST(SUM(CASE WHEN COALESCE(net_pnl_usd, 0) > 0 THEN 1 ELSE 0 END) "
+            "     AS INTEGER) AS wins, "
+            "COUNT(*) AS n_trades, "
+            "COALESCE(SUM(notional_usd), 0) AS volume "
+            "FROM trades WHERE status = 'closed' "
+            "GROUP BY 1",
+        )
 
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:

@@ -531,3 +531,41 @@ def test_zero_mock_seams_are_honest_empty(client):
     assert lake.get("ok") is False and lake.get("mode") == "disabled"
     poly = client.get("/api/quant/polymarket/layer0").json()
     assert poly.get("valid") is False and poly.get("reason") == "missing_data"
+
+
+def test_logs_poll_aggregates_match_sql_stats(client):
+    """GET /api/logs must not depend on a 10k-row Python scan for PnL."""
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "bolt-logs-s1", "name": "BoltLogs", "status": "inactive",
+        "assetPair": "BTC/USD", "interval": 15, "executionMode": "paper",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-logs-a", "strategy_id": "bolt-logs-s1",
+        "strategy_name": "BoltLogs", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 8.5,
+        "notional_usd": 200.0, "exit_time": "2026-08-30 06:00:00",
+        "entry_time": "2026-08-30 05:00:00", "entry_price": 100.0,
+        "quantity": 1.0,
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-logs-b", "strategy_id": "bolt-logs-s1",
+        "strategy_name": "BoltLogs", "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -1.5,
+        "notional_usd": 50.0, "exit_time": "2026-08-30 06:10:00",
+        "entry_time": "2026-08-30 05:10:00", "entry_price": 100.0,
+        "quantity": 1.0,
+    })
+    stats = store.closed_pnl_stats("paper")
+    body = client.get("/api/logs").json()
+    assert body["metrics"]["totalTrades"] == stats["count"]
+    row = next(r for r in body["strategyPnL"] if r["strategyId"] == "bolt-logs-s1")
+    assert row["realizedPnL"] == 7.0
+    assert row["totalTrades"] == 2
+    assert row["winningTrades"] == 1
+    assert row["volumeTradedUSD"] == 250.0
+    assert any(o.get("id") == "bolt-logs-a" for o in body["orders"])

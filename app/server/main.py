@@ -1043,20 +1043,22 @@ async def market_data():
 async def logs():
     st = state
     strategies = st.store.list_strategies()
-    # One closed-trades scan (limit 10000). Helpers below used to each re-query
-    # DuckDB independently — 4× trades() per 5–8s poll. Bench @ 8k rows:
-    # 4 scans ~110 ms → 1 scan ~35 ms (~3×, ~75 ms saved / poll).
-    closed = st.store.trades(status="closed", limit=10000)
+    # Orders only need the last 80 fills. Metrics / balances / strategyPnL are
+    # SQL aggregates — do not SELECT * 10k rows on a 5–8s poll.
+    # Passing that snapshot into helpers also defeated sum_closed_pnl.
+    # Bench @ 8k closed rows: materialize+Python ~37 ms → SQL + 80-row
+    # orders ~5 ms (~7×, ~32 ms/poll).
+    recent = st.store.trades(status="closed", limit=80)
     open_positions = st.paper.all_positions()
-    metrics = _build_metrics(st, strategies, closed)
-    orders = [_order_row(t) for t in closed[:80] if t.get("exit_time")] + \
+    metrics = _build_metrics(st, strategies)
+    orders = [_order_row(t) for t in recent if t.get("exit_time")] + \
              [_order_row(p) for p in open_positions]
     return {
         "logs": st.bus.to_log_rows(120),
         "metrics": metrics,
         "orders": orders,
-        "balances": _paper_balances(st, closed),
-        "strategyPnL": _strategy_pnl(st, strategies, closed[:5000]),
+        "balances": _paper_balances(st),
+        "strategyPnL": _strategy_pnl(st, strategies),
     }
 
 
@@ -1068,16 +1070,21 @@ def _build_metrics(
     from app.core.exchange_clock import get_exchange_clock
     from app.core.telemetry import _cpu_percent, _mem_usage_percent
 
-    closed = (
-        closed_trades
-        if closed_trades is not None
-        else st.store.trades(status="closed", limit=10000)
-    )
-    balances = _paper_balances(st, closed)
+    if closed_trades is not None:
+        balances = _paper_balances(st, closed_trades)
+        paper_closed = [
+            t for t in closed_trades if (t.get("execution_mode") or "paper") == "paper"
+        ]
+        total_pnl = sum(float(t.get("net_pnl_usd") or 0.0) for t in paper_closed)
+        total_trades = len(paper_closed)
+    else:
+        # SQL COUNT+SUM — same empty-string/NULL paper rule as sum_closed_pnl.
+        stats = st.store.closed_pnl_stats("paper")
+        balances = _paper_balances(st)
+        total_pnl = stats["pnl"]
+        total_trades = stats["count"]
     portfolio = _portfolio_value(st, balances)
     baseline = st.config.paper_baseline_usd
-    paper_closed = [t for t in closed if (t.get("execution_mode") or "paper") == "paper"]
-    total_pnl = sum(float(t.get("net_pnl_usd") or 0.0) for t in paper_closed)
     active = [s for s in strategies if s["status"] == "active"]
     paper_active = [s for s in active if s["executionMode"] == "paper"]
     live_active = [s for s in active if s["executionMode"] == "live"]
@@ -1090,7 +1097,7 @@ def _build_metrics(
         "activeWorkers": len(active),
         "paperWorkers": len(paper_active),
         "liveWorkers": len(live_active),
-        "totalTrades": len(paper_closed),
+        "totalTrades": total_trades,
         "profitLossPercentage": round(total_pnl / baseline * 100.0, 4),
         "balanceUSD": round(balances.get("USD", 0.0), 2),
         "balanceBTC": round(balances.get("BTC", 0.0), 4),
@@ -1132,23 +1139,38 @@ def _strategy_pnl(
 ) -> List[Dict[str, Any]]:
     if strategies is None:
         strategies = st.store.list_strategies()
-    closed = (
-        closed_trades
-        if closed_trades is not None
-        else st.store.trades(status="closed", limit=5000)
-    )
+    # SQL GROUP BY unless a caller already has an in-request snapshot.
+    # Default used to SELECT * LIMIT 5000 on every /api/logs poll.
+    stats_by_sid: Dict[str, Dict[str, Any]] = {}
+    if closed_trades is not None:
+        for t in closed_trades:
+            rec = stats_by_sid.setdefault(
+                str(t.get("strategy_id") or ""),
+                {"realized": 0.0, "wins": 0, "n": 0, "volume": 0.0},
+            )
+            pnl = float(t.get("net_pnl_usd") or 0.0)
+            rec["realized"] += pnl
+            rec["wins"] += 1 if pnl > 0 else 0
+            rec["n"] += 1
+            rec["volume"] += float(t.get("notional_usd") or 0.0)
+    else:
+        for row in st.store.strategy_closed_stats():
+            stats_by_sid[str(row.get("strategy_id") or "")] = {
+                "realized": float(row.get("realized") or 0.0),
+                "wins": int(row.get("wins") or 0),
+                "n": int(row.get("n_trades") or 0),
+                "volume": float(row.get("volume") or 0.0),
+            }
     open_positions = st.paper.all_positions()
-    by_sid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for t in closed:
-        by_sid[str(t.get("strategy_id") or "")].append(t)
     pos_by_sid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for p in open_positions:
         pos_by_sid[str(p.get("strategy_id") or "")].append(p)
     out = []
     for s in strategies:
-        mine = by_sid.get(s["id"], [])
-        realized = sum(float(t.get("net_pnl_usd") or 0.0) for t in mine)
-        wins = sum(1 for t in mine if float(t.get("net_pnl_usd") or 0) > 0)
+        rec = stats_by_sid.get(s["id"], {"realized": 0.0, "wins": 0, "n": 0, "volume": 0.0})
+        realized = rec["realized"]
+        wins = rec["wins"]
+        n = rec["n"]
         unrealized = 0.0
         for p in pos_by_sid.get(s["id"], []):
             price = st.ingestor.last_price(p["symbol"])
@@ -1157,18 +1179,17 @@ def _strategy_pnl(
                 unrealized += (price - float(p.get("entry_price") or price)) * qty
             else:
                 unrealized += (float(p.get("entry_price") or price) - price) * qty
-        volume = sum(float(t.get("notional_usd") or 0.0) for t in mine)
         out.append({
             "strategyId": s["id"],
             "strategyName": s["name"],
             "realizedPnL": round(realized, 4),
             "unrealizedPnL": round(unrealized, 4),
             "totalPnL": round(realized + unrealized, 4),
-            "totalTrades": len(mine),
+            "totalTrades": n,
             "winningTrades": wins,
-            "losingTrades": len(mine) - wins,
-            "winRate": round(wins / len(mine) * 100.0, 1) if mine else 0.0,
-            "volumeTradedUSD": round(volume, 2),
+            "losingTrades": n - wins,
+            "winRate": round(wins / n * 100.0, 1) if n else 0.0,
+            "volumeTradedUSD": round(rec["volume"], 2),
             "executionMode": s["executionMode"],
         })
     return out
