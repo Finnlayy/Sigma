@@ -27,6 +27,7 @@ from sigma.orchestration.hourly_screening_gate import HourlyScreeningGate
 from sigma.orchestration.multi_asset_router import MultiAssetRouter
 from sigma.strategies.dual_hedge_grid import DualHedgeGrid
 from sigma.strategies.dynamic_channel_dca import DynamicChannelDCA
+from sigma.strategies.fractal_directional import FractalDirectional
 from sigma.strategies.htf_trend_ltf_reversion import HtfTrendLtfReversion
 from sigma.strategies.quantum_sniper_dca import QuantumSniperDCA
 
@@ -60,6 +61,9 @@ class MasterOrchestrator:
             # MP-07: Sniper-Template registriert; aufrufbar nur im
             # HIGH_BETA_MOMENTUM-Fenster bei vorhandenem Screening-Kontext.
             "quantum_sniper_dca": QuantumSniperDCA(),
+            # MP-15: Fraktal-Template; nur bei Ranker-Empfehlung
+            # fractal_directional (extreme beta/RVOL), sonst ungenutzt.
+            "fractal_directional": FractalDirectional(),
         }
         from sigma.execution.universe import default_execution_universe, rank_watchlist
 
@@ -165,12 +169,18 @@ class MasterOrchestrator:
         tmpl = None
         wave_ctx = wave.to_dict() if wave is not None and hasattr(wave, "to_dict") else (wave or {})
         if name == "HIGH_BETA_MOMENTUM" and screening is not None:
-            # MP-07: Sniper nur im Momentum-Fenster MIT Screening-Kontext
-            # (Ranker-Freigabe ist Entry-Bedingung im Template). Wave fuer
-            # den Sniper ist die 15m-Wave (KB §5.4); weicht die Session-
-            # Bias-Intervalle ab, wird nur fuer den Sniper-Pfad eine 15m-
-            # Evaluierung des bestehenden Colliders angefordert.
-            tmpl = self.templates["quantum_sniper_dca"]
+            # MP-07/MP-15: Sniper/Fraktal nur im Momentum-Fenster MIT
+            # Screening-Kontext (Ranker-Freigabe ist Entry-Bedingung im
+            # Template). Empfehlung fractal_directional (extreme beta/RVOL)
+            # -> Fraktal-Template, sonst Sniper. Wave fuer beide ist die
+            # 15m-Wave (KB §5.4); weicht die Session-Bias-Intervalle ab,
+            # wird nur fuer diesen Pfad eine 15m-Evaluierung des
+            # bestehenden Colliders angefordert.
+            rec = self._symbol_recommendation(screening, symbol)
+            if rec == "fractal_directional":
+                tmpl = self.templates["fractal_directional"]
+            else:
+                tmpl = self.templates["quantum_sniper_dca"]
             if pair.bias_minutes != 15:
                 leader_htf = (htf_series or {}).get("BTC/USD") or (htf_series or {}).get(symbol) or []
                 w15 = self.collider.evaluate(
@@ -197,7 +207,27 @@ class MasterOrchestrator:
             "wave": wave_ctx,
             "screening": screening,
             "now": now,
+            # MP-15: optionaler Exhaustion-Kontext (MP-08) als Kill-Switch-
+            # Eingang; fehlt er, bleibt der Fraktal-Pfad trotzdem lauffaehig
+            # (Kill-Switch dann via TTL/Sweep).
+            "exhaustion": self.ports.get("exhaustion"),
         })
+
+    @staticmethod
+    def _symbol_recommendation(screening: Optional[Dict[str, Any]], symbol: str) -> str:
+        """Ranker-Empfehlung fuer ein Symbol aus dem Screening-Kontext."""
+        if not screening:
+            return ""
+        result = screening.get("screening")
+        if not isinstance(result, dict):
+            return ""
+        for key in ("long_rank", "short_rank"):
+            rows = result.get(key) or []
+            for row in rows:
+                row_sym = row.get("symbol") if isinstance(row, dict) else getattr(row, "symbol", "")
+                if str(row_sym or "") == symbol:
+                    return str(row.get("recommendation") if isinstance(row, dict) else getattr(row, "recommendation", ""))
+        return ""
 
     def _loop_e(self, strategy_id: str, symbol: str, tf: int, regime: str) -> bool:
         port = self.ports.get("loop_e")

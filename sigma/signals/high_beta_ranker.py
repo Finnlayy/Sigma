@@ -28,6 +28,10 @@ DECOUPLED_THRESHOLD = 0.30  # |r| < 0.30 -> decoupled (fail-closed)
 SNIPER_BETA = 2.8         # Empfehlung sniper_hedge
 SNIPER_RVOL = 2.5
 SNIPER_MAX_LIQ_DISTANCE = 0.10  # "Liq-Puffer klein" fuer Sniper-Modus
+# MP-15: extreme beta/RVOL -> fraktaler Einzeltrade (KB §5.5, 20-50x);
+# moderat -> Sniper/DCA-Pfade.
+FRACTAL_BETA = 3.5
+FRACTAL_RVOL = 3.0
 POS_EQ_CONSOLIDATION_MIN = 0.40
 POS_EQ_CONSOLIDATION_MAX = 0.65
 POS_EQ_CHASING = 0.90
@@ -278,7 +282,12 @@ class HighBetaRanker:
 
 
 def _recommendation(beta: float, rvol: float, liq_distance: float) -> str:
-    """sniper_hedge nur bei hohem beta+RVOL und kleinem Liq-Puffer; sonst dca."""
+    """Extrem (MP-15, fractal_directional) -> Sniper -> DCA: nur bei
+    hohem beta+RVOL und kleinem Liq-Puffer wird ueberhaupt gestaffelt;
+    sonst dca."""
+    if beta >= FRACTAL_BETA and rvol >= FRACTAL_RVOL:
+        if liq_distance <= 0 or liq_distance <= SNIPER_MAX_LIQ_DISTANCE:
+            return "fractal_directional"
     if beta >= SNIPER_BETA and rvol >= SNIPER_RVOL:
         if liq_distance <= 0 or liq_distance <= SNIPER_MAX_LIQ_DISTANCE:
             return "sniper_hedge"
