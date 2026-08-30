@@ -482,3 +482,55 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_symbol_scans_ohlcv_once_for_shared_pair():
+    """N strategies on BTC/USD must share one 1500-row lake snapshot per close."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.server.main import AppState
+
+    bars = [
+        {"ts": f"2026-08-30 00:{i:02d}:00", "open": 1.0, "high": 1.0,
+         "low": 1.0, "close": 1.0, "volume": 1.0}
+        for i in range(90)
+    ]
+    store = MagicMock()
+    store.list_strategies.return_value = [
+        {"id": f"s{i}", "assetPair": "BTC/USD", "status": "active", "interval": 15,
+         "parameters": {}, "code": ""}
+        for i in range(4)
+    ]
+    store.ohlcv.return_value = list(bars)
+
+    st = AppState()
+    st.store = store
+    st.paper = SimpleNamespace(positions_for=lambda _sid: [])
+    st.ingestor = SimpleNamespace(_candles={})
+
+    await st._evaluate_symbol("BTC/USD", {})
+
+    store.ohlcv.assert_called_once_with("BTC/USD", 60, limit=1500)
+
+
+@pytest.mark.asyncio
+async def test_evaluate_symbol_skips_lake_scan_when_all_in_position():
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.server.main import AppState
+
+    store = MagicMock()
+    store.list_strategies.return_value = [
+        {"id": "s1", "assetPair": "BTC/USD", "status": "active", "interval": 15},
+    ]
+    st = AppState()
+    st.store = store
+    st.paper = SimpleNamespace(positions_for=lambda _sid: [{"trade_id": "open"}])
+    st.ingestor = SimpleNamespace(_candles={})
+
+    await st._evaluate_symbol("BTC/USD", {})
+
+    store.ohlcv.assert_not_called()

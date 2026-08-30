@@ -11,3 +11,7 @@
 ## 2026-08-29 - empty execution_mode vs SQL COALESCE
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
+
+## 2026-08-30 - 1m close re-scanned ohlcv per strategy
+**Learning:** `_evaluate_strategy` owned its own `store.ohlcv(symbol, 60, limit=1500)` plus partial-bar append. Academy/templates stack many bots on one pair, so each 1m close paid N identical lake scans (~2.7 ms × N @ 1500 rows). `resample_candles(factor<=1)` returns the same list — sharing is safe only if callers do not append/mutate.
+**Action:** On candle-close fan-out, fetch the 1m snapshot once in `_evaluate_symbol` and pass it down. Skip the scan when every strategy already has a position.
