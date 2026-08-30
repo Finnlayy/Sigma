@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-30 - SQL default mode must be literal 'paper', not the bind param
+**Learning:** `COALESCE(NULLIF(execution_mode, ''), ?)` with `?` bound to the *filter* mode treats `""` as live when querying live. Python `(x or "paper")` always defaults to paper, regardless of the comparison target. The 2026-08-29 SUM used this bind-param default; it passed because tests only queried `"paper"`.
+**Action:** Hardcode `'paper'` as the SQL empty/NULL default. Bind only the comparison value. Always test both paper and live filters when replacing `x or "paper"`.

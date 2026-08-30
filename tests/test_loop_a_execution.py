@@ -482,3 +482,56 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_pnl_stats("paper")
+    assert stats["count"] == 2
+    assert stats["pnl"] == 13.0
+    live_stats = store.closed_pnl_stats("live")
+    assert live_stats["count"] == 1
+    assert live_stats["pnl"] == 99.0
+    assert store.sum_closed_pnl("live") == 99.0  # "" must not count as live
+
+
+def test_closed_pnl_by_strategy_matches_python_scan(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "rollup.duckdb"))
+    store.upsert_trade({
+        "trade_id": "w", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+        "notional_usd": 100.0,
+    })
+    store.upsert_trade({
+        "trade_id": "l", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -4.0,
+        "notional_usd": 50.0,
+    })
+    store.upsert_trade({
+        "trade_id": "z", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 0.0,
+        "notional_usd": 25.0,
+    })
+    store.upsert_trade({
+        "trade_id": "b", "strategy_id": "beta", "status": "closed",
+        "execution_mode": "live", "symbol": "ETH/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 7.0,
+        "notional_usd": 200.0,
+    })
+    store.upsert_trade({
+        "trade_id": "open", "strategy_id": "alpha", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+        "notional_usd": 999.0,
+    })
+    rollup = store.closed_pnl_by_strategy()
+    assert rollup["alpha"]["n"] == 3
+    assert rollup["alpha"]["wins"] == 1  # breakeven is not a win
+    assert rollup["alpha"]["realized"] == 6.0
+    assert rollup["alpha"]["volume"] == 175.0
+    assert rollup["beta"]["n"] == 1
+    assert rollup["beta"]["wins"] == 1
+    assert rollup["beta"]["realized"] == 7.0
+    assert rollup["beta"]["volume"] == 200.0
+    assert set(rollup) == {"alpha", "beta"}
