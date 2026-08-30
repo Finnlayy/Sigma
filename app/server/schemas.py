@@ -24,7 +24,7 @@ verdrahtet).
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -328,3 +328,214 @@ def parse_payload(payload: Dict[str, Any]):
     if family == "PIONEX_NATIVE":
         return family, PionexSignalPayload.model_validate(payload)
     return family, MLFeaturePayload.model_validate(payload)
+
+
+# =============================================================================
+# MP-17 — Sigma Research-/Panel-Read-Schemas (fail-closed)
+# -----------------------------------------------------------------------------
+# Kanonische Antworten unter /api/v1/sigma/* und /api/v1/research/*.
+# Ohne Fachmodule liefern die Routen strukturierte Leerantworten
+# (ok=False, available=False, leere Arrays) — niemals synthetische Werte.
+# Zeiten: UNIX-Sekunden (UTC); Prozentangaben als Dezimalen (0.06 = 6 %).
+# =============================================================================
+
+class SigmaFeedMeta(BaseModel):
+    """Herkunft eines Panel-Feeds; source='unknown' ohne Feed."""
+
+    source: str = "unknown"          # tv_scraper | cache_stale | synthetic | unknown
+    available: bool = False
+    degraded: bool = False
+    age_s: Optional[float] = None
+    error: Optional[str] = None
+
+
+class SigmaEmptyMixin(BaseModel):
+    """Gemeinsame fail-closed Basis-Felder aller Panel-Antworten."""
+
+    ok: bool = False
+    available: bool = False
+    feed: SigmaFeedMeta = Field(default_factory=SigmaFeedMeta)
+    generated_at: Optional[str] = None   # ISO-8601 UTC
+
+
+class SigmaRegimeState(SigmaEmptyMixin):
+    """MP-07/05/06/11 Mission-Control-Zustand."""
+
+    phase: Optional[str] = None          # SCAN_AND_DEPLOY | ACTIVE_EXECUTION | PRE_CLOSE_UNWIND | IDLE
+    minute: Optional[int] = None         # Minute der laufenden 1h-Bar (UTC)
+    last_scan_ts: Optional[float] = None
+    wave_status: Optional[str] = None    # IDLE | COLLAPSED_INTO_ZONE | INVALIDATED | HTF_OPEN
+    range_high: Optional[float] = None
+    range_low: Optional[float] = None
+    eq: Optional[float] = None
+    ce50: Optional[float] = None
+    session_window: Optional[str] = None
+    session_quarantine: Optional[bool] = None
+    throttle_state: Optional[str] = None
+    throttle_bots: Optional[int] = None
+    hurst_htf: Optional[float] = None
+    poly_bias: Optional[str] = None
+    poly_p_cal: Optional[float] = None
+    onnx_action: Optional[str] = None
+    onnx_model_available: Optional[bool] = None
+    shadow_plan: Optional[Dict[str, Any]] = None
+
+
+class SigmaRiskState(SigmaEmptyMixin):
+    """MP-01 Schutzschicht (nur Anzeige; Regeln nicht abschaltbar)."""
+
+    positions: List[Dict[str, Any]] = Field(default_factory=list)
+    rules: List[Dict[str, Any]] = Field(default_factory=list)  # {id,label,enabled:true}
+
+
+class SigmaPowerState(SigmaEmptyMixin):
+    """MP-04 Price-Action-Physics."""
+
+    cos_phi: Optional[float] = None
+    cluster: Optional[str] = None
+    s_norm: Optional[float] = None
+    p_norm: Optional[float] = None
+    q_norm: Optional[float] = None
+    q_upper: Optional[float] = None
+    q_lower: Optional[float] = None
+    q_bias: Optional[float] = None
+    cos_path: List[Dict[str, Any]] = Field(default_factory=list)  # [{time,value}]
+    resonance: Optional[float] = None
+    resonance_badge: Optional[str] = None
+
+
+class SigmaZonesState(SigmaEmptyMixin):
+    """MP-03 Zonen & Tagesanker."""
+
+    interval_min: Optional[int] = None
+    zones: List[Dict[str, Any]] = Field(default_factory=list)
+    envelope: Optional[Dict[str, Any]] = None
+    events: List[Dict[str, Any]] = Field(default_factory=list)  # Thrust/Marubozu
+
+
+class SigmaScoutState(SigmaEmptyMixin):
+    """MP-05 Stufe-2-Ranker."""
+
+    last_scan_ts: Optional[float] = None
+    phase_ok: Optional[bool] = None
+    long_rank: List[Dict[str, Any]] = Field(default_factory=list)
+    short_rank: List[Dict[str, Any]] = Field(default_factory=list)
+    rejected: List[Dict[str, Any]] = Field(default_factory=list)
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    blinded: Optional[bool] = None
+
+
+class SigmaPolymarketState(SigmaEmptyMixin):
+    """MP-06 Layer 0; ohne Feed available=False und Gate inaktiv."""
+
+    bins: List[Dict[str, Any]] = Field(default_factory=list)
+    term_structure: List[Dict[str, Any]] = Field(default_factory=list)
+    mu: Optional[float] = None
+    bias: Optional[str] = None
+    platt_a: Optional[float] = None
+    platt_b: Optional[float] = None
+    brier: Optional[float] = None
+    p_cal: Optional[float] = None
+    gate_open: Optional[bool] = None
+
+
+class SigmaExhaustionState(SigmaEmptyMixin):
+    """MP-08 Exhaustion + geordnetes Glattstellen."""
+
+    score: Optional[float] = None
+    exhausted: Optional[bool] = None
+    components: Dict[str, Any] = Field(default_factory=dict)  # bbw/oi/cvd + availability
+    unwind: List[Dict[str, Any]] = Field(default_factory=list)
+    forced: Optional[bool] = None
+    ttl_flat: Optional[bool] = None
+
+
+class SigmaProvisionState(SigmaEmptyMixin):
+    """MP-09 Provisionierer."""
+
+    provisions: List[Dict[str, Any]] = Field(default_factory=list)
+    harden_supported: bool = True
+
+
+class SigmaLadderPreview(SigmaEmptyMixin):
+    """MP-02 DCA-Leiter-Preview + MP-01 Guards."""
+
+    rungs: List[Dict[str, Any]] = Field(default_factory=list)
+    guards: List[Dict[str, Any]] = Field(default_factory=list)  # {id,ok,reason}
+    deploy_allowed: bool = False
+    avg_fill_price: Optional[float] = None
+    total_depth_pct: Optional[float] = None
+
+
+class SigmaFractalPreview(SigmaEmptyMixin):
+    """MP-15 Fraktaler Einzeltrade."""
+
+    side: Optional[str] = None
+    leverage: Optional[int] = None
+    entry: Optional[float] = None
+    tranches: List[Dict[str, Any]] = Field(default_factory=list)
+    initial_sl: Optional[float] = None
+    sl_basis: Optional[str] = None
+    fee_covered_be: Optional[float] = None
+    kill_switch: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SigmaOnnxState(SigmaEmptyMixin):
+    """MP-11 Tensor-Inspektor."""
+
+    tensor: List[Dict[str, Any]] = Field(default_factory=list)  # [{name,value}]
+    action_probs: Dict[str, float] = Field(default_factory=dict)  # long/flat/short
+    action: Optional[str] = None
+    leverage: Optional[int] = None
+    entropy: Optional[float] = None
+    model_available: Optional[bool] = None
+    bar_lock: Optional[str] = None       # EXECUTED | BLOCKED_BY_BAR_LOCK | None
+    latency_ms: Optional[float] = None
+
+
+class SigmaOrderflowState(SigmaEmptyMixin):
+    """MP-10 (optional) — ohne L2-Feed immer leer."""
+
+    reason: Optional[str] = "orderflow_port_not_available"
+
+
+class SigmaWriteResult(BaseModel):
+    """Operator-POST-Antworten (Scan/Provision/De-Provision/Harden/Research)."""
+
+    ok: bool = False
+    available: bool = False
+    reason: str = "backend_module_not_available"
+    job_id: Optional[str] = None
+    detail: Optional[Dict[str, Any]] = None
+
+
+class ResearchRunRequest(BaseModel):
+    """POST /api/v1/research/run — Hypothese H1-H7."""
+
+    hypothesis: str = Field(..., min_length=1, max_length=16)
+    params: Optional[Dict[str, Any]] = None
+
+
+class ResearchJob(BaseModel):
+    """Asynchroner Research-Job (MP-12/16)."""
+
+    job_id: str
+    hypothesis: str
+    status: str = "unavailable"   # queued | running | done | failed | unavailable
+    progress: float = 0.0
+    error: Optional[str] = None
+    created_at: Optional[float] = None
+
+
+class ResearchJobResult(ResearchJob):
+    """Job-Detail inkl. Ergebnis-Report (MP-16-Exportpfad)."""
+
+    result: Optional[Dict[str, Any]] = None
+
+
+class ResearchDashboard(SigmaEmptyMixin):
+    """H1-H7-Status + Sweep-Tabelle + Export-Link."""
+
+    hypotheses: List[Dict[str, Any]] = Field(default_factory=list)
+    sweeps: List[Dict[str, Any]] = Field(default_factory=list)
+    export_html_path: Optional[str] = None

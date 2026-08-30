@@ -28,6 +28,7 @@ export const PRESETS = [
   'BOT_COCKPIT', 'PINE_IDE', 'RISK_RADAR', 'SENTINEL_OPS',
   'CAPITAL_OPS', 'PAPER_LAB', 'OBSERVABILITY', 'ML_INSPECTOR',
   'OVERVIEW', 'LIBRARY', 'QUANT', 'CONFIG',
+  'QUANTUM_OPS', 'POSITION_DESK', 'RESEARCH_LAB',
 ] as const;
 export type Preset = (typeof PRESETS)[number];
 
@@ -174,6 +175,41 @@ const PRESET_LAYOUTS: Record<Preset, { type: string; weight?: number; children?:
       row(45, [
         set(50, ['DeadmanSwitchPanel']),
         set(50, ['RiskGauges']),
+      ]),
+    ],
+  },
+  // MP-17 — Sigma-Forschungs-Presets (UI-Spezifikation §4)
+  QUANTUM_OPS: {
+    type: 'row',
+    children: [
+      set(60, ['QuantumRegimePanel_']),
+      row(40, [
+        set(50, ['PowerPhysicsPanel_']),
+        set(50, ['SymbolScoutPanel_']),
+      ]),
+      row(60, [
+        set(50, ['MarketChart', 'MarketGeometryPanel_']),
+        set(50, ['PolymarketPanel_', 'OnnxBrainPanel_']),
+      ]),
+    ],
+  },
+  POSITION_DESK: {
+    type: 'row',
+    children: [
+      set(50, ['LadderArchitectPanel_', 'FractalTradePanel_']),
+      row(50, [
+        set(60, ['MarketChart']),
+        set(40, ['RiskGuardPanel_', 'UnwindPanel_', 'ProvisionerPanel_']),
+      ]),
+    ],
+  },
+  RESEARCH_LAB: {
+    type: 'row',
+    children: [
+      set(55, ['ResearchLabPanel_']),
+      row(45, [
+        set(50, ['PowerPhysicsPanel_', 'BacktestPanel']),
+        set(50, ['GeneticPanel', 'MarketChart']),
       ]),
     ],
   },

@@ -18,7 +18,7 @@ import {
   type FeedMeta, type MoverRow, type ScraperHealth,
   type BadgeRow, type BotCard, type Candle, type DeadmanSnapshot, type MemorySnapshot,
   type MlSnapshot, type RegimeVector, type RewardRow, type SafetySnapshot,
-  type TelegramSnapshot, type TvJob,
+  type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart from '../TvLightweightChart';
 import { Card } from '@/components/ui/card';
@@ -38,12 +38,17 @@ import {
   SettingsPanel as SettingsPanelImpl,
 } from './legacyPanels';
 import { StrategyLibraryPanel as StrategyLibraryPanelImpl } from './StrategyLibraryPanel';
+import {
+  QuantumRegimePanel, MarketGeometryPanel, PowerPhysicsPanel, SymbolScoutPanel,
+  PolymarketPanel, LadderArchitectPanel, FractalTradePanel, ProvisionerPanel,
+  OnnxBrainPanel, RiskGuardPanel, UnwindPanel, ResearchLabPanel,
+} from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
 
 /* ------------------------------------------------------------------ shared */
 
-function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, () => void] {
+export function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, () => void] {
   const [data, setData] = useState<T | null>(null);
   const refresh = useCallback(() => { void fn().then((d) => d && setData(d)); }, [fn]);
   useEffect(() => {
@@ -54,7 +59,7 @@ function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, () => vo
   return [data, refresh];
 }
 
-function PanelShell({ title, icon, actions, children }: {
+export function PanelShell({ title, icon, actions, children }: {
   title: string; icon: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
@@ -72,7 +77,7 @@ function PanelShell({ title, icon, actions, children }: {
   );
 }
 
-const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; value: React.ReactNode; tone?: string }) => (
+export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; value: React.ReactNode; tone?: string }) => (
   <div className="rounded border border-zinc-800 bg-zinc-900/50 px-2 py-1.5">
     <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
     <div className={`font-mono text-sm ${tone}`}>{value}</div>
@@ -87,7 +92,7 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 );
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
-function FeedBadge({ feed }: { feed?: FeedMeta | null }) {
+export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
   if (!feed) return null;
   const tone = feed.source === 'tv_scraper'
     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
@@ -1136,6 +1141,18 @@ export function RegimePanel() { return <RegimePanelImpl />; }
 export function ExecutionRiskPanel() { return <ExecutionRiskPanelImpl />; }
 export function AcademyRegistryPanel() { return <AcademyRegistryPanelImpl />; }
 export function SettingsPanel() { return <SettingsPanelImpl />; }
+export function QuantumRegimePanel_() { return <QuantumRegimePanel />; }
+export function MarketGeometryPanel_() { return <MarketGeometryPanel />; }
+export function PowerPhysicsPanel_() { return <PowerPhysicsPanel />; }
+export function SymbolScoutPanel_() { return <SymbolScoutPanel />; }
+export function PolymarketPanel_() { return <PolymarketPanel />; }
+export function LadderArchitectPanel_() { return <LadderArchitectPanel />; }
+export function FractalTradePanel_() { return <FractalTradePanel />; }
+export function ProvisionerPanel_() { return <ProvisionerPanel />; }
+export function OnnxBrainPanel_() { return <OnnxBrainPanel />; }
+export function RiskGuardPanel_() { return <RiskGuardPanel />; }
+export function UnwindPanel_() { return <UnwindPanel />; }
+export function ResearchLabPanel_() { return <ResearchLabPanel />; }
 
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
@@ -1173,6 +1190,18 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   ExecutionRiskPanel,
   AcademyRegistryPanel,
   SettingsPanel,
+  QuantumRegimePanel_,
+  MarketGeometryPanel_,
+  PowerPhysicsPanel_,
+  SymbolScoutPanel_,
+  PolymarketPanel_,
+  LadderArchitectPanel_,
+  FractalTradePanel_,
+  ProvisionerPanel_,
+  OnnxBrainPanel_,
+  RiskGuardPanel_,
+  UnwindPanel_,
+  ResearchLabPanel_,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -1211,4 +1240,16 @@ export const PANEL_TITLES: Record<string, string> = {
   ExecutionRiskPanel: 'Execution Risk',
   AcademyRegistryPanel: 'Academy Registry',
   SettingsPanel: 'Settings',
+  QuantumRegimePanel_: 'Quantum Regime',
+  MarketGeometryPanel_: 'Market Geometry',
+  PowerPhysicsPanel_: 'Power Physics',
+  SymbolScoutPanel_: 'Symbol Scout',
+  PolymarketPanel_: 'Polymarket L0',
+  LadderArchitectPanel_: 'Ladder Architect',
+  FractalTradePanel_: 'Fractal Trade',
+  ProvisionerPanel_: 'Provisioner',
+  OnnxBrainPanel_: 'ONNX Brain',
+  RiskGuardPanel_: 'Risk Guard',
+  UnwindPanel_: 'Unwind',
+  ResearchLabPanel_: 'Research Lab',
 };

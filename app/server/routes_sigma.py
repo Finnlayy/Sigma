@@ -22,6 +22,7 @@ from app.core import blueprint as bp
 from app.core.config import load_config
 from app.core.memory_watchdog import get_memory_watchdog
 from app.core.telemetry import get_telemetry_center
+from app.server import schemas
 from app.server.schemas import SignalExecutionResponse
 from app.execution.KrakenCliBridge import KrakenCliBridge
 from app.execution.LoopAPipeline import LoopAPipeline, SignalRequest
@@ -1664,3 +1665,211 @@ async def leverage_profile(strategy_id: str, style: Optional[str] = None):
     cfg = load_config()
     root = getattr(cfg, "strategies_dir", "./data/strategies")
     return load_profile(strategy_id, strategies_root=root, style=style).as_dict()
+
+
+# =============================================================================
+# MP-17 — Sigma Research-/Panel-Routen (fail-closed Read-Only)
+# -----------------------------------------------------------------------------
+# Dünne, versionierte Read-Endpunkte unter /api/v1/sigma/* und
+# /api/v1/research/*. Ohne Fachmodule liefern sie stabile, strukturierte
+# Leerantworten (ok=False, available=False, leere Arrays, feed.source=
+# "unknown") — niemals synthetische Werte. Schreibzugriffe (Scan,
+# Provision, De-Provision, Harden, Research-Run) erfordern Operator-Token
+# (X-Sigma-Settings-Token) und bleiben ohne Backend fail-closed.
+#
+# Schema-Doku (Einheiten/UTC):
+#   - Zeiten: UNIX-Sekunden (UTC); generated_at: ISO-8601 UTC.
+#   - Prozentangaben als Dezimalen (0.06 = 6 %); Hebel als int (10..25).
+#   - Jede Antwort trägt feed{source,available,degraded,age_s,error}.
+#   - Sicherheitsregeln (Hard-Stop, Grid-Tiefe >= 6 %, Fee-BE) erscheinen
+#     nur als Anzeige (rules[].enabled == true, nie abschaltbar).
+# =============================================================================
+
+def _sigma_feed_unknown() -> Dict[str, Any]:
+    return {"source": "unknown", "available": False, "degraded": False,
+            "age_s": None, "error": None}
+
+
+def _sigma_generated_at() -> str:
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _sigma_empty(**fields: Any) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "ok": False,
+        "available": False,
+        "feed": _sigma_feed_unknown(),
+        "generated_at": _sigma_generated_at(),
+    }
+    out.update(fields)
+    return out
+
+
+# --- MP-17 Read-Endpunkte (GET, fail-closed) --------------------------------
+
+@router.get("/api/v1/sigma/regime", response_model=schemas.SigmaRegimeState)
+async def sigma_regime_state():
+    """MP-07/05/06/11 — Mission Control; ohne Fachmodul leer."""
+    return _sigma_empty(phase=None, minute=None, last_scan_ts=None,
+                        wave_status=None, session_window=None,
+                        onnx_action=None, onnx_model_available=None,
+                        shadow_plan=None)
+
+
+@router.get("/api/v1/sigma/risk", response_model=schemas.SigmaRiskState)
+async def sigma_risk_state():
+    """MP-01 — Schutzschicht; Sicherheitsregeln immer sichtbar,
+    niemals abschaltbar (enabled=true fix)."""
+    return _sigma_empty(
+        positions=[],
+        rules=[
+            {"id": "hard_stop_required", "label": "Hard-Stop-Pflicht aktiv", "enabled": True},
+            {"id": "no_panic_exit", "label": "keine manuellen Panic-Exits — System beendet", "enabled": True},
+            {"id": "grid_depth_min_6pct", "label": "Grid-Tiefe ≥ 6 % erzwungen", "enabled": True},
+            {"id": "fee_covered_be", "label": "Fee-Covered Break-Even nach TP1 (Pflicht)", "enabled": True},
+        ],
+    )
+
+
+@router.get("/api/v1/sigma/power", response_model=schemas.SigmaPowerState)
+async def sigma_power_state():
+    """MP-04 — Price-Action-Physics; ohne Modul leer."""
+    return _sigma_empty(cos_phi=None, cluster=None, cos_path=[], resonance=None)
+
+
+@router.get("/api/v1/sigma/zones", response_model=schemas.SigmaZonesState)
+async def sigma_zones_state():
+    """MP-03 — Zonen & Tagesanker; ohne Modul leer."""
+    return _sigma_empty(interval_min=15, zones=[], envelope=None, events=[])
+
+
+@router.get("/api/v1/sigma/scout", response_model=schemas.SigmaScoutState)
+async def sigma_scout_state():
+    """MP-05 — Stufe-2-Ranker; ohne Screening leer (kein Gate-Aufriss)."""
+    return _sigma_empty(last_scan_ts=None, phase_ok=False, long_rank=[],
+                        short_rank=[], rejected=[], filters={}, blinded=False)
+
+
+@router.get("/api/v1/sigma/polymarket", response_model=schemas.SigmaPolymarketState)
+async def sigma_polymarket_state():
+    """MP-06 — Layer 0; ohne Feed available=False, Gate inaktiv."""
+    return _sigma_empty(bins=[], term_structure=[], mu=None, bias=None,
+                        p_cal=None, gate_open=False)
+
+
+@router.get("/api/v1/sigma/exhaustion", response_model=schemas.SigmaExhaustionState)
+async def sigma_exhaustion_state():
+    """MP-08 — Exhaustion + Unwind; ohne Modul leer."""
+    return _sigma_empty(score=None, exhausted=False, components={},
+                        unwind=[], forced=False, ttl_flat=False)
+
+
+@router.get("/api/v1/sigma/provisions", response_model=schemas.SigmaProvisionState)
+async def sigma_provisions_state():
+    """MP-09 — Provisionierer; ohne Modul leere Liste."""
+    return _sigma_empty(provisions=[], harden_supported=True)
+
+
+@router.get("/api/v1/sigma/ladder/preview", response_model=schemas.SigmaLadderPreview)
+async def sigma_ladder_preview():
+    """MP-02 + MP-01 — Leiter-Preview; ohne Modul leer, Deploy gesperrt."""
+    return _sigma_empty(rungs=[], guards=[], deploy_allowed=False,
+                        avg_fill_price=None, total_depth_pct=None)
+
+
+@router.get("/api/v1/sigma/fractal/preview", response_model=schemas.SigmaFractalPreview)
+async def sigma_fractal_preview():
+    """MP-15 — Fraktaler Einzeltrade; ohne Modul leer."""
+    return _sigma_empty(side=None, leverage=None, entry=None, tranches=[],
+                        initial_sl=None, fee_covered_be=None, kill_switch={})
+
+
+@router.get("/api/v1/sigma/onnx", response_model=schemas.SigmaOnnxState)
+async def sigma_onnx_state():
+    """MP-11 — Tensor-Inspektor; ohne Modul leer (Fallback-Policy aktiv)."""
+    return _sigma_empty(tensor=[], action_probs={}, action=None, leverage=None,
+                        entropy=None, model_available=False, bar_lock=None,
+                        latency_ms=None)
+
+
+@router.get("/api/v1/sigma/orderflow", response_model=schemas.SigmaOrderflowState)
+async def sigma_orderflow_state():
+    """MP-10 (optional) — ohne L2-Feed immer leer (fail-closed)."""
+    return _sigma_empty(reason="orderflow_port_not_available")
+
+
+# --- MP-17 Operator-Schreibzugriffe (POST, Token + fail-closed) --------------
+
+@router.post("/api/v1/sigma/scan", response_model=schemas.SigmaWriteResult)
+async def sigma_scan(request: Request,
+                     x_sigma_settings_token: Optional[str] = Header(default=None)):
+    """MP-05 — Scan-Trigger; ohne Fachmodul fail-closed."""
+    _require_operator(request, x_sigma_settings_token)
+    return {"ok": False, "available": False, "reason": "scan_backend_not_available",
+            "job_id": None, "detail": None}
+
+
+@router.post("/api/v1/sigma/provisions", response_model=schemas.SigmaWriteResult)
+async def sigma_provision(body: Dict[str, Any], request: Request,
+                          x_sigma_settings_token: Optional[str] = Header(default=None)):
+    """MP-09 — Strategie provisionieren; ohne Fachmodul fail-closed."""
+    _require_operator(request, x_sigma_settings_token)
+    return {"ok": False, "available": False, "reason": "provision_backend_not_available",
+            "job_id": None, "detail": {"strategy_id": body.get("strategy_id")}}
+
+
+@router.post("/api/v1/sigma/provisions/de-provision", response_model=schemas.SigmaWriteResult)
+async def sigma_de_provision(body: Dict[str, Any], request: Request,
+                             x_sigma_settings_token: Optional[str] = Header(default=None)):
+    """MP-09 — De-Provision; ohne Fachmodul fail-closed."""
+    _require_operator(request, x_sigma_settings_token)
+    return {"ok": False, "available": False, "reason": "provision_backend_not_available",
+            "job_id": None, "detail": {"strategy_id": body.get("strategy_id")}}
+
+
+@router.post("/api/v1/sigma/provisions/harden", response_model=schemas.SigmaWriteResult)
+async def sigma_harden_pine(body: Dict[str, Any], request: Request,
+                            x_sigma_settings_token: Optional[str] = Header(default=None)):
+    """MP-09 — Auto-Härtung fremder Pine-Skripte; ohne Fachmodul
+    fail-closed (hardening_ok=false, keine Codes)."""
+    _require_operator(request, x_sigma_settings_token)
+    return {"ok": False, "available": False,
+            "reason": "harden_backend_not_available",
+            "job_id": None,
+            "detail": {"hardening_ok": False,
+                       "code": None,
+                       "transformations": [],
+                       "reasons": ["pine_hardening_backend_not_available"]}}
+
+
+# --- MP-12/16 Research (fail-closed) -----------------------------------------
+
+_RESEARCH_HYPOTHESES = ("H1", "H2", "H3", "H4", "H5", "H6", "H7")
+
+
+@router.post("/api/v1/research/run", response_model=schemas.SigmaWriteResult)
+async def research_run(body: schemas.ResearchRunRequest, request: Request,
+                       x_sigma_settings_token: Optional[str] = Header(default=None)):
+    """MP-12 — Hypothesen-Job anstoßen; ohne Backend fail-closed."""
+    _require_operator(request, x_sigma_settings_token)
+    hypothesis = body.hypothesis.upper()
+    if not hypothesis.startswith("H") or hypothesis not in _RESEARCH_HYPOTHESES:
+        raise HTTPException(422, detail={"code": "UNKNOWN_HYPOTHESIS",
+                                         "reason": "erlaubt: H1..H7"})
+    return {"ok": False, "available": False, "reason": "research_backend_not_available",
+            "job_id": None, "detail": {"hypothesis": hypothesis}}
+
+
+@router.get("/api/v1/research/jobs/{job_id}", response_model=schemas.ResearchJobResult)
+async def research_job(job_id: str):
+    """MP-12 — Job-Detail; unbekannte Jobs -> status='unavailable'."""
+    return {"job_id": job_id, "hypothesis": "", "status": "unavailable",
+            "progress": 0.0, "error": "research_backend_not_available",
+            "created_at": None, "result": None}
+
+
+@router.get("/api/v1/research/dashboard", response_model=schemas.ResearchDashboard)
+async def research_dashboard():
+    """MP-12/16 — H1-H7-Status + Sweeps; ohne Backend leer."""
+    return _sigma_empty(hypotheses=[], sweeps=[], export_html_path=None)

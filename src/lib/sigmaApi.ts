@@ -583,3 +583,211 @@ export function m8Color(state: string): string {
     default: return 'text-zinc-400';
   }
 }
+
+// =============================================================================
+// MP-17 — Sigma Research-/Panel-Endpunkte (fail-closed Read-Only)
+// Zeiten: UNIX-Sekunden (UTC); Prozentangaben als Dezimalen (0.06 = 6 %).
+// Ohne Fachmodule liefern die Routen strukturierte Leerantworten
+// (ok=false, available=false, leere Arrays, feed.source="unknown").
+// =============================================================================
+
+export interface SigmaFeedMeta {
+  source: 'tv_scraper' | 'cache_stale' | 'synthetic' | 'unknown';
+  available: boolean;
+  degraded: boolean;
+  cached?: boolean;
+  age_s?: number | null;
+  upstream_error?: string | null;
+  error?: string | null;
+}
+
+export interface SigmaPanelBase {
+  ok: boolean;
+  available: boolean;
+  feed: SigmaFeedMeta;
+  generated_at?: string | null;
+}
+
+export interface SigmaRegimeState extends SigmaPanelBase {
+  phase?: string | null;
+  minute?: number | null;
+  last_scan_ts?: number | null;
+  wave_status?: string | null;
+  range_high?: number | null;
+  range_low?: number | null;
+  eq?: number | null;
+  ce50?: number | null;
+  session_window?: string | null;
+  session_quarantine?: boolean | null;
+  throttle_state?: string | null;
+  throttle_bots?: number | null;
+  hurst_htf?: number | null;
+  poly_bias?: string | null;
+  poly_p_cal?: number | null;
+  onnx_action?: string | null;
+  onnx_model_available?: boolean | null;
+  shadow_plan?: Record<string, unknown> | null;
+}
+
+export interface SigmaRiskState extends SigmaPanelBase {
+  positions: Array<Record<string, unknown>>;
+  rules: Array<{ id: string; label: string; enabled: boolean }>;
+}
+
+export interface SigmaPowerState extends SigmaPanelBase {
+  cos_phi?: number | null;
+  cluster?: string | null;
+  s_norm?: number | null;
+  p_norm?: number | null;
+  q_norm?: number | null;
+  q_upper?: number | null;
+  q_lower?: number | null;
+  q_bias?: number | null;
+  cos_path: Array<{ time: number; value: number }>;
+  resonance?: number | null;
+  resonance_badge?: string | null;
+}
+
+export interface SigmaZonesState extends SigmaPanelBase {
+  interval_min?: number | null;
+  zones: Array<Record<string, unknown>>;
+  envelope?: Record<string, unknown> | null;
+  events: Array<Record<string, unknown>>;
+}
+
+export interface SigmaScoutState extends SigmaPanelBase {
+  last_scan_ts?: number | null;
+  phase_ok?: boolean | null;
+  long_rank: Array<Record<string, unknown>>;
+  short_rank: Array<Record<string, unknown>>;
+  rejected: Array<Record<string, unknown>>;
+  filters: Record<string, unknown>;
+  blinded?: boolean | null;
+}
+
+export interface SigmaPolymarketState extends SigmaPanelBase {
+  bins: Array<Record<string, unknown>>;
+  term_structure: Array<Record<string, unknown>>;
+  mu?: number | null;
+  bias?: string | null;
+  platt_a?: number | null;
+  platt_b?: number | null;
+  brier?: number | null;
+  p_cal?: number | null;
+  gate_open?: boolean | null;
+}
+
+export interface SigmaExhaustionState extends SigmaPanelBase {
+  score?: number | null;
+  exhausted?: boolean | null;
+  components: Record<string, unknown>;
+  unwind: Array<Record<string, unknown>>;
+  forced?: boolean | null;
+  ttl_flat?: boolean | null;
+}
+
+export interface SigmaProvisionState extends SigmaPanelBase {
+  provisions: Array<Record<string, unknown>>;
+  harden_supported: boolean;
+}
+
+export interface SigmaLadderPreview extends SigmaPanelBase {
+  rungs: Array<Record<string, unknown>>;
+  guards: Array<{ id: string; ok: boolean; reason?: string }>;
+  deploy_allowed: boolean;
+  avg_fill_price?: number | null;
+  total_depth_pct?: number | null;
+}
+
+export interface SigmaFractalPreview extends SigmaPanelBase {
+  side?: string | null;
+  leverage?: number | null;
+  entry?: number | null;
+  tranches: Array<Record<string, unknown>>;
+  initial_sl?: number | null;
+  sl_basis?: string | null;
+  fee_covered_be?: number | null;
+  kill_switch: Record<string, unknown>;
+}
+
+export interface SigmaOnnxState extends SigmaPanelBase {
+  tensor: Array<{ name: string; value: number }>;
+  action_probs: { long: number; flat: number; short: number };
+  action?: string | null;
+  leverage?: number | null;
+  entropy?: number | null;
+  model_available?: boolean | null;
+  bar_lock?: string | null;
+  latency_ms?: number | null;
+}
+
+export interface SigmaOrderflowState extends SigmaPanelBase {
+  reason?: string | null;
+}
+
+export interface SigmaWriteResult {
+  ok: boolean;
+  available: boolean;
+  reason: string;
+  job_id?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+
+export interface ResearchJob {
+  job_id: string;
+  hypothesis: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'unavailable';
+  progress: number;
+  error?: string | null;
+  created_at?: number | null;
+}
+
+export interface ResearchJobResult extends ResearchJob {
+  result?: Record<string, unknown> | null;
+}
+
+export interface ResearchDashboard extends SigmaPanelBase {
+  hypotheses: Array<Record<string, unknown>>;
+  sweeps: Array<Record<string, unknown>>;
+  export_html_path?: string | null;
+}
+
+const sigmaGet = <T,>(path: string) => request<T>(path);
+
+export const sigmaResearchApi = {
+  regime: () => sigmaGet<SigmaRegimeState>('/api/v1/sigma/regime'),
+  risk: () => sigmaGet<SigmaRiskState>('/api/v1/sigma/risk'),
+  power: () => sigmaGet<SigmaPowerState>('/api/v1/sigma/power'),
+  zones: () => sigmaGet<SigmaZonesState>('/api/v1/sigma/zones'),
+  scout: () => sigmaGet<SigmaScoutState>('/api/v1/sigma/scout'),
+  polymarket: () => sigmaGet<SigmaPolymarketState>('/api/v1/sigma/polymarket'),
+  exhaustion: () => sigmaGet<SigmaExhaustionState>('/api/v1/sigma/exhaustion'),
+  provisions: () => sigmaGet<SigmaProvisionState>('/api/v1/sigma/provisions'),
+  ladderPreview: () => sigmaGet<SigmaLadderPreview>('/api/v1/sigma/ladder/preview'),
+  fractalPreview: () => sigmaGet<SigmaFractalPreview>('/api/v1/sigma/fractal/preview'),
+  onnx: () => sigmaGet<SigmaOnnxState>('/api/v1/sigma/onnx'),
+  orderflow: () => sigmaGet<SigmaOrderflowState>('/api/v1/sigma/orderflow'),
+
+  // Operator-Schreibzugriffe (Token + Modal im UI)
+  scan: (settingsToken: string) =>
+    operatorPost<SigmaWriteResult>('/api/v1/sigma/scan', settingsToken),
+  provision: (settingsToken: string, body: Record<string, unknown>) =>
+    operatorPost<SigmaWriteResult>('/api/v1/sigma/provisions', settingsToken, body),
+  deProvision: (settingsToken: string, body: Record<string, unknown>) =>
+    operatorPost<SigmaWriteResult>('/api/v1/sigma/provisions/de-provision', settingsToken, body),
+  hardenPine: (settingsToken: string, body: Record<string, unknown>) =>
+    operatorPost<SigmaWriteResult>('/api/v1/sigma/provisions/harden', settingsToken, body),
+
+  // Research (MP-12/16)
+  researchRun: (settingsToken: string, body: { hypothesis: string; params?: Record<string, unknown> }) =>
+    operatorPost<SigmaWriteResult>('/api/v1/research/run', settingsToken, body),
+  researchJob: (jobId: string) => sigmaGet<ResearchJobResult>(`/api/v1/research/jobs/${encodeURIComponent(jobId)}`),
+  researchDashboard: () => sigmaGet<ResearchDashboard>('/api/v1/research/dashboard'),
+};
+
+/** MP-17 Blinded-Modus: Ticker nur als ASSET_### anzeigen (Ranker/Tensor). */
+export function blindedSymbol(symbol: string | undefined, blinded: boolean): string {
+  if (!blinded || !symbol) return symbol ?? '—';
+  const m = /(\d+)$/.exec(symbol);
+  return m ? `ASSET_${m[1]}` : 'ASSET_???';
+}
