@@ -514,6 +514,43 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.live_kraken_sync_ts = None
 
 
+def test_pnl_daily_uses_sql_day_buckets(client):
+    import datetime as dt
+    import app.server.main as main
+
+    today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    sid = "pnl_daily_sql"
+    main.state.store.upsert_strategy({
+        "id": sid, "name": "Daily SQL", "assetPair": "BTC/USD",
+        "status": "inactive", "executionMode": "paper", "interval": 15,
+        "parameters": {},
+    })
+    main.state.store.upsert_trade({
+        "trade_id": "dly-w", "strategy_id": sid, "status": "closed",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 7.25, "notional_usd": 250.0,
+        "exit_time": f"{today} 12:00:00", "entry_time": f"{today} 09:00:00",
+    })
+    main.state.store.upsert_trade({
+        "trade_id": "dly-l", "strategy_id": sid, "status": "closed",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": -2.25, "notional_usd": 100.0,
+        "exit_time": f"{today}T16:00:00", "entry_time": f"{today}T13:00:00",
+    })
+    body = client.get(f"/api/pnl/daily/{sid}?days=7").json()
+    assert body["strategyId"] == sid
+    assert len(body["days"]) == 7
+    today_row = next(d for d in body["days"] if d["isToday"])
+    assert today_row["pnl"] == pytest.approx(5.0)
+    assert today_row["tradesCount"] == 2
+    assert today_row["wins"] == 1
+    assert today_row["losses"] == 1
+    assert today_row["volumeUSD"] == pytest.approx(350.0)
+    assert today_row["winRate"] == pytest.approx(50.0)
+    assert body["bestDay"]["pnl"] == pytest.approx(5.0)
+    assert body["bestDay"]["date"] == today
+
+
 def test_zero_mock_seams_are_honest_empty(client):
     sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
     assert sent.get("available") is False

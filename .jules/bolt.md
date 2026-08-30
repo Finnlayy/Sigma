@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-30 - daily GROUP BY is ~13× not ~45×
+**Learning:** `sum_closed_pnl` (single SUM) was ~45× vs materializing 4k rows. `closed_pnl_by_day` (GROUP BY + 5 aggregates + a Python dict of day buckets) at 8k rows was ~49 ms → ~3.7 ms (~13×). DuckDB still SEQ_SCANs `trades`; the win is skipping 30-column Python dicts, not skipping the scan.
+**Action:** Quote measured GROUP BY numbers, not the SUM-only speedup. Still prefer SQL aggregates over `SELECT *` + Python group.

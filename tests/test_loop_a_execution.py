@@ -482,3 +482,84 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+
+
+def _python_pnl_by_day(rows):
+    """Reference loop that /api/pnl/daily used before the SQL GROUP BY."""
+    by_day = {}
+    for t in rows:
+        day = str(t.get("exit_time") or t.get("entry_time") or "")[:10]
+        if not day:
+            continue
+        d = by_day.setdefault(day, {"pnl": 0.0, "trades": 0.0, "wins": 0.0,
+                                    "losses": 0.0, "vol": 0.0, "realized": 0.0})
+        pnl = float(t.get("net_pnl_usd") or 0.0)
+        d["pnl"] += pnl
+        d["realized"] += pnl
+        d["trades"] += 1
+        d["wins"] += 1 if pnl > 0 else 0
+        d["losses"] += 1 if pnl <= 0 else 0
+        d["vol"] += float(t.get("notional_usd") or 0.0)
+    return by_day
+
+
+def test_closed_pnl_by_day_matches_python_group(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "daily.duckdb"))
+    store.upsert_trade({
+        "trade_id": "w1", "strategy_id": "alpha", "status": "closed",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 12.5, "notional_usd": 100.0,
+        "exit_time": "2026-08-29 15:00:00", "entry_time": "2026-08-29 10:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "l1", "strategy_id": "alpha", "status": "closed",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": -4.0, "notional_usd": 80.0,
+        "exit_time": "2026-08-29T18:30:00", "entry_time": "2026-08-29T12:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "z1", "strategy_id": "alpha", "status": "closed",
+        "symbol": "ETH/USD", "direction": "SHORT", "side": "sell",
+        "net_pnl_usd": 0.0, "notional_usd": 50.0,
+        "exit_time": "2026-08-30 09:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "other", "strategy_id": "beta", "status": "closed",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 99.0, "notional_usd": 200.0,
+        "exit_time": "2026-08-29 11:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "open", "strategy_id": "alpha", "status": "open",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 7.0, "notional_usd": 10.0,
+        "entry_time": "2026-08-29 08:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "nodate", "strategy_id": "alpha", "status": "closed",
+        "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 3.0, "notional_usd": 10.0,
+    })
+
+    assert store.closed_pnl_by_day([]) == {}
+
+    sql = store.closed_pnl_by_day(["alpha"])
+    py = _python_pnl_by_day(store.trades(strategy_id="alpha", status="closed", limit=500))
+    # Open-row is excluded by both; dateless close is excluded by both (empty [:10]).
+    assert set(sql) == set(py) == {"2026-08-29", "2026-08-30"}
+    for day in sql:
+        for key in ("pnl", "trades", "wins", "losses", "vol", "realized"):
+            assert sql[day][key] == pytest.approx(py[day][key])
+    assert sql["2026-08-29"]["pnl"] == pytest.approx(8.5)
+    assert sql["2026-08-29"]["trades"] == 2
+    assert sql["2026-08-29"]["wins"] == 1
+    assert sql["2026-08-29"]["losses"] == 1
+    assert sql["2026-08-30"]["trades"] == 1
+    assert sql["2026-08-30"]["losses"] == 1  # zero PnL counts as a loss
+    assert sql["2026-08-30"]["wins"] == 0
+
+    windowed = store.closed_pnl_by_day(["alpha"], since="2026-08-30", until="2026-08-30")
+    assert set(windowed) == {"2026-08-30"}
+    assert "beta" not in store.closed_pnl_by_day(["alpha"])
