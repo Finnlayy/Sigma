@@ -1,5 +1,10 @@
 # Master-Prompts für Project Sigma
 
+Unattended Implementierungs-Loop (Jules): `docs/prompts/JULES-MASTER-EXECUTE.md`
+plus Zustand `docs/plans/EXECUTE-STATE.md` und `AGENTS.md`. Eine Phase nach der
+anderen bis STOP; GitHub Action `.github/workflows/jules-mp-execute.yml`
+startet neu, solange **Next** nicht `STOP` ist.
+
 Diese Prompts sind dafür gedacht, **nacheinander von KI-Agenten**
 (z. B. Cursor / Claude Code / GitHub-Copilot-Workspace) abgearbeitet zu werden.
 

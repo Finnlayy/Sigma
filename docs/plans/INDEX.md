@@ -1,5 +1,7 @@
 # Plan-Index
 
+Implementierungs-Loop: `docs/plans/EXECUTE-STATE.md` (Next-Zeiger) · Prompt: `docs/prompts/JULES-MASTER-EXECUTE.md`
+
 | MP | Status | Datei | Blocker | Next |
 |---|---|---|---|---|
 | MP-01 | PLAN-DONE | `docs/plans/MP-01.md` | — | MP-02 |

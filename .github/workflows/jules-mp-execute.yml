@@ -1,0 +1,82 @@
+# Re-invokes Jules until docs/plans/EXECUTE-STATE.md Next is STOP.
+# Requires repo secret JULES_API_KEY (jules.google.com → Settings).
+# Sessions start from jules/mp-execute if that branch exists, else main.
+name: Jules MP execute loop
+
+on:
+  schedule:
+    - cron: "25 */2 * * *"
+  workflow_dispatch:
+  issues:
+    types: [opened, labeled]
+
+concurrency:
+  group: jules-mp-execute
+  cancel-in-progress: false
+
+jobs:
+  continue:
+    if: |
+      github.event_name != 'issues' ||
+      contains(github.event.issue.labels.*.name, 'jules-mp-execute')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Next and starting branch
+        id: state
+        run: |
+          set -euo pipefail
+          git fetch origin --prune
+          BRANCH="main"
+          if git ls-remote --heads origin jules/mp-execute | grep -q .; then
+            BRANCH="jules/mp-execute"
+            git checkout -B jules/mp-execute origin/jules/mp-execute
+          fi
+          STATE="docs/plans/EXECUTE-STATE.md"
+          if [ ! -f "$STATE" ]; then
+            echo "continue=false" >> "$GITHUB_OUTPUT"
+            echo "reason=missing EXECUTE-STATE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          NEXT="$(sed -n 's/^<!-- jules-next:\([^ ]*\) -->/\1/p' "$STATE" | head -1)"
+          if [ -z "$NEXT" ]; then
+            NEXT="$(sed -n 's/^\*\*Next:\*\*[[:space:]]*//p' "$STATE" | head -1 | tr -d '[:space:]')"
+          fi
+          LOOP="$(sed -n 's/^<!-- jules-loop:\([^ ]*\) -->/\1/p' "$STATE" | head -1)"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "loop=$LOOP" >> "$GITHUB_OUTPUT"
+          if [ "$NEXT" = "STOP" ] || [ "$LOOP" = "DONE" ]; then
+            echo "continue=false" >> "$GITHUB_OUTPUT"
+            echo "reason=loop complete ($NEXT / $LOOP)" >> "$GITHUB_OUTPUT"
+          else
+            echo "continue=true" >> "$GITHUB_OUTPUT"
+            echo "reason=next $NEXT on $BRANCH" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Jules state: branch=$BRANCH next=$NEXT loop=$LOOP"
+
+      - name: Invoke Jules for Next
+        if: steps.state.outputs.continue == 'true'
+        uses: google-labs-code/jules-invoke@v1
+        with:
+          starting_branch: ${{ steps.state.outputs.branch }}
+          include_commit_log: true
+          jules_api_key: ${{ secrets.JULES_API_KEY }}
+          prompt: |
+            Unattended Sigma MP execute loop. Operator cannot restart. Do not wait for humans.
+
+            1. Read AGENTS.md.
+            2. Read docs/plans/EXECUTE-STATE.md. Next is ${{ steps.state.outputs.next }}.
+            3. Read docs/prompts/JULES-MASTER-EXECUTE.md for that phase, then docs/plans/MP-XX.md.
+            4. Work on branch jules/mp-execute (create from current starting branch if missing). One accumulating PR, not one PR per phase.
+            5. Implement Next. Tests green. Mark the row DONE, set Next to the following CHAIN item, commit, push.
+            6. Immediately start the new Next in THIS session. Repeat until Next is STOP or the VM is about to die.
+            7. If files for Next already exist with tests, skip, advance state, continue.
+            8. Never implement MP-10, MP-13, MP-14. Never live-order. Never restart from MP-01 if later phases are DONE.
+
+            If Next is already STOP, do nothing.
