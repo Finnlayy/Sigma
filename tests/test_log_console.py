@@ -87,6 +87,28 @@ def test_tail_missing_file_is_empty(tailer):
     assert tailer.tail("SCRAPER") == []
 
 
+def test_read_last_n_lines_matches_readlines(tmp_path):
+    path = tmp_path / "core.log"
+    body = "".join(f"line {i}\n" for i in range(500)) + "no-nl-tail"
+    path.write_text(body, encoding="utf-8")
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        expected = [ln.rstrip("\n") for ln in fh.readlines()[-7:]]
+    assert rl.read_last_n_lines(str(path), 7, chunk_size=64) == expected
+
+
+def test_tail_large_file_returns_last_n(tailer):
+    append(tailer, "CORE", *[f"evt {i}" for i in range(4000)])
+    rows = tailer.tail("CORE", limit=5)
+    assert [r["raw_line"] for r in rows] == [f"evt {i}" for i in range(3995, 4000)]
+
+
+def test_read_last_n_lines_empty_and_zero(tmp_path):
+    path = tmp_path / "empty.log"
+    path.write_text("", encoding="utf-8")
+    assert rl.read_last_n_lines(str(path), 10) == []
+    assert rl.read_last_n_lines(str(path), 0) == []
+
+
 def test_poll_once_only_returns_new_lines(tailer):
     append(tailer, "CORE", "boot")
     tailer.seek_to_end()

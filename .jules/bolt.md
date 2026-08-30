@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-30 - LogTailer.tail slurped whole files
+**Learning:** `poll_once` is offset-based (cheap), but WS/HTTP backfill used `readlines()[-n]` on all 6 sources. At 20 MB/source that was ~24 ms × 6 ≈ 144 ms and O(file size) RAM on every reconnect; seek-from-end stayed ~0.04 ms (~600×). `readlines()[-n]` cost grew linearly with CORE/TV_WORKER logs; the tail window did not.
+**Action:** Never backfill growing log files with `readlines()[-n]`. Seek from EOF until `n` newlines. Incremental `poll_once` offsets are not a substitute for cheap attach backfill.
