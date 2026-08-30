@@ -51,7 +51,7 @@ from app.optimizer.AcademyRegistry import AcademyRegistry
 from app.optimizer.GeneticOptimizer import GeneticOptimizer
 from app.quant.RegimeEngine import ampel_status, dfa_hurst, lead_lag_matrix, sentiment_score
 from app.security.PasskeyAuthEngine import PasskeyAuthEngine
-from app.security.SettingsEnvManager import SettingsEnvManager
+from app.security.SettingsEnvManager import SettingValidationError, SettingsEnvManager
 from app.telegram.TelegramBotEngine import TelegramBotEngine
 
 logger = logging.getLogger("app.server.main")
@@ -2358,8 +2358,16 @@ async def settings_update(request: Request, body: SettingsUpdateBody):
         raise HTTPException(400, "key & value erforderlich.")
     try:
         out = state.settings.update(body.key, body.value)
+    except SettingValidationError as exc:
+        raise HTTPException(400, {
+            "code": "invalid",
+            "detail": str(exc),
+            "hint": exc.hint,
+            "format": exc.format,
+            "allowed": exc.allowed,
+        })
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, {"code": "rejected", "detail": str(exc)})
     state.has_credentials = _kraken_credentials_present()
     out["hasCredentials"] = state.has_credentials
     return out

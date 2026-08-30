@@ -60,7 +60,7 @@ Canonical form is Sigma (`BTC/USD`). Mapping to `XBTUSD` stays inside `to_kraken
 - Reuse `htf_series` from [`LoopCPort.poll_pair`](../sigma/loops/loop_c.py)
 - Fill gaps in parallel (`ThreadPoolExecutor`, worker cap ~4) via [`fetch_ohlc_with_meta`](../app/tv/scraper_client.py)
 - Drop `synthetic` / `degraded` the same way Loop C does
-- [`movers()`](../app/tv/scraper_client.py) may reorder; it must not enlarge the universe
+- [`movers()`](../app/tv/scraper_client.py) reorders the watchlist (`rank_watchlist`); it must not enlarge the universe. Synthetic/degraded movers are ignored.
 - Sidecar down → empty screen; Scout falls back to `universe.list_symbols()`
 
 ### Screen and Academy

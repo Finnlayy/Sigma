@@ -7,11 +7,73 @@ import {
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { safeFetchJson } from "../../lib/api";
 
+const FALLBACK_ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD"];
+
+type CrossImpactRow = {
+  asset: string;
+  correlations: Record<string, number>;
+  spillover: number;
+};
+
+type CrossImpactView = {
+  assets: string[];
+  matrix: CrossImpactRow[];
+  lead_asset: string;
+  lead_lag_bars: number;
+};
+
+/** Map RegimeEngine.lead_lag_matrix ({symbol_a, lags}) or the older {assets, correlations} shape. */
+function normalizeCrossImpact(raw: any): CrossImpactView | null {
+  if (!raw) return null;
+  const incoming = Array.isArray(raw.matrix) ? raw.matrix : [];
+  const assets: string[] = Array.isArray(raw.assets) && raw.assets.length
+    ? raw.assets
+    : incoming.map((r: any) => r.symbol_a || r.asset).filter(Boolean);
+  const cols = assets.length ? assets : FALLBACK_ASSETS;
+
+  const matrix: CrossImpactRow[] = incoming.map((r: any) => {
+    const asset = r.symbol_a || r.asset || "";
+    const correlations: Record<string, number> = {};
+    for (const col of cols) {
+      if (col === asset) {
+        correlations[col] = 1;
+        continue;
+      }
+      const fromLegacy = r.correlations?.[col];
+      const fromLag = r.lags?.[col]?.best_corr;
+      correlations[col] = typeof fromLegacy === "number" ? fromLegacy
+        : typeof fromLag === "number" ? fromLag
+        : 0;
+    }
+    const off = cols.filter((c) => c !== asset).map((c) => Math.abs(correlations[c] || 0));
+    const spillover = off.length ? off.reduce((s, v) => s + v, 0) / off.length : 0;
+    return { asset, correlations, spillover };
+  });
+
+  let lead_asset = typeof raw.lead_asset === "string" ? raw.lead_asset : (cols[0] || FALLBACK_ASSETS[0]);
+  let lead_lag_bars = 0;
+  let bestAbs = 0;
+  for (const r of incoming) {
+    const lags = r.lags && typeof r.lags === "object" ? r.lags : {};
+    for (const info of Object.values(lags) as any[]) {
+      const corr = Math.abs(Number(info?.best_corr) || 0);
+      const lag = Number(info?.best_lag) || 0;
+      if (lag > 0 && corr > bestAbs) {
+        bestAbs = corr;
+        lead_asset = r.symbol_a || r.asset || lead_asset;
+        lead_lag_bars = lag;
+      }
+    }
+  }
+
+  return { assets: cols, matrix, lead_asset, lead_lag_bars };
+}
+
 export function QuantitativeRegimePanel() {
   const [selectedAsset, setSelectedAsset] = useState<string>("BTC/USD");
   const [dfaData, setDfaData] = useState<any>(null);
   const [ampelData, setAmpelData] = useState<any>(null);
-  const [crossImpactData, setCrossImpactData] = useState<any>(null);
+  const [crossImpactData, setCrossImpactData] = useState<CrossImpactView | null>(null);
   const [sentimentResult, setSentimentResult] = useState<any>(null);
   const [customHeadline, setCustomHeadline] = useState<string>("SEC approves landmark multi-crypto ETF basket with instant spot settlement");
   const [isLoadingDFA, setIsLoadingDFA] = useState<boolean>(false);
@@ -57,8 +119,9 @@ export function QuantitativeRegimePanel() {
   const fetchCrossImpact = async () => {
     try {
       const data = await safeFetchJson<any>("/api/quant/lead-lag/cross-impact", undefined, 4000);
-      if (data) {
-        setCrossImpactData(data);
+      const view = normalizeCrossImpact(data);
+      if (view) {
+        setCrossImpactData(view);
       }
     } catch (err) {
       console.error("Failed to fetch Cross-Impact matrix:", err);
@@ -84,7 +147,7 @@ export function QuantitativeRegimePanel() {
   };
 
   // Mock fluctuation curve points for DFA chart if not returned from backend
-  const dfaPlotPoints = dfaData?.fluctuation_curve || [
+  const dfaPlotPoints = Array.isArray(dfaData?.fluctuation_curve) ? dfaData.fluctuation_curve : [
     { scale: 8, fluctuation: 0.0012, fit: 0.0011 },
     { scale: 16, fluctuation: 0.0019, fit: 0.0018 },
     { scale: 32, fluctuation: 0.0029, fit: 0.0030 },
@@ -396,7 +459,7 @@ export function QuantitativeRegimePanel() {
                 </h4>
               </div>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950 text-purple-300 border border-purple-800">
-                Lead: {crossImpactData?.lead_asset || "BTC/USD"} ({crossImpactData?.lead_lag_lag_ms || 145}ms)
+                Lead: {crossImpactData?.lead_asset || "BTC/USD"} ({crossImpactData?.lead_lag_bars ?? 0} bars)
               </span>
             </div>
 
@@ -406,25 +469,18 @@ export function QuantitativeRegimePanel() {
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
                     <th className="py-2 text-left">Asset</th>
-                    {crossImpactData?.assets?.map((a: string) => (
+                    {(crossImpactData?.assets ?? FALLBACK_ASSETS).map((a: string) => (
                       <th key={a} className="py-2 text-center text-[10px]">{a.split('/')[0]}</th>
-                    )) || (
-                      <>
-                        <th className="py-2 text-center text-[10px]">BTC</th>
-                        <th className="py-2 text-center text-[10px]">ETH</th>
-                        <th className="py-2 text-center text-[10px]">SOL</th>
-                        <th className="py-2 text-center text-[10px]">XRP</th>
-                      </>
-                    )}
+                    ))}
                     <th className="py-2 text-right">Spillover</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {crossImpactData?.matrix?.map((row: any) => (
+                  {crossImpactData?.matrix?.length ? crossImpactData.matrix.map((row) => (
                     <tr key={row.asset} className="hover:bg-slate-800/30">
                       <td className="py-2 text-slate-300 font-semibold">{row.asset}</td>
-                      {crossImpactData.assets.map((colAsset: string) => {
-                        const corr = row.correlations[colAsset] || 0;
+                      {(crossImpactData.assets ?? FALLBACK_ASSETS).map((colAsset: string) => {
+                        const corr = row.correlations?.[colAsset] || 0;
                         return (
                           <td key={colAsset} className="py-2 text-center">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] ${
@@ -440,10 +496,10 @@ export function QuantitativeRegimePanel() {
                         );
                       })}
                       <td className="py-2 text-right text-purple-300 font-semibold">
-                        {((row.spillover || 0.25) * 100).toFixed(1)}%
+                        {((row.spillover || 0) * 100).toFixed(1)}%
                       </td>
                     </tr>
-                  )) || (
+                  )) : (
                     <tr>
                       <td colSpan={6} className="py-4 text-center text-slate-500">Loading cross-impact correlation matrix...</td>
                     </tr>

@@ -26,6 +26,7 @@ from sigma.execution.universe import (
     KrakenExecutionUniverse,
     PionexExecutionUniverse,
     default_execution_universe,
+    rank_watchlist,
     register_venue,
     reset_venues,
 )
@@ -392,3 +393,103 @@ def test_orchestrator_screen_empty_when_series_degraded():
     # Sidecar down -> leerer Screen, Scout faellt auf Universe-Defaults.
     assert loop_d.calls and loop_d.calls[-1]["symbols"] == ["BTC/USD", "ETH/USD"]
     assert out["screen"]["states"] == {}
+
+
+# ---------------------------------------------------------------------------
+# TV-movers: nur Sortierung, Universe bleibt zu
+# ---------------------------------------------------------------------------
+
+def test_rank_watchlist_promotes_tradable_movers_and_drops_sol():
+    wanted = ["BTC/USD", "ETH/USD"]
+    rows = [
+        {"name": "SOLUSD"},          # Gainer, aber nicht tradable
+        {"ticker": "ETHUSD"},
+        {"symbol": "XBTUSD"},
+    ]
+    ranked = rank_watchlist(wanted, rows)
+    assert ranked == ["ETH/USD", "BTC/USD"]
+    assert "SOL/USD" not in ranked
+    assert rank_watchlist(wanted, []) == wanted
+    assert rank_watchlist(wanted, None) == wanted
+
+
+def test_academy_list_exposes_wave_watch():
+    acad = AcademyRegistry(_StubStore())
+    acad.ingest_wave_screen([], defaults=["ETH/USD", "BTC/USD"])
+    acad.store.upsert_academy_entry({
+        "id": "s1", "name": "s1", "symbol": "BTC/USD", "interval_min": 15,
+        "archetype": "sma_cross", "graduation_level": "CADET",
+        "wfo_return": 0.0, "wfo_sharpe": 0.0, "dsr": 0.0,
+        "drills_passed": 0, "drills_total": 5,
+    })
+
+    class _Store(_StubStore):
+        def academy_entries(self):
+            return [{"id": "s1", "name": "s1"}]
+
+    acad.store = _Store()
+    rows = acad.list()
+    assert rows[0]["waveWatch"] == ["ETH/USD", "BTC/USD"]
+
+
+class _MoversScraper:
+    def __init__(self, rows, meta=None):
+        self._rows = rows
+        self.last_meta = meta or {"source": "tv_scraper", "degraded": False}
+
+    def health(self):
+        return {"ok": True, "degraded": False}
+
+    def movers(self, market="crypto", category="gainers", limit=25):
+        return list(self._rows)
+
+    def fetch_ohlc_with_meta(self, *args, **kwargs):
+        return [], {"source": "tv_scraper", "degraded": False}
+
+
+def test_orchestrator_movers_reorder_defaults_without_adding_sol():
+    btc_htf = _bars(20, start=1_700_000_000.0, step=H1)
+    now = max(NY_FRIDAY, _closed_now(btc_htf, H1))
+    loop_d, acad = _CaptureLoopD(), _CaptureAcademy()
+    scraper = _MoversScraper([
+        {"name": "SOLUSD"},
+        {"ticker": "ETHUSD"},
+        {"symbol": "XBTUSD"},
+    ])
+    orch = MasterOrchestrator(
+        ports={
+            "polymarket": None,
+            "loop_c": LoopCPort(scraper=scraper, store=None),
+            "loop_d": loop_d,
+            "academy": acad,
+        },
+        universe=KrakenExecutionUniverse(),
+        hydrate_cooldown_s=0,
+    )
+    out = orch.tick(_snapshot(btc_htf), now=now)
+    assert out["screen"]["defaults"] == ["ETH/USD", "BTC/USD"]
+    assert "SOL/USD" not in out["screen"]["defaults"]
+    assert loop_d.calls[-1]["symbols"] == ["ETH/USD", "BTC/USD"]
+    assert acad.watch == ["ETH/USD", "BTC/USD"]
+
+
+def test_orchestrator_ignores_synthetic_movers():
+    btc_htf = _bars(20, start=1_700_000_000.0, step=H1)
+    now = max(NY_FRIDAY, _closed_now(btc_htf, H1))
+    loop_d, acad = _CaptureLoopD(), _CaptureAcademy()
+    scraper = _MoversScraper(
+        [{"ticker": "ETHUSD"}],
+        meta={"source": "synthetic", "degraded": False},
+    )
+    orch = MasterOrchestrator(
+        ports={
+            "polymarket": None,
+            "loop_c": LoopCPort(scraper=scraper, store=None),
+            "loop_d": loop_d,
+            "academy": acad,
+        },
+        universe=KrakenExecutionUniverse(),
+        hydrate_cooldown_s=0,
+    )
+    out = orch.tick(_snapshot(btc_htf), now=now)
+    assert out["screen"]["defaults"] == ["BTC/USD", "ETH/USD"]

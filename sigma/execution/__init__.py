@@ -15,6 +15,7 @@ from sigma.execution.universe import (
     KrakenExecutionUniverse,
     PionexExecutionUniverse,
     default_execution_universe,
+    rank_watchlist,
     register_venue,
     reset_venues,
 )
@@ -30,6 +31,7 @@ __all__ = (
     "KrakenExecutionUniverse",
     "PionexExecutionUniverse",
     "default_execution_universe",
+    "rank_watchlist",
     "register_venue",
     "reset_venues",
 )

@@ -21,7 +21,7 @@ Invarianten:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Mapping, Optional, Sequence
 
 from app.core import blueprint as bp
 from app.tv.symbol_map import is_allowed, market_type, to_sigma_symbol
@@ -171,3 +171,42 @@ def default_execution_universe() -> ExecutionUniverse:
     if not live:
         return _DEFAULT_KRAKEN
     return CompositeExecutionUniverse([_DEFAULT_KRAKEN] + live)
+
+
+def mover_symbol(row: Mapping[str, Any]) -> str:
+    """Roh-Ticker aus einer TV-Movers-Zeile → kanonische Sigma-Form oder ''."""
+    raw = row.get("symbol") or row.get("ticker") or row.get("name") or row.get("pair") or ""
+    if not raw:
+        return ""
+    try:
+        return to_sigma_symbol(str(raw))
+    except Exception:
+        return ""
+
+
+def rank_watchlist(
+    wanted: Sequence[str],
+    mover_rows: Optional[Iterable[Mapping[str, Any]]] = None,
+) -> List[str]:
+    """Sortiert die Watchlist nach TV-Movers. Erweitert das Universe nicht.
+
+    Symbole, die in ``wanted`` fehlen (z. B. ein SOL-Gainer), werden
+    verworfen. Fehlende / leere Movers → ursprüngliche Reihenfolge.
+    """
+    wanted_list = [s for s in wanted if s]
+    if not wanted_list or not mover_rows:
+        return list(wanted_list)
+    wanted_set = set(wanted_list)
+    ranked: List[str] = []
+    seen = set()
+    for row in mover_rows:
+        if not isinstance(row, Mapping):
+            continue
+        symbol = mover_symbol(row)
+        if symbol and symbol in wanted_set and symbol not in seen:
+            ranked.append(symbol)
+            seen.add(symbol)
+    for symbol in wanted_list:
+        if symbol not in seen:
+            ranked.append(symbol)
+    return ranked

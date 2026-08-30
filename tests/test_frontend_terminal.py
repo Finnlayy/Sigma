@@ -171,3 +171,13 @@ def test_package_json_pins_terminal_dependencies():
     assert "flexlayout-react" not in deps
     assert os.path.exists(os.path.join(ROOT, "components.json"))
     assert os.path.exists(os.path.join(ROOT, "src", "components", "ui", "resizable.tsx"))
+
+
+def test_settings_save_feedback_tones():
+    src = _read(os.path.join(ROOT, "src", "components", "SettingsPage.tsx"))
+    assert 'tone: "ok"' in src
+    assert 'tone: "err"' in src
+    assert 'tone: "bad"' in src
+    assert "FLASH_MS" in src
+    assert "Erlaubt:" in src
+    assert "Format:" in src

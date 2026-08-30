@@ -52,7 +52,7 @@ class MasterOrchestrator:
             "dynamic_channel_dca": DynamicChannelDCA(),
             "dual_hedge_grid": DualHedgeGrid(),
         }
-        from sigma.execution.universe import default_execution_universe
+        from sigma.execution.universe import default_execution_universe, rank_watchlist
 
         # Venue = Source of Truth fürs tradable Universe — nicht Scraper,
         # nicht config.market_symbols.
@@ -214,7 +214,9 @@ class MasterOrchestrator:
         Fail-Closed: synthetic/degraded wird verworfen). Sidecar down →
         leere Serie → leerer Screen → Scout fällt auf Universe-Defaults.
         """
-        wanted = list(self.universe.list_symbols())
+        from sigma.execution.universe import rank_watchlist
+
+        wanted = rank_watchlist(self.universe.list_symbols(), self._mover_rows())
         cached = {
             s: list(c) for s, c in (htf_series or {}).items()
             if s in wanted and c
@@ -224,13 +226,54 @@ class MasterOrchestrator:
             filled = self._hydrate_missing(missing, interval_min)
             self._last_hydrate_ts = time.time()
             cached = {**cached, **filled}
-        return self.collider.screen(
+        screen = self.collider.screen(
             cached,
             universe=self.universe,
             leader=leader,
             interval_min=interval_min,
             now=now,
         )
+        order = {symbol: i for i, symbol in enumerate(wanted)}
+        ranked_cands = tuple(
+            sorted(screen.candidates, key=lambda c: order.get(c.symbol, len(order)))
+        )
+        return WaveScreen(
+            candidates=ranked_cands,
+            states=screen.states,
+            defaults=tuple(wanted),
+            leader=screen.leader,
+            interval_min=screen.interval_min,
+            now=screen.now,
+        )
+
+    def _mover_rows(self) -> List[Dict[str, Any]]:
+        """TV-Movers nur zur Sortierung. Fail-closed; erweitert das Universe nicht.
+
+        Nur über den injizierten Loop-C-Scraper — kein globaler Client in
+        Tests, der eine lebende Sidecar-Reihenfolge einschleusen könnte.
+        Synthetic / degraded Meta → leere Liste (Watchlist bleibt Universe-Order).
+        """
+        port = self.ports.get("loop_c")
+        if port is None:
+            return []
+        client = getattr(port, "scraper", None)
+        if client is None and hasattr(port, "_scraper"):
+            try:
+                client = port._scraper()
+            except Exception:
+                return []
+        if client is None or not hasattr(client, "movers"):
+            return []
+        try:
+            rows = client.movers("crypto", "gainers", 25) or []
+        except Exception as exc:
+            logger.info("wave screen movers failed: %s", exc)
+            return []
+        meta = getattr(client, "last_meta", {}) or {}
+        origin = str(meta.get("source") or "").lower()
+        if meta.get("degraded") or origin in ("synthetic", "synth", "seed"):
+            return []
+        return [row for row in rows if isinstance(row, dict)]
 
     def _hydrate_due(self) -> bool:
         if self.hydrate_cooldown_s <= 0:

@@ -88,8 +88,10 @@ class AcademyRegistry:
 
     def list(self) -> List[Dict[str, Any]]:
         rows = self.store.academy_entries()
+        watch = list(self.wave_watchlist)
         for r in rows:
             r["drills"] = DRILLS
+            r["waveWatch"] = watch
         return rows
 
     def career(self, strategy_id: str) -> Dict[str, Any]:
