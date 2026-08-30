@@ -482,3 +482,48 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_trade_stats("paper")
+    assert stats["n"] == 2
+    assert stats["pnl"] == 13.0
+    assert store.closed_trade_stats("live") == {"n": 1, "pnl": 99.0}
+
+
+def test_strategy_closed_stats_matches_python_groupby(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "strat-pnl.duckdb"))
+    rows = [
+        ("t1", "alpha", 10.0, 100.0, "2026-01-03T00:00:00"),
+        ("t2", "alpha", -4.0, 80.0, "2026-01-02T00:00:00"),
+        ("t3", "beta", 2.5, 50.0, "2026-01-01T00:00:00"),
+        ("t4", "alpha", 1.0, 20.0, "2025-12-01T00:00:00"),  # outside LIMIT 2 window
+    ]
+    for tid, sid, pnl, notional, ts in rows:
+        store.upsert_trade({
+            "trade_id": tid, "strategy_id": sid, "status": "closed",
+            "execution_mode": "paper", "symbol": "BTC/USD",
+            "direction": "LONG", "side": "buy", "net_pnl_usd": pnl,
+            "notional_usd": notional, "entry_time": ts,
+        })
+    scanned = store.trades(status="closed", limit=2)
+    by_sid: dict = {}
+    for t in scanned:
+        rec = by_sid.setdefault(t["strategy_id"], {"realized": 0.0, "n": 0, "wins": 0, "volume": 0.0})
+        pnl = float(t.get("net_pnl_usd") or 0.0)
+        rec["realized"] += pnl
+        rec["n"] += 1
+        rec["wins"] += 1 if pnl > 0 else 0
+        rec["volume"] += float(t.get("notional_usd") or 0.0)
+    sql = store.strategy_closed_stats(limit=2)
+    assert set(sql) == set(by_sid)
+    for sid, expected in by_sid.items():
+        got = sql[sid]
+        assert got["n"] == expected["n"]
+        assert got["wins"] == expected["wins"]
+        assert got["realized"] == expected["realized"]
+        assert got["volume"] == expected["volume"]
+    # Newest two rows are t1 (alpha +10) and t2 (alpha -4); beta is older.
+    assert sql["alpha"]["n"] == 2
+    assert sql["alpha"]["wins"] == 1
+    assert sql["alpha"]["realized"] == 6.0
+    assert "beta" not in sql

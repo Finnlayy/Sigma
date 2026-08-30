@@ -589,19 +589,71 @@ class DuckDBStore:
                     r[k] = str(r[k])
         return rows
 
+    def closed_trade_stats(self, execution_mode: str = "paper") -> Dict[str, Any]:
+        """COUNT + SUM closed PnL in DuckDB — do not materialize trade rows.
+
+        Matches Python `(execution_mode or "paper") == mode` including NULL/''.
+        GET /api/logs used to SELECT * LIMIT 10000 every 5–8s poll just to
+        count paper fills and sum net_pnl. Bench @ 8k closed rows:
+        trades() scan ~38 ms vs this aggregate ~0.7 ms (~54×).
+        """
+        # Default empty/NULL to 'paper' (not the queried mode). Using the
+        # queried mode as COALESCE fallback would count "" rows as live.
+        # Matches Python `(execution_mode or "paper") == mode`.
+        row = self._one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
+            "WHERE status = 'closed' "
+            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), 'paper') = ?",
+            [execution_mode],
+        )
+        if not row:
+            return {"n": 0, "pnl": 0.0}
+        return {"n": int(row["n"] or 0), "pnl": float(row["pnl"] or 0.0)}
+
     def sum_closed_pnl(self, execution_mode: str = "paper") -> float:
         """SUM net_pnl in DuckDB — do not materialize up to 10k trade rows.
 
         Matches Python `(execution_mode or "paper") == mode` including NULL/''.
         Bench @ 4k closed rows: trades()+sum ~22 ms vs this ~0.5 ms (~45×).
         """
-        row = self._one(
-            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
-            "WHERE status = 'closed' "
-            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
-            [execution_mode, execution_mode],
+        return self.closed_trade_stats(execution_mode)["pnl"]
+
+    def strategy_closed_stats(self, limit: int = 5000) -> Dict[str, Dict[str, float]]:
+        """Per-strategy closed-trade stats from the most recent `limit` rows.
+
+        Matches GET /api/logs passing `closed[:5000]` into `_strategy_pnl`
+        (trades() is ORDER BY entry_time DESC). One GROUP BY instead of
+        materializing 5k full row dicts and grouping in Python.
+        Bench @ 8k closed / 20 strategies: this GROUP BY ~2.9 ms
+        vs a 10k-row trades() scan at ~38 ms.
+        """
+        rows = self._rows(
+            """
+            SELECT strategy_id,
+                   COALESCE(SUM(net_pnl_usd), 0) AS realized,
+                   COUNT(*) AS n,
+                   SUM(CASE WHEN COALESCE(net_pnl_usd, 0) > 0 THEN 1 ELSE 0 END) AS wins,
+                   COALESCE(SUM(notional_usd), 0) AS volume
+            FROM (
+                SELECT strategy_id, net_pnl_usd, notional_usd
+                FROM trades
+                WHERE status = 'closed'
+                ORDER BY entry_time DESC
+                LIMIT ?
+            ) recent
+            GROUP BY strategy_id
+            """,
+            [int(limit)],
         )
-        return float(row["pnl"]) if row else 0.0
+        out: Dict[str, Dict[str, float]] = {}
+        for r in rows:
+            out[str(r.get("strategy_id") or "")] = {
+                "realized": float(r.get("realized") or 0.0),
+                "n": float(r.get("n") or 0.0),
+                "wins": float(r.get("wins") or 0.0),
+                "volume": float(r.get("volume") or 0.0),
+            }
+        return out
 
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:

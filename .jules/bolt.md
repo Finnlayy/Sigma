@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-30 - COALESCE fallback must be 'paper', not the queried mode
+**Learning:** `COALESCE(NULLIF(execution_mode, ''), ?)` with the queried mode as `?` treats `""` as live when filtering live. Python `(execution_mode or "paper") == "live"` is False for `""`. `sum_closed_pnl("paper")` hid this because both sides defaulted to paper.
+**Action:** Hardcode the empty/NULL default to `'paper'`: `COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), 'paper') = ?`. Always test the live filter, not only paper.
