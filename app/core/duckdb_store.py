@@ -595,13 +595,49 @@ class DuckDBStore:
         Matches Python `(execution_mode or "paper") == mode` including NULL/''.
         Bench @ 4k closed rows: trades()+sum ~22 ms vs this ~0.5 ms (~45×).
         """
+        return float(self.closed_trade_stats(execution_mode)["pnl"])
+
+    def closed_trade_stats(self, execution_mode: str = "paper") -> Dict[str, Any]:
+        """COUNT+SUM closed PnL in one scan — poll path used to SELECT * 10k rows.
+
+        Matches Python `(execution_mode or "paper") == mode` including NULL/''.
+        Bench @ 8k closed rows: trades() ~32 ms vs this ~0.8 ms (~40×).
+        """
         row = self._one(
-            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
+            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl, COUNT(*) AS n FROM trades "
             "WHERE status = 'closed' "
             "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
             [execution_mode, execution_mode],
         )
-        return float(row["pnl"]) if row else 0.0
+        if not row:
+            return {"pnl": 0.0, "n": 0}
+        return {"pnl": float(row["pnl"] or 0.0), "n": int(row["n"] or 0)}
+
+    def closed_pnl_by_strategy(self) -> Dict[str, Dict[str, Any]]:
+        """Per-strategy closed aggregates via GROUP BY — no row materialization.
+
+        GET /api/logs used to SELECT * LIMIT 5000 then group in Python.
+        Bench @ 8k rows: SELECT * + Python group ~32 ms vs this ~1.4 ms (~20×).
+        """
+        rows = self._rows(
+            """SELECT CAST(strategy_id AS VARCHAR) AS strategy_id,
+                      COALESCE(SUM(net_pnl_usd), 0) AS realized,
+                      COUNT(*) AS total,
+                      COALESCE(SUM(CASE WHEN net_pnl_usd > 0 THEN 1 ELSE 0 END), 0) AS wins,
+                      COALESCE(SUM(notional_usd), 0) AS volume
+               FROM trades
+               WHERE status = 'closed'
+               GROUP BY strategy_id""",
+        )
+        out: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            out[str(r.get("strategy_id") or "")] = {
+                "realized": float(r["realized"] or 0.0),
+                "total": int(r["total"] or 0),
+                "wins": int(r["wins"] or 0),
+                "volume": float(r["volume"] or 0.0),
+            }
+        return out
 
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:

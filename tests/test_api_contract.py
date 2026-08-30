@@ -514,6 +514,34 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.live_kraken_sync_ts = None
 
 
+def test_logs_poll_sql_aggregates_match_new_closed_trade(client):
+    """GET /api/logs must not need a 10k-row SELECT * to update metrics/balances."""
+    import app.server.main as main
+
+    before = client.get("/api/logs").json()
+    main.state.store.upsert_trade({
+        "trade_id": "bolt-logs-sql-agg",
+        "strategy_id": "bolt-s",
+        "strategy_name": "BoltAgg",
+        "status": "closed",
+        "execution_mode": "paper",
+        "symbol": "BTC/USD",
+        "direction": "LONG",
+        "side": "buy",
+        "net_pnl_usd": 4.0,
+        "notional_usd": 80.0,
+        "exit_time": "2026-08-30T01:00:00",
+        "entry_time": "2026-08-30T00:00:00",
+        "entry_price": 100.0,
+        "quantity": 0.8,
+    })
+    after = client.get("/api/logs").json()
+    assert after["metrics"]["totalTrades"] == before["metrics"]["totalTrades"] + 1
+    assert after["balances"]["USD"] == pytest.approx(before["balances"]["USD"] + 4.0)
+    assert after["metrics"]["balanceUSD"] == pytest.approx(before["metrics"]["balanceUSD"] + 4.0)
+    assert any(o.get("id") == "bolt-logs-sql-agg" for o in after["orders"])
+
+
 def test_zero_mock_seams_are_honest_empty(client):
     sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
     assert sent.get("available") is False

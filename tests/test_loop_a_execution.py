@@ -482,3 +482,10 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_trade_stats("paper")
+    assert stats["pnl"] == 13.0
+    assert stats["n"] == 2
+    by_sid = store.closed_pnl_by_strategy()
+    assert by_sid["s"]["realized"] == 13.0 + 99.0
+    assert by_sid["s"]["total"] == 3
+    assert by_sid["s"]["wins"] == 3
