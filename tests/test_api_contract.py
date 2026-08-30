@@ -512,3 +512,55 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.has_credentials = False
         main.state.live_kraken_balances = {}
         main.state.live_kraken_sync_ts = None
+
+
+def test_queue_matrices_groups_trades_by_mode_and_strategy(client):
+    """Hash-map grouping must match the old nested-filter totals (paper vs live)."""
+    import app.server.main as main
+
+    paper = client.post("/api/strategies", json={
+        "name": "qm-paper", "assetPair": "BTC/USD", "executionMode": "paper",
+        "status": "active",
+    }).json()
+    live = client.post("/api/strategies", json={
+        "name": "qm-live", "assetPair": "ETH/USD", "executionMode": "live",
+        "status": "inactive",
+    }).json()
+    store = main.state.store
+    for i, (sid, mode, pnl) in enumerate((
+        (paper["id"], "paper", 10.0),
+        (paper["id"], "paper", -4.0),
+        (live["id"], "live", 3.5),
+        (paper["id"], "live", 99.0),  # other-mode trade must not leak into paper row
+    )):
+        store.upsert_trade({
+            "trade_id": f"qm-{i}",
+            "strategy_id": sid,
+            "strategy_name": "qm",
+            "symbol": "BTC/USD",
+            "execution_mode": mode,
+            "direction": "LONG",
+            "side": "buy",
+            "status": "closed",
+            "entry_time": f"2026-01-0{i+1}T00:00:00",
+            "exit_time": f"2026-01-0{i+1}T01:00:00",
+            "net_pnl_usd": pnl,
+            "notional_usd": 100.0,
+        })
+
+    body = client.get("/api/queue-matrices").json()
+    paper_q, live_q = body["paper"], body["live"]
+    assert paper_q["totalClosedTrades"] == 2
+    assert paper_q["winningTrades"] == 1
+    assert paper_q["totalRealizedPnL"] == 6.0
+    paper_row = next(s for s in paper_q["strategies"] if s["strategyId"] == paper["id"])
+    assert paper_row["totalTrades"] == 2
+    assert paper_row["realizedPnL"] == 6.0
+    assert paper_row["winningTrades"] == 1
+    assert live_q["totalClosedTrades"] == 2
+    assert live_q["totalRealizedPnL"] == 102.5
+    live_row = next(s for s in live_q["strategies"] if s["strategyId"] == live["id"])
+    assert live_row["totalTrades"] == 1
+    assert live_row["realizedPnL"] == 3.5
+    assert len(paper_q["pnlTrajectory"]) == 2
+    assert paper_q["pnlTrajectory"][-1]["cumPnL"] == 6.0
