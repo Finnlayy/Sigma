@@ -18,3 +18,6 @@ models/*.onnx
 .vercel
 .env*
 !.env.example
+
+# MP-12 Backtest-Artefakte (Report-Exports), nie versionieren
+tests/backtest/results/
