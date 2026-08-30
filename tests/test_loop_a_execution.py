@@ -485,6 +485,7 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
     stats = store.closed_pnl_stats("paper")
     assert stats["pnl"] == 13.0
     assert stats["count"] == 2
+    # Empty-string execution_mode must stay paper, not match live.
     live = store.closed_pnl_stats("live")
     assert live["pnl"] == 99.0
     assert live["count"] == 1
