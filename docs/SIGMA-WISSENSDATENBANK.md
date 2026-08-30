@@ -330,10 +330,40 @@ vertretbar — das löst die Margin-Bindung der DCA-Grids.
   - Bucket 3 (Chop/Blacklist): zu geringes Volumen/Spread → nicht anfassen
 - Neuere/kleine Ticker brauchen zwingend Liquiditäts-Filter
   (Mindest-Orderbuchtiefe, Spread-Cap)
-- **Scoring (❌ zu bauen):** `Score = β × RVOL × r − Spread_Penalty`;
-  Zuordnung β ≥ 2,8 & RVOL ≥ 2,5 → 25x-Sniper; sonst 10x/5x-DCA
+- **Richtung ist signiert (Hartregel):** r und β tragen Vorzeichen.
+  - Long-Kandidat: r ≥ 0,75 **und** β ≥ 1,5 (beide positiv).
+  - Short-Kandidat: r ≥ 0,75 mit **negativem** β (fällt zuverlässig,
+    wenn BTC schwach wird) — nur bei BTC-bearishem Makro routbar.
+  - **Inverse Longs verboten:** r < 0 wird nie automatisch gelongt,
+    auch nicht „als Hedge gegen schwachen BTC" — das ist ein
+    Alt-Long gegen den BTC-Makro (MP-01-Gate); höchstens
+    Forschungshypothese.
+  - Decoupled (|r| < 0,30): keine BTC-Führungsbeziehung → v1 nicht
+    über den Scout handeln (idiosynkratisch, fail-closed).
+- **24h-Relativstärke-Vorselektion (manueller Nutzer-Workflow,
+  automatisiert):** erst die Altcoin-24h-Top-Gainer mit
+  Volumenbestätigung (`perf_24h_pct` + RVOL) — Coins, in die das
+  Kapital schon geflossen ist (Leader mit stattgehabtem Breakout) —
+  dann erst die BTC-Confluence-Prüfung; Eintrittsqualität über
+  skaleninvariante Post-Breakout-Position (`pos_EQ ∈ [0,40;0,65]`
+  = erste Konsolidierung), nie Chasing in der vertikalen Kerze.
+- **Scoring (zu bauen, Richtung getrennt):**
+  Long: `Score = β × RVOL × r × rs(perf_24h) − Spread_Penalty`
+  (r>0, β>0); Short analog mit |β| auf r>0/β<0;
+  Zuordnung |β| ≥ 2,8 & RVOL ≥ 2,5 → 25x-Sniper; sonst 10x/5x-DCA
+- **Leader-Rotation:** jeder 1h-Scan bewertet neu — ein Alt mit
+  abkühlender Volatilität (RVOL/β zerfällt) fällt automatisch aus
+  der Wertung, der frische Leader mit neuem Volumen rückt nach
+  (kein Tick-Redeploy; Rotation nur im Scan-Takt).
 - **Screening-Takt:** 1× pro geschlossener 1h-BTC-Kerze
   (Minute 00–05 Scan&Deploy, 05–48 Execution, 48–55 Unwind, 55–60 Idle)
+- **Live-Beleg Leader-Rotation (30.08.2026):** nach BTC-Stabilisierung
+  am Support um Mittag UTC verließ ein vorher hochvolatiler,
+  volatilitätsabgekühlter Altcoin die Leader-Position; ein anderer
+  Top-Gainer-Alt (vorab Breakout, dann flache Konsolidierung) übernahm
+  die Trendführerschaft und lief ab dem 1h-Impuls konfluent mit BTC
+  (+20 %+) — exakt das Rotations-Szenario, das der Scout pro Scan
+  abgreifen soll. Hauptleck bleibt der Exit (siehe §8 Regel 8).
 - **Live-Beleg Lead-Lag (30.08.2026):** BTC 1m XABCD-Break über Neckline
   78.124 → 78.177 (Book 65 % Bids / 35 % Asks); 我踏马来了 reagierte
   0,01340 → >0,01460. Folge-DCA-Bots: Bot #1 (10x Long, 1h51m)

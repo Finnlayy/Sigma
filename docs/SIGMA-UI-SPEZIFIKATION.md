@@ -135,10 +135,18 @@ SettingsPanel).
 - **Gate-Zeile:** letztes Screening (Bar-Zeitstempel), Scan-Button
   (operator-bestätigt, nur in Phase SCAN&DEPLOY aktiv; sonst disabled mit
   Phasenhinweis), „1 Scan pro geschlossener 1h-Bar“ als Badge.
-- **Ranking-Tabelle:** Symbol (Blinded-Modus-Umschalter: Ticker ausblendbar
-  → nur `ASSET_###`, Blinded-Prinzip §10), β, r, RVOL, Spread %,
+- **Ranking-Tabelle (Long- und Short-Seite getrennt):** Symbol
+  (Blinded-Modus-Umschalter: Ticker ausblendbar → nur `ASSET_###`,
+  Blinded-Prinzip §10), Seiten-Badge (LONG emerald / SHORT rot),
+  β (signiert), r (signiert), RVOL, Spread %, **24h-Performance %**,
+  **Post-Breakout-Position pos_EQ** (Konsolidierung 0,40–0,65 = grün
+  „Leader bereit"; >0,9 = rot „Chasing-Zone vertikale Kerze"),
   Score (Farbskala m8Color), Empfehlung (`sniper_hedge 25x` emerald /
-  `dca 5–10x` zinc), Blacklist-Grund als Tooltip (thin_book/unlock/…).
+  `dca 5–10x` zinc). Tabellen-Zeilen für r<0 bzw. |r|<0,30 erscheinen
+  **nicht** als Kandidaten; bei Bedarf als aufgeklappte „abgelehnt"-
+  Sektion mit Grund (`inverse_long_blocked` / `decoupled` /
+  thin_book / unlock_window / …). Sortierung initial nach
+  24h-Relativstärke (manueller Top-Gainer-Workflow, dann Konfluenz).
 - **Aktion pro Zeile:** „Provisionieren“ öffnet Fractal-/Ladder-Panel
   vorbefüllt mit Symbol + empfohlener Strategie; Bestätigungs-Modal
   (Queue-Confirm-Muster). Kein Auto-Deploy aus der Tabelle heraus.

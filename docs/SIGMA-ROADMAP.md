@@ -34,7 +34,7 @@
 | MP-02 | `MP-02-micro-dca-ladder.md` | Micro-DCA-Ladder-Generator (0,15–0,2 % Steps, 1,15x Vol, 1,5 % TP, dynamische Range-Steps, 6–10 %-Tiefen-Guard, TTL) | MP-01 |
 | MP-03 | `MP-03-candle-regime-signals.md` | Two-Bar-Thrust, Marubozu/FVG-Quant, Daily-Open-Envelope (00:00, Volumen-Anker, Outside-Inside) | — |
 | MP-04 | `MP-04-power-phasor-features.md` | Leistungsdreieck (P/Q/S, cos φ), Hilbert-Phasor, MTF-Resonanz, reellwertige Target-Algebra | MP-03 |
-| MP-05 | `MP-05-hourly-gate-symbol-ranker.md` | 1-Scan-pro-1h-Bar-Gate + High-Beta-Symbol-Ranker (β/RVOL/Spread-Score, Strategieempfehlung) | MP-01, MP-03 |
+| MP-05 | `MP-05-hourly-gate-symbol-ranker.md` | 1-Scan-pro-1h-Bar-Gate + High-Beta-Symbol-Ranker (signiertes r/β, Long/Short-Richtung, 24h-Top-Gainer-Relativstärke-Vorselektion + Post-Breakout-pos_EQ, RVOL/Spread-Score, Leader-Rotation pro Scan, Strategieempfehlung) | MP-01, MP-03 |
 | MP-06 | `MP-06-polymarket-density.md` | Polymarket-Feed-Adapter (optionaler Port), implizite Dichte, Term-Struktur-Trajektorie, Brier/Platt-Kalibrierung | MP-05 |
 | MP-07 | `MP-07-sniper-strategy-phase2.md` | Quantum-Sniper-Strategie (15m→1m Retest + DCA-Ladder, TTL 45–48 min) als BaseStrategy | MP-02, MP-03, MP-05 |
 | MP-08 | `MP-08-exhaustion-unwind.md` | Volatilitäts-Exhaustion-Detektor (BBW/OI/CVD) + asynchroner Unwind-Template | MP-01, MP-04 |
