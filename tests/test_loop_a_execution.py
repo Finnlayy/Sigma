@@ -482,3 +482,51 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    assert store.count_closed_trades("paper") == 2
+    assert store.count_closed_trades("live") == 1
+
+
+def test_strategy_closed_aggregates_match_python_scan(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    rows = [
+        {"trade_id": "a", "strategy_id": "s1", "status": "closed",
+         "execution_mode": "paper", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+         "notional_usd": 100.0},
+        {"trade_id": "b", "strategy_id": "s1", "status": "closed",
+         "execution_mode": "", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": -2.0,
+         "notional_usd": 50.0},
+        {"trade_id": "c", "strategy_id": "s2", "status": "closed",
+         "execution_mode": "paper", "symbol": "ETH/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 4.0,
+         "notional_usd": 80.0},
+        {"trade_id": "d", "strategy_id": "s1", "status": "open",
+         "execution_mode": "paper", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+         "notional_usd": 200.0},
+    ]
+    for row in rows:
+        store.upsert_trade(row)
+
+    closed = store.trades(status="closed", limit=5000)
+    by_sid: dict = {}
+    for t in closed:
+        sid = str(t.get("strategy_id") or "")
+        mine = by_sid.setdefault(sid, {"realized": 0.0, "wins": 0, "total_trades": 0, "volume": 0.0})
+        pnl = float(t.get("net_pnl_usd") or 0.0)
+        mine["realized"] += pnl
+        mine["wins"] += 1 if pnl > 0 else 0
+        mine["total_trades"] += 1
+        mine["volume"] += float(t.get("notional_usd") or 0.0)
+
+    aggs = store.strategy_closed_aggregates()
+    assert set(aggs) == set(by_sid)
+    for sid, expected in by_sid.items():
+        got = aggs[sid]
+        assert got["total_trades"] == expected["total_trades"]
+        assert got["wins"] == expected["wins"]
+        assert got["realized"] == expected["realized"]
+        assert got["volume"] == expected["volume"]

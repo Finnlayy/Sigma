@@ -11,3 +11,7 @@
 ## 2026-08-29 - empty execution_mode vs SQL COALESCE
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
+
+## 2026-08-30 - reusing a fat trades() scan is not enough
+**Learning:** After collapsing four `trades()` calls into one, `GET /api/logs` still spent ~41 ms materializing 8k full rows every 5–8s poll just to COUNT/SUM/GROUP BY. SQL aggregates + an 80-row orders strip: ~5 ms (~8×). Passing the snapshot down does not help if callers only need aggregates.
+**Action:** On dashboard/poll endpoints, ask whether the payload needs row fields. If not, SQL aggregate — do not reuse a fat scan.
