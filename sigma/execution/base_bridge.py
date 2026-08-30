@@ -27,6 +27,9 @@ class ExecutionReceipt:
     code: str = ""
     reason: str = ""
     details: Dict[str, Any] = field(default_factory=dict)
+    # Passives HITL-Metadatum (MP-01): wird von risk_guards befüllt und nur
+    # als Intent-/Receipt-Kontext weitergereicht. Nie eine Freigabe.
+    requires_hitl: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return dict(self.__dict__)
