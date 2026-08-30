@@ -1044,8 +1044,8 @@ async def logs():
     st = state
     strategies = st.store.list_strategies()
     # Metrics / balances / strategyPnL used to share a 10k-row trades() dump
-    # (~35 ms @ 8k). SQL aggregates (~1 ms) keep totals correct past LIMIT
-    # 5000/10000. Order tape only needs the latest fills.
+    # (~30 ms @ 8k). SQL aggregates + 80-row tape ~4 ms (~8×, ~26 ms / poll)
+    # and keep totals correct past LIMIT 5000/10000.
     recent_closed = st.store.trades(status="closed", limit=80)
     open_positions = st.paper.all_positions()
     metrics = _build_metrics(st, strategies)
@@ -1069,8 +1069,8 @@ def _build_metrics(
     from app.core.telemetry import _cpu_percent, _mem_usage_percent
 
     # Prefer SQL SUM+COUNT when no snapshot is passed (the /api/logs poll).
-    # A 10k-row dump was ~35 ms @ 8k; closed_pnl_stats is ~0.6 ms and is not
-    # capped by LIMIT 10000 (which undercounted paper totals past that).
+    # A 10k-row dump was ~30 ms @ 8k; aggregates are not capped by LIMIT
+    # 10000 (which undercounted paper totals past that).
     if closed_trades is None:
         balances = _paper_balances(st)
         paper_stats = st.store.closed_pnl_stats("paper")

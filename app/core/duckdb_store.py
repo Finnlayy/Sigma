@@ -593,7 +593,8 @@ class DuckDBStore:
         """SUM + COUNT in DuckDB — do not materialize up to 10k trade rows.
 
         Matches Python `(execution_mode or "paper") == mode` including NULL/''.
-        Bench @ 8k closed rows: trades()+filter+sum+len ~35 ms vs this ~0.6 ms.
+        Bench @ 8k closed rows (full /api/logs path): dump+Python ~30 ms vs
+        this + GROUP BY + 80-row tape ~4 ms (~8×).
         """
         row = self._one(
             "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl, COUNT(*) AS n FROM trades "
@@ -618,7 +619,6 @@ class DuckDBStore:
         """GROUP BY strategy_id in DuckDB — one hash-aggregate, no row dump.
 
         Replaces trades(limit=5000) + Python group on the /api/logs poll.
-        Bench @ 8k closed rows: materialize+group ~35 ms vs this ~1 ms (~35×).
         Full-table aggregate (no LIMIT) so totals stay correct past 5k/10k.
         """
         rows = self._rows(

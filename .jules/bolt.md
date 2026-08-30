@@ -13,5 +13,5 @@
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
 
 ## 2026-08-30 - LIMIT 10000 trades() snapshot undercounts dashboard totals
-**Learning:** Sharing one `trades(status="closed", limit=10000)` dump across `/api/logs` helpers still materializes ~8k full rows (~35 ms) and silently drops older trades from `totalTrades` / `strategyPnL` once history exceeds the LIMIT. DuckDB SUM/COUNT/GROUP BY is ~1 ms and exact.
+**Learning:** Sharing one `trades(status="closed", limit=10000)` dump across `/api/logs` helpers still materializes ~8k full rows (~30 ms) and silently drops older trades from `totalTrades` / `strategyPnL` once history exceeds the LIMIT. DuckDB SUM/COUNT/GROUP BY plus an 80-row order tape is ~4 ms (~8×) and exact.
 **Action:** On poll endpoints that only need aggregates, use SQL SUM/COUNT/GROUP BY. Fetch `trades()` only for the order tape (limit ~80). Never pass a capped snapshot into helpers that compute lifetime totals.
