@@ -482,3 +482,60 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_pnl_stats("paper")
+    assert stats["pnl"] == 13.0
+    assert stats["count"] == 2
+    live = store.closed_pnl_stats("live")
+    assert live["pnl"] == 99.0
+    assert live["count"] == 1
+
+
+def test_strategy_closed_stats_matches_python_scan(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    store.upsert_trade({
+        "trade_id": "w1", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 12.5,
+        "notional_usd": 100.0,
+    })
+    store.upsert_trade({
+        "trade_id": "l1", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "", "symbol": "ETH/USD",
+        "direction": "SHORT", "side": "sell", "net_pnl_usd": -2.5,
+        "notional_usd": 40.0,
+    })
+    store.upsert_trade({
+        "trade_id": "w2", "strategy_id": "beta", "status": "closed",
+        "execution_mode": "live", "symbol": "SOL/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 4.0,
+        "notional_usd": 80.0,
+    })
+    store.upsert_trade({
+        "trade_id": "open", "strategy_id": "alpha", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+        "notional_usd": 999.0,
+    })
+    closed = store.trades(status="closed", limit=5000)
+    expected: dict = {}
+    for t in closed:
+        rec = expected.setdefault(str(t.get("strategy_id") or ""), {
+            "realized": 0.0, "trades": 0, "wins": 0, "volume": 0.0,
+        })
+        pnl = float(t.get("net_pnl_usd") or 0.0)
+        rec["realized"] += pnl
+        rec["trades"] += 1
+        rec["wins"] += 1 if pnl > 0 else 0
+        rec["volume"] += float(t.get("notional_usd") or 0.0)
+    got = store.strategy_closed_stats()
+    assert set(got) == set(expected)
+    for sid, rec in expected.items():
+        assert got[sid]["realized"] == rec["realized"]
+        assert got[sid]["trades"] == rec["trades"]
+        assert got[sid]["wins"] == rec["wins"]
+        assert got[sid]["volume"] == rec["volume"]
+    assert got["alpha"]["trades"] == 2
+    assert got["alpha"]["wins"] == 1
+    assert got["beta"]["realized"] == 4.0

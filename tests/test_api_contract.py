@@ -514,6 +514,42 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.live_kraken_sync_ts = None
 
 
+def test_logs_poll_uses_sql_aggregates(client):
+    """GET /api/logs must report paper SUM/COUNT and per-strategy GROUP BY
+    without depending on a 10k-row trades() materialization."""
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "bolt_agg_s", "name": "BoltAgg", "status": "inactive",
+        "assetPair": "BTC/USD", "executionMode": "paper",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt_agg_w", "strategy_id": "bolt_agg_s",
+        "strategy_name": "BoltAgg", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 7.5,
+        "notional_usd": 150.0, "exit_time": "2026-08-30T08:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt_agg_l", "strategy_id": "bolt_agg_s",
+        "strategy_name": "BoltAgg", "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "SHORT", "side": "sell", "net_pnl_usd": -2.5,
+        "notional_usd": 50.0, "exit_time": "2026-08-30T08:01:00",
+    })
+    body = client.get("/api/logs").json()
+    assert body["metrics"]["totalTrades"] >= 2
+    row = next(r for r in body["strategyPnL"] if r["strategyId"] == "bolt_agg_s")
+    assert row["realizedPnL"] == 5.0
+    assert row["totalTrades"] == 2
+    assert row["winningTrades"] == 1
+    assert row["losingTrades"] == 1
+    assert row["volumeTradedUSD"] == 200.0
+    assert row["winRate"] == 50.0
+    assert any(o.get("id") == "bolt_agg_w" for o in body["orders"])
+
+
 def test_zero_mock_seams_are_honest_empty(client):
     sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
     assert sent.get("available") is False

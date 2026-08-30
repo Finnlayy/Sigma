@@ -11,3 +11,11 @@
 ## 2026-08-29 - empty execution_mode vs SQL COALESCE
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
+
+## 2026-08-30 - SQL COALESCE default must be literal 'paper', not ?
+**Learning:** `COALESCE(NULLIF(execution_mode, ''), ?)` with the queried mode as `?` treats `''` as whatever mode you asked for (`closed_pnl_stats("live")` included empty-string paper rows). Python is always `(x or "paper")`.
+**Action:** Hardcode `'paper'` as the COALESCE default. Bind only the comparison value.
+
+## 2026-08-30 - shared trades() scan still too expensive for /api/logs
+**Learning:** After the 4×-scan fix, GET /api/logs still materialized ~10k full trade rows every 5–8s poll just to SUM/COUNT/GROUP BY (~35 ms @ 8k). The order strip only needs 80 rows. SQL aggregates (~1 ms) plus `trades(limit=80)` (~2 ms total) beat the shared scan.
+**Action:** On dashboard/poll endpoints, default to DuckDB SUM/COUNT/GROUP BY. Pass a trade list only when a caller needs per-row fields (orders, trajectory, drawdown).

@@ -589,19 +589,58 @@ class DuckDBStore:
                     r[k] = str(r[k])
         return rows
 
-    def sum_closed_pnl(self, execution_mode: str = "paper") -> float:
-        """SUM net_pnl in DuckDB — do not materialize up to 10k trade rows.
+    # Matches Python `(execution_mode or "paper") == mode` (NULL and '' → paper).
+    # The default MUST be the literal 'paper', not the bind param: `COALESCE(..., ?)`
+    # would treat '' as whatever mode the caller queried ('' counted as live).
+    _EXEC_MODE_OR_PAPER = (
+        "COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), 'paper')"
+    )
+
+    def closed_pnl_stats(self, execution_mode: str = "paper") -> Dict[str, Any]:
+        """SUM + COUNT closed PnL in DuckDB — do not materialize up to 10k rows.
 
         Matches Python `(execution_mode or "paper") == mode` including NULL/''.
-        Bench @ 4k closed rows: trades()+sum ~22 ms vs this ~0.5 ms (~45×).
+        Bench @ 4k closed rows: trades()+sum/len ~22 ms vs this ~0.5 ms (~45×).
+        GET /api/logs polls every 5–8s and only needs these two numbers for metrics.
         """
         row = self._one(
-            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
-            "WHERE status = 'closed' "
-            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
-            [execution_mode, execution_mode],
+            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl, COUNT(*) AS n FROM trades "
+            f"WHERE status = 'closed' AND {self._EXEC_MODE_OR_PAPER} = ?",
+            [execution_mode],
         )
-        return float(row["pnl"]) if row else 0.0
+        return {
+            "pnl": float(row["pnl"]) if row else 0.0,
+            "count": int(row["n"]) if row else 0,
+        }
+
+    def sum_closed_pnl(self, execution_mode: str = "paper") -> float:
+        """SUM net_pnl in DuckDB — do not materialize up to 10k trade rows."""
+        return self.closed_pnl_stats(execution_mode)["pnl"]
+
+    def strategy_closed_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Per-strategy closed-trade aggregates — one GROUP BY, no row materialization.
+
+        Replaces the Python scan in `_strategy_pnl` (limit 5000 full rows / poll).
+        Keys match `str(strategy_id or "")`. Wins use `net_pnl_usd > 0` like the
+        Python path. Bench @ 4k rows: trades()+groupby ~22 ms vs this ~0.6 ms.
+        """
+        rows = self._rows(
+            "SELECT CAST(COALESCE(strategy_id, '') AS VARCHAR) AS strategy_id, "
+            "COALESCE(SUM(net_pnl_usd), 0) AS realized, "
+            "COUNT(*) AS trades, "
+            "COALESCE(SUM(CASE WHEN net_pnl_usd > 0 THEN 1 ELSE 0 END), 0) AS wins, "
+            "COALESCE(SUM(notional_usd), 0) AS volume "
+            "FROM trades WHERE status = 'closed' GROUP BY 1"
+        )
+        out: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            out[str(r.get("strategy_id") or "")] = {
+                "realized": float(r.get("realized") or 0.0),
+                "trades": int(r.get("trades") or 0),
+                "wins": int(r.get("wins") or 0),
+                "volume": float(r.get("volume") or 0.0),
+            }
+        return out
 
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:
