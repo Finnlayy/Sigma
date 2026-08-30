@@ -482,3 +482,40 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_paper_stats()
+    assert stats["count"] == 2
+    assert stats["pnl"] == 13.0
+
+
+def test_strategy_closed_aggregates_groups_like_python(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    store.upsert_trade({
+        "trade_id": "w1", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+        "notional_usd": 100.0,
+    })
+    store.upsert_trade({
+        "trade_id": "l1", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -4.0,
+        "notional_usd": 80.0,
+    })
+    store.upsert_trade({
+        "trade_id": "w2", "strategy_id": "beta", "status": "closed",
+        "execution_mode": "live", "symbol": "ETH/USD",
+        "direction": "SHORT", "side": "sell", "net_pnl_usd": 2.5,
+        "notional_usd": 50.0,
+    })
+    store.upsert_trade({
+        "trade_id": "open", "strategy_id": "alpha", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+        "notional_usd": 9.0,
+    })
+    aggs = store.strategy_closed_aggregates()
+    assert aggs["alpha"] == {"n": 2, "realized": 6.0, "wins": 1, "volume": 180.0}
+    assert aggs["beta"] == {"n": 1, "realized": 2.5, "wins": 1, "volume": 50.0}
+    assert "open" not in aggs

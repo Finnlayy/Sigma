@@ -1,5 +1,9 @@
 # Bolt journal
 
+## 2026-08-30 - shared 10k-row /api/logs snapshot still too expensive
+**Learning:** Reusing one `trades()` scan removed the 4× query, but the remaining 10k-row materialization was still ~34 ms/poll. The payload only needed COUNT/SUM, per-strategy GROUP BY, and 80 order rows. Bench @ 8k: SQL path ~4.8 ms (~7×).
+**Action:** On poll endpoints, default to SQL aggregates (`COUNT`/`SUM`/`GROUP BY`) plus a small LIMIT for the table. Do not keep a "shared" full-row snapshot just because helpers used to share it.
+
 ## 2026-08-29 - /api/logs re-scanned trades four times
 **Learning:** `GET /api/logs` is polled every 5–8s (`SigmaTerminal`, `legacyPanels`) and each helper (`_paper_balances`, `_build_metrics`, `_strategy_pnl`, plus the handler) independently called `store.trades(status="closed")`. One poll materialized up to ~36k trade rows. At 8k trades that was ~110 ms vs ~35 ms for a single scan (~3×, ~75 ms/poll).
 **Action:** On dashboard/poll endpoints, fetch the closed-trade snapshot once and pass it down. Do not assume each helper should own its own `trades()` call.
