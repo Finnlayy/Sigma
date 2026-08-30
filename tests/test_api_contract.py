@@ -531,3 +531,98 @@ def test_zero_mock_seams_are_honest_empty(client):
     assert lake.get("ok") is False and lake.get("mode") == "disabled"
     poly = client.get("/api/quant/polymarket/layer0").json()
     assert poly.get("valid") is False and poly.get("reason") == "missing_data"
+
+
+# =============================================================================
+# MP-17 — Sigma Panel-/Research-Routen (fail-closed, ohne Fachmodule)
+# =============================================================================
+
+MP17_SIGMA_GET_ENDPOINTS = [
+    "/api/v1/sigma/regime",
+    "/api/v1/sigma/risk",
+    "/api/v1/sigma/power",
+    "/api/v1/sigma/zones",
+    "/api/v1/sigma/scout",
+    "/api/v1/sigma/polymarket",
+    "/api/v1/sigma/exhaustion",
+    "/api/v1/sigma/provisions",
+    "/api/v1/sigma/ladder/preview",
+    "/api/v1/sigma/fractal/preview",
+    "/api/v1/sigma/onnx",
+    "/api/v1/sigma/orderflow",
+]
+
+
+@pytest.mark.parametrize("endpoint", MP17_SIGMA_GET_ENDPOINTS)
+def test_mp17_sigma_get_endpoints_fail_closed(client, endpoint: str):
+    """MP-17 — ohne Fachmodule: ok=False, available=False, feed unknown;
+    niemals synthetische Werte; stabile strukturierte Antwort."""
+    resp = client.get(endpoint)
+    assert resp.status_code == 200, endpoint
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["available"] is False
+    assert body["feed"]["source"] == "unknown"
+    assert body["generated_at"]  # ISO-8601 UTC
+
+
+def test_mp17_risk_rules_never_toggleable(client):
+    """MP-01-Sicherheitsregeln sind im UI nur sichtbar, nie abschaltbar."""
+    rules = client.get("/api/v1/sigma/risk").json()["rules"]
+    assert len(rules) >= 3
+    for rule in rules:
+        assert rule["enabled"] is True
+    labels = " ".join(r["label"] for r in rules)
+    assert "Hard-Stop" in labels
+    assert "6 %" in labels or "6%" in labels
+    assert "Fee-Covered" in labels or "fee-covered" in labels
+
+
+def test_mp17_orderflow_and_polymarket_fail_closed_gate(client):
+    of = client.get("/api/v1/sigma/orderflow").json()
+    assert of["reason"] == "orderflow_port_not_available"
+    poly = client.get("/api/v1/sigma/polymarket").json()
+    assert poly["gate_open"] is False  # ohne Feed Gate inaktiv
+
+
+def test_mp17_write_actions_rejected_without_token(client):
+    """Schreibzugriffe ohne Operator-Token -> 403."""
+    assert client.post("/api/v1/sigma/scan").status_code == 403
+    assert client.post("/api/v1/sigma/provisions",
+                       json={"strategy_id": "x"}).status_code == 403
+    assert client.post("/api/v1/sigma/provisions/de-provision",
+                       json={}).status_code == 403
+    assert client.post("/api/v1/sigma/provisions/harden", json={}).status_code == 403
+    assert client.post("/api/v1/research/run",
+                       json={"hypothesis": "H1"}).status_code == 403
+
+
+def test_mp17_write_actions_with_token_fail_closed(client):
+    """Mit Token: strukturierte fail-closed Antworten (kein Backend)."""
+    import app.server.routes_sigma as routes
+
+    routes.set_operator_auth_override(lambda request: True)
+    try:
+        h = {"X-Sigma-Settings-Token": "test"}
+        r = client.post("/api/v1/sigma/scan", headers=h)
+        assert r.status_code == 200
+        assert r.json()["reason"] == "scan_backend_not_available"
+        r = client.post("/api/v1/sigma/provisions/harden", json={}, headers=h)
+        assert r.json()["detail"]["hardening_ok"] is False  # kein Code nach außen
+        r = client.post("/api/v1/research/run", json={"hypothesis": "H3"}, headers=h)
+        assert r.json()["reason"] == "research_backend_not_available"
+        # unbekannte Hypothese -> 422 (Auth geht vor Validierung)
+        assert client.post("/api/v1/research/run", json={"hypothesis": "H9"},
+                           headers=h).status_code == 422
+    finally:
+        routes.set_operator_auth_override(None)
+
+
+def test_mp17_research_jobs_and_dashboard_fail_closed(client):
+    job = client.get("/api/v1/research/jobs/xyz").json()
+    assert job["status"] == "unavailable"
+    assert job["job_id"] == "xyz"
+    dash = client.get("/api/v1/research/dashboard").json()
+    assert dash["ok"] is False
+    assert dash["hypotheses"] == []
+    assert dash["sweeps"] == []
