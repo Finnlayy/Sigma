@@ -22,6 +22,31 @@ def dealing_range_eq(high: float, low: float, price: float) -> Optional[float]:
     return (float(price) - float(low)) / span
 
 
+def atr_wilder(
+    candles: Sequence[Mapping[str, Any]], period: int = 14
+) -> Optional[float]:
+    """Wilder-RMA-ATR (kanonischer Helfer fuer MP-03/MP-04, skaleninvariante
+    FVG-/Volatilitaets-Normierung). None, wenn zu wenige Bars (fail-closed)."""
+    if not candles:
+        return None
+    period = max(1, int(period))
+    trs: List[float] = []
+    prev_close: Optional[float] = None
+    for c in candles:
+        h, l = _h(c), _l(c)
+        close = _c(c)
+        if prev_close is not None:
+            tr = max(h - l, abs(h - prev_close), abs(l - prev_close))
+            trs.append(tr)
+        prev_close = close
+    if len(trs) < period:
+        return None
+    rma = sum(trs[:period]) / period
+    for tr in trs[period:]:
+        rma = (rma * (period - 1) + tr) / period
+    return rma
+
+
 def fvg_flags(candles: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     """Three-bar fair-value-gap flags. Research-only; NSR gate = need 2-bar confirm."""
     if len(candles) < 3:
