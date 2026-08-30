@@ -19,6 +19,8 @@ logger = logging.getLogger("app.core.telemetry")
 
 VALID_STATES = ("SHADOW_ACTIVE", "LIVE_APPROVED", "EMERGENCY_HALT")
 VALID_BREAKERS = ("NORMAL", "TRIPPED", "HALTED")
+# Parquet file counts change on compact/seed, not every SSE tick (2s).
+_L2_STATS_TTL_S = 5.0
 
 
 @dataclass
@@ -56,6 +58,8 @@ class TelemetryCenter:
         self.l3_rclone_sync_status = "DISABLED"
         self.ingestion_rate_events_per_sec = 0.0
         self.avg_latency_microseconds = 0.0
+        # (time.monotonic(), files, mb) — shared across SSE clients
+        self._l2_stats_cache: Optional[tuple[float, int, float]] = None
 
     # ------------------------------------------------------------- M-00 state
     def set_state(self, new_state: str, reason: Optional[str] = None) -> Dict[str, Any]:
@@ -90,6 +94,7 @@ class TelemetryCenter:
 
     def build_frame(self, store=None, log_bus=None) -> Dict[str, Any]:
         mem = _mem_usage_percent()
+        l2_files, l2_mb = self._l2_storage(store)
         return {
             "timestamp": time.time(),
             "state_machine": self.system.to_dict(),
@@ -103,8 +108,8 @@ class TelemetryCenter:
             "storage_tiering": {
                 "l1_shm_ringbuffer_bytes": int(self.l1_ringbuffer_bytes),
                 "l1_capacity_bytes": int(self.l1_capacity_bytes),
-                "l2_duckdb_parquet_files": _l2_files(store),
-                "l2_total_mb": _l2_mb(store),
+                "l2_duckdb_parquet_files": l2_files,
+                "l2_total_mb": l2_mb,
                 "l3_rclone_sync_status": self.l3_rclone_sync_status,
                 "ingestion_rate_events_per_sec": round(self.ingestion_rate_events_per_sec, 1),
                 "avg_latency_microseconds": round(self.avg_latency_microseconds, 1),
@@ -117,6 +122,24 @@ class TelemetryCenter:
             },
             "recent_logs": (log_bus.recent_logs_list(25) if log_bus else []),
         }
+
+    def _l2_storage(self, store) -> tuple[int, float]:
+        """Parquet file count/MB for SSE — skip lake_summary() OHLCV scans.
+
+        GET /api/quant/telemetry/stream calls build_frame every sse_interval
+        (2s). The frame only uses total_files / total_size_mb, but
+        lake_summary() also COUNT(*) + GROUP BY ohlcv and holds DuckDBStore._lock
+        — stalling the 1m evaluate path. Two lake_summary() calls per frame
+        @ 80k 1m bars: ~9.1 ms vs parquet walk ~0.13 ms (~70×). 5s TTL so
+        multiple SSE clients share one walk.
+        """
+        now = time.monotonic()
+        cached = self._l2_stats_cache
+        if cached is not None and (now - cached[0]) < _L2_STATS_TTL_S:
+            return cached[1], cached[2]
+        files, mb = _read_l2_storage(store)
+        self._l2_stats_cache = (now, files, mb)
+        return files, mb
 
 
 def _cpu_percent() -> float:
@@ -148,18 +171,18 @@ def _mem_usage_percent() -> float:
         return 38.0
 
 
-def _l2_files(store) -> int:
+def _read_l2_storage(store) -> tuple[int, float]:
+    if store is None:
+        return 0, 0.0
     try:
-        return store.lake_summary()["total_files"]
+        stats = getattr(store, "parquet_file_stats", None)
+        if callable(stats):
+            files, mb = stats()
+            return int(files), float(mb)
+        summary = store.lake_summary()
+        return int(summary.get("total_files") or 0), float(summary.get("total_size_mb") or 0.0)
     except Exception:
-        return 0
-
-
-def _l2_mb(store) -> float:
-    try:
-        return store.lake_summary()["total_size_mb"]
-    except Exception:
-        return 0.0
+        return 0, 0.0
 
 
 _center: Optional[TelemetryCenter] = None

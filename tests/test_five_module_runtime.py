@@ -432,6 +432,44 @@ def test_contagion_panel_state_survives_import():
     json.dumps(panel)
 
 
+def test_telemetry_sse_frame_skips_lake_summary_ohlcv_scans():
+    """SSE frames only need parquet file count/MB — not COUNT/GROUP BY ohlcv."""
+
+    class Store:
+        def __init__(self):
+            self.summary_calls = 0
+            self.stats_calls = 0
+
+        def lake_summary(self):
+            self.summary_calls += 1
+            raise AssertionError("lake_summary should not run on SSE frames")
+
+        def parquet_file_stats(self):
+            self.stats_calls += 1
+            return 7, 1.25
+
+    store = Store()
+    telemetry = TelemetryCenter()
+    frame = telemetry.build_frame(store=store)
+    assert store.summary_calls == 0
+    assert store.stats_calls == 1
+    assert frame["storage_tiering"]["l2_duckdb_parquet_files"] == 7
+    assert frame["storage_tiering"]["l2_total_mb"] == 1.25
+    # 5s TTL: a second client/tick reuses the walk
+    telemetry.build_frame(store=store)
+    assert store.stats_calls == 1
+
+
+def test_telemetry_sse_frame_falls_back_without_parquet_stats():
+    class Store:
+        def lake_summary(self):
+            return {"total_files": 3, "total_size_mb": 0.5}
+
+    frame = TelemetryCenter().build_frame(store=Store())
+    assert frame["storage_tiering"]["l2_duckdb_parquet_files"] == 3
+    assert frame["storage_tiering"]["l2_total_mb"] == 0.5
+
+
 def test_telemetry_center_can_enable_live_bridge():
     from app.core.config import load_config
 
