@@ -432,6 +432,32 @@ def test_contagion_panel_state_survives_import():
     json.dumps(panel)
 
 
+def test_telemetry_build_frame_calls_lake_summary_once_and_caches():
+    """SSE used to call lake_summary() twice per 2s tick (_l2_files + _l2_mb)."""
+    center = TelemetryCenter()
+    calls = {"n": 0}
+
+    class Store:
+        def lake_summary(self):
+            calls["n"] += 1
+            return {"total_files": 4, "total_size_mb": 12.5}
+
+    store = Store()
+    frame = center.build_frame(store=store)
+    assert calls["n"] == 1
+    assert frame["storage_tiering"]["l2_duckdb_parquet_files"] == 4
+    assert frame["storage_tiering"]["l2_total_mb"] == 12.5
+
+    frame2 = center.build_frame(store=store)
+    assert calls["n"] == 1
+    assert frame2["storage_tiering"]["l2_duckdb_parquet_files"] == 4
+    assert frame2["storage_tiering"]["l2_total_mb"] == 12.5
+
+    empty = TelemetryCenter().build_frame(store=None)
+    assert empty["storage_tiering"]["l2_duckdb_parquet_files"] == 0
+    assert empty["storage_tiering"]["l2_total_mb"] == 0.0
+
+
 def test_telemetry_center_can_enable_live_bridge():
     from app.core.config import load_config
 

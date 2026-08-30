@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-30 - SSE telemetry double-called lake_summary
+**Learning:** `GET /api/quant/telemetry/stream` ticks every 2s (`sse_interval_seconds`). `build_frame` read `total_files` and `total_size_mb` via two helpers, each calling `store.lake_summary()` — COUNT(*) + GROUP BY + `os.walk` parquet + `load_config()`. Caching on DuckDBStore would stale `/api/lake/summary` after compact/seed.
+**Action:** Dedup + TTL-cache L2 inventory on the TelemetryCenter (the 2s consumer), never on `lake_summary()` itself.
