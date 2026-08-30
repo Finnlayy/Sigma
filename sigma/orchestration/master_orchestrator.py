@@ -14,7 +14,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from sigma.signals.dual_hurst import evaluate_dual_hurst
-from sigma.signals.polymarket_layer0 import layer0_pre_regime
+from sigma.signals.polymarket_layer0 import layer0_from_port, layer0_pre_regime
 from sigma.signals.quantum_wave_collider import (
     STATUS_INVALIDATED,
     QuantumWaveCollider,
@@ -81,7 +81,13 @@ class MasterOrchestrator:
         dual = evaluate_dual_hurst(htf, ltf, htf_interval_min=pair.bias_minutes, now=now)
         btc = (series or {}).get(leader) or []
         throttle = self.throttle.evaluate(btc, force_sleep=session.liquidity_gap)
-        poly = layer0_pre_regime(self.ports.get("polymarket"))
+        _poly_port = self.ports.get("polymarket")
+        if _poly_port is not None and hasattr(_poly_port, "fetch_event_odds"):
+            # MP-06: echter Port -> validierte Dichte/Term-Struktur als
+            # Telemetrie-Kontext; ohne Feed bleibt valid=False wie bisher.
+            poly = layer0_from_port(_poly_port, "btc-macro")
+        else:
+            poly = layer0_pre_regime(_poly_port)
         wave = self.collider.evaluate(
             htf,
             _alt_htf(htf_series, series, leader),
