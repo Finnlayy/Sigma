@@ -531,3 +531,37 @@ def test_zero_mock_seams_are_honest_empty(client):
     assert lake.get("ok") is False and lake.get("mode") == "disabled"
     poly = client.get("/api/quant/polymarket/layer0").json()
     assert poly.get("valid") is False and poly.get("reason") == "missing_data"
+
+
+def test_logs_poll_aggregates_closed_trades_in_sql(client):
+    import app.server.main as main
+
+    created = client.post("/api/strategies", json={
+        "name": "bolt-agg", "assetPair": "BTC/USD", "interval": 15,
+        "executionMode": "paper", "status": "inactive",
+    }).json()
+    sid = created["id"]
+    main.state.store.upsert_trade({
+        "trade_id": "bolt-win", "strategy_id": sid, "strategy_name": "bolt-agg",
+        "status": "closed", "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 7.25,
+        "notional_usd": 200.0, "entry_time": "2026-08-30T00:00:00",
+        "exit_time": "2026-08-30T01:00:00", "entry_price": 100.0, "quantity": 2.0,
+    })
+    main.state.store.upsert_trade({
+        "trade_id": "bolt-loss", "strategy_id": sid, "strategy_name": "bolt-agg",
+        "status": "closed", "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -2.25,
+        "notional_usd": 50.0, "entry_time": "2026-08-30T02:00:00",
+        "exit_time": "2026-08-30T03:00:00", "entry_price": 100.0, "quantity": 0.5,
+    })
+    body = client.get("/api/logs").json()
+    row = next(p for p in body["strategyPnL"] if p["strategyId"] == sid)
+    assert row["realizedPnL"] == 5.0
+    assert row["totalTrades"] == 2
+    assert row["winningTrades"] == 1
+    assert row["losingTrades"] == 1
+    assert row["volumeTradedUSD"] == 250.0
+    assert body["metrics"]["totalTrades"] >= 2
+    ids = {o["id"] for o in body["orders"]}
+    assert "bolt-win" in ids and "bolt-loss" in ids

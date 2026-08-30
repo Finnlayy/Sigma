@@ -482,3 +482,50 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    assert store.sum_closed_pnl("live") == 99.0
+    assert store.count_closed_trades("paper") == 2
+    assert store.count_closed_trades("live") == 1
+
+
+def test_closed_pnl_by_strategy_matches_python_loop(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    store.upsert_trade({
+        "trade_id": "w", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 10.0, "notional_usd": 100.0,
+    })
+    store.upsert_trade({
+        "trade_id": "l", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": -4.0, "notional_usd": 80.0,
+    })
+    store.upsert_trade({
+        "trade_id": "z", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 0.0, "notional_usd": 20.0,
+    })
+    store.upsert_trade({
+        "trade_id": "b", "strategy_id": "beta", "status": "closed",
+        "execution_mode": "live", "symbol": "ETH/USD",
+        "direction": "SHORT", "side": "sell",
+        "net_pnl_usd": 2.5, "notional_usd": 50.0,
+    })
+    store.upsert_trade({
+        "trade_id": "open", "strategy_id": "alpha", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 99.0, "notional_usd": 999.0,
+    })
+    by_sid = {r["strategy_id"]: r for r in store.closed_pnl_by_strategy()}
+    assert by_sid["alpha"]["realized_pnl"] == 6.0
+    assert by_sid["alpha"]["total_trades"] == 3
+    assert by_sid["alpha"]["winning_trades"] == 1
+    assert by_sid["alpha"]["volume_usd"] == 200.0
+    assert by_sid["beta"]["realized_pnl"] == 2.5
+    assert by_sid["beta"]["total_trades"] == 1
+    assert by_sid["beta"]["winning_trades"] == 1
