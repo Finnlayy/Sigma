@@ -912,3 +912,18 @@ Perp-Liquidationskaskaden als FVG-Verstärker unerforscht.
 > (orchestrator, correlation_scout) und umgehen das Zwei-Stufen-Prinzip.
 > Die Formeln sind übernommen (§9.5/§11), die Implementierung folgt den
 > Master-Prompts MP-04/MP-05/MP-11/MP-16 auf den echten Modulstand.
+> Eine zweite Chat-Welle (`sigma_onnx_quantum_pipeline.py`,
+> `sigma_model_exporter.py`, `sigma_live_feed_orchestrator.py`,
+> `feature_wirkleistung.py`, `price_action_physics.py`,
+> `trend_power_factor.py`, `knn_physics_engine.py`,
+> `power_factor_backtest.py`) ist ebenfalls nur Referenz: die
+> P/Q/S-Formeln stimmen mit §9.5 überein (nutze sie als Formelcheck),
+> aber der Tensor ist dort nur 9D (Sigma = 16D, §11), `TTL_norm` wird
+> falsch aus Sekunden-der-Minute statt aus Restminuten der 1h-Kerze
+> gerechnet, die Fallback-Policy fehlt (TTL<0,15/21:00-Gates), `P_cal`
+> ohne Platt-Skalierung, der Live-WebSocket-Orchestrator mit
+> `except: pass` ist fail-open und gehört nicht zur Loop-Architektur
+> (keine Tick-Einspeisung, nur geschlossene Bars über die bestehenden
+> Feeds), und kNN ersetzt nicht den ONNX-Dual-Head. Verdrahtung der
+> 16 Features zu den Quellmodulen: MP-11-Prompt, Tabelle
+> „Feature-Verdrahtung“.

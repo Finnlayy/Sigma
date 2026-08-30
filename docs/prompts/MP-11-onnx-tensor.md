@@ -11,6 +11,48 @@ Abhängigkeit geführt werden kann. Chat-Module
 ihr 9D-Tensor mit teils kaputten Indizierungen (`tensor =` statt
 `tensor[0,k] =`) darf nicht kopiert werden.
 
+## Feature-Verdrahtung (Schnittstellen / Quellen)
+
+Der Tensor bekommt **nur geschlossene Bars** (Loop-C/Feed-Pfad,
+HTF mit `[:-1]`/`htf_ready`, Hartregel 7) — kein eigener WebSocket-/
+Tick-Orchestrator. Jede Feature-Quelle ist ein bestehendes bzw. per
+Roadmap entstehendes Modul; fehlt eine Quelle → sicherer Default
+(0 bzw. neutral), niemals Ausnahme schlucken oder synthetisieren:
+
+| # | Feature | Quelle / Modul | Anmerkung |
+|---|---|---|---|
+| 1 | `cos_phi` (Bar) | MP-04 Price-Action-Physics | OHLCV geschlossen |
+| 2 | `P_norm`, `Q_norm`, `Q_upper/lower`, `Q_bias` | MP-04 (`price_action_physics`) | ATR = Wilder-RMA(TR,14) |
+| 3 | `pos_00`, `m_tangent` | MP-03 (`daily_open_envelope`) | 00:00-UTC-Anker |
+| 4 | `P_cal` | `polymarket_layer0` / MP-06 | **Platt-kalibriert**, nicht Rohquote; ohne Feed neutral, kein Gate |
+| 5 | `pos_EQ` | `quantum_wave_collider` (Range H/L) | existiert |
+| 6 | `d_CE` (FVG-CE50) | `quantum_wave_collider`/`htf_features` (CE50 existiert in fractal_scaling) | |
+| 7 | `TTL_norm` | `hourly_screening_gate` (MP-05): **Restminuten bis 1h-Bar-Close / 60** | NICHT Sekunden-der-Minuten-Uhr |
+| 8 | UTC-Safe-Flag | `session_clock` (existiert; 21:00–22:00-Quarantäne) | |
+| 9 | RVOL | `correlation_scout`/Universum-Feed (MP-05) | |
+| 10 | CVD-Absorption | MP-10 Orderflow-Port (optional) | ohne L2-Feed → 0, fail-closed |
+| 11 | Hurst | `dual_hurst` (existiert) | |
+| 12 | Liq-Distanz | MP-01 Risk-Guards / Venue-Daten | ohne Daten → neutral |
+| 13 | Two-Bar-Thrust | MP-03 | |
+| 14 | FVG-Touch | `htf_features` (existiert) / MP-03 | |
+| — | Output | Orchestrator `ctx["onnx"]` | nur BTC-Makro Long/Flat/Short + Hebel; **keine Symbole im Tensor** (Ranker = Stufe 2) |
+
+Modelldatei nur über Konfigpfad + optionalen onnxruntime-Import;
+ohne beides läuft die deterministische Fallback-Policy.
+
+### Achtung: Chat-Entwürfe nur als Formelreferenz
+Im Chat kursierende Gemini-Skripte (`sigma_onnx_quantum_pipeline.py`,
+`sigma_model_exporter.py`, `sigma_live_feed_orchestrator.py`,
+`knn_physics_engine.py`, `power_factor_backtest.py`) sind **nicht
+kanonisch** und werden nicht kopiert: Tensor dort nur **9D** (Sigma =
+16D), `TTL_norm` falsch aus Sekunden-der-Minute berechnet, Fallback
+ohne TTL-/21:00-Gates, `P_cal` ohne Platt-Skalierung, ein eigener
+WebSocket-`LiveFeedOrchestrator` mit `except: pass` (fail-open!)
+außerhalb der Loop-Architektur, und kNN statt ONNX-Dual-Head. Die
+PyTorch-Export-Struktur (2× Linear→LayerNorm→GELU, Softmax 3,
+10+15·σ, opset 14, I/O `tensor_x`/`action_probs`/`leverage_factor`)
+stützt die §11-Spezifikation — Input-Dim ist aber 16, nicht 9.
+
 ## Auftrag — `sigma/core/onnx_quantum_tensor.py`
 
 1. **Feature-Builder (reine Einzelfunktionen + Gesamt-Tensor):**
