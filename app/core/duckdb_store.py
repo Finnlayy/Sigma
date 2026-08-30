@@ -598,11 +598,14 @@ class DuckDBStore:
         closed rows: trades(10000)+Python scan ~35.7 ms vs stats+GROUP BY+
         trades(80) ~4.1 ms (~9×).
         """
+        # Default must be the literal 'paper', not the queried mode. Binding
+        # COALESCE(..., ?) to "live" would treat "" as live — Python
+        # `(execution_mode or "paper")` always defaults empty to paper.
         row = self._one(
             "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl, COUNT(*) AS n FROM trades "
             "WHERE status = 'closed' "
-            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
-            [execution_mode, execution_mode],
+            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), 'paper') = ?",
+            [execution_mode],
         )
         if not row:
             return {"pnl": 0.0, "count": 0}
