@@ -11,3 +11,7 @@
 ## 2026-08-29 - empty execution_mode vs SQL COALESCE
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
+
+## 2026-08-30 - empty execution_mode default is always paper, not the query arg
+**Learning:** `COALESCE(NULLIF(execution_mode,''), ?)` with `? = queried mode` is wrong for `mode='live'`: blanks become live. Python `(x or "paper") == "live"` still treats `""` as paper. The 2026-08-29 `sum_closed_pnl` helper only looked correct because every caller passed `"paper"`.
+**Action:** Hard-code `'paper'` as the SQL empty/NULL default. Assert both paper and live aggregates in tests so the blank-as-live bug cannot hide.

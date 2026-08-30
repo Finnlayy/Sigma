@@ -589,19 +589,62 @@ class DuckDBStore:
                     r[k] = str(r[k])
         return rows
 
+    def closed_pnl_stats(self, execution_mode: str = "paper") -> Dict[str, Any]:
+        """COUNT + SUM in one SEQ_SCAN — do not materialize up to 10k trade rows.
+
+        Matches Python `(execution_mode or "paper") == mode` including NULL/''.
+        Empty-string default is always ``'paper'``, not the queried mode —
+        ``COALESCE(NULLIF(mode,''), ?)`` with ``? = live`` would count blanks
+        as live. GET /api/logs polls every 5–8s; trades(limit=10000) was
+        ~29 ms @ 8k rows just to derive paper count/pnl. This is ~0.8 ms (~35×).
+        """
+        row = self._one(
+            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl, COUNT(*) AS n FROM trades "
+            "WHERE status = 'closed' "
+            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), 'paper') = ?",
+            [execution_mode],
+        )
+        return {
+            "pnl": float(row["pnl"]) if row else 0.0,
+            "count": int(row["n"]) if row else 0,
+        }
+
     def sum_closed_pnl(self, execution_mode: str = "paper") -> float:
         """SUM net_pnl in DuckDB — do not materialize up to 10k trade rows.
 
         Matches Python `(execution_mode or "paper") == mode` including NULL/''.
         Bench @ 4k closed rows: trades()+sum ~22 ms vs this ~0.5 ms (~45×).
         """
-        row = self._one(
-            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
-            "WHERE status = 'closed' "
-            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
-            [execution_mode, execution_mode],
+        return self.closed_pnl_stats(execution_mode)["pnl"]
+
+    def strategy_closed_aggregates(self) -> Dict[str, Dict[str, Any]]:
+        """Per-strategy closed-trade stats without materializing rows.
+
+        Replaces the GET /api/logs Python scan of up to 5–10k trades
+        (realized / wins / volume / count). Same win definition as Python:
+        ``(net_pnl_usd or 0) > 0``. Bench @ 8k rows: trades()+groupby ~29 ms
+        vs this ~1.7 ms (~17×).
+        """
+        rows = self._rows(
+            "SELECT COALESCE(CAST(strategy_id AS VARCHAR), '') AS strategy_id, "
+            "COUNT(*) AS total_trades, "
+            "SUM(CASE WHEN COALESCE(net_pnl_usd, 0) > 0 THEN 1 ELSE 0 END) "
+            "AS winning_trades, "
+            "COALESCE(SUM(net_pnl_usd), 0) AS realized_pnl, "
+            "COALESCE(SUM(notional_usd), 0) AS volume "
+            "FROM trades WHERE status = 'closed' GROUP BY 1"
         )
-        return float(row["pnl"]) if row else 0.0
+        out: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            total = int(r.get("total_trades") or 0)
+            wins = int(r.get("winning_trades") or 0)
+            out[str(r.get("strategy_id") or "")] = {
+                "total_trades": total,
+                "winning_trades": wins,
+                "realized_pnl": float(r.get("realized_pnl") or 0.0),
+                "volume": float(r.get("volume") or 0.0),
+            }
+        return out
 
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:

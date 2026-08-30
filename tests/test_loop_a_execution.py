@@ -482,3 +482,50 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_pnl_stats("paper")
+    assert stats["pnl"] == 13.0
+    assert stats["count"] == 2
+    assert store.closed_pnl_stats("live") == {"pnl": 99.0, "count": 1}
+
+
+def test_strategy_closed_aggregates_match_python_scan(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    rows = [
+        {"trade_id": "a", "strategy_id": "s1", "status": "closed",
+         "execution_mode": "paper", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+         "notional_usd": 100.0},
+        {"trade_id": "b", "strategy_id": "s1", "status": "closed",
+         "execution_mode": "", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": -2.0,
+         "notional_usd": 50.0},
+        {"trade_id": "c", "strategy_id": "s2", "status": "closed",
+         "execution_mode": "live", "symbol": "ETH/USD",
+         "direction": "SHORT", "side": "sell", "net_pnl_usd": 4.0,
+         "notional_usd": 80.0},
+        {"trade_id": "d", "strategy_id": "s1", "status": "open",
+         "execution_mode": "paper", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+         "notional_usd": 9.0},
+        {"trade_id": "e", "strategy_id": None, "status": "closed",
+         "execution_mode": "paper", "symbol": "SOL/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 1.0,
+         "notional_usd": 10.0},
+    ]
+    for row in rows:
+        store.upsert_trade(row)
+
+    agg = store.strategy_closed_aggregates()
+    assert agg["s1"]["total_trades"] == 2
+    assert agg["s1"]["winning_trades"] == 1
+    assert agg["s1"]["realized_pnl"] == 8.0
+    assert agg["s1"]["volume"] == 150.0
+    assert agg["s2"]["total_trades"] == 1
+    assert agg["s2"]["winning_trades"] == 1
+    assert agg["s2"]["realized_pnl"] == 4.0
+    assert agg["s2"]["volume"] == 80.0
+    assert agg[""]["total_trades"] == 1
+    assert agg[""]["realized_pnl"] == 1.0
+    assert set(agg) == {"s1", "s2", ""}
