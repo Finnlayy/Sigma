@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-30 - SSE telemetry paid for full lake_summary twice
+**Learning:** `TelemetryCenter.build_frame` (SSE every 2s) called `_l2_files` and `_l2_mb`, each running `store.lake_summary()` — COUNT(*) + GROUP BY ohlcv + parquet os.walk — just to read `total_files` / `total_size_mb` from `_parquet_stats()`. Bench @ 20k OHLCV rows: 2× summary ~4.0 ms vs `_parquet_stats` once ~0.04 ms (~100×). Also holds the DuckDB store lock for two unused table scans on the same interval as trade upserts.
+**Action:** Poll/SSE paths that only need parquet file counts must call `lake_file_stats()`, never `lake_summary()`. Never invoke the same lake walk twice in one frame.

@@ -500,3 +500,36 @@ def test_memory_stage_four_pauses_and_restarts_worker():
     repeated = watchdog.check(percent=99.0)
     assert repeated["executed"] is False
     assert repeated["reason"] == "stage4_latched"
+
+
+def test_telemetry_frame_uses_lake_file_stats_not_full_summary(tmp_path):
+    """SSE build_frame must not pay for ohlcv COUNT/GROUP BY twice per tick."""
+    store = DuckDBStore(str(tmp_path / "tele-l2.duckdb"))
+    candles = [
+        {"ts": 1_700_000_000 + i * 60, "open": 100.0, "high": 101.0,
+         "low": 99.0, "close": 100.5, "volume": 10.0}
+        for i in range(40)
+    ]
+    store.seed_ohlcv("BTC/USD", 60, candles)
+
+    summary_calls = {"n": 0}
+    orig_summary = store.lake_summary
+
+    def wrapped_summary():
+        summary_calls["n"] += 1
+        return orig_summary()
+
+    store.lake_summary = wrapped_summary  # type: ignore[method-assign]
+
+    file_stats = DuckDBStore.lake_file_stats(store)
+    assert file_stats["total_files"] == orig_summary()["total_files"]
+    assert file_stats["total_size_mb"] == orig_summary()["total_size_mb"]
+    assert file_stats["total_files"] >= 0
+    assert file_stats["total_size_mb"] >= 0.0
+    summary_calls["n"] = 0
+
+    frame = TelemetryCenter().build_frame(store=store)
+    assert summary_calls["n"] == 0
+    tier = frame["storage_tiering"]
+    assert tier["l2_duckdb_parquet_files"] == file_stats["total_files"]
+    assert tier["l2_total_mb"] == file_stats["total_size_mb"]
