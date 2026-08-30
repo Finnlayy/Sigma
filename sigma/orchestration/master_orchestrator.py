@@ -23,6 +23,7 @@ from sigma.signals.quantum_wave_collider import (
 from sigma.signals.session_clock import SessionClock
 from sigma.signals.timeframe_ladder import session_exec_pair
 from sigma.signals.volatility_throttle import VolatilityThrottleGate
+from sigma.orchestration.hourly_screening_gate import HourlyScreeningGate
 from sigma.orchestration.multi_asset_router import MultiAssetRouter
 from sigma.strategies.dual_hedge_grid import DualHedgeGrid
 from sigma.strategies.dynamic_channel_dca import DynamicChannelDCA
@@ -40,9 +41,13 @@ class MasterOrchestrator:
         ports: Optional[Dict[str, Any]] = None,
         universe: Optional[Any] = None,
         hydrate_cooldown_s: float = 30.0,
+        screening_gate: Optional[HourlyScreeningGate] = None,
     ) -> None:
         self.ports = ports or {}
         self.ticks = 0
+        # MP-05: passives 1h-Screening-Gate. Nur Klassifikation/Gate als
+        # ctx["screening"] — keine Orders, kein Auto-Deploy.
+        self.screening_gate = screening_gate
         self.clock = SessionClock()
         self.throttle = VolatilityThrottleGate()
         self.router = MultiAssetRouter()
@@ -88,12 +93,14 @@ class MasterOrchestrator:
         # Paper-only — kein Deploy-Trigger, auch im Unwind/Idle-Pfad.
         screen = self._screen_pipeline(htf_series, leader, pair.bias_minutes, now)
         self._screen_to_loop_d_academy(screen, session.session)
+        # MP-05: passives 1h-Screening (Gate + Ranker) — nur ctx, keine Orders.
+        screening = self._screening_ctx(series, session, now)
         if not dual.htf_ready:
-            return self._idle("htf_not_ready", session, throttle, dual, pair, poly, wave, screen)
+            return self._idle("htf_not_ready", session, throttle, dual, pair, poly, wave, screen, screening)
         if throttle.mode == "SLEEP" or session.liquidity_gap:
-            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen)
+            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen, screening)
         if wave.status == STATUS_INVALIDATED:
-            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen)
+            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen, screening)
         routes = self.router.route(series, session=session, now=now, use_ict_ladder=False, leader=leader)
         cap = int(throttle.allowed_concurrent_bots)
         deployed: List[Dict[str, Any]] = []
@@ -112,7 +119,7 @@ class MasterOrchestrator:
                 continue
             receipt = self._loop_a_paper(intent)
             deployed.append({**route.to_dict(), "path": "e_then_a", "receipt": receipt})
-        return {
+        result = {
             "ok": True,
             "status": "tick",
             "phase": 3,
@@ -127,6 +134,9 @@ class MasterOrchestrator:
             "polymarket": poly.to_dict(),
             "routes": deployed,
         }
+        if screening:
+            result["screening"] = screening
+        return result
 
     def _poll_c(self) -> Any:
         port = self.ports.get("loop_c")
@@ -181,8 +191,9 @@ class MasterOrchestrator:
             return
 
     def _idle(self, reason, session, throttle, dual, pair, poly, wave=None,
-              screen: Optional[WaveScreen] = None) -> Dict[str, Any]:
-        return {
+              screen: Optional[WaveScreen] = None,
+              screening: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        out = {
             "ok": True,
             "status": reason,
             "phase": 3,
@@ -197,11 +208,48 @@ class MasterOrchestrator:
             "polymarket": poly.to_dict(),
             "routes": [],
         }
+        if screening:
+            out["screening"] = screening
+        return out
 
     def _unwind_only(self, session, throttle, dual, pair, poly, wave=None,
-                     screen: Optional[WaveScreen] = None) -> Dict[str, Any]:
-        out = self._idle("unwind_only", session, throttle, dual, pair, poly, wave, screen)
+                     screen: Optional[WaveScreen] = None,
+                     screening: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        out = self._idle("unwind_only", session, throttle, dual, pair, poly, wave,
+                         screen, screening)
         out["status"] = "unwind_only"
+        return out
+
+    # ---------------------------------------------------- MP-05 screening ---
+    def _screening_ctx(self, series, session, now) -> Optional[Dict[str, Any]]:
+        """Passives 1h-Screening: Gate blockt Mehrfach-Scans; Ranker-Ergebnis
+        landet als ctx["screening"]. Ohne Gate -> None (Key fehlt im ctx)."""
+        if self.screening_gate is None:
+            return None
+        btc = (series or {}).get("BTC/USD") or []
+        if not btc:
+            return {"valid": False, "reason": "missing_btc_closed_bars"}
+        last = btc[-1]
+        bar_ts = int(last.get("ts", last.get("time", 0)) or 0)
+        if bar_ts <= 0:
+            return {"valid": False, "reason": "missing_bar_ts"}
+        gate_result = self.screening_gate.evaluate(bar_ts, now_ts=now)
+        out: Dict[str, Any] = {"valid": True, "gate": gate_result.to_dict()}
+        ranker = self.ports.get("ranker")
+        if gate_result.scan_allowed and ranker is not None and hasattr(ranker, "rank"):
+            try:
+                result = ranker.rank(
+                    series,
+                    bar_ts=bar_ts,
+                    weekend=getattr(session, "weekend_alts_paper_only", False),
+                )
+                out["screening"] = result.to_dict()
+                self.screening_gate.mark_scanned(bar_ts)
+            except Exception as exc:  # fail-closed
+                out["valid"] = False
+                out["reason"] = f"ranker_error:{exc}"
+        else:
+            out["screening"] = None
         return out
 
     # ------------------------------------------------------------ wave screen
