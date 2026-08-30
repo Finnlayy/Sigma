@@ -531,3 +531,53 @@ def test_zero_mock_seams_are_honest_empty(client):
     assert lake.get("ok") is False and lake.get("mode") == "disabled"
     poly = client.get("/api/quant/polymarket/layer0").json()
     assert poly.get("valid") is False and poly.get("reason") == "missing_data"
+
+
+def test_logs_strategy_pnl_matches_sql_aggregates(client):
+    """GET /api/logs no longer scans 10k trade rows — SQL path must match."""
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "bolt-s1", "name": "BoltAgg", "status": "inactive",
+        "assetPair": "BTC/USD", "interval": 15, "executionMode": "paper",
+        "parameters": {},
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-t1", "strategy_id": "bolt-s1", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 12.5, "notional_usd": 200.0,
+        "exit_time": "2026-08-30 00:00:00",
+        "entry_time": "2026-08-30 00:00:00",
+        "entry_price": 100.0, "quantity": 1.0,
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-t2", "strategy_id": "bolt-s1", "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": -2.5, "notional_usd": 50.0,
+        "exit_time": "2026-08-30 01:00:00",
+        "entry_time": "2026-08-30 01:00:00",
+        "entry_price": 100.0, "quantity": 0.5,
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-t3", "strategy_id": "bolt-s1", "status": "closed",
+        "execution_mode": "live", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 99.0, "notional_usd": 10.0,
+        "exit_time": "2026-08-30 02:00:00",
+        "entry_time": "2026-08-30 02:00:00",
+        "entry_price": 100.0, "quantity": 0.1,
+    })
+    body = client.get("/api/logs").json()
+    row = next(r for r in body["strategyPnL"] if r["strategyId"] == "bolt-s1")
+    assert row["totalTrades"] == 3
+    assert row["winningTrades"] == 2
+    assert row["realizedPnL"] == 109.0
+    assert row["volumeTradedUSD"] == 260.0
+    # paper + empty-string count toward metrics; live does not
+    assert body["metrics"]["totalTrades"] >= 2
+    paper_stats = store.closed_trade_stats("paper")
+    assert paper_stats["count"] >= 2
+    assert paper_stats["pnl"] == store.sum_closed_pnl("paper")

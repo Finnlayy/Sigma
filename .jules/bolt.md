@@ -11,3 +11,7 @@
 ## 2026-08-29 - empty execution_mode vs SQL COALESCE
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
+
+## 2026-08-30 - /api/logs still materialized 10k rows after the 4×-scan fix
+**Learning:** Sharing one `trades(limit=10000)` across helpers cut 4 scans to 1 (~110→35 ms), but the dashboard only needs aggregates (COUNT/SUM/GROUP BY) plus 80 order rows. The leftover `SELECT *` was still ~39 ms + ~9 ms Python grouping. SQL aggregates + `limit=80` measured ~4.3 ms @ 8k/20 (~11×).
+**Action:** On poll endpoints, do not ship a "shared snapshot" of full rows when callers only sum/count/group. Aggregate in DuckDB; fetch the tiny slice the UI actually renders.
