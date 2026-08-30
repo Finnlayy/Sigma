@@ -590,10 +590,15 @@ class DuckDBStore:
         return rows
 
     def _closed_mode_filter(self, execution_mode: str) -> Tuple[str, List[Any]]:
-        """SQL that matches Python `(execution_mode or "paper") == mode` (NULL/'')."""
+        """SQL that matches Python `(execution_mode or "paper") == mode`.
+
+        Empty string and NULL must default to *paper*, not to the queried mode.
+        `COALESCE(NULLIF(mode, ''), ?)` with `?` = needle would count `""` as
+        live when filtering for live — the Python `or "paper"` path never does.
+        """
         return (
-            "COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
-            [execution_mode, execution_mode],
+            "COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), 'paper') = ?",
+            [execution_mode],
         )
 
     def sum_closed_pnl(self, execution_mode: str = "paper") -> float:

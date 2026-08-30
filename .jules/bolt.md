@@ -15,3 +15,7 @@
 ## 2026-08-30 - reusing a fat trades() scan is not enough
 **Learning:** After collapsing four `trades()` calls into one, `GET /api/logs` still spent ~41 ms materializing 8k full rows every 5–8s poll just to COUNT/SUM/GROUP BY. SQL aggregates + an 80-row orders strip: ~5 ms (~8×). Passing the snapshot down does not help if callers only need aggregates.
 **Action:** On dashboard/poll endpoints, ask whether the payload needs row fields. If not, SQL aggregate — do not reuse a fat scan.
+
+## 2026-08-30 - COALESCE default is paper, not the filter needle
+**Learning:** `COALESCE(NULLIF(mode, ''), ?)` with `?` = requested mode treats `""` as whatever you queried. Python `(mode or "paper") == "live"` is False for empty string. `sum_closed_pnl("live")` would have included empty-mode rows.
+**Action:** When porting `x or default == needle`, the SQL default is `default`, never `needle`.
