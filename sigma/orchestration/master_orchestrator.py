@@ -28,6 +28,7 @@ from sigma.orchestration.multi_asset_router import MultiAssetRouter
 from sigma.strategies.dual_hedge_grid import DualHedgeGrid
 from sigma.strategies.dynamic_channel_dca import DynamicChannelDCA
 from sigma.strategies.htf_trend_ltf_reversion import HtfTrendLtfReversion
+from sigma.strategies.quantum_sniper_dca import QuantumSniperDCA
 
 logger = logging.getLogger("sigma.orchestration")
 
@@ -56,6 +57,9 @@ class MasterOrchestrator:
             "htf_trend_ltf_reversion": HtfTrendLtfReversion(),
             "dynamic_channel_dca": DynamicChannelDCA(),
             "dual_hedge_grid": DualHedgeGrid(),
+            # MP-07: Sniper-Template registriert; aufrufbar nur im
+            # HIGH_BETA_MOMENTUM-Fenster bei vorhandenem Screening-Kontext.
+            "quantum_sniper_dca": QuantumSniperDCA(),
         }
         from sigma.execution.universe import default_execution_universe, rank_watchlist
 
@@ -115,7 +119,8 @@ class MasterOrchestrator:
                 self._loop_d_paper(route.symbol, session.session)
                 deployed.append({**route.to_dict(), "path": "loop_d_paper"})
                 continue
-            intent = self._plan(route.symbol, session, series, htf_series, pair, wave)
+            intent = self._plan(route.symbol, session, series, htf_series, pair, wave,
+                                screening=screening, now=now)
             if intent.action == "FLAT":
                 deployed.append({**route.to_dict(), "path": "flat", "reason": intent.details.get("reason")})
                 continue
@@ -153,14 +158,35 @@ class MasterOrchestrator:
             return port.poll_pair()
         return port.poll()
 
-    def _plan(self, symbol, session, series, htf_series, pair, wave=None):
+    def _plan(self, symbol, session, series, htf_series, pair, wave=None,
+              screening: Optional[Dict[str, Any]] = None,
+              now: Optional[float] = None):
         name = session.recommended_strategy
-        if name == "DUAL_HEDGE_DCA":
-            tmpl = self.templates["dual_hedge_grid"]
-        elif name == "MICRO_RANGE_GRID":
-            tmpl = self.templates["dynamic_channel_dca"]
-        else:
-            tmpl = self.templates["htf_trend_ltf_reversion"]
+        tmpl = None
+        wave_ctx = wave.to_dict() if wave is not None and hasattr(wave, "to_dict") else (wave or {})
+        if name == "HIGH_BETA_MOMENTUM" and screening is not None:
+            # MP-07: Sniper nur im Momentum-Fenster MIT Screening-Kontext
+            # (Ranker-Freigabe ist Entry-Bedingung im Template). Wave fuer
+            # den Sniper ist die 15m-Wave (KB §5.4); weicht die Session-
+            # Bias-Intervalle ab, wird nur fuer den Sniper-Pfad eine 15m-
+            # Evaluierung des bestehenden Colliders angefordert.
+            tmpl = self.templates["quantum_sniper_dca"]
+            if pair.bias_minutes != 15:
+                leader_htf = (htf_series or {}).get("BTC/USD") or (htf_series or {}).get(symbol) or []
+                w15 = self.collider.evaluate(
+                    leader_htf,
+                    _alt_htf(htf_series, series, "BTC/USD"),
+                    interval_min=15,
+                    now=now,
+                )
+                wave_ctx = w15.to_dict() if hasattr(w15, "to_dict") else dict(w15)
+        if tmpl is None:
+            if name == "DUAL_HEDGE_DCA":
+                tmpl = self.templates["dual_hedge_grid"]
+            elif name == "MICRO_RANGE_GRID":
+                tmpl = self.templates["dynamic_channel_dca"]
+            else:
+                tmpl = self.templates["htf_trend_ltf_reversion"]
         return tmpl.plan({
             "symbol": symbol,
             "session": session.to_dict(),
@@ -168,7 +194,9 @@ class MasterOrchestrator:
             "ltf_candles": (series or {}).get(symbol) or [],
             "htf_interval_min": pair.bias_minutes,
             "ltf_interval_min": pair.exec_minutes,
-            "wave": wave.to_dict() if wave is not None and hasattr(wave, "to_dict") else (wave or {}),
+            "wave": wave_ctx,
+            "screening": screening,
+            "now": now,
         })
 
     def _loop_e(self, strategy_id: str, symbol: str, tf: int, regime: str) -> bool:
