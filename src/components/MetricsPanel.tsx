@@ -769,16 +769,23 @@ export default function MetricsPanel({
         {walletTab === 'spot' && (
           <div className="space-y-2 max-h-52 overflow-y-auto pr-1 font-mono">
             {displayBalances && Object.keys(displayBalances).length > 0 ? (
+              (() => {
+                // Bolt Optimization: Added O(1) map lookup for UI cross-referencing to eliminate O(N*M) .find() on each render loop
+                const tickerMap = new Map(tickers.map(t => [t.pair, t]));
+
+                const totalSpotUsd = Object.keys(displayBalances).reduce((acc, asset) => {
+                  const amount = displayBalances[asset] || 0;
+                  if (asset === 'USD') return acc + amount;
+                  const ticker = tickerMap.get(`${asset}USD`) || tickerMap.get(`${asset}/USD`);
+                  return acc + (ticker ? amount * ticker.price : 0);
+                }, 0);
+
+                return (
               <>
                 <div className="flex justify-between items-center text-xs font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/50 p-2 rounded mb-2">
                   <span>Total Spot USD:</span>
                   <span>
-                    ${Object.keys(displayBalances).reduce((acc, asset) => {
-                      const amount = displayBalances[asset] || 0;
-                      if (asset === 'USD') return acc + amount;
-                      const ticker = tickers.find(t => t.pair === `${asset}USD` || t.pair === `${asset}/USD`);
-                      return acc + (ticker ? amount * ticker.price : 0);
-                    }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${totalSpotUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
                 {Object.keys(displayBalances)
@@ -787,7 +794,7 @@ export default function MetricsPanel({
                     const val = displayBalances[asset] || 0;
                     const isFiat = asset === 'USD' || asset === 'EUR' || asset === 'GBP' || asset === 'CAD';
                     const symbol = asset === 'USD' ? '$' : asset === 'EUR' ? '€' : asset === 'GBP' ? '£' : asset === 'CAD' ? 'C$' : '';
-                    const ticker = !isFiat ? tickers.find(t => t.pair === `${asset}USD` || t.pair === `${asset}/USD`) : undefined;
+                    const ticker = !isFiat ? (tickerMap.get(`${asset}USD`) || tickerMap.get(`${asset}/USD`)) : undefined;
                     const usdValue = ticker ? val * ticker.price : undefined;
 
                     return (
@@ -816,6 +823,8 @@ export default function MetricsPanel({
                     );
                   })}
               </>
+                );
+              })()
             ) : (
               <div className="text-center py-2 text-xs text-zinc-400">
                 {defaultMetrics.hasCredentials
