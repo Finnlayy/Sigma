@@ -18,4 +18,4 @@
 | MP-14 | OPEN | `docs/plans/MP-14.md` | optional; explizite Anforderung erforderlich | — |
 | MP-15 | PLAN-DONE | `docs/plans/MP-15.md` | — | MP-11 |
 | MP-16 | PLAN-DONE | `docs/plans/MP-16.md` | — | MP-17 |
-| MP-17 | OPEN | `docs/plans/MP-17.md` | vorheriger Pflicht-Plan | STOP |
+| MP-17 | PLAN-DONE | `docs/plans/MP-17.md` | — | STOP |
