@@ -207,15 +207,18 @@ SettingsPanel).
   - Vorher/Nachher-Diff oder Transformations-Liste
     (z. B. „v5→v6 portiert“, „Webhook-Payload an 3 strategy.entry
     injiziert“, „Fremd-Webhook entfernt“, „barstate.isconfirmed
-    ergänzt“, „pyramiding=0 gesetzt“) als Häkchenliste,
+    ergänzt“, „Standard-Header gesetzt (10k/cash 100/pyramiding=1/
+    0,04 %)“, „eindeutige idempotency_key je Alert“) als Häkchenliste,
   - bei `hardening_ok=false`: roter Block mit den Ablehnungsgründen,
     Deploy-Button deaktiviert (fail-closed),
   - bei Erfolg: nur Pfad „Provisionieren“ über Bestätigungs-Modal
     (Scout-Symbol + kraken_paper + TTL sichtbar) — kein Direkt-Upload.
 - **Wächter-Anzeige:** statische Prüfergebnisse des Generators
   (lookahead_off vorhanden, bar-close-Alert, Schema-A-Payload,
-  pyramiding=0, calc_on_every_tick=false) als Häkchenliste — dieselben
-  Checks für eigen-generierte und gehärtete Skripte.
+  Standard-Header initial_capital=10000 / cash 100 / pyramiding=1 /
+  Commission 0,04 %, calc_on_every_tick=false, `idempotency_key`
+  je Alert eindeutig) als Häkchenliste — dieselben Checks für
+  eigen-generierte und gehärtete Skripte.
 - Dock-Andockung bei TvJobs/PineStudio (neuer Tab, kein Ersatz).
 
 ### 3.9 OnnxBrainPanel — KNN-Tensor-Inspektor (MP-11)

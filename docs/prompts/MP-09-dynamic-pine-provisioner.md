@@ -14,8 +14,25 @@ Alerts, TTL-De-Provisioning) und das API/Webhook-Kapitel im
   take_profit, fixed_leverage, strategy_id, webhook_secret,
   ttl_minutes, side (buy/sell), bar_close_only=True.
 - Ausgabe: vollständiger, eigenständiger Pine-Script-v6-String:
+  - **Standard-Header (Pflicht für jede generierte/gehärtete Strategie):**
+    `initial_capital=10000`, `currency=currency.USD`,
+    `default_qty_type=strategy.cash`, `default_qty_value=100`
+    (100 USD Standard-Ordergröße), `pyramiding=1` (genau eine Position
+    pro Richtung — Chart-Pyramiding läuft nicht; DCA/Leitern bleiben
+    serverseitige Templates),
+    `commission_type=strategy.commission.percent`,
+    `commission_value=0.04` (0,04 % Standard-Gebühr pro Seite),
+    `calc_on_every_tick=false`, `overlay=true`.
   - Alle Werte als injizierte Konstanten (keine freien Variablen,
     die der Nutzer setzen muss).
+  - **Eindeutige Tracking-ID pro Alert:** Jeder `alert_message`-Payload
+    trägt eine eigene, einzigartige `idempotency_key` nach dem Muster
+    `{strategy_id}_{action}_{seq:02d}_{bar_unix}` (seq fortlaufend je
+    Strategie/Bar: Entry = 01, TP1 = 02, TP2 = 03, TP3 = 04,
+    UPDATE_SL = 05, CLOSE = 06 …). Kein Alert teilt sich eine ID;
+    der Ingest antwortet auf Wiederholungen mit `DUPLICATE_IGNORED`.
+    Zweck: keine Vertauschungen/Doppelausführungen bei mehreren
+    ephemeren Strategien und Mehrfach-Alerts.
   - Alerts feuern auf **Bar-Close** (kein Intrabar-Repaint):
     `barmerge.lookahead_off`, Signale mit [1]-Offset berechnet.
   - Webhook-Payload exakt Schema A: `action` (BUY/SELL/CLOSE groß),
@@ -57,15 +74,22 @@ Provisionieren automatisch auf Sigma-Standard um:
   1. **Version:** fehlende Versionszeile → `//@version=6` ergänzen;
      `//@version=5` → v6 umschreiben (strategy.entry/exit kompatibel;
      nicht portierbare Konstrukte → fail-closed mit Grund).
-  2. **strategy()-Header:** `calc_on_every_tick=false` und
-     `pyramiding=0` sicherstellen/erzwingen; explizites
-     `calc_on_every_tick=true` überschreiben + loggen.
+  2. **strategy()-Header auf Sigma-Standard bringen/erzwingen:**
+     `initial_capital=10000`, `currency=currency.USD`,
+     `default_qty_type=strategy.cash`, `default_qty_value=100`,
+     `pyramiding=1`, `commission_type=strategy.commission.percent`,
+     `commission_value=0.04`, `calc_on_every_tick=false`;
+     abweichende Werte (z. B. `initial_capital=100000`, qty in %,
+     pyramiding>1, `calc_on_every_tick=true`, andere Commission)
+     überschreiben und als Transformation loggen.
   3. **Webhook:** jeden `strategy.entry`/`strategy.exit`/
      `strategy.close` ohne Sigma-Payload mit Schema-A-`alert_message`
      (bzw. Fraktal-Payload mit tp1–3/UPDATE_SL) über
      `build_alert_message` versehen; vorhandene fremde
      `alert_message`/`alert()`-Aufrufe (fremde URLs) ersetzen bzw.
-     entfernen und als Transformation loggen.
+     entfernen und als Transformation loggen. In jeden Payload die
+     eindeutige `idempotency_key` nach dem Muster
+     `{strategy_id}_{action}_{seq:02d}_{bar_unix}` einsetzen.
   4. **Bar-Close-Guard:** Entry-/Exit-Bedingungen um
      `barstate.isconfirmed` ergänzen (oder [1]-Offset);
      `request.security(...)` ohne `lookahead=barmerge.lookahead_off`
@@ -90,6 +114,14 @@ Provisionieren automatisch auf Sigma-Standard um:
 ## Tests (`tests/test_dynamic_pine.py`)
 - Generierter Code enthält: alle injizierten Konstanten, alle
   Schema-A-Feldnamen, `alert_message`/`alert()` mit Webhook-URL-Platzhalter.
+- **Standard-Header:** Code enthält `initial_capital=10000`,
+  `default_qty_type=strategy.cash` mit `default_qty_value=100`,
+  `pyramiding=1`, `commission_type=strategy.commission.percent` mit
+  `commission_value=0.04`, `calc_on_every_tick=false`.
+- **Eindeutige IDs:** jeder generierte `alert_message`-Payload enthält
+  eine `idempotency_key`; bei mehreren Alerts (Entry, TP1, TP2, TP3,
+  UPDATE_SL, CLOSE) sind alle Keys paarweise verschieden und folgen
+  dem Muster `{strategy_id}_{action}_{seq}_{bar_unix}`.
 - Statische String-Checks: `lookahead_on` kommt nicht vor; kein
   `request.security(..., lookahead=...)` mit Repaint-Muster; Bar-Close-
   Bedingung (`barstate.isconfirmed` oder [1]-Offset) vorhanden.
@@ -102,9 +134,10 @@ Provisionieren automatisch auf Sigma-Standard um:
 - Deterministisch: gleiche Eingabe → identischer String.
 - **Härtung (fremdes Pine):**
   - v5-`strategy.entry`-Skript ohne Alert → nach Härtung v6, mit
-    Schema-A-`alert_message`, Secret/strategy_id, `pyramiding=0`,
-    `calc_on_every_tick=false`, Bar-Close-Bedingung; `transformations`
-    listet die Änderungen.
+    Schema-A-`alert_message`, Secret/strategy_id, Standard-Header
+    (10000 / cash 100 / `pyramiding=1` / 0,04 % /
+    `calc_on_every_tick=false`), eindeutige `idempotency_key` je Alert,
+    Bar-Close-Bedingung; `transformations` listet die Änderungen.
   - Skript mit fremdem Webhook/`alert_message` → Fremd-Payload ersetzt,
     keine Fremd-URL mehr enthalten.
   - `request.security` ohne `lookahead_off` → ergänzt;
@@ -112,8 +145,14 @@ Provisionieren automatisch auf Sigma-Standard um:
   - Intrabare Strategie (`calc_on_every_tick=true`, nicht statisch
     auf bar-close umschließbar) → `hardening_ok=False` mit Gründen,
     es wird **kein** Einsatzcode erzeugt.
+  - Skript mit abweichenden Header-Werten (`initial_capital=100000`,
+    qty in Prozent, `pyramiding=10`, feste Commission oder
+    `calc_on_every_tick=true`) → nach Härtung stehen die
+    Sigma-Standards (10000 / cash 100 / pyramiding=1 / 0.04 % /
+    bar-close), die Überschreibungen sind in `transformations` gelistet.
   - Gehärteter Code besteht dieselben statischen Checks wie
-    eigen-generierter Code; Härtung ist deterministisch.
+    eigen-generierter Code (inkl. eindeutiger idempotency_keys je
+    Alert); Härtung ist deterministisch.
 
 ## Nicht im Scope
 - Kein TradingView-Upload/Login (Loop B / `app/tv/` bleibt zuständig).

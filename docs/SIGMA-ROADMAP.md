@@ -269,10 +269,13 @@ Konzeptreferenzen — diese eine Modul-Gruppe baut.
     v5/v6-Fremdcode (Gemini, manuell, TV-Bibliothek) wird beim
     Provisionieren automatisch umgeschrieben — Schema-A-`alert_message`
     an jeden Entry/Exit, Fremd-Webhooks ersetzt, Bar-Close-Guard
-    (`barstate.isconfirmed`) + `lookahead_off` ergänzt,
-    `pyramiding=0`/`calc_on_every_tick=false`, strategy_id/Secret/TTL
-    injiziert; nicht härtbar → fail-closed ohne Deploy. Transport-Härtung
-    nur über den regulären Scout→Modal→kraken_paper-Pfad.
+    (`barstate.isconfirmed`) + `lookahead_off` ergänzt, Standard-Header
+    (`initial_capital=10000`, Order 100 USD cash, `pyramiding=1`,
+    Commission 0,04 %, `calc_on_every_tick=false`), eindeutige
+    `idempotency_key` je Alert (Tracking gegen Vertauschung/Doppel-
+    ausführung), strategy_id/Secret/TTL injiziert; nicht härtbar →
+    fail-closed ohne Deploy. Transport-Härtung nur über den regulären
+    Scout→Modal→kraken_paper-Pfad.
 - Tests: `tests/test_dynamic_pine.py`
   - Generierter Code enthält alle Konstanten + Schema-A-Felder
   - Statische Checks: kein `lookahead_on`, kein Repaint-Muster;

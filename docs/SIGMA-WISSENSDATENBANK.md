@@ -614,12 +614,32 @@ operativen Pfad. → MP-04 (Formeln dorthin als Akzeptanzgrundlage).
   maschinell portierbar, Schema-A-`alert_message`-Payload (bzw. Fraktal-
   Payload) an jeden `strategy.entry/exit/close`, Fremd-Webhooks ersetzen,
   `barstate.isconfirmed`-Bar-Close-Guard + `lookahead_off` erzwingen,
-  `pyramiding=0` / `calc_on_every_tick=false`, strategy_id/Secret/TTL
+  Standard-Header (Test-Equity 10.000 USD, Ordergröße 100 USD cash,
+  `pyramiding=1`, Commission 0,04 %) / `calc_on_every_tick=false`,
+  eindeutige `idempotency_key` je Alert, strategy_id/Secret/TTL
   injizieren. Nicht statisch härtbare Skripte → fail-closed
   (`hardening_ok=False` mit Gründen), **kein** Deploy. Härtung betrifft
   nur den Transport — die Signallogik fremder Skripte bleibt unkanonisch
   und gelangt nur über Scout-Symbol + Operator-Modal + kraken_paper +
   TTL in den Markt, nie per Direkt-Upload.
+- **Standard-Header aller provisionierten/gehärteten TV-Strategien
+  (Pflicht-Defaults):** `initial_capital=10000` (Test-Equity 10.000 USD),
+  `default_qty_type=strategy.cash` + `default_qty_value=100`
+  (Standard-Ordergröße 100 USD), `pyramiding=1` (genau eine Position pro
+  Richtung — funktional identisch mit dem TradingView-Default 0;
+  Chart-interne Skalierung erfolgt nicht, DCA läuft serverseitig über die
+  Templates), `commission_type=strategy.commission.percent` +
+  `commission_value=0.04` (0,04 % Gebühr pro Seite im TV-Backtest),
+  `calc_on_every_tick=false`, `currency=currency.USD`. Fremde Skripte
+  bekommen diese Werte bei der Härtung überschrieben.
+- **Eindeutige Tracking-ID pro Webhook (Pflicht):** Jeder einzelne
+  Alert/Order — Entry, jede Teil-TP (TP1/2/3), `UPDATE_SL`, CLOSE —
+  bekommt eine eigene, eindeutige `idempotency_key` nach dem Muster
+  `{strategy_id}_{action}_{seq:02d}_{bar_unix}` (seq = fortlaufende
+  Nummer je Strategie/Bar). Kein Alert teilt sich eine ID; der
+  Ingest quittiert Wiederholungen mit `DUPLICATE_IGNORED`. Das
+  verhindert Vertauschungen und Doppelausführungen bei mehreren
+  ephemeren Strategien und Mehrfach-Alerts pro Position.
 - **Schema-Erweiterung für fraktale Einzeltrades (MP-15):** Entry-Payload
   trägt gestaffelte TPs mit:
   `action` `open_long`/`open_short`, `ticker`, `price` (Close der

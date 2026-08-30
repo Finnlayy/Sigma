@@ -1487,7 +1487,7 @@ Drei Schema-Familien; Ingestion-Router auf `:8000` erkennt Format und validiert 
 | Feld | Pflicht | Zweck |
 |------|---------|-------|
 | `secret` | ja | Shared Secret; HTTP 401 bei Mismatch |
-| `idempotency_key` | ja | Duplikat → `DUPLICATE_IGNORED` |
+| `idempotency_key` | ja | **Pro Alert einzigartig** — Muster `{strategy_id}_{action}_{seq:02d}_{bar_unix}` (Entry/TP1/TP2/TP3/UPDATE_SL/CLOSE je eigene fortlaufende seq). Wiederholung desselben Alerts → `DUPLICATE_IGNORED`; verhindert Vertauschungen/Doppelausführungen bei mehreren ephemeren Strategien. |
 | `strategy_id` / `bot_id` | ja | Routing zu Virtual Bot + M8 |
 | `stop_loss` | ja | Native Bracket-SL an Kraken CLI |
 | `fixed_leverage` | ja | Strategy-bound; 1–5 |
