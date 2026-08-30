@@ -35,12 +35,18 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 
 ## How to update this file (every finished phase)
 
-After phase `MP-XX` is implemented and tests are green:
+Mark `DONE` only if the phase is **complete** per `AGENTS.md` Completeness
+and `docs/prompts/JULES-MASTER-EXECUTE.md` (real formulas, all tests, no
+stubs/mocks/placeholders). File existence is not enough.
 
-1. Set that row to `DONE`.
+After that:
+
+1. Set that row to `DONE` and write the commit SHA in Notes.
 2. Set **Next** to the following item in CHAIN (after MP-09 comes MP-15, not MP-10).
 3. Update the HTML comments `jules-loop` / `jules-next` to match.
 4. Commit this file in the **same** commit as the phase (or immediately after).
 5. If **Next** is `STOP`, set **Loop** to `DONE` and stop invoking new work.
 
-If the NEW files for **Next** already exist on this branch with tests, mark DONE and advance — do not redo.
+If the NEW files for **Next** already exist **and** pass the completeness
+gate (formulas + tests + no forbidden tokens), mark DONE and advance.
+If they are stubs, **do not** advance — finish the real implementation first.

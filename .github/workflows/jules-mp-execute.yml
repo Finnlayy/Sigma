@@ -70,13 +70,20 @@ jobs:
           prompt: |
             Unattended Sigma MP execute loop. Operator cannot restart. Do not wait for humans.
 
-            1. Read AGENTS.md.
+            COMPLETENESS: Implement every formula, constant, dataclass field, and listed test.
+            No mocks, no stubs, no placeholders, no TODO, no pass-bodies, no fake returns,
+            no invented LIVE numbers. Tests must assert numeric/boolean contracts.
+            File existence is not DONE. Stubs must be finished, not skipped.
+
+            1. Read AGENTS.md (Completeness section).
             2. Read docs/plans/EXECUTE-STATE.md. Next is ${{ steps.state.outputs.next }}.
-            3. Read docs/prompts/JULES-MASTER-EXECUTE.md for that phase, then docs/plans/MP-XX.md.
-            4. Work on branch jules/mp-execute (create from current starting branch if missing). One accumulating PR, not one PR per phase.
-            5. Implement Next. Tests green. Mark the row DONE, set Next to the following CHAIN item, commit, push.
-            6. Immediately start the new Next in THIS session. Repeat until Next is STOP or the VM is about to die.
-            7. If files for Next already exist with tests, skip, advance state, continue.
-            8. Never implement MP-10, MP-13, MP-14. Never live-order. Never restart from MP-01 if later phases are DONE.
+            3. Read docs/prompts/JULES-MASTER-EXECUTE.md for THAT phase in full (every Step),
+               then docs/plans/MP-XX.md and docs/prompts/MP-XX-*.md. Implement the union.
+            4. Branch jules/mp-execute (create if missing). One accumulating PR.
+            5. Implement Next completely. Run the completeness grep + pytest.
+            6. Only then mark the row DONE, set Next to the following CHAIN item, commit, push.
+            7. Immediately start the new Next in THIS session. Repeat until STOP or the VM dies.
+            8. If Next files exist but are stubs, finish them. Never implement MP-10/13/14.
+            9. Never live-order. Never restart from MP-01 if later complete phases are DONE.
 
             If Next is already STOP, do nothing.
