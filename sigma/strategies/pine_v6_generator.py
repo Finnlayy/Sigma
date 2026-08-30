@@ -1,18 +1,61 @@
 """
 =========================================================
 Datei:      sigma/strategies/pine_v6_generator.py
-Zweck:      Pine v6 für HTF-Bias / LTF-Execution. Alerts nur auf confirmed bars.
+Zweck:      Pine v6 für HTF-Bias / LTF-Execution. Alerts nur auf
+            confirmed bars. MP-09: gemeinsame Sigma-Standard-Header-
+            und Bar-Close-Prüf-Helfer für den dynamischen
+            Provisionierer (KEINE Upload-/Deploy-Logik).
 System:     Manas: Ciel Core Matrix — Projekt:Sigma
 Knoten:     Jaune (Pine) / Noir (kein Repaint)
 =========================================================
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 
 from app.tv.alert_provisioner import build_alert_message
 from app.tv.interval_map import to_tv_interval
 from sigma.signals.timeframe_ladder import exec_tf, execution_ladder_tf
+
+
+def standard_strategy_header(title: str) -> str:
+    """Sigma-Standard strategy()-Header (MP-09, Pflicht fuer jede
+    generierte/gehaertete Strategie): initial_capital=10000,
+    currency.USD, strategy.cash 100, pyramiding=1, 0,04 % Commission,
+    calc_on_every_tick=false, overlay=true. Alle Werte injiziert,
+    keine freien Variablen."""
+    return (
+        f'strategy("{title}", overlay=true, initial_capital=10000, '
+        f"currency=currency.USD, default_qty_type=strategy.cash, "
+        f"default_qty_value=100, pyramiding=1, "
+        f"commission_type=strategy.commission.percent, "
+        f"commission_value=0.04, calc_on_every_tick=false)"
+    )
+
+
+def static_pine_checks(code: str) -> List[str]:
+    """Statische String-Checks (MP-09): lookahead_on verboten,
+    request.security mit lookahead_off, Bar-Close-Bedingung vorhanden,
+    idempotency_keys eindeutig + Muster. Leere Liste = bestanden."""
+    issues: List[str] = []
+    if not code or not code.strip():
+        return ["empty_code"]
+    if "lookahead_on" in code:
+        issues.append("contains_lookahead_on")
+    for m in re.finditer(r"request\.security\s*\(", code):
+        # bis zur schliessenden Klammer der Argumente
+        seg = code[m.start(): code.find(")", m.start()) + 1]
+        if "lookahead" not in seg:
+            issues.append("request_security_without_lookahead_off")
+    if "barstate.isconfirmed" not in code and not re.search(r"\[\d+\]", code):
+        issues.append("missing_bar_close_guard")
+    keys = re.findall(r'"idempotency_key"\s*:\s*"([^"]+)"', code)
+    if len(keys) != len(set(keys)):
+        issues.append("duplicate_idempotency_keys")
+    if keys and not all(re.match(r"^[A-Za-z0-9_]+_[A-Z0-9]+_\d{2}_", k) for k in keys):
+        issues.append("idempotency_key_pattern")
+    return issues
 
 
 def generate_htf_ltf_pine(
@@ -106,3 +149,11 @@ def pine_spec(strategy_id: str, **kwargs: Any) -> Dict[str, Any]:
             "enableFvgLocator": bool(kwargs.get("enable_fvg_locator") or False),
         },
     }
+
+
+__all__ = [
+    "generate_htf_ltf_pine",
+    "pine_spec",
+    "standard_strategy_header",
+    "static_pine_checks",
+]
