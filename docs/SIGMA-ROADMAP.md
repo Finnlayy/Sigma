@@ -44,6 +44,7 @@
 | MP-11 | `MP-11-onnx-tensor.md` | 16-Feature-Observation-Tensor + ONNX-Runtime-Inferenz mit deterministischem Fallback | MP-04, MP-05, MP-06 |
 | MP-12 | `MP-12-backtest-hypotheses.md` | Backtest-Harness (VectorBT): Faktor-Sweep H3, Hypothesen H1–H7 (inkl. Weekend-Fakeout, cos-φ-Strategie), Look-ahead-Pipeline-Test, Walk-Forward | MP-02, MP-04, MP-07 |
 | MP-16 | `MP-16-research-dashboard.md` | Lightweight-Charts-Dashboard (3 Pane, Marker, Equity) + cos-φ-Pfad-Backtester mit Hysterese | MP-04, MP-12 |
+| MP-17 | `MP-17-frontend-panels.md` | Frontend-Darstellung aller neuen Funktionen im bestehenden Terminal (12 neue Panels, 3 Presets, dünne `/api/v1/sigma/*`-Endpunkte, fail-closed); Vertrag: `docs/SIGMA-UI-SPEZIFIKATION.md` | kann parallel zu MP-01…MP-16 laufen (Endpunkte zunächst leer) |
 | MP-13 (optional) | `MP-13-multi-asset.md` | Multi-Asset-Erweiterung XAU/XAG/Forex (Venue-Ports, Marktzeiten) | MP-05 |
 | MP-14 (optional) | `MP-14-event-straddle.md` | Pre-Event Doppel-Hedge-Straddle-Template (Event-Waffe mit TTL/Net-Profit-Guarantee) | MP-01, MP-08 |
 
@@ -424,6 +425,32 @@ Signale/Marker/Equity) unabhängig von der Live-Pipeline.
   Mini-Base 10 %/10 %, TTL 2–4 h Neutral-Abbruch, Trailing ab +3 %,
   Net-Profit-Guarantee (Verlierer-SL bei 50 % des realisierten Gewinns),
   Event-Trigger nur aus Layer-0/Session-Kalender.
+
+---
+
+## Phase MP-17 — Frontend-Panels (stilgetreues Terminal-UI)
+
+Vollständige Spezifikation: **`docs/SIGMA-UI-SPEZIFIKATION.md`** (Funktions-→Panel-Mapping,
+Panel-Inhalte, Presets, Sicherheitsregeln). Kernpunkte:
+
+- 12 neue Panels im bestehenden Dock/Registry-Muster (`PANEL_REGISTRY`,
+  `PanelShell`/`Stat`/`FeedBadge`/`usePoll`): QuantumRegime (Hourly-Cycle-Band,
+  Wellen-Status, SessionClock, Throttle, Polymarket-Bias, ONNX-Köpfe),
+  MarketGeometry (Zonen/FVG/Envelope + Chart-Overlays), PowerPhysics
+  (cos-φ-Meter, S/P/Q-Normen, Pfad-Serie, MTF-Resonanz), SymbolScout
+  (Ranker-Tabelle, Blinded-Toggle, 1-Scan-pro-Bar), Polymarket
+  (Dichte-Histogramm, Term-Struktur, Kalibrierung), LadderArchitect
+  (Leiter-Werkbank mit Live-Guard-Leiste), FractalTrade (TP-Staffel 40/30/20/10,
+  Fee-Covered-BE-Badge, Kill-Switch), Provisioner (Pine-Agenten-Tabelle),
+  OnnxBrain (16er-Tensor, Dual-Head, Bar-Lock), RiskGuard (Liq-Puffer,
+  Cooldown, nicht abschaltbare Regel-Badges), Unwind (Exhaustion-Gauge,
+  Unwind-Sequenz), ResearchLab (H1–H7, 3-Pane-Dashboard, Sweep-Tabelle).
+- 3 neue Presets: `QUANTUM_OPS`, `POSITION_DESK`, `RESEARCH_LAB`.
+- Dünne `/api/v1/sigma/*`-Leseendpunkte + Research-Jobs; ohne Fachmodule
+  strukturierte Leerantworten (fail-closed, Leerzustände im UI).
+- Alle Schwellen/Defaults im Settings-Panel verstellbar; Sicherheitsregeln
+  (Hard-Stop, Grid-Tiefe ≥ 6 %, Fee-BE) nicht abschaltbar; Schreibzugriffe
+  nur modal mit Operator-Token; keine neuen Dependencies; `npm run lint` grün.
 
 ---
 
