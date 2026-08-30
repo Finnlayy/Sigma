@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-30 - /api/pnl/daily materialized 50k trades then discarded the window
+**Learning:** CalendarHeatmap's `GET /api/pnl/daily` did `trades(limit=min(5000*n, 50_000))` (`SELECT *`) and grouped by `exit_time[:10]` in Python, then only kept the last 90 days. At 8k closed rows that was ~39 ms vs ~3 ms for `GROUP BY day` with `since=` (≈14×). The LIMIT also dropped older-in-window days once history exceeded 50k.
+**Action:** Heatmap/calendar endpoints must `GROUP BY` the day key in DuckDB and push the visible date window into `WHERE`. Do not pull full trade rows just to bin them.

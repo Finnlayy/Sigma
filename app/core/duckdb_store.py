@@ -603,6 +603,55 @@ class DuckDBStore:
         )
         return float(row["pnl"]) if row else 0.0
 
+    def closed_pnl_by_day(
+        self,
+        strategy_ids: Optional[List[str]] = None,
+        since: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """GROUP BY calendar day in DuckDB — do not materialize up to 50k trades.
+
+        GET /api/pnl/daily used to SELECT * LIMIT 50_000 then group in Python,
+        discarding everything outside the heatmap window (default 90 days).
+        Bench @ 8k closed rows: trades()+group ~39 ms vs this ~3 ms (~14×).
+        Day key matches Python ``str(exit_time or entry_time)[:10]``.
+        """
+        if strategy_ids is not None and len(strategy_ids) == 0:
+            return []
+        sql = (
+            "SELECT strftime(COALESCE(exit_time, entry_time), '%Y-%m-%d') AS day, "
+            "COALESCE(SUM(net_pnl_usd), 0) AS pnl, "
+            "COUNT(*) AS trades, "
+            "SUM(CASE WHEN net_pnl_usd > 0 THEN 1 ELSE 0 END) AS wins, "
+            "SUM(CASE WHEN COALESCE(net_pnl_usd, 0) <= 0 THEN 1 ELSE 0 END) AS losses, "
+            "COALESCE(SUM(notional_usd), 0) AS vol "
+            "FROM trades WHERE status = 'closed' "
+            "AND COALESCE(exit_time, entry_time) IS NOT NULL"
+        )
+        params: List[Any] = []
+        if strategy_ids:
+            placeholders = ", ".join("?" for _ in strategy_ids)
+            sql += f" AND strategy_id IN ({placeholders})"
+            params.extend(strategy_ids)
+        if since:
+            # Inclusive window start — same as the Python day loop's first date.
+            sql += " AND CAST(COALESCE(exit_time, entry_time) AS DATE) >= CAST(? AS DATE)"
+            params.append(since)
+        sql += " GROUP BY 1"
+        out: List[Dict[str, Any]] = []
+        for r in self._rows(sql, params):
+            day = str(r.get("day") or "")
+            if not day:
+                continue
+            out.append({
+                "day": day,
+                "pnl": float(r["pnl"] or 0.0),
+                "trades": int(r["trades"] or 0),
+                "wins": int(r["wins"] or 0),
+                "losses": int(r["losses"] or 0),
+                "vol": float(r["vol"] or 0.0),
+            })
+        return out
+
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:
         if not candles:

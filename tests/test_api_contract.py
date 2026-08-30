@@ -514,6 +514,49 @@ def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
         main.state.live_kraken_sync_ts = None
 
 
+def test_pnl_daily_sql_aggregate_skips_trade_row_scan(client, monkeypatch):
+    """Calendar heatmap must GROUP BY day in DuckDB, not SELECT * LIMIT 50k."""
+    import datetime as dt
+
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "heat_s1", "name": "Heat", "assetPair": "BTC/USD",
+        "status": "active", "interval": 15, "executionMode": "paper",
+    })
+    today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    store.upsert_trade({
+        "trade_id": "heat-win", "strategy_id": "heat_s1", "status": "closed",
+        "exit_time": f"{today} 10:00:00", "net_pnl_usd": 8.0,
+        "notional_usd": 200.0, "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+    })
+    store.upsert_trade({
+        "trade_id": "heat-loss", "strategy_id": "heat_s1", "status": "closed",
+        "exit_time": f"{today} 14:00:00", "net_pnl_usd": -2.0,
+        "notional_usd": 50.0, "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+    })
+
+    def _boom(*_a, **_k):
+        raise AssertionError("trades() must not run on /api/pnl/daily")
+
+    monkeypatch.setattr(store, "trades", _boom)
+    body = client.get("/api/pnl/daily/heat_s1", params={"days": 7}).json()
+
+    assert body["strategyId"] == "heat_s1"
+    assert len(body["days"]) == 7
+    today_row = next(d for d in body["days"] if d["isToday"])
+    assert today_row["pnl"] == pytest.approx(6.0)
+    assert today_row["tradesCount"] == 2
+    assert today_row["wins"] == 1
+    assert today_row["losses"] == 1
+    assert today_row["volumeUSD"] == pytest.approx(250.0)
+    assert today_row["winRate"] == pytest.approx(50.0)
+    assert body["greenDays"] == 1
+
+
 def test_zero_mock_seams_are_honest_empty(client):
     sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
     assert sent.get("available") is False

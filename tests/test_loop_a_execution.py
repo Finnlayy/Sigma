@@ -482,3 +482,48 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+
+
+def test_closed_pnl_by_day_matches_python_group_and_skips_empty(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "daily.duckdb"))
+    assert store.closed_pnl_by_day([]) == []
+
+    rows = [
+        # two closed trades on 2026-08-01 (win + scratch=loss per heatmap contract)
+        {"trade_id": "a", "strategy_id": "s1", "status": "closed",
+         "exit_time": "2026-08-01 10:00:00", "net_pnl_usd": 12.5,
+         "notional_usd": 100.0, "symbol": "BTC/USD", "direction": "LONG", "side": "buy"},
+        {"trade_id": "b", "strategy_id": "s1", "status": "closed",
+         "exit_time": "2026-08-01 15:00:00", "net_pnl_usd": 0.0,
+         "notional_usd": 40.0, "symbol": "BTC/USD", "direction": "LONG", "side": "buy"},
+        # loss on 2026-08-02, other strategy — excluded when filtering s1
+        {"trade_id": "c", "strategy_id": "s2", "status": "closed",
+         "exit_time": "2026-08-02 12:00:00", "net_pnl_usd": -3.0,
+         "notional_usd": 50.0, "symbol": "ETH/USD", "direction": "SHORT", "side": "sell"},
+        # open trade must not count
+        {"trade_id": "d", "strategy_id": "s1", "status": "open",
+         "entry_time": "2026-08-01 09:00:00", "net_pnl_usd": 99.0,
+         "notional_usd": 10.0, "symbol": "BTC/USD", "direction": "LONG", "side": "buy"},
+        # before the since window
+        {"trade_id": "e", "strategy_id": "s1", "status": "closed",
+         "exit_time": "2026-07-01 08:00:00", "net_pnl_usd": 7.0,
+         "notional_usd": 20.0, "symbol": "BTC/USD", "direction": "LONG", "side": "buy"},
+    ]
+    for t in rows:
+        store.upsert_trade(t)
+
+    grouped = {r["day"]: r for r in store.closed_pnl_by_day(["s1"], since="2026-08-01")}
+    assert set(grouped) == {"2026-08-01"}
+    day = grouped["2026-08-01"]
+    assert day["pnl"] == pytest.approx(12.5)
+    assert day["trades"] == 2
+    assert day["wins"] == 1
+    assert day["losses"] == 1
+    assert day["vol"] == pytest.approx(140.0)
+
+    both = {r["day"]: r for r in store.closed_pnl_by_day(["s1", "s2"], since="2026-08-01")}
+    assert both["2026-08-02"]["pnl"] == pytest.approx(-3.0)
+    assert both["2026-08-02"]["losses"] == 1
+    assert both["2026-08-02"]["wins"] == 0
