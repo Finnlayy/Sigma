@@ -482,3 +482,46 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_mode_stats("paper")
+    assert stats["count"] == 2
+    assert stats["pnl"] == 13.0
+
+
+def test_strategy_closed_stats_groups_and_skips_open(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    store.upsert_trade({
+        "trade_id": "a", "strategy_id": "s1", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+        "notional_usd": 100.0,
+    })
+    store.upsert_trade({
+        "trade_id": "b", "strategy_id": "s1", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -4.0,
+        "notional_usd": 50.0,
+    })
+    store.upsert_trade({
+        "trade_id": "c", "strategy_id": "s2", "status": "closed",
+        "execution_mode": "paper", "symbol": "ETH/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 2.0,
+        "notional_usd": 20.0,
+    })
+    store.upsert_trade({
+        "trade_id": "d", "strategy_id": "s1", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+        "notional_usd": 999.0,
+    })
+    grouped = store.strategy_closed_stats()
+    assert grouped["s1"]["total_trades"] == 2
+    assert grouped["s1"]["wins"] == 1
+    assert grouped["s1"]["realized"] == 6.0
+    assert grouped["s1"]["volume"] == 150.0
+    assert grouped["s2"] == {
+        "realized": 2.0, "total_trades": 1, "wins": 1, "volume": 20.0,
+    }
+    assert "s1" in grouped and "s2" in grouped
+
