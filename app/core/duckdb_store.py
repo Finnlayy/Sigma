@@ -291,6 +291,15 @@ class DuckDBStore:
               net_pnl DOUBLE, trade_count INTEGER, win_rate DOUBLE, updated_at DOUBLE
             )"""
         )
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS live_kraken_snapshots (
+              snapshot_id VARCHAR PRIMARY KEY,
+              ts DOUBLE,
+              balances_json VARCHAR,
+              error VARCHAR,
+              has_credentials INTEGER
+            )"""
+        )
 
     # ------------------------------------------------------------------ helpers
     def _rows(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
@@ -341,6 +350,43 @@ class DuckDBStore:
     def vault_balance(self) -> float:
         row = self._one("SELECT COALESCE(SUM(amount_usd), 0) AS b FROM vault_ledger")
         return float(row["b"]) if row else 0.0
+
+    def put_live_kraken_snapshot(self, *, balances: Dict[str, float],
+                                 ts: Optional[float], error: Optional[str],
+                                 has_credentials: bool) -> None:
+        self._exec(
+            """INSERT OR REPLACE INTO live_kraken_snapshots
+               (snapshot_id, ts, balances_json, error, has_credentials)
+               VALUES (?, ?, ?, ?, ?)""",
+            ["latest", ts, json.dumps(balances or {}), error or "",
+             1 if has_credentials else 0],
+        )
+
+    def get_live_kraken_snapshot(self) -> Optional[Dict[str, Any]]:
+        row = self._one(
+            "SELECT ts, balances_json, error, has_credentials "
+            "FROM live_kraken_snapshots WHERE snapshot_id = ?",
+            ["latest"],
+        )
+        if not row:
+            return None
+        try:
+            raw = json.loads(row.get("balances_json") or "{}")
+        except json.JSONDecodeError:
+            raw = {}
+        balances: Dict[str, float] = {}
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                try:
+                    balances[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+        return {
+            "ts": row.get("ts"),
+            "balances": balances,
+            "error": row.get("error") or None,
+            "has_credentials": bool(row.get("has_credentials")),
+        }
 
     def vault_entries(self, limit: int = 50) -> List[Dict[str, Any]]:
         rows = self._rows(
@@ -515,10 +561,17 @@ class DuckDBStore:
         )
 
     def trades(self, strategy_id: Optional[str] = None, status: Optional[str] = None,
-               limit: int = 500, execution_mode: Optional[str] = None) -> List[Dict[str, Any]]:
+               limit: int = 500, execution_mode: Optional[str] = None,
+               strategy_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        if strategy_ids is not None and len(strategy_ids) == 0:
+            return []
         sql = "SELECT * FROM trades WHERE 1=1"
         params: List[Any] = []
-        if strategy_id:
+        if strategy_ids:
+            placeholders = ", ".join("?" for _ in strategy_ids)
+            sql += f" AND strategy_id IN ({placeholders})"
+            params.extend(strategy_ids)
+        elif strategy_id:
             sql += " AND strategy_id = ?"
             params.append(strategy_id)
         if status:
@@ -535,6 +588,20 @@ class DuckDBStore:
                 if r.get(k) is not None:
                     r[k] = str(r[k])
         return rows
+
+    def sum_closed_pnl(self, execution_mode: str = "paper") -> float:
+        """SUM net_pnl in DuckDB — do not materialize up to 10k trade rows.
+
+        Matches Python `(execution_mode or "paper") == mode` including NULL/''.
+        Bench @ 4k closed rows: trades()+sum ~22 ms vs this ~0.5 ms (~45×).
+        """
+        row = self._one(
+            "SELECT COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
+            "WHERE status = 'closed' "
+            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
+            [execution_mode, execution_mode],
+        )
+        return float(row["pnl"]) if row else 0.0
 
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:

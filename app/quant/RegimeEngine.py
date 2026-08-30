@@ -118,12 +118,24 @@ def ampel_status(symbol: str, closes: List[float]) -> Dict[str, Any]:
 def lead_lag_matrix(symbols: List[str],
                     series: Dict[str, List[float]],
                     max_lag: int = 5) -> Dict[str, Any]:
-    """Rollende Kreuzkorrelation (Lag 0..max_lag) über 60er-Fenster."""
+    """Rollende Kreuzkorrelation (Lag 0..max_lag) über 60er-Fenster.
+
+    Returns both the detector shape ({symbol_a, lags}) and the QUANT UI
+    contract ({assets, asset, correlations, spillover, lead_asset}).
+    """
     rows = []
     window = 120
+    lead_asset = symbols[0] if symbols else ""
+    lead_lag_bars = 0
+    best_abs = 0.0
     for a in symbols:
         sa = series.get(a, [])
-        row = {"symbol_a": a, "lags": {}}
+        row: Dict[str, Any] = {
+            "symbol_a": a,
+            "asset": a,
+            "lags": {},
+            "correlations": {a: 1.0},
+        }
         for b in symbols:
             if a == b:
                 continue
@@ -131,12 +143,11 @@ def lead_lag_matrix(symbols: List[str],
             n = min(len(sa), len(sb))
             if n < window + max_lag:
                 row["lags"][b] = {"best_lag": 0, "best_corr": 0.0}
+                row["correlations"][b] = 0.0
                 continue
             best_lag, best_corr = 0, 0.0
             for lag in range(0, max_lag + 1):
                 xa = [sa[i + 1] / sa[i] - 1 for i in range(n - window - max_lag, n - max_lag)]
-                xb = [sb[i] / sb[i - 1] - 1 for i in range(window + lag, n + lag)
-                      if i + lag < n]
                 # alignment: b verzögert um lag
                 xb = [sb[i] / sb[i - 1] - 1 for i in range(n - window - lag, n - lag)]
                 if len(xa) < 20 or len(xb) < 20:
@@ -145,10 +156,24 @@ def lead_lag_matrix(symbols: List[str],
                 corr = _pearson(xa[-m:], xb[-m:])
                 if abs(corr) > abs(best_corr):
                     best_lag, best_corr = lag, corr
-            row["lags"][b] = {"best_lag": best_lag, "best_corr": round(best_corr, 4)}
+            rounded = round(best_corr, 4)
+            row["lags"][b] = {"best_lag": best_lag, "best_corr": rounded}
+            row["correlations"][b] = rounded
+            if best_lag > 0 and abs(rounded) > best_abs:
+                best_abs = abs(rounded)
+                lead_asset = a
+                lead_lag_bars = best_lag
+        off = [abs(v) for k, v in row["correlations"].items() if k != a]
+        row["spillover"] = round(sum(off) / len(off), 4) if off else 0.0
         rows.append(row)
-    return {"matrix": rows, "max_lag": max_lag,
-            "interpretation": "best_lag>0 ⇒ Symbol B folgt Symbol A um best_lag Bars"}
+    return {
+        "matrix": rows,
+        "assets": list(symbols),
+        "lead_asset": lead_asset,
+        "lead_lag_bars": lead_lag_bars,
+        "max_lag": max_lag,
+        "interpretation": "best_lag>0 ⇒ Symbol B folgt Symbol A um best_lag Bars",
+    }
 
 
 def _pearson(x: List[float], y: List[float]) -> float:
@@ -190,27 +215,17 @@ NEGATIVE_WORDS = {
 
 
 def sentiment_score(text: str) -> Dict[str, Any]:
-    """Lexikon-Scorer (FinBERT-Proxy).
-    [MOCK-SEAM] Für Produktionsqualität hier echten FinBERT-Inferrance anbinden
-    (transformers on Windows-Host, API-Call vom Core)."""
-    words = [w.strip(".,;:!?()\"'").lower() for w in (text or "").split()]
-    pos = sum(1 for w in words if w in POSITIVE_WORDS)
-    neg = sum(1 for w in words if w in NEGATIVE_WORDS)
-    total = max(1, pos + neg)
-    score = (pos - neg) / total
-    hits = [w for w in words if w in POSITIVE_WORDS or w in NEGATIVE_WORDS]
-    if score > 0.15:
-        label = "POSITIVE"
-    elif score < -0.15:
-        label = "NEGATIVE"
-    else:
-        label = "NEUTRAL"
+    """FinBERT is not wired. Honest empty — no lexicon proxy scores."""
+    _ = text
     return {
-        "score": round(score, 4),
-        "label": label,
-        "confidence": round(min(1.0, (pos + neg) / 8.0), 2),
-        "positive_hits": pos,
-        "negative_hits": neg,
-        "keywords": hits[:12],
-        "model": "lexicon-v1 (FinBERT-Proxy [MOCK])",
+        "score": None,
+        "sentiment_score": None,
+        "label": "UNAVAILABLE",
+        "confidence": None,
+        "positive_hits": 0,
+        "negative_hits": 0,
+        "keywords": [],
+        "model": "unavailable",
+        "reason": "finbert_not_configured",
+        "available": False,
     }

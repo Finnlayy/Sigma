@@ -178,14 +178,31 @@ def set_pipeline(p: Optional[LoopAPipeline]) -> None:
 # =============================================================================
 
 @router.post(bp.WEBHOOK_ROUTE)
-async def signal_webhook(payload: PineAlertPayload, request: Request,
+async def signal_webhook(request: Request,
                          x_sigma_webhook_secret: Optional[str] = Header(default=None)):
-    """TradingView Pine Alert -> Safety -> Sizing -> Kraken CLI / Paper."""
-    if pipeline().config.live_trading:
-        raise HTTPException(status_code=503, detail={
-            "code": "LEGACY_WEBHOOK_LIVE_DISABLED",
-            "reason": "Use the schema-A ingest route with verified execution accounting",
-        })
+    """TradingView Pine Alert. Schema A wird nach Ingest weitergereicht."""
+    from app.server.schemas import SchemaDetectionError, detect_schema
+
+    try:
+        raw = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={
+            "code": "ERR_TV_WEBHOOK_SCHEMA_INVALID", "reason": "Body ist kein gueltiges JSON"})
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail={
+            "code": "ERR_TV_WEBHOOK_SCHEMA_INVALID", "reason": "Body muss ein JSON-Objekt sein"})
+    try:
+        family = detect_schema(raw)
+    except SchemaDetectionError:
+        family = ""
+    if family == "SIGMA_L4_MASTER":
+        return await ingest_sigma_alert(
+            raw, raw.get("secret") or x_sigma_webhook_secret)
+    try:
+        payload = PineAlertPayload.model_validate(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": "ERR_TV_WEBHOOK_SCHEMA_INVALID", "reason": str(exc)})
     sig = SignalRequest(
         symbol=payload.symbol, action=payload.action, price=payload.price,
         rsi=payload.rsi, atr=payload.atr, cisd_score=payload.cisd_score,
@@ -209,16 +226,25 @@ async def signal_ingest(request: Request,
     Reihenfolge (kanonisch): secret -> stale gate (Kraken-Zeit) -> Idempotenz
     -> Glint x Orderbook JIT -> reliable_order_dispatcher.
     """
+    try:
+        raw = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={
+            "code": "ERR_TV_WEBHOOK_SCHEMA_INVALID", "reason": "Body ist kein gueltiges JSON"})
+    return await ingest_sigma_alert(raw, (raw.get("secret") if isinstance(raw, dict) else None)
+                                   or x_sigma_webhook_secret)
+
+
+async def ingest_sigma_alert(raw: Dict[str, Any],
+                             provided_secret: Optional[str]) -> SignalExecutionResponse:
     from app.core.exchange_clock import get_exchange_clock
     from app.server.schemas import (ERR_PIONEX_DISABLED, ERR_SCHEMA_INVALID,
                                     SchemaDetectionError, detect_schema,
                                     PionexSignalPayload, SigmaL4AlertPayload)
 
-    try:
-        raw = await request.json()
-    except Exception:
+    if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail={
-            "code": ERR_SCHEMA_INVALID, "reason": "Body ist kein gueltiges JSON"})
+            "code": ERR_SCHEMA_INVALID, "reason": "Body muss ein JSON-Objekt sein"})
 
     try:
         family = detect_schema(raw)
@@ -258,7 +284,7 @@ async def signal_ingest(request: Request,
         raise HTTPException(status_code=422, detail={
             "code": ERR_SCHEMA_INVALID, "reason": str(exc)})
 
-    provided = alert.secret or x_sigma_webhook_secret
+    provided = alert.secret or provided_secret
     auth = pipeline().safety.verify_webhook_secret(provided)
     if not auth.allowed:
         raise HTTPException(
@@ -285,19 +311,6 @@ async def signal_ingest(request: Request,
     from app.tv.symbol_map import is_allowed
 
     is_futures = alert.market_type == "futures"
-    if is_futures and alert.execution_mode == bp.ExecutionMode.LIVE.value:
-        raise HTTPException(status_code=503, detail={
-            "code": "FUTURES_LIVE_BRACKET_UNAVAILABLE",
-            "reason": "Live futures stay disabled until atomic entry + reduce-only stop is supported",
-        })
-    if not is_futures and alert.execution_mode == bp.ExecutionMode.LIVE.value:
-        raise HTTPException(status_code=503, detail={
-            "code": "SPOT_LIVE_PNL_RECONCILIATION_UNAVAILABLE",
-            "reason": (
-                "Kraken trades-history returns fill price/volume/fee, not "
-                "cost-basis realized PnL; live spot stays disabled"
-            ),
-        })
     if not is_allowed(alert.symbol, futures=is_futures):
         raise HTTPException(status_code=403, detail={
             "code": "SYMBOL_NOT_ALLOWED",

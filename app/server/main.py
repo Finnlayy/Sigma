@@ -17,6 +17,7 @@ import math
 import os
 import time
 import uuid
+from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -24,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from app.tv.alert_provisioner import build_alert_message
 from app.core import blueprint as bp
 from app.core.config import AlphaConfig, load_config
 from app.core.l4_config import load_l4_config
@@ -49,17 +51,31 @@ from app.optimizer.AcademyRegistry import AcademyRegistry
 from app.optimizer.GeneticOptimizer import GeneticOptimizer
 from app.quant.RegimeEngine import ampel_status, dfa_hurst, lead_lag_matrix, sentiment_score
 from app.security.PasskeyAuthEngine import PasskeyAuthEngine
-from app.security.SettingsEnvManager import SettingsEnvManager
+from app.security.SettingsEnvManager import SettingValidationError, SettingsEnvManager
 from app.telegram.TelegramBotEngine import TelegramBotEngine
 
 logger = logging.getLogger("app.server.main")
+
+
+def _tv_schema_a(strategy_id: str) -> str:
+    return build_alert_message(
+        strategy_id, "<SIGMA_WEBHOOK_SECRET>", execution_mode="kraken_paper")
+
+
+_PINE_FEATURE_PLOTS = """
+plot(ta.rsi(close, 14), "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMultSL, "sl", display=display.none)
+plot(close + atr * atrMultTP, "tp", display=display.none)
+"""
 
 FACTORY_STRATEGIES: List[Dict[str, Any]] = [
     {
         "id": "MEAN_REV_V3__BTC-USDT__15m__PAPER",
         "name": "BTC Mean-Reversion V3",
         "description": "RSI-Reversion Pine v6 auf BTC/USD mit ATR-Stop 1.5x und TP 2.2x. Seed-Manifest — Strategy≡TV.",
-        "code": """//@version=6
+        "code": ("""//@version=6
 strategy("BTC Mean-Reversion V3", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
 // Sigma L4 — RSI Reversion + ATR Bracket (BaFin/MiCA Kraken CLI)
 rsiLength = input.int(14, "RSI Length", minval=2)
@@ -73,13 +89,14 @@ rsi = ta.rsi(close, rsiLength)
 atr = ta.atr(atrLength)
 longCond = ta.crossover(rsi, rsiLower) or (rsi < rsiLower and ta.crossover(ta.sma(close, 12), ta.sma(close, 48)))
 shortCond = ta.crossunder(rsi, rsiUpper) or (rsi > rsiUpper and ta.crossunder(ta.sma(close, 12), ta.sma(close, 48)))
+""" + _PINE_FEATURE_PLOTS + """
 if longCond
-    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"MEAN_REV_V3__BTC-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("LONG", strategy.long, alert_message='%s')
     strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
 if shortCond
-    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"MEAN_REV_V3__BTC-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("SHORT", strategy.short, alert_message='%s')
     strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
-""",
+""" % ((_tv_schema_a("MEAN_REV_V3__BTC-USDT__15m__PAPER"),) * 2)),
         "status": "active",
         "assetPair": "BTC/USD",
         "interval": 15,
@@ -95,7 +112,7 @@ if shortCond
         "id": "SMA_CROSS_V2__ETH-USDT__15m__PAPER",
         "name": "ETH Momentum SMA-Cross",
         "description": "SMA 12/48 Golden- & Death-Cross Pine v6 auf ETH/USD, ATR-gestoppt. Strategy≡TV.",
-        "code": """//@version=6
+        "code": ("""//@version=6
 strategy("ETH Momentum SMA-Cross", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
 // Sigma L4 — SMA Cross Momentum
 fastLen = input.int(12, "Fast SMA", minval=2)
@@ -109,13 +126,14 @@ slow = ta.sma(close, slowLen)
 atr = ta.atr(atrLen)
 longCond = ta.crossover(fast, slow)
 shortCond = ta.crossunder(fast, slow)
+""" + _PINE_FEATURE_PLOTS + """
 if longCond
-    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"SMA_CROSS_V2__ETH-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("LONG", strategy.long, alert_message='%s')
     strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
 if shortCond
-    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"SMA_CROSS_V2__ETH-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("SHORT", strategy.short, alert_message='%s')
     strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
-""",
+""" % ((_tv_schema_a("SMA_CROSS_V2__ETH-USDT__15m__PAPER"),) * 2)),
         "status": "active",
         "assetPair": "ETH/USD",
         "interval": 15,
@@ -131,7 +149,7 @@ if shortCond
         "id": "EMA_TREND_V1__SOL-USDT__15m__PAPER",
         "name": "SOL EMA Trend Rider",
         "description": "EMA 12/60 Trend-Following Pine v6 auf SOL/USD mit 1.5x-ATR-Stop. Strategy≡TV.",
-        "code": """//@version=6
+        "code": ("""//@version=6
 strategy("SOL EMA Trend Rider", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, pyramiding=0)
 // Sigma L4 — EMA Trend
 fastLen = input.int(12, "Fast EMA", minval=2)
@@ -145,13 +163,14 @@ slow = ta.ema(close, slowLen)
 atr = ta.atr(atrLen)
 longCond = ta.crossover(fast, slow)
 shortCond = ta.crossunder(fast, slow)
+""" + _PINE_FEATURE_PLOTS + """
 if longCond
-    strategy.entry("LONG", strategy.long, alert_message='{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"strategy_id":"EMA_TREND_V1__SOL-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("LONG", strategy.long, alert_message='%s')
     strategy.exit("LONG_EXIT", from_entry="LONG", stop=close - atr*atrMultSL, limit=close + atr*atrMultTP)
 if shortCond
-    strategy.entry("SHORT", strategy.short, alert_message='{"symbol":"{{ticker}}","action":"SELL","price":{{close}},"strategy_id":"EMA_TREND_V1__SOL-USDT__15m__PAPER","secret":"<SIGMA_WEBHOOK_SECRET>","interval":15}')
+    strategy.entry("SHORT", strategy.short, alert_message='%s')
     strategy.exit("SHORT_EXIT", from_entry="SHORT", stop=close + atr*atrMultSL, limit=close - atr*atrMultTP)
-""",
+""" % ((_tv_schema_a("EMA_TREND_V1__SOL-USDT__15m__PAPER"),) * 2)),
         "status": "active",
         "assetPair": "SOL/USD",
         "interval": 15,
@@ -242,9 +261,25 @@ class AppState:
         self.started_at = time.time()
         self.is_paper_trading = True
         self.has_credentials = False
+        self.live_kraken_balances: Dict[str, float] = {}
+        self.live_kraken_sync_ts: Optional[float] = None
+        self.live_kraken_sync_error: Optional[str] = None
         self._tasks: List[asyncio.Task] = []
         self._scheduler_work: Optional[asyncio.Task] = None
         self._last_eod_day: Optional[str] = None
+
+    def _hydrate_live_kraken_cache(self) -> None:
+        if not self.has_credentials or self.store is None:
+            self.live_kraken_balances = {}
+            self.live_kraken_sync_ts = None
+            self.live_kraken_sync_error = None
+            return
+        snap = self.store.get_live_kraken_snapshot()
+        if not snap:
+            return
+        self.live_kraken_balances = snap.get("balances") or {}
+        self.live_kraken_sync_ts = snap.get("ts")
+        self.live_kraken_sync_error = snap.get("error")
 
     # ------------------------------------------------------------- lifecycle
     async def startup(self) -> None:
@@ -276,6 +311,7 @@ class AppState:
         self.passkey = PasskeyAuthEngine(self.redis, cfg)
         self.settings = SettingsEnvManager(cfg)
         self.has_credentials = _kraken_credentials_present()
+        self._hydrate_live_kraken_cache()
         self.mcp = KrakenMCPBridge(cfg, self.passkey, None, self.store)
         self.telegram = TelegramBotEngine(cfg)
         # §36 — HIGH/CRITICAL Fehler pushen ueber denselben Bot
@@ -764,6 +800,15 @@ class AppState:
     async def _scheduler_loop(self) -> None:
         """§23.2 Tier-1 Fast Pulse — Deadman erneuert sich selbst, Memory-Watchdog tickt."""
         from app.core.scheduler_matrix import install_canonical_tasks
+        from app.optimizer.StrategyAllocator import get_allocator
+        from app.scout.ScoutDaemon import get_scout
+
+        try:
+            from app.tv.scraper_client import get_scraper_client
+
+            scraper = get_scraper_client()
+        except Exception:
+            scraper = None
         sched = install_canonical_tasks(
             deadman=self.deadman,
             memory=self.memory_watchdog,
@@ -772,6 +817,11 @@ class AppState:
             flywheel=self.flywheel,
             fill_reconciler=self.fill_reconciler,
             scorecard=self.scorecard,
+            scout=get_scout(),
+            allocator=get_allocator(),
+            academy=self.academy,
+            scraper=scraper,
+            lake=self.store,
         )
         self.deadman.start()
         logger.info("Scheduler matrix online (%d tasks)", len(sched.tasks))
@@ -818,16 +868,27 @@ def _pair_prices(state: AppState) -> Dict[str, float]:
     return {sym: state.ingestor.last_price(sym) for sym in state.config.market_symbols}
 
 
-def _paper_balances(state: AppState) -> Dict[str, float]:
-    """Paper-Basket (50k USD + 1.5 BTC + 10 ETH + 100 SOL + 5000 XRP) + Realised PnL."""
+def _paper_balances(
+    state: AppState,
+    closed_trades: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, float]:
+    """Paper-Basket (50k USD + 1.5 BTC + 10 ETH + 100 SOL + 5000 XRP) + Realised PnL.
+
+    Pass *closed_trades* to reuse an in-request scan. GET /api/logs used to
+    call trades() four times per 5–8s poll (~40k row materializations).
+    """
     balances: Dict[str, float] = {}
     for seed in state.config.paper_seeds:
         asset, amt = seed.split(":")
         balances[asset] = float(amt)
-    # Realisierter PnL fließt in den USD-Bestand
-    for t in state.store.trades(status="closed", limit=10000):
-        if (t.get("execution_mode") or "paper") == "paper":
-            balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
+    if closed_trades is not None:
+        for t in closed_trades:
+            if (t.get("execution_mode") or "paper") == "paper":
+                balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
+    else:
+        # /api/kraken/ledgers polls this every 12s and only needs the SUM.
+        # SQL aggregate ~0.5 ms vs ~22 ms pulling 4k full trade rows.
+        balances["USD"] = balances.get("USD", 0.0) + state.store.sum_closed_pnl("paper")
     return balances
 
 
@@ -982,28 +1043,39 @@ async def market_data():
 async def logs():
     st = state
     strategies = st.store.list_strategies()
-    closed = st.store.trades(status="closed", limit=1000)
+    # One closed-trades scan (limit 10000). Helpers below used to each re-query
+    # DuckDB independently — 4× trades() per 5–8s poll. Bench @ 8k rows:
+    # 4 scans ~110 ms → 1 scan ~35 ms (~3×, ~75 ms saved / poll).
+    closed = st.store.trades(status="closed", limit=10000)
     open_positions = st.paper.all_positions()
-    metrics = _build_metrics(st, strategies)
+    metrics = _build_metrics(st, strategies, closed)
     orders = [_order_row(t) for t in closed[:80] if t.get("exit_time")] + \
              [_order_row(p) for p in open_positions]
     return {
         "logs": st.bus.to_log_rows(120),
         "metrics": metrics,
         "orders": orders,
-        "balances": _paper_balances(st),
-        "strategyPnL": _strategy_pnl(st),
+        "balances": _paper_balances(st, closed),
+        "strategyPnL": _strategy_pnl(st, strategies, closed[:5000]),
     }
 
 
-def _build_metrics(st: AppState, strategies: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_metrics(
+    st: AppState,
+    strategies: List[Dict[str, Any]],
+    closed_trades: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     from app.core.exchange_clock import get_exchange_clock
     from app.core.telemetry import _cpu_percent, _mem_usage_percent
 
-    balances = _paper_balances(st)
+    closed = (
+        closed_trades
+        if closed_trades is not None
+        else st.store.trades(status="closed", limit=10000)
+    )
+    balances = _paper_balances(st, closed)
     portfolio = _portfolio_value(st, balances)
     baseline = st.config.paper_baseline_usd
-    closed = st.store.trades(status="closed", limit=10000)
     paper_closed = [t for t in closed if (t.get("execution_mode") or "paper") == "paper"]
     total_pnl = sum(float(t.get("net_pnl_usd") or 0.0) for t in paper_closed)
     active = [s for s in strategies if s["status"] == "active"]
@@ -1030,8 +1102,9 @@ def _build_metrics(st: AppState, strategies: List[Dict[str, Any]]) -> Dict[str, 
                                 else "Level 4 Live Capital Execution",
         "activeLedgerMode": "paper" if st.is_paper_trading else "live",
         "paperBalances": {k: round(v, 2) for k, v in balances.items()},
-        "liveKrakenBalances": {},
+        "liveKrakenBalances": dict(st.live_kraken_balances) if st.has_credentials else {},
         "hasCredentials": st.has_credentials,
+        "lastSyncTimestamp": st.live_kraken_sync_ts if st.has_credentials else None,
     }
 
 
@@ -1052,24 +1125,38 @@ def _order_row(t: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _strategy_pnl(st: AppState) -> List[Dict[str, Any]]:
-    strategies = st.store.list_strategies()
-    closed = st.store.trades(status="closed", limit=5000)
+def _strategy_pnl(
+    st: AppState,
+    strategies: Optional[List[Dict[str, Any]]] = None,
+    closed_trades: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    if strategies is None:
+        strategies = st.store.list_strategies()
+    closed = (
+        closed_trades
+        if closed_trades is not None
+        else st.store.trades(status="closed", limit=5000)
+    )
     open_positions = st.paper.all_positions()
+    by_sid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for t in closed:
+        by_sid[str(t.get("strategy_id") or "")].append(t)
+    pos_by_sid: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for p in open_positions:
+        pos_by_sid[str(p.get("strategy_id") or "")].append(p)
     out = []
     for s in strategies:
-        mine = [t for t in closed if t.get("strategy_id") == s["id"]]
+        mine = by_sid.get(s["id"], [])
         realized = sum(float(t.get("net_pnl_usd") or 0.0) for t in mine)
         wins = sum(1 for t in mine if float(t.get("net_pnl_usd") or 0) > 0)
         unrealized = 0.0
-        for p in open_positions:
-            if p.get("strategy_id") == s["id"]:
-                price = st.ingestor.last_price(p["symbol"])
-                qty = float(p.get("quantity") or 0.0)
-                if p["direction"] == "LONG":
-                    unrealized += (price - float(p.get("entry_price") or price)) * qty
-                else:
-                    unrealized += (float(p.get("entry_price") or price) - price) * qty
+        for p in pos_by_sid.get(s["id"], []):
+            price = st.ingestor.last_price(p["symbol"])
+            qty = float(p.get("quantity") or 0.0)
+            if p["direction"] == "LONG":
+                unrealized += (price - float(p.get("entry_price") or price)) * qty
+            else:
+                unrealized += (float(p.get("entry_price") or price) - price) * qty
         volume = sum(float(t.get("notional_usd") or 0.0) for t in mine)
         out.append({
             "strategyId": s["id"],
@@ -1128,11 +1215,7 @@ async def create_strategy(body: StrategyBody):
     return state.store.get_strategy(sid)
 
 
-_PINE_ALERT_JSON = (
-    '{"symbol":"{{ticker}}","action":"%s","price":{{close}},'
-    '"rsi":50,"atr":0,"timestamp":{{timenow}},'
-    '"strategy_id":"REPLACE_ME","secret":"REPLACE_SECRET"}'
-)
+_SCHEMA_A_ALERT = _tv_schema_a("REPLACE_ME")
 
 _PINE_CISD = f'''//@version=6
 strategy("Sigma CISD Momentum", overlay=true, initial_capital=1000, pyramiding=0)
@@ -1152,13 +1235,18 @@ bullDisp = (close - open) > avgBody * cisdDisp and close > ta.highest(high, cisd
 bearDisp = (open - close) > avgBody * cisdDisp and close < ta.lowest(low, cisdLookback)[1]
 cisdBull = bullDisp and fast > slow
 cisdBear = bearDisp and fast < slow
+plot(ta.rsi(close, 14), "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMult, "sl", display=display.none)
+plot(close + atr * atrMult * 2, "tp", display=display.none)
 
 if ta.crossover(fast, slow) or cisdBull
-    strategy.entry("L", strategy.long, alert_message = '{_PINE_ALERT_JSON % "BUY"}')
+    strategy.entry("L", strategy.long, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XL", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
 
 if ta.crossunder(fast, slow) or cisdBear
-    strategy.entry("S", strategy.short, alert_message = '{_PINE_ALERT_JSON % "SELL"}')
+    strategy.entry("S", strategy.short, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XS", "S", stop = close + atr * atrMult, limit = close - atr * atrMult * 2)
 '''
 
@@ -1173,13 +1261,18 @@ atrMult  = input.float(1.5, "ATR Stop Multiplier")
 
 rsi = ta.rsi(close, rsiLen)
 atr = ta.atr(atrLen)
+plot(rsi, "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMult, "sl", display=display.none)
+plot(close + atr * atrMult * 2, "tp", display=display.none)
 
 if ta.crossunder(rsi, rsiLower)
-    strategy.entry("L", strategy.long, alert_message = '{_PINE_ALERT_JSON % "BUY"}')
+    strategy.entry("L", strategy.long, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XL", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
 
 if ta.crossover(rsi, rsiUpper)
-    strategy.entry("S", strategy.short, alert_message = '{_PINE_ALERT_JSON % "SELL"}')
+    strategy.entry("S", strategy.short, alert_message = '{_SCHEMA_A_ALERT}')
     strategy.exit("XS", "S", stop = close + atr * atrMult, limit = close - atr * atrMult * 2)
 '''
 
@@ -1222,6 +1315,18 @@ PINE_STRATEGY_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "assetPair": "BTC/USD",
         "parameters": {"template": "empty"},
     },
+    "htf_trend_ltf_reversion": {
+        "name": "HTF Trend LTF Reversion",
+        "description": "HTF bias + LTF sweep/reclaim. Confirmed bars only. Paper until E graduates.",
+        "code": "",
+        "assetPair": "BTC/USD",
+        "parameters": {
+            "template": "htf_trend_ltf_reversion",
+            "biasMinutes": 60,
+            "useIctLadder": False,
+            "enableFvgLocator": False,
+        },
+    },
 }
 
 
@@ -1237,6 +1342,9 @@ async def create_strategy_from_template(body: FromTemplateBody):
     spec = PINE_STRATEGY_TEMPLATES.get((body.template or "").strip().lower())
     if spec is None:
         raise HTTPException(400, f"unknown template: {body.template!r}")
+    if (body.template or "").strip().lower() == "htf_trend_ltf_reversion":
+        from sigma.strategies.pine_v6_generator import pine_spec
+        spec = pine_spec("htf_trend_ltf_reversion")
     sid = uuid.uuid4().hex[:12]
     s = {
         "id": sid,
@@ -1546,9 +1654,12 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
             raise HTTPException(404, "Strategy not found")
         pool, name, pair = [s], s["name"], s["assetPair"]
 
-    closed = []
-    for s in pool:
-        closed += st.store.trades(strategy_id=s["id"], status="closed", limit=5000)
+    pool_ids = [s["id"] for s in pool]
+    closed = st.store.trades(
+        strategy_ids=pool_ids,
+        status="closed",
+        limit=min(5000 * max(1, len(pool_ids)), 50_000),
+    ) if pool_ids else []
     by_day: Dict[str, Dict[str, float]] = {}
     for t in closed:
         day = str(t.get("exit_time") or t.get("entry_time") or "")[:10]
@@ -1719,13 +1830,32 @@ async def kraken_ledgers_sync():
 
 @app.post("/api/kraken/sync-balance")
 async def kraken_sync_balance():
-    return {"ok": True, "balances": _paper_balances(state),
-            "portfolioUSD": round(_portfolio_value(state, _paper_balances(state)), 2)}
+    out = _refresh_live_kraken_balances(state)
+    live = out.get("liveKrakenBalances") or {}
+    return {
+        "ok": bool(out.get("hasCredentials") and not out.get("error")),
+        "hasCredentials": out["hasCredentials"],
+        "liveKrakenBalances": live,
+        "lastSyncTimestamp": out.get("lastSyncTimestamp"),
+        "balances": live,
+        "portfolioUSD": round(_portfolio_value(state, live), 2) if live else 0.0,
+        **({"error": out["error"]} if out.get("error") else {}),
+    }
 
 
 @app.get("/api/kraken/positions/pro")
 async def kraken_positions_pro():
-    return [ _pro_position(p) for p in state.paper.all_positions()]
+    """Live futures book is not wired. Paper is not a live substitute."""
+    return {
+        "ok": False,
+        "source": "unavailable",
+        "live": False,
+        "reason": "live_futures_not_wired",
+        "positions": [],
+        "totalCollateralUSD": None,
+        "freeMarginUSD": None,
+        "totalUnrealizedPnL": None,
+    }
 
 
 @app.get("/api/kraken/symbols")
@@ -1971,8 +2101,8 @@ async def backtest_ai_analyze(body: AiAnalyzeBody):
 # GENETIC OPTIMIZER
 # =====================================================================
 class GeneticRunBody(BaseModel):
-    populationSize: Optional[int] = 30
-    maxGenerations: Optional[int] = 50
+    populationSize: Optional[int] = bp.GA_MAX_POPULATION
+    maxGenerations: Optional[int] = bp.GA_MAX_GENERATIONS
     survivorsCount: Optional[int] = 3
     mutationRate: Optional[float] = 0.18
     crossoverRate: Optional[float] = 0.80
@@ -1996,32 +2126,39 @@ async def genetic_run(body: GeneticRunBody):
     candles = resample_candles(candles, max(1, body.interval or 15))[-count:]
     if len(candles) < 240:
         raise HTTPException(400, f"WFO benötigt ≥240 Candles — vorhanden: {len(candles)}.")
+    payload = body.model_dump(exclude_none=True)
+    payload["populationSize"] = min(
+        max(1, int(payload.get("populationSize") or bp.GA_MAX_POPULATION)),
+        bp.GA_MAX_POPULATION)
+    payload["maxGenerations"] = min(
+        max(1, int(payload.get("maxGenerations") or bp.GA_MAX_GENERATIONS)),
+        bp.GA_MAX_GENERATIONS)
     state.bus.log("info",
-                  f"GA-Run gestartet: {pair} {body.interval}m, Pop={body.populationSize}, "
-                  f"Gens={body.maxGenerations}, WFO={body.walkForwardSplitPercent}%",
+                  f"GA-Run gestartet: {pair} {body.interval}m, Pop={payload['populationSize']}, "
+                  f"Gens={payload['maxGenerations']}, WFO={body.walkForwardSplitPercent}%",
                   category="GA")
     try:
-        result = await asyncio.to_thread(state.ga.run, body.model_dump(exclude_none=True), candles)
+        result = await asyncio.to_thread(state.ga.run, payload, candles)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    # Beste Genome persistieren
-    best = result["bestIndividual"]
-    state.store.upsert_genome({
-        "genome_id": best["id"],
-        "strategy_id": body.baselineStrategyId,
-        "asset_pair": pair,
-        "interval_min": body.interval,
-        "genes": best["genes"],
-        "generation": best.get("generation"),
-        "fitness": best.get("fitness"),
-        "dsr": best.get("dsr"),
-        "cadence_per_day": best.get("tradesPerDay"),
-        "in_sample_summary": best.get("inSampleSummary"),
-        "oos_sample_summary": best.get("outOfSampleSummary"),
-    })
+    best = result.get("bestIndividual")
+    if best and best.get("status") != "quarantined":
+        state.store.upsert_genome({
+            "genome_id": best["id"],
+            "strategy_id": body.baselineStrategyId,
+            "asset_pair": pair,
+            "interval_min": body.interval,
+            "genes": best["genes"],
+            "generation": best.get("generation"),
+            "fitness": best.get("fitness"),
+            "dsr": best.get("dsr"),
+            "cadence_per_day": best.get("tradesPerDay"),
+            "in_sample_summary": best.get("inSampleSummary"),
+            "oos_sample_summary": best.get("outOfSampleSummary"),
+        })
     state.bus.log("info",
-                  f"GA-Run fertig: best fitness={best.get('fitness')} DSR={best.get('dsr')} "
-                  f"Gate={'PASS' if result['shadowGate']['passed'] else 'FAIL'}",
+                  f"GA-Run fertig: best fitness={(best or {}).get('fitness')} DSR={(best or {}).get('dsr')} "
+                  f"Gate={'PASS' if result.get('shadowGate', {}).get('passed') else 'FAIL'}",
                   category="GA")
     return result
 
@@ -2108,6 +2245,85 @@ def _kraken_credentials_present() -> bool:
     return bool(key and secret)
 
 
+def _persist_live_kraken_snapshot(st: AppState, out: Dict[str, Any]) -> Dict[str, Any]:
+    store = getattr(st, "store", None)
+    if store is None:
+        return out
+    try:
+        store.put_live_kraken_snapshot(
+            balances=out.get("liveKrakenBalances") or {},
+            ts=out.get("lastSyncTimestamp"),
+            error=out.get("error"),
+            has_credentials=bool(out.get("hasCredentials")),
+        )
+    except Exception as exc:
+        logger.warning("live kraken snapshot persist failed: %s", exc)
+    return out
+
+
+def _refresh_live_kraken_balances(st: AppState) -> Dict[str, Any]:
+    """CLI snapshot into AppState cache. Never falls back to paper seeds."""
+    from app.execution.KrakenCliBridge import parse_balance_stdout
+
+    creds = _kraken_credentials_present()
+    st.has_credentials = creds
+    if not creds:
+        st.live_kraken_balances = {}
+        st.live_kraken_sync_ts = None
+        st.live_kraken_sync_error = None
+        return _persist_live_kraken_snapshot(st, {
+            "hasCredentials": False,
+            "liveKrakenBalances": {},
+            "lastSyncTimestamp": None,
+        })
+    bridge = st.kraken_cli
+    if bridge is None:
+        st.live_kraken_balances = {}
+        st.live_kraken_sync_ts = None
+        st.live_kraken_sync_error = "bridge_unavailable"
+        logger.warning("live kraken balance skipped: bridge unavailable")
+        return _persist_live_kraken_snapshot(st, {
+            "hasCredentials": True,
+            "liveKrakenBalances": {},
+            "lastSyncTimestamp": None,
+            "error": "bridge_unavailable",
+        })
+    try:
+        result = bridge.balance()
+        if not getattr(result, "ok", False):
+            err = getattr(result, "error_code", None) or "balance_failed"
+            st.live_kraken_balances = {}
+            st.live_kraken_sync_ts = None
+            st.live_kraken_sync_error = err
+            logger.warning("live kraken balance failed: %s", err)
+            return _persist_live_kraken_snapshot(st, {
+                "hasCredentials": True,
+                "liveKrakenBalances": {},
+                "lastSyncTimestamp": None,
+                "error": err,
+            })
+        parsed = parse_balance_stdout(getattr(result, "stdout", "") or "")
+        st.live_kraken_balances = parsed
+        st.live_kraken_sync_ts = time.time()
+        st.live_kraken_sync_error = None
+        return _persist_live_kraken_snapshot(st, {
+            "hasCredentials": True,
+            "liveKrakenBalances": dict(parsed),
+            "lastSyncTimestamp": st.live_kraken_sync_ts,
+        })
+    except Exception as exc:
+        st.live_kraken_balances = {}
+        st.live_kraken_sync_ts = None
+        st.live_kraken_sync_error = str(exc)
+        logger.warning("live kraken balance error: %s", exc)
+        return _persist_live_kraken_snapshot(st, {
+            "hasCredentials": True,
+            "liveKrakenBalances": {},
+            "lastSyncTimestamp": None,
+            "error": str(exc),
+        })
+
+
 def _is_loopback(request: Request) -> bool:
     host = (request.client.host if request.client else "") or ""
     return host in {"127.0.0.1", "::1", "localhost", "testclient"}
@@ -2142,8 +2358,16 @@ async def settings_update(request: Request, body: SettingsUpdateBody):
         raise HTTPException(400, "key & value erforderlich.")
     try:
         out = state.settings.update(body.key, body.value)
+    except SettingValidationError as exc:
+        raise HTTPException(400, {
+            "code": "invalid",
+            "detail": str(exc),
+            "hint": exc.hint,
+            "format": exc.format,
+            "allowed": exc.allowed,
+        })
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, {"code": "rejected", "detail": str(exc)})
     state.has_credentials = _kraken_credentials_present()
     out["hasCredentials"] = state.has_credentials
     return out
@@ -2190,50 +2414,20 @@ class AiSuggestBody(BaseModel):
 
 @app.post("/api/ai/suggest")
 async def ai_suggest(body: AiSuggestBody):
-    prompt = body.prompt.lower()
-    # [MOCK-SEAM] Regex-Archetyp-Resolver — echte LLM-Anbindung hier anbinden.
-    if "rsi" in prompt or "reversion" in prompt or "mean" in prompt:
-        archetype, pair, interval = "rsi_reversion", "BTC/USD", 15
-        params = {"archetype": "rsi_reversion", "rsiPeriod": 14, "rsiLower": 33,
-                  "rsiUpper": 67, "hardStopPercent": 4.0}
-        desc = "RSI-Mean-Reversion mit 33/67-Gates und 4% Hard-Stop."
-    elif "momentum" in prompt or "trend" in prompt or "ema" in prompt:
-        archetype, pair, interval = "ema_trend", "ETH/USD", 15
-        params = {"archetype": "ema_trend", "trendFastEma": 12, "trendSlowEma": 60,
-                  "hardStopPercent": 5.0}
-        desc = "EMA 12/60 Trend-Following mit 1.5x-ATR-Stop."
-    else:
-        archetype, pair, interval = "sma_cross", "BTC/USD", 15
-        params = {"archetype": "sma_cross", "smaFast": 12, "smaSlow": 48,
-                  "hardStopPercent": 4.5}
-        desc = "SMA 12/48 Golden- & Death-Cross mit ATR-gestopptem TP."
-    if "eth" in prompt:
-        pair = "ETH/USD"
-    elif "sol" in prompt:
-        pair = "SOL/USD"
-    elif "xrp" in prompt:
-        pair = "XRP/USD"
-    for tf, name in ((5, "5m"), (15, "15m"), (30, "30m"), (60, "1h"), (240, "4h")):
-        if name in prompt:
-            interval = tf
-    code = f"""// AI-generated strategy ({archetype})
-function onCandle(ctx) {{
-  // {desc}
-  const entry = ctx.close;
-  const stop = entry * (1 - {params['hardStopPercent']}/100);
-  const tp = entry * (1 + {params['hardStopPercent']*2.2/100});
-  return {{ direction: 'LONG', stop, tp }};
-}}"""
+    """LLM is not configured. Honest empty — no regex archetype seeds."""
+    _ = body.prompt
     return {
-        "name": f"AI {archetype.replace('_', ' ').title()} {pair} {interval}m",
-        "description": desc,
-        "assetPair": pair,
-        "interval": interval,
-        "parameters": params,
-        "code": code,
-        "tweaksApplied": ["Archetyp-Erkennung", "Hard-Stop kalibriert"],
-        "reasoning": f"Prompt '{body.prompt[:80]}' → {archetype}-Archetyp mit konservativer Risikokalibrierung.",
-        "expectedImprovement": "+0.2 PF im Backtest-Referenzfenster (Schätzung)",
+        "ok": False,
+        "reason": "llm_unavailable",
+        "name": "",
+        "description": "",
+        "assetPair": "",
+        "interval": None,
+        "parameters": {},
+        "code": "",
+        "tweaksApplied": [],
+        "reasoning": "",
+        "expectedImprovement": None,
     }
 
 

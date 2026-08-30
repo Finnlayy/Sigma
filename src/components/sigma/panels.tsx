@@ -193,10 +193,15 @@ atrMult = input.float(1.5, "ATR Stop Multiplier")
 fast = ta.ema(close, fastLen)
 slow = ta.ema(close, slowLen)
 atr  = ta.atr(atrLen)
+plot(ta.rsi(close, 14), "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMult, "sl", display=display.none)
+plot(close + atr * atrMult * 2, "tp", display=display.none)
 
 longCond = ta.crossover(fast, slow)
 if longCond
-    strategy.entry("L", strategy.long, alert_message = '{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"rsi":50,"atr":0,"timestamp":{{timenow}},"strategy_id":"REPLACE_ME","secret":"REPLACE_SECRET"}')
+    strategy.entry("L", strategy.long, alert_message='{"secret":"<SIGMA_WEBHOOK_SECRET>","idempotency_key":"{{strategy.order.id}}","strategy_id":"REPLACE_ME","bot_id":"REPLACE_ME","symbol":"{{ticker}}","action":"{{strategy.order.action}}","order_type":"MARKET","price":"{{close}}","stop_loss":"{{plot_3}}","take_profit":"{{plot_4}}","fixed_leverage":1,"timestamp":"{{timenow}}","interval":"{{interval}}","execution_mode":"kraken_paper","features":{"rsi":"{{plot_0}}","atr":"{{plot_1}}","cisd_score":"{{plot_2}}"}}')
     strategy.exit("X", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
 `;
 

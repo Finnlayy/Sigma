@@ -55,6 +55,7 @@ def test_health_and_blueprint(client):
     assert set(b["loops"]) == {"A", "B", "C", "D", "E"}
     assert b["m8_alert_matrix"]["THROTTLED"]["budget_multiplier"] == 0.5
     assert f"POST {bp.WEBHOOK_ROUTE}" in b["api_contract"]
+    assert f"POST {bp.WEBHOOK_INGEST_ROUTE}" in b["api_contract"]
 
 
 # ------------------------------------------------------------------ webhook ---
@@ -79,18 +80,54 @@ def test_webhook_happy_path_returns_sizing(client):
     assert body["mode"] in ("sim", "paper", "dry_run")
 
 
-def test_legacy_webhook_is_disabled_when_live_trading(client):
+def test_legacy_webhook_forwards_schema_a_when_live_trading(client):
     import app.server.routes_sigma as routes
+    from app.quant.glint_orderbook_verifier import OrderbookSnapshot
 
     pipe = routes.pipeline()
     previous = pipe.config.live_trading
+    previous_secret = pipe.config.webhook_secret
+    previous_open = pipe.open_positions
+    long_secret = "api-secret-token16"
     pipe.config.live_trading = True
+    pipe.config.webhook_secret = long_secret
+    pipe.safety.config.webhook_secret = long_secret
+    routes.set_depth_adapter(type("_Depth", (), {
+        "fetch": staticmethod(lambda symbol: OrderbookSnapshot(
+            symbol, [(49_999.0, 80.0)], [(50_001.0, 20.0)], time.time()
+        ))
+    })())
     try:
-        response = client.post(bp.WEBHOOK_ROUTE, json=_alert())
-        assert response.status_code == 503
-        assert response.json()["detail"]["code"] == "LEGACY_WEBHOOK_LIVE_DISABLED"
+        response = client.post(bp.WEBHOOK_ROUTE, json=_alert(secret=long_secret),
+                               headers={bp.WEBHOOK_SECRET_HEADER: long_secret})
+        assert response.status_code == 200
+        assert response.json()["accepted"] is True
+        schema_a = {
+            "secret": long_secret,
+            "idempotency_key": f"sig_live_fwd_{int(time.time())}_ok",
+            "strategy_id": "api_strat",
+            "bot_id": "bot_api",
+            "symbol": "KRAKEN:XBTUSD",
+            "action": "BUY",
+            "order_type": "MARKET",
+            "price": 50_000.0,
+            "stop_loss": 49_000.0,
+            "take_profit": 52_000.0,
+            "fixed_leverage": 1,
+            "execution_mode": "live",
+            "timestamp": int(time.time()),
+            "features": {"rsi": 28.0, "atr": 500.0, "cisd_score": 0.7},
+        }
+        forwarded = client.post(bp.WEBHOOK_ROUTE, json=schema_a)
+        assert forwarded.status_code == 200, forwarded.json()
+        assert forwarded.json()["status"] == "EXECUTED"
+        assert forwarded.json()["schema_family"] == "SIGMA_L4_MASTER"
     finally:
         pipe.config.live_trading = previous
+        pipe.config.webhook_secret = previous_secret
+        pipe.safety.config.webhook_secret = previous_secret
+        pipe.open_positions = previous_open
+        routes.set_depth_adapter(None)
 
 
 def test_webhook_rejects_stale_and_unknown_symbol(client):
@@ -138,7 +175,7 @@ def test_alert_sync_and_switch(client):
                 params={"symbol": "ETH/USD", "interval": 15})
     enabled = client.post("/api/strategies/alerts_strat/alerts/enable").json()
     assert enabled["status"] == "ENABLED"
-    assert enabled["webhook_url"].endswith(bp.WEBHOOK_ROUTE)
+    assert enabled["webhook_url"].endswith(bp.WEBHOOK_INGEST_ROUTE)
     disabled = client.post("/api/strategies/alerts_strat/alerts/disable").json()
     assert disabled["status"] == "DISABLED"
     assert client.post("/api/strategies/alerts_strat/alerts/bogus").status_code == 400
@@ -355,3 +392,142 @@ def test_tv_library_list_and_import_is_idempotent_paper(client):
         assert "POST /api/strategies/tv/sync-library" in contract
     finally:
         tvlib.set_tv_library_driver_factory(None)
+
+
+def test_sync_balance_without_keys_is_empty(client, monkeypatch):
+    monkeypatch.delenv("KRAKEN_API_KEY", raising=False)
+    monkeypatch.delenv("KRAKEN_API_SECRET", raising=False)
+    import app.server.main as main
+
+    main.state.has_credentials = True
+    main.state.live_kraken_balances = {"USD": 99.0}
+    main.state.live_kraken_sync_ts = 1.0
+    try:
+        body = client.post("/api/kraken/sync-balance").json()
+        assert body["hasCredentials"] is False
+        assert body["liveKrakenBalances"] == {}
+        assert body["lastSyncTimestamp"] is None
+        assert body["balances"] == {}
+        assert body.get("portfolioUSD") == 0.0
+        metrics = client.get("/api/logs").json()["metrics"]
+        assert metrics["liveKrakenBalances"] == {}
+        assert metrics["hasCredentials"] is False
+    finally:
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+
+
+def test_sync_balance_with_keys_normalizes_and_logs_use_cache(client, monkeypatch):
+    monkeypatch.setenv("KRAKEN_API_KEY", "k")
+    monkeypatch.setenv("KRAKEN_API_SECRET", "s")
+    import app.server.main as main
+    from app.execution.KrakenCliBridge import OrderResult
+
+    calls = []
+
+    class FakeBridge:
+        def balance(self):
+            calls.append(1)
+            return OrderResult(True, "live", stdout=json.dumps({"XXBT": "0.5", "ZUSD": "1000"}))
+
+    original = main.state.kraken_cli
+    main.state.kraken_cli = FakeBridge()
+    try:
+        body = client.post("/api/kraken/sync-balance").json()
+        assert body["hasCredentials"] is True
+        assert body["liveKrakenBalances"] == {"BTC": 0.5, "USD": 1000.0}
+        assert body["lastSyncTimestamp"] is not None
+        assert calls == [1]
+        metrics = client.get("/api/logs").json()["metrics"]
+        assert metrics["liveKrakenBalances"] == {"BTC": 0.5, "USD": 1000.0}
+        assert metrics["hasCredentials"] is True
+        assert calls == [1]
+    finally:
+        main.state.kraken_cli = original
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+
+
+def test_sync_balance_cli_error_clears_without_paper_seed(client, monkeypatch):
+    monkeypatch.setenv("KRAKEN_API_KEY", "k")
+    monkeypatch.setenv("KRAKEN_API_SECRET", "s")
+    import app.server.main as main
+    from app.execution.KrakenCliBridge import OrderResult
+
+    class FakeBridge:
+        def balance(self):
+            return OrderResult(False, "live", error_code="EAPI:Invalid key")
+
+    original = main.state.kraken_cli
+    main.state.kraken_cli = FakeBridge()
+    main.state.live_kraken_balances = {"BTC": 9.0}
+    try:
+        body = client.post("/api/kraken/sync-balance").json()
+        assert body["hasCredentials"] is True
+        assert body["liveKrakenBalances"] == {}
+        assert body["lastSyncTimestamp"] is None
+        assert body["balances"] == {}
+        paper = client.get("/api/logs").json()["balances"]
+        assert paper != {}
+        assert body["balances"] != paper
+        snap = main.state.store.get_live_kraken_snapshot()
+        assert snap is not None
+        assert snap["balances"] == {}
+        assert snap["error"]
+    finally:
+        main.state.kraken_cli = original
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+
+
+def test_live_balance_snapshot_hydrates_cache(client, monkeypatch):
+    monkeypatch.setenv("KRAKEN_API_KEY", "k")
+    monkeypatch.setenv("KRAKEN_API_SECRET", "s")
+    import app.server.main as main
+    from app.execution.KrakenCliBridge import OrderResult
+
+    class FakeBridge:
+        def balance(self):
+            return OrderResult(True, "live", stdout=json.dumps({"XXBT": "0.25"}))
+
+    original = main.state.kraken_cli
+    main.state.kraken_cli = FakeBridge()
+    try:
+        client.post("/api/kraken/sync-balance")
+        snap = main.state.store.get_live_kraken_snapshot()
+        assert snap["balances"]["BTC"] == 0.25
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+        main.state.has_credentials = True
+        main.state._hydrate_live_kraken_cache()
+        assert main.state.live_kraken_balances["BTC"] == 0.25
+        main.state.has_credentials = False
+        main.state._hydrate_live_kraken_cache()
+        assert main.state.live_kraken_balances == {}
+    finally:
+        main.state.kraken_cli = original
+        main.state.has_credentials = False
+        main.state.live_kraken_balances = {}
+        main.state.live_kraken_sync_ts = None
+
+
+def test_zero_mock_seams_are_honest_empty(client):
+    sent = client.post("/api/quant/sentiment/score", json={"text": "SEC approves ETF"}).json()
+    assert sent.get("available") is False
+    assert sent.get("score") is None
+    assert sent.get("model") == "unavailable"
+    ai = client.post("/api/ai/suggest", json={"prompt": "rsi mean reversion btc 15m"}).json()
+    assert ai.get("ok") is False and ai.get("code") == ""
+    assert "rsi_reversion" not in str(ai.get("parameters"))
+    pro = client.get("/api/kraken/positions/pro").json()
+    assert pro.get("live") is False and pro.get("positions") == []
+    assert pro.get("totalCollateralUSD") is None
+    rl = client.post("/api/quant/engine/rl-fast-path").json()
+    assert rl.get("q_value") is None and rl.get("available") is False
+    lake = client.post("/api/lake/sync", json={}).json()
+    assert lake.get("ok") is False and lake.get("mode") == "disabled"
+    poly = client.get("/api/quant/polymarket/layer0").json()
+    assert poly.get("valid") is False and poly.get("reason") == "missing_data"

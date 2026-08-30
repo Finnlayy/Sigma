@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from app.core.config import AlphaConfig
 
@@ -50,6 +52,232 @@ RUNTIME_MAP: Dict[str, str] = {
 
 WRITABLE: Dict[str, str] = {**ENV_MAP, **SECRET_MAP, **RUNTIME_MAP}
 SENSITIVE_PREFIXES = ("TELEGRAM_", "KRAKEN_", "ALPHA_WEBAUTHN_", "SIGMA_WEBHOOK_")
+
+# kind: enum | float | int | url | flag | secret | text
+SETTING_SPECS: Dict[str, Dict[str, Any]] = {
+    "ALPHA_BASE_BUDGET_USD": {
+        "kind": "float", "min": 1, "max": 1_000_000,
+        "format": "positive Zahl, USD",
+        "hint": "Basis-Budget als Dezimalzahl, z. B. 50 oder 50.0. Bereich: 1–1000000.",
+    },
+    "ALPHA_MAX_LEVERAGE": {
+        "kind": "float", "min": 1, "max": 10,
+        "format": "Zahl 1–10",
+        "hint": "Hebel als Dezimalzahl, z. B. 5 oder 5.0. Erlaubt: 1 bis 10.",
+    },
+    "ALPHA_RISK_FRACTION": {
+        "kind": "float", "min": 0, "max": 1,
+        "format": "Zahl 0–1",
+        "hint": "Risiko-Quote pro Trade, z. B. 0.15. Erlaubt: 0 bis 1.",
+    },
+    "ALPHA_MAKER_FEE": {
+        "kind": "float", "min": 0, "max": 0.05,
+        "format": "Dezimalbruch, z. B. 0.0002",
+        "hint": "Maker-Fee als Bruch, z. B. 0.0002 (= 2 bps). Bereich: 0–0.05.",
+    },
+    "ALPHA_TAKER_FEE": {
+        "kind": "float", "min": 0, "max": 0.05,
+        "format": "Dezimalbruch, z. B. 0.0005",
+        "hint": "Taker-Fee als Bruch, z. B. 0.0005. Bereich: 0–0.05.",
+    },
+    "ALPHA_CHURN_COOLDOWN_S": {
+        "kind": "int", "min": 0, "max": 86400,
+        "format": "ganze Sekunden",
+        "hint": "Cooldown in ganzen Sekunden, z. B. 60. Bereich: 0–86400.",
+    },
+    "ALPHA_CHURN_MAX_DAILY": {
+        "kind": "int", "min": 0, "max": 10000,
+        "format": "ganze Zahl",
+        "hint": "Max. Trades pro Tag als ganze Zahl, z. B. 40. Bereich: 0–10000.",
+    },
+    "ALPHA_FEE_HURDLE_MULT": {
+        "kind": "float", "min": 0, "max": 50,
+        "format": "Zahl, z. B. 2.5",
+        "hint": "Fee-Hurdle-Multiplikator, z. B. 2.5. Bereich: 0–50.",
+    },
+    "ALPHA_MARKET_SOURCE": {
+        "kind": "enum", "allowed": ["synthetic", "ccxt_ws"],
+        "format": "synthetic | ccxt_ws",
+        "hint": "Nur diese Werte: synthetic (Sandbox-Feed) oder ccxt_ws (Live-Stream).",
+    },
+    "ALPHA_AUTOPSY_ORDER": {
+        "kind": "enum", "allowed": ["v1.2.0", "v1.6.4"],
+        "format": "v1.2.0 | v1.6.4",
+        "hint": "Nur diese Werte: v1.2.0 oder v1.6.4.",
+    },
+    "ALPHA_LOG_LEVEL": {
+        "kind": "enum", "allowed": ["DEBUG", "INFO", "WARNING", "ERROR"],
+        "format": "DEBUG | INFO | WARNING | ERROR",
+        "hint": "Log-Level exakt in Großbuchstaben: DEBUG, INFO, WARNING oder ERROR.",
+    },
+    "SIGMA_LIVE_TRADING": {
+        "kind": "flag", "allowed": ["0", "1"],
+        "format": "0 oder 1",
+        "hint": "0 = Paper, 1 = Live. Keine anderen Werte (nicht true/yes).",
+    },
+    "SIGMA_MARKET_SOURCE": {
+        "kind": "enum", "allowed": ["synthetic", "ccxt_ws"],
+        "format": "synthetic | ccxt_ws",
+        "hint": "Nur diese Werte: synthetic oder ccxt_ws.",
+    },
+    "SIGMA_TV_MCP_URL": {
+        "kind": "url",
+        "allowed": ["fake", "mock", "test://fake"],
+        "format": "fake | https://…",
+        "hint": "Sandbox: fake (oder mock, test://fake). Live: volle http(s)-URL zum TradingView-MCP.",
+    },
+    "SIGMA_OLLAMA_URL": {
+        "kind": "url",
+        "format": "http://host:port",
+        "hint": "Ollama-Base-URL, z. B. http://127.0.0.1:11434 — muss mit http:// oder https:// beginnen.",
+    },
+    "SIGMA_PUBLIC_URL": {
+        "kind": "url",
+        "format": "http://host:port",
+        "hint": "Öffentliche Webhook-Basis, z. B. http://127.0.0.1:8080 — muss mit http:// oder https:// beginnen.",
+    },
+    "KRAKEN_API_KEY": {
+        "kind": "secret",
+        "format": "nicht-leerer Key",
+        "hint": "Kraken API Key einfügen (nicht leer). Bereits gesetzte Keys bleiben maskiert.",
+    },
+    "KRAKEN_API_SECRET": {
+        "kind": "secret",
+        "format": "nicht-leeres Secret",
+        "hint": "Kraken API Secret einfügen (nicht leer).",
+    },
+    "SIGMA_WEBHOOK_SECRET": {
+        "kind": "secret",
+        "format": "nicht-leerer String",
+        "hint": "Webhook-Secret als beliebiger nicht-leerer String.",
+    },
+    "TELEGRAM_BOT_TOKEN": {
+        "kind": "text",
+        "format": "123456:AA…",
+        "hint": "Telegram-Bot-Token im Format <id>:<secret>, z. B. 123456789:AAH…",
+    },
+    "TELEGRAM_CHAT_ID": {
+        "kind": "text",
+        "format": "Zahl, optional negativ",
+        "hint": "Chat-ID als ganze Zahl, z. B. 123456789 oder -1001234567890 für Gruppen.",
+    },
+}
+
+
+class SettingValidationError(ValueError):
+    def __init__(self, message: str, *, hint: str = "", format: str = "", allowed: Optional[List[str]] = None):
+        super().__init__(message)
+        self.hint = hint or message
+        self.format = format
+        self.allowed = list(allowed or [])
+
+
+def spec_for(key: str) -> Dict[str, Any]:
+    return dict(SETTING_SPECS.get(key) or {})
+
+
+def _as_public_spec(key: str) -> Dict[str, Any]:
+    spec = spec_for(key)
+    if not spec:
+        return {}
+    return {
+        "kind": spec.get("kind"),
+        "format": spec.get("format") or "",
+        "hint": spec.get("hint") or "",
+        "allowed": list(spec.get("allowed") or []),
+        "min": spec.get("min"),
+        "max": spec.get("max"),
+    }
+
+
+def validate_setting(key: str, value: str) -> None:
+    raw = "" if value is None else str(value).strip()
+    spec = spec_for(key)
+    hint = spec.get("hint") or f"Ungültiger Wert für {key}."
+    fmt = spec.get("format") or ""
+    allowed = list(spec.get("allowed") or [])
+    kind = spec.get("kind") or "text"
+
+    if not raw:
+        raise SettingValidationError(
+            f"{key}: Wert fehlt.", hint=hint, format=fmt, allowed=allowed,
+        )
+
+    if kind == "enum":
+        if not any(a.lower() == raw.lower() for a in allowed):
+            raise SettingValidationError(
+                f"{key}: '{raw}' ist kein erlaubter Wert.",
+                hint=hint, format=fmt, allowed=allowed,
+            )
+        return
+
+    if kind == "flag":
+        if raw not in ("0", "1"):
+            raise SettingValidationError(
+                f"{key}: nur 0 oder 1.", hint=hint, format=fmt, allowed=["0", "1"],
+            )
+        return
+
+    if kind == "int":
+        if not re.fullmatch(r"-?\d+", raw):
+            raise SettingValidationError(
+                f"{key}: erwartet ganze Zahl.", hint=hint, format=fmt, allowed=allowed,
+            )
+        n = int(raw)
+        lo, hi = spec.get("min"), spec.get("max")
+        if lo is not None and n < lo or hi is not None and n > hi:
+            raise SettingValidationError(
+                f"{key}: {n} außerhalb {lo}–{hi}.", hint=hint, format=fmt, allowed=allowed,
+            )
+        return
+
+    if kind == "float":
+        try:
+            n = float(raw)
+        except ValueError as exc:
+            raise SettingValidationError(
+                f"{key}: erwartet Zahl.", hint=hint, format=fmt, allowed=allowed,
+            ) from exc
+        lo, hi = spec.get("min"), spec.get("max")
+        if lo is not None and n < lo or hi is not None and n > hi:
+            raise SettingValidationError(
+                f"{key}: {n} außerhalb {lo}–{hi}.", hint=hint, format=fmt, allowed=allowed,
+            )
+        return
+
+    if kind == "url":
+        if raw.lower() in {a.lower() for a in allowed}:
+            return
+        parsed = urlparse(raw)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise SettingValidationError(
+                f"{key}: keine gültige URL.", hint=hint, format=fmt, allowed=allowed,
+            )
+        return
+
+    if kind == "secret":
+        return
+
+    if key == "TELEGRAM_BOT_TOKEN" and not re.fullmatch(r"\d+:[A-Za-z0-9_-]+", raw):
+        raise SettingValidationError(
+            f"{key}: Token-Format ungültig.", hint=hint, format=fmt, allowed=allowed,
+        )
+    if key == "TELEGRAM_CHAT_ID" and not re.fullmatch(r"-?\d+", raw):
+        raise SettingValidationError(
+            f"{key}: Chat-ID muss eine Zahl sein.", hint=hint, format=fmt, allowed=allowed,
+        )
+
+
+def _canonicalize(key: str, value: str) -> str:
+    raw = str(value).strip()
+    spec = spec_for(key)
+    allowed = list(spec.get("allowed") or [])
+    kind = spec.get("kind")
+    if kind in ("enum", "url") and allowed:
+        for item in allowed:
+            if item.lower() == raw.lower():
+                return item
+    return raw
 
 
 def _mask(value: str) -> str:
@@ -89,6 +317,7 @@ class SettingsEnvManager:
                 "value": _mask(value) if sensitive and value else (value or self._default_for(key)),
                 "isMasked": bool(sensitive and value),
                 "setInEnv": bool(value),
+                **_as_public_spec(key),
             })
             seen.add(key)
         for k in os.environ:
@@ -129,6 +358,8 @@ class SettingsEnvManager:
     def update(self, key: str, value: str) -> Dict[str, Any]:
         if key not in WRITABLE:
             raise ValueError(f"Key '{key}' ist nicht für die UI freigegeben.")
+        validate_setting(key, value)
+        value = _canonicalize(key, value)
         os.environ[key] = str(value)
         self._write_env_file(key, str(value))
         self.config.reload_from_env()

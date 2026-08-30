@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.backtest.BacktestEngine import resample_candles
+from app.core import blueprint as bp
 from app.core.event_bus import EventBus
 from app.quant.RegimeEngine import (ampel_status, dfa_hurst,
                                     lead_lag_matrix, sentiment_score)
@@ -146,21 +147,17 @@ async def reconciliation_run():
 
 @router.post("/api/quant/engine/rl-fast-path")
 async def rl_fast_path():
-    """M-16: [MOCK-SEAM] RL-Policy-Inferenz — deterministischer Platzhalter
-    (echtes PPO-Modell im LAN-Produktionsbetrieb anbinden)."""
-    t0 = time.perf_counter()
-    # 'Inferenz' = state-geleitetes Determinierung (sub-ms)
-    can_execute = state.telemetry.system.can_execute_orders
-    action = "EXECUTE_IMMEDIATE_POST" if can_execute else "HOLD_AND_REQUEUE"
-    q_value = 0.842 if can_execute else 0.121
-    elapsed = (time.perf_counter() - t0) * 1000
+    """RL policy is not loaded. Honest empty — no fake Q-values."""
     return {
-        "inference_time_ms": round(max(elapsed, 0.4), 3),
-        "action_name": action,
-        "q_value": round(q_value, 4),
-        "fast_path_share": 0.945 if can_execute else 0.0,
-        "safe_path_share": 0.055 if can_execute else 1.0,
-        "model": "deterministic-policy-proxy [MOCK]",
+        "ok": False,
+        "available": False,
+        "reason": "rl_policy_unavailable",
+        "inference_time_ms": None,
+        "action_name": None,
+        "q_value": None,
+        "fast_path_share": None,
+        "safe_path_share": None,
+        "model": "unavailable",
     }
 
 
@@ -194,6 +191,75 @@ class SentimentBody(BaseModel):
 @router.post("/api/quant/sentiment/score")
 async def sentiment(body: SentimentBody):
     return sentiment_score(body.text)
+
+
+@router.get("/api/quant/session")
+async def quant_session():
+    from sigma.signals.session_clock import SessionClock
+    return SessionClock().evaluate().to_dict()
+
+
+@router.get("/api/quant/throttle")
+async def quant_throttle(symbol: str = "BTC/USD"):
+    from sigma.signals.volatility_throttle import VolatilityThrottleGate
+    candles = state.store.ohlcv(symbol, 15 * 60, limit=200)
+    mapped = [{"ts": c.get("ts"), "o": c.get("open"), "h": c.get("high"),
+               "l": c.get("low"), "c": c.get("close"), "v": c.get("volume")}
+              for c in candles]
+    return VolatilityThrottleGate().evaluate(mapped).to_dict()
+
+
+@router.get("/api/quant/scout")
+async def quant_scout(leader: str = "BTC/USD"):
+    from sigma.signals.correlation_scout import CorrelationScout
+    series = {}
+    for sym in state.config.market_symbols:
+        rows = state.store.ohlcv(sym, 15 * 60, limit=80)
+        series[sym] = [{"c": r.get("close")} for r in rows]
+    return CorrelationScout().find_high_beta_candidates(series, leader=leader).to_dict()
+
+
+@router.get("/api/quant/dual-hurst")
+async def quant_dual_hurst(symbol: str = "BTC/USD", htf: int = 60, ltf: int = 15):
+    from sigma.signals.dual_hurst import evaluate_dual_hurst
+    htf_rows = state.store.ohlcv(symbol, int(htf) * 60, limit=400)
+    ltf_rows = state.store.ohlcv(symbol, int(ltf) * 60, limit=400)
+    htf_c = [{"ts": r.get("ts"), "c": r.get("close")} for r in htf_rows]
+    ltf_c = [{"ts": r.get("ts"), "c": r.get("close")} for r in ltf_rows]
+    return evaluate_dual_hurst(htf_c, ltf_c, htf_interval_min=htf).to_dict()
+
+
+@router.get("/api/quant/htf-features")
+async def quant_htf_features(symbol: str = "BTC/USD", interval: int = 60):
+    from sigma.signals.htf_features import extract_htf_flags
+    from sigma.signals.scale_features import scale_invariant_features
+    rows = state.store.ohlcv(symbol, int(interval) * 60, limit=200)
+    candles = [{
+        "ts": r.get("ts"), "o": r.get("open"), "h": r.get("high"),
+        "l": r.get("low"), "c": r.get("close"), "v": r.get("volume"),
+    } for r in rows]
+    return {
+        "scale": scale_invariant_features(candles, interval_min=interval),
+        "flags": extract_htf_flags(candles, interval_min=interval),
+    }
+
+
+@router.get("/api/quant/h-tests")
+async def quant_h_tests(symbol: str = "BTC/USD"):
+    from sigma.loops.loop_b import LoopBPort
+    htf = [{"ts": r.get("ts"), "o": r.get("open"), "h": r.get("high"),
+            "l": r.get("low"), "c": r.get("close")}
+           for r in state.store.ohlcv(symbol, 60 * 60, limit=200)]
+    ltf = [{"ts": r.get("ts"), "o": r.get("open"), "h": r.get("high"),
+            "l": r.get("low"), "c": r.get("close")}
+           for r in state.store.ohlcv(symbol, 15 * 60, limit=200)]
+    return LoopBPort().paper_hypotheses(htf, ltf)
+
+
+@router.get("/api/quant/polymarket/layer0")
+async def quant_polymarket_layer0():
+    from sigma.signals.polymarket_layer0 import layer0_pre_regime
+    return layer0_pre_regime(None).to_dict()
 
 
 # =====================================================================
@@ -241,8 +307,8 @@ async def postmortem(body: PostmortemBody):
 
 
 class EvolutionBody(BaseModel):
-    maxGenerations: int = 10
-    populationSize: int = 12
+    maxGenerations: int = bp.GA_MAX_GENERATIONS
+    populationSize: int = bp.GA_MAX_POPULATION
     assetPair: str = "BTC/USD"
     interval: int = 15
     candleCount: int = 500
@@ -257,8 +323,8 @@ async def evolution_run(body: EvolutionBody):
     if len(candles) < 240:
         raise HTTPException(400, f"WFO benötigt ≥240 Candles — vorhanden: {len(candles)}.")
     result = await asyncio.to_thread(state.ga.run, {
-        "populationSize": body.populationSize,
-        "maxGenerations": body.maxGenerations,
+        "populationSize": min(max(1, int(body.populationSize)), bp.GA_MAX_POPULATION),
+        "maxGenerations": min(max(1, int(body.maxGenerations)), bp.GA_MAX_GENERATIONS),
         "survivorsCount": 3,
         "mutationRate": 0.25,
         "crossoverRate": 0.7,
@@ -370,15 +436,15 @@ class LakeSyncBody(BaseModel):
 
 @router.post("/api/lake/sync")
 async def lake_sync(body: LakeSyncBody):
-    """[MOCK-SEAM] Rclone/Google-Drive-Push — im Sandbox nur Statusbericht."""
+    """Rclone is not configured. Honest disable — no fake sync."""
     summary = state.store.lake_summary()
     return {
-        "ok": True,
-        "mode": "mock-rclone [MOCK-SEAM]",
+        "ok": False,
+        "mode": "disabled",
+        "reason": "rclone_not_configured",
         "files": summary["total_files"],
         "sizeMb": summary["total_size_mb"],
-        "destination": "Backtest_Data/OHLCV",
-        "note": "Cloud sync via Ubuntu core only (Windows TS portal removed in Sigma).",
+        "destination": None,
     }
 
 

@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional, Set
 
 from app.core.config import AlphaConfig
 from app.core.event_bus import get_event_bus
+from app.core.redis_client import is_fake_redis
 from app.core.telemetry import get_telemetry_center
 
 logger = logging.getLogger("app.execution.m8_state_engine")
@@ -240,9 +241,22 @@ class M8StateEngine:
 
     # ------------------------------------------------------------------ setup
     async def initialize_scripts(self) -> None:
-        if self.redis:
+        if not self.redis:
+            return
+        # fakeredis has no SCRIPT LOAD / EVALSHA — leave SHAs unset so
+        # update_post_trade_state / update_eod_profit_factor use the local path.
+        if is_fake_redis(self.redis):
+            self.lua_trade_sha = None
+            self.lua_eod_sha = None
+            logger.info("fakeredis: skipping Lua script_load — local M8 fallback")
+            return
+        try:
             self.lua_trade_sha = await self.redis.script_load(LUA_IDEMPOTENT_POST_TRADE_SCRIPT)
             self.lua_eod_sha = await self.redis.script_load(LUA_EOD_PF_SCRIPT)
+        except Exception as exc:
+            logger.warning("Lua script_load failed (%s) — using local fallback", exc)
+            self.lua_trade_sha = None
+            self.lua_eod_sha = None
 
     async def register_strategy(self, instance_id: str, base_budget_usd: Optional[float] = None,
                                 status: str = "ACTIVE",

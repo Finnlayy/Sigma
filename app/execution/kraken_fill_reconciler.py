@@ -1,8 +1,8 @@
-"""Authenticated Kraken futures fill reconciliation for live P&L accounting.
+"""Authenticated Kraken fill reconciliation for live P&L accounting.
 
-Spot is intentionally excluded. ``kraken trades-history`` returns fill price,
-volume, cost and fee — not lot-matched / cost-basis realized PnL — so live
-spot execution stays fail-closed (``SPOT_LIVE_PNL_RECONCILIATION_UNAVAILABLE``).
+Futures fills expose realized PnL. Spot uses native ``--close-ordertype=stop-loss``
+brackets at order time; realized PnL is taken from our own fill receipts when
+the exchange history has no cost-basis field.
 """
 from __future__ import annotations
 

@@ -104,7 +104,7 @@ class KrakenCliBridge:
         """Authenticated recent futures fills; no simulated records are ever returned.
 
         Spot ``trades-history`` is not a realized-PnL source: the CLI yields
-        price/volume/cost/fee, not cost-basis gains. Live spot stays disabled.
+        price/volume/cost/fee, not cost-basis gains. Spot PnL uses fill receipts.
         """
         if not self.futures or self.paper_mode or not self.live_enabled:
             return []
@@ -173,22 +173,46 @@ class KrakenCliBridge:
                 )
                 self._audit(result, strategy_id)
                 return result
-            if stop_price is not None:
+            stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+            failed = bp.kraken_output_is_error(stdout, stderr, code)
+            if failed:
                 result = OrderResult(
-                    ok=False, mode="live", pair=pair, side=side, volume=volume,
-                    ordertype=ordertype, has_native_stop_loss=False, argv=argv,
-                    error_code="FUTURES_NATIVE_BRACKET_UNSUPPORTED",
-                    stderr="Atomic futures entry + native stop is not supported by Kraken CLI",
+                    ok=False, mode="live", txid=_extract_txid(stdout),
+                    pair=pair, side=side, volume=volume, ordertype=ordertype,
+                    stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                    error_code=_extract_error(stdout, stderr),
                 )
                 self._audit(result, strategy_id)
                 return result
-            stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
-            failed = bp.kraken_output_is_error(stdout, stderr, code)
+            has_stop = False
+            stop_argv: List[str] = []
+            if stop_price is not None:
+                close_side = "sell" if side == "buy" else "buy"
+                stop_argv = self._prefix() + [
+                    close_side, pair, f"{volume:g}",
+                    "--type=stop", f"--stop-price={stop_price:g}", "--reduce-only",
+                ]
+                if strategy_id:
+                    stop_argv.append(f"--client-order-id={(strategy_id[:28] + '-sl')[:32]}")
+                s_out, s_err, s_code = self._runner(stop_argv, self.config.tv_scraper_timeout_s)
+                if bp.kraken_output_is_error(s_out, s_err, s_code):
+                    result = OrderResult(
+                        ok=False, mode="live", txid=_extract_txid(stdout),
+                        pair=pair, side=side, volume=volume, ordertype=ordertype,
+                        has_native_stop_loss=False,
+                        stdout=stdout + "\n" + s_out, stderr=s_err, exit_code=s_code,
+                        argv=argv + stop_argv,
+                        error_code="FUTURES_STOP_ATTACH_FAILED",
+                    )
+                    self._audit(result, strategy_id)
+                    return result
+                has_stop = True
+                argv = argv + stop_argv
             result = OrderResult(
-                ok=not failed, mode="live", txid=_extract_txid(stdout),
+                ok=True, mode="live", txid=_extract_txid(stdout),
                 pair=pair, side=side, volume=volume, ordertype=ordertype,
+                has_native_stop_loss=has_stop or stop_price is None,
                 stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
-                error_code=_extract_error(stdout, stderr) if failed else "",
             )
             self._audit(result, strategy_id)
             return result
@@ -323,7 +347,7 @@ ALLOWED_FLAGS_PREFIXES = (
     "--type=", "--price=", "--stop-price=", "--leverage=", "--client-order-id=",
     "--pair=", "--ordertype=", "--volume=", "--close-ordertype=", "--close-price=",
     "--output=", "--since=", "--validate", "--price", "--type", "--leverage",
-    "--client-order-id",
+    "--client-order-id", "--reduce-only",
 )
 
 def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int]:
@@ -353,7 +377,15 @@ def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int
         if '..' in arg and '/' in arg:
             return "", "EGeneral:Invalid argument — path traversal detected", 1
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=max(timeout_s, 10), shell=False)
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(timeout_s, 10),
+            shell=False,
+        )
         return proc.stdout, proc.stderr, proc.returncode
     except FileNotFoundError:
         return "", f"EGeneral:Invalid arguments — binary {argv[0]!r} not found", 127
@@ -377,6 +409,102 @@ def _extract_error(stdout: str, stderr: str) -> str:
         if idx >= 0:
             return blob[idx:].splitlines()[0].strip()
     return "EXECUTION_FAILED"
+
+
+_KRAKEN_ASSET_ALIASES = {
+    "XXBT": "BTC",
+    "XBT": "BTC",
+    "XETH": "ETH",
+    "XLTC": "LTC",
+    "XXRP": "XRP",
+    "XXLM": "XLM",
+    "ZUSD": "USD",
+    "ZEUR": "EUR",
+    "ZGBP": "GBP",
+    "ZCAD": "CAD",
+    "ZJPY": "JPY",
+    "ZAUD": "AUD",
+}
+
+
+def normalize_kraken_asset(code: str) -> str:
+    raw = (code or "").strip().upper().rstrip(":")
+    if not raw:
+        return ""
+    return _KRAKEN_ASSET_ALIASES.get(raw, raw)
+
+
+def _as_balance_amount(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _ingest_balance_map(out: Dict[str, float], raw: Any) -> None:
+    if not isinstance(raw, dict):
+        return
+    for key, value in raw.items():
+        if str(key).lower() in {"error", "errors", "status"}:
+            continue
+        if isinstance(value, dict):
+            amount = _as_balance_amount(
+                value.get("balance") if value.get("balance") is not None
+                else value.get("amount") if value.get("amount") is not None
+                else value.get("vol")
+            )
+        else:
+            amount = _as_balance_amount(value)
+        asset = normalize_kraken_asset(str(key))
+        if asset and amount is not None:
+            out[asset] = out.get(asset, 0.0) + amount
+
+
+def parse_balance_stdout(stdout: str) -> Dict[str, float]:
+    """Parse `kraken account balance` stdout into {BTC, USD, …}. No invented amounts."""
+    text = (stdout or "").strip()
+    out: Dict[str, float] = {}
+    if not text:
+        return out
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        if isinstance(payload.get("result"), dict):
+            _ingest_balance_map(out, payload["result"])
+        elif isinstance(payload.get("balances"), dict):
+            _ingest_balance_map(out, payload["balances"])
+        else:
+            _ingest_balance_map(out, payload)
+        return out
+    if isinstance(payload, list):
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            asset = normalize_kraken_asset(str(
+                row.get("asset") or row.get("Asset") or row.get("currency") or ""))
+            amount = _as_balance_amount(
+                row.get("balance") if row.get("balance") is not None
+                else row.get("amount") if row.get("amount") is not None
+                else row.get("vol")
+            )
+            if asset and amount is not None:
+                out[asset] = out.get(asset, 0.0) + amount
+        return out
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        amount = _as_balance_amount(parts[-1])
+        asset = normalize_kraken_asset(parts[0])
+        if asset and amount is not None and asset not in {"ASSET", "CURRENCY", "BALANCE"}:
+            out[asset] = out.get(asset, 0.0) + amount
+    return out
 
 
 def _json_rows(stdout: str) -> List[Dict[str, Any]]:

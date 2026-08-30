@@ -64,6 +64,10 @@ class AcademyRegistry:
     def __init__(self, store, state_engine=None):
         self.store = store
         self.state_engine = state_engine
+        # In-Memory Wave-Watchlist (Review: keine neue DuckDB-Tabelle in
+        # diesem Schnitt). Befüllt von ingest_wave_screen() — nur tradable
+        # Kollaps-Kandidaten, sonst Universe-Defaults (nie market_symbols).
+        self.wave_watchlist: List[str] = []
 
     def seed(self, strategies: List[Dict[str, Any]]) -> None:
         for s in strategies:
@@ -84,8 +88,10 @@ class AcademyRegistry:
 
     def list(self) -> List[Dict[str, Any]]:
         rows = self.store.academy_entries()
+        watch = list(self.wave_watchlist)
         for r in rows:
             r["drills"] = DRILLS
+            r["waveWatch"] = watch
         return rows
 
     def career(self, strategy_id: str) -> Dict[str, Any]:
@@ -104,7 +110,35 @@ class AcademyRegistry:
             },
         }
 
-    # ------------------------------------------------------------------ drills
+    # ---------------------------------------------------------------- drills
+    def ingest_wave_screen(self, candidates, defaults=None) -> List[str]:
+        """Wave-Screen in die Academy-Watchlist übernehmen.
+
+        Nur tradable Kollaps-Kandidaten landen in der Watchlist; ein
+        leerer Screen fällt auf die Universe-Defaults zurück
+        (nie market_symbols — sonst wieder SOL/XRP im Academy-Pfad).
+        """
+        if not candidates:
+            self.wave_watchlist = list(defaults or [])
+        else:
+            self.wave_watchlist = [
+                c.symbol if hasattr(c, "symbol") else str(c) for c in candidates
+            ]
+        return list(self.wave_watchlist)
+
+    def watchlist(self) -> List[str]:
+        """Kopie der aktuellen Wave-Watchlist."""
+        return list(self.wave_watchlist)
+
+    def drill_watchlist(self, strategy_ids, *, symbols=None) -> List[Dict[str, Any]]:
+        """run_drills auf genau der Wave-Watchlist (Paper only)."""
+        targets = list(symbols) if symbols is not None else list(self.wave_watchlist)
+        out: List[Dict[str, Any]] = []
+        for sid in strategy_ids:
+            for symbol in targets:
+                out.append(self.run_drills(str(sid), str(symbol)))
+        return out
+
     def run_drills(self, strategy_id: str, symbol: str = "BTC/USD") -> Dict[str, Any]:
         """DR-01..05 gegen Strategie-Parameter (deterministisch + RNG-Saat)."""
         rng = random.Random(hash(f"{strategy_id}:{symbol}") % (2 ** 31))

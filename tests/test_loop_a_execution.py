@@ -78,6 +78,23 @@ def test_webhook_secret_timing_safe(guard):
     assert not bad.allowed and bad.status_code == 401
 
 
+def test_webhook_secret_live_without_secret_blocks(cfg):
+    cfg.webhook_secret = ""
+    cfg.live_trading = True
+    verdict = SafetyGuard(cfg).verify_webhook_secret(None)
+    assert not verdict.allowed
+    assert verdict.code == "UNAUTHORIZED"
+    assert verdict.status_code == bp.WEBHOOK_UNAUTHORIZED_STATUS
+
+
+def test_webhook_secret_paper_without_secret_allows(cfg):
+    cfg.webhook_secret = ""
+    cfg.live_trading = False
+    verdict = SafetyGuard(cfg).verify_webhook_secret(None)
+    assert verdict.allowed
+    assert verdict.code == "OK"
+
+
 def test_signal_freshness(guard):
     now = time.time()
     assert guard.check_signal_freshness(now * 1000, 60, now=now).allowed     # ms input
@@ -124,6 +141,28 @@ def test_error_text_beats_exit_code(cfg):
                              runner=lambda argv, t: ("EOrder:Insufficient funds", "", 0))
     res = bridge.add_order(pair="XBTUSD", side="buy", volume=1)
     assert not res.ok and res.error_code.startswith("EOrder:")
+
+
+def test_futures_live_attaches_reduce_only_stop(cfg):
+    class Telemetry:
+        class state:
+            state = "LIVE_APPROVED"
+
+    cfg.live_trading = True
+    calls = []
+
+    def runner(argv, timeout):
+        calls.append(list(argv))
+        return "txid=FT-ENTRY-1", "", 0
+
+    bridge = KrakenCliBridge(cfg, telemetry=Telemetry(), runner=runner, futures=True)
+    res = bridge.add_order(pair="PF_XBTUSD", side="buy", volume=0.01,
+                           stop_price=67_000, strategy_id="s1")
+    assert res.ok and res.mode == "live" and res.has_native_stop_loss
+    assert len(calls) == 2
+    assert calls[0][:3] == ["kraken", "futures", "order"]
+    assert "--reduce-only" in calls[1]
+    assert any(a.startswith("--stop-price=") for a in calls[1])
 
 
 def test_shadow_mode_when_telemetry_not_approved(cfg):
@@ -387,3 +426,59 @@ def test_pipeline_caps_notional(pipeline):
     res = pipeline.handle_signal(_signal(price=1.0, atr=0.01))
     limit = bp.EXCHANGE_SPOT["max_order_notional_usd"]
     assert res.notional <= limit + 1e-6
+
+
+def test_parse_balance_stdout_normalizes_assets():
+    from app.execution.KrakenCliBridge import parse_balance_stdout
+
+    mapped = parse_balance_stdout('{"result": {"XXBT": "0.5", "ZUSD": "1000"}}')
+    assert mapped["BTC"] == 0.5
+    assert mapped["USD"] == 1000.0
+    table = parse_balance_stdout("XXBT    0.25\nZUSD    50")
+    assert table["BTC"] == 0.25
+    assert table["USD"] == 50.0
+    assert parse_balance_stdout("") == {}
+
+
+def test_trades_strategy_ids_in_query(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "in.duckdb"))
+    for sid, tid in (("s1", "t1"), ("s2", "t2"), ("s3", "t3")):
+        store.upsert_trade({
+            "trade_id": tid, "strategy_id": sid, "status": "closed",
+            "symbol": "BTC/USD", "direction": "LONG", "side": "buy",
+            "net_pnl_usd": 1.0,
+        })
+    assert store.trades(strategy_ids=[]) == []
+    rows = store.trades(strategy_ids=["s1", "s2"], status="closed")
+    assert {r["strategy_id"] for r in rows} == {"s1", "s2"}
+    single = store.trades(strategy_id="s3", status="closed")
+    assert [r["strategy_id"] for r in single] == ["s3"]
+
+
+def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "pnl.duckdb"))
+    store.upsert_trade({
+        "trade_id": "a", "strategy_id": "s", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+    })
+    store.upsert_trade({
+        "trade_id": "b", "strategy_id": "s", "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 3.0,
+    })
+    store.upsert_trade({
+        "trade_id": "c", "strategy_id": "s", "status": "closed",
+        "execution_mode": "live", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+    })
+    store.upsert_trade({
+        "trade_id": "d", "strategy_id": "s", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
+    })
+    assert store.sum_closed_pnl("paper") == 13.0

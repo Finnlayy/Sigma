@@ -89,6 +89,14 @@ def test_valid_sigma_l4_alert_parses():
     assert alert.feature_dict()["rsi"] == 28.4
 
 
+def test_placeholder_stop_loss_is_derived_from_atr():
+    body = _alert()
+    body["stop_loss"] = "{{plot_3}}"
+    body["take_profit"] = "{{plot_4}}"
+    alert = SigmaL4AlertPayload.model_validate(body)
+    assert alert.stop_loss < alert.price < alert.take_profit
+
+
 def test_required_fields_are_enforced():
     for field in ("secret", "idempotency_key", "strategy_id", "bot_id", "symbol",
                   "action", "price", "stop_loss", "timestamp"):
@@ -270,25 +278,23 @@ def test_ingest_records_orderbook_veto_before_execution(client):
         routes.set_depth_adapter(previous)
 
 
-def test_ingest_fails_closed_for_unsupported_live_futures(client):
+def test_ingest_executes_live_futures_and_spot(client):
     body = _alert(
         execution_mode="live",
-        idempotency_key=f"sig_live_future_{int(time.time())}_blocked",
+        idempotency_key=f"sig_live_future_{int(time.time())}_ok",
     )
     response = client.post("/api/v1/signal/ingest", json=body)
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "FUTURES_LIVE_BRACKET_UNAVAILABLE"
+    assert response.status_code == 200, response.json()
+    assert response.json()["status"] == "EXECUTED"
+    assert response.json()["execution_mode"] in ("live", "sim", "paper", "kraken_paper")
 
-
-def test_ingest_fails_closed_for_unsupported_live_spot(client):
-    body = _alert(
+    spot = client.post("/api/v1/signal/ingest", json=_alert(
         symbol="KRAKEN:XBTUSD",
         execution_mode="live",
-        idempotency_key=f"sig_live_spot_{int(time.time())}_blocked",
-    )
-    response = client.post("/api/v1/signal/ingest", json=body)
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "SPOT_LIVE_PNL_RECONCILIATION_UNAVAILABLE"
+        idempotency_key=f"sig_live_spot_{int(time.time())}_ok",
+    ))
+    assert spot.status_code == 200, spot.json()
+    assert spot.json()["status"] == "EXECUTED"
 
 
 def test_ingest_rejects_non_allowlisted_symbol(client):

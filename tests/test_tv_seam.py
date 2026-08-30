@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import pytest
 
@@ -246,10 +247,34 @@ def provisioner(cfg, tmp_path, monkeypatch):
 
 
 def test_alert_message_carries_secret_and_fields(provisioner):
-    msg = json.loads(build_alert_message("s1", "abc123"))
-    assert msg["secret"] == "abc123"
-    for key in ("symbol", "action", "price", "timestamp", "strategy_id"):
+    msg = json.loads(build_alert_message("s1", "sigma_prod_secure_token_8849"))
+    assert msg["secret"] == "sigma_prod_secure_token_8849"
+    for key in bp.SIGMA_L4_REQUIRED_FIELDS:
         assert key in msg
+    assert msg["features"]["rsi"] == "{{plot_0}}"
+    assert msg["stop_loss"] == "{{plot_3}}"
+    assert "rsi" not in msg
+    assert set(msg).issuperset({"idempotency_key", "bot_id", "fixed_leverage", "execution_mode"})
+
+
+def test_alert_template_validates_as_schema_a_after_tv_fill():
+    from app.server.schemas import SigmaL4AlertPayload
+
+    raw = json.loads(build_alert_message("s1", "sigma_prod_secure_token_8849"))
+    filled = {
+        **raw,
+        "symbol": "XBTUSD",
+        "action": "buy",
+        "price": 50_000.0,
+        "stop_loss": 49_000.0,
+        "take_profit": 52_000.0,
+        "timestamp": int(time.time()),
+        "idempotency_key": "tv_order_abcdef12",
+        "interval": "15",
+        "features": {"rsi": 28.0, "atr": 500.0, "cisd_score": 0.7},
+    }
+    alert = SigmaL4AlertPayload.model_validate(filled)
+    assert alert.action == "BUY" and alert.stop_loss < alert.price
 
 
 def test_alert_upsert_is_idempotent(provisioner):
@@ -257,7 +282,7 @@ def test_alert_upsert_is_idempotent(provisioner):
     b = provisioner.upsert("s1", "BTC/USD", 15)
     assert a["name"] == b["name"] == "sigma:s1"
     assert len(provisioner.list()) == 1
-    assert b["webhook_url"].endswith(bp.WEBHOOK_ROUTE)
+    assert b["webhook_url"].endswith(bp.WEBHOOK_INGEST_ROUTE)
 
 
 def test_alert_m8_matrix_behaviour(provisioner):

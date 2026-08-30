@@ -275,7 +275,7 @@ def test_flywheel_and_safety_are_idempotent_on_fill_refs(tmp_path):
     store.close()
 
 
-def test_live_spot_and_futures_ingest_fail_closed():
+def test_live_spot_and_futures_ingest_execute():
     import os
 
     from fastapi.testclient import TestClient
@@ -317,8 +317,8 @@ def test_live_spot_and_futures_ingest_fail_closed():
             "execution_mode": "live",
             "timestamp": int(time.time()),
         })
-        assert futures.status_code == 503
-        assert futures.json()["detail"]["code"] == "FUTURES_LIVE_BRACKET_UNAVAILABLE"
+        assert futures.status_code == 200, futures.json()
+        assert futures.json()["status"] == "EXECUTED"
 
         spot = client.post("/api/v1/signal/ingest", json={
             "secret": secret,
@@ -335,8 +335,8 @@ def test_live_spot_and_futures_ingest_fail_closed():
             "execution_mode": "live",
             "timestamp": int(time.time()),
         })
-        assert spot.status_code == 503
-        assert spot.json()["detail"]["code"] == "SPOT_LIVE_PNL_RECONCILIATION_UNAVAILABLE"
+        assert spot.status_code == 200, spot.json()
+        assert spot.json()["status"] == "EXECUTED"
     finally:
         safety_module._guard = None
         routes.set_pipeline(None)

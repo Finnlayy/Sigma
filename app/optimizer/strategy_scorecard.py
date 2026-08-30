@@ -338,8 +338,8 @@ class StrategyScorecard:
             "baselineStrategyName": strategy.get("name"),
             "assetPair": strategy.get("assetPair") or "BTC/USD",
             "interval": strategy.get("interval") or 15,
-            "populationSize": 12,
-            "maxGenerations": 8,
+            "populationSize": bp.GA_MAX_POPULATION,
+            "maxGenerations": bp.GA_MAX_GENERATIONS,
         }
         result: Any = {"queued": True}
         if self.ga_runner is not None:
