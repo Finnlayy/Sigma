@@ -61,7 +61,8 @@ gefährliche Aktionen immer modal bestätigt.
 
 1. `src/lib/sigmaApi.ts`: typisierte Endpunkte —
    `GET /api/v1/sigma/regime`, `/risk`, `/power`, `/zones`, `/scout`,
-   `/polymarket`, `/exhaustion`, `/provisions`, `/ladder/preview`,
+   `/polymarket`, `/exhaustion`, `/provisions` (+ `/provisions/harden`
+   für die Auto-Härtung fremder Pine-Skripte, MP-09), `/ladder/preview`,
    `/fractal/preview`, `/onnx`, `/orderflow`; `POST .../scan`,
    `POST .../provisions` (+ `/de-provision`); Research:
    `POST /api/v1/research/run`, `GET /api/v1/research/jobs/:id`,

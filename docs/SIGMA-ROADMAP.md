@@ -38,7 +38,7 @@
 | MP-06 | `MP-06-polymarket-density.md` | Polymarket-Feed-Adapter (optionaler Port), implizite Dichte, Term-Struktur-Trajektorie, Brier/Platt-Kalibrierung | MP-05 |
 | MP-07 | `MP-07-sniper-strategy-phase2.md` | Quantum-Sniper-Strategie (15m→1m Retest + DCA-Ladder, TTL 45–48 min) als BaseStrategy | MP-02, MP-03, MP-05 |
 | MP-08 | `MP-08-exhaustion-unwind.md` | Volatilitäts-Exhaustion-Detektor (BBW/OI/CVD) + asynchroner Unwind-Template | MP-01, MP-04 |
-| MP-09 | `MP-09-dynamic-pine-provisioner.md` | Dynamischer Pine-v6-Provisionierer pro gescoutetem Symbol + Schema-A-Webhook (inkl. Multi-TP-Fraktal-Payload) | MP-07 |
+| MP-09 | `MP-09-dynamic-pine-provisioner.md` | Dynamischer Pine-v6-Provisionierer pro gescoutetem Symbol + Schema-A-Webhook (inkl. Multi-TP-Fraktal-Payload) + Auto-Härtung fremder Pine-Skripte (Webhook/Bar-Close/Payload automatisch injiziert, sonst fail-closed) | MP-07 |
 | MP-15 | `MP-15-fractal-directional.md` | Fraktale High-Leverage-Einzeltrade-Strategie (TP1 40 % / TP2 30 % / TP3 20 % / Runner 10 %, Fee-Covered Break-Even +0,05 %, 20–50x, ATR-Trailing-Kill-Switch) | MP-01, MP-05, MP-09 |
 | MP-10 | `MP-10-orderflow-validator.md` | L2/Footprint-Orderflow-Validator (Stacked Imbalances, CVD-Absorption, POC-Konfluenz, Iceberg) — optional, fail-closed ohne Tiefe | MP-04 |
 | MP-11 | `MP-11-onnx-tensor.md` | 16-Feature-Observation-Tensor + ONNX-Runtime-Inferenz mit deterministischem Fallback | MP-04, MP-05, MP-06 |
@@ -265,6 +265,14 @@ Konzeptreferenzen — diese eine Modul-Gruppe baut.
     (BUY/SELL/CLOSE groß, ticker, price, stop_loss, fixed_leverage, secret),
     bar-close-Alerts, look-ahead-frei (`barmerge.lookahead_off`, [1]-Offset)
   - De-Provisioning-Hinweis nach TTL/TP
+  - **Auto-Härtung fremder Pine-Skripte (`harden_pine_code()`):**
+    v5/v6-Fremdcode (Gemini, manuell, TV-Bibliothek) wird beim
+    Provisionieren automatisch umgeschrieben — Schema-A-`alert_message`
+    an jeden Entry/Exit, Fremd-Webhooks ersetzt, Bar-Close-Guard
+    (`barstate.isconfirmed`) + `lookahead_off` ergänzt,
+    `pyramiding=0`/`calc_on_every_tick=false`, strategy_id/Secret/TTL
+    injiziert; nicht härtbar → fail-closed ohne Deploy. Transport-Härtung
+    nur über den regulären Scout→Modal→kraken_paper-Pfad.
 - Tests: `tests/test_dynamic_pine.py`
   - Generierter Code enthält alle Konstanten + Schema-A-Felder
   - Statische Checks: kein `lookahead_on`, kein Repaint-Muster;

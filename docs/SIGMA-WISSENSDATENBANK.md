@@ -607,6 +607,19 @@ operativen Pfad. → MP-04 (Formeln dorthin als Akzeptanzgrundlage).
   `secret`)
 - Nach Move/TTL: Strategie de-provisionieren (ephemere Agenten)
 - Backtest + Live nutzen identischen Code (Loop B testet, Loop A führt aus)
+- **Auto-Härtung fremder Pine-Skripte (MP-09, `harden_pine_code()`):**
+  Skripte aus externen Quellen (Chat-Modelle, manuell, TV-Bibliothek)
+  werden beim Provisionieren automatisch auf Sigma-Standard umgeschrieben,
+  statt sie wegen fehlender Webhook-Anbindung abzulehnen: v5→v6 wo
+  maschinell portierbar, Schema-A-`alert_message`-Payload (bzw. Fraktal-
+  Payload) an jeden `strategy.entry/exit/close`, Fremd-Webhooks ersetzen,
+  `barstate.isconfirmed`-Bar-Close-Guard + `lookahead_off` erzwingen,
+  `pyramiding=0` / `calc_on_every_tick=false`, strategy_id/Secret/TTL
+  injizieren. Nicht statisch härtbare Skripte → fail-closed
+  (`hardening_ok=False` mit Gründen), **kein** Deploy. Härtung betrifft
+  nur den Transport — die Signallogik fremder Skripte bleibt unkanonisch
+  und gelangt nur über Scout-Symbol + Operator-Modal + kraken_paper +
+  TTL in den Markt, nie per Direkt-Upload.
 - **Schema-Erweiterung für fraktale Einzeltrades (MP-15):** Entry-Payload
   trägt gestaffelte TPs mit:
   `action` `open_long`/`open_short`, `ticker`, `price` (Close der

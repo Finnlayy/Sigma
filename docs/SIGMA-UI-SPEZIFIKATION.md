@@ -58,7 +58,7 @@ SettingsPanel).
 | MP-06 Polymarket Dichte/Trajektorie | `GET /api/v1/sigma/polymarket` | **PolymarketPanel** (neu) |
 | MP-07 Sniper-Pipeline (15m→1m, TTL-Phasen) | `GET /api/v1/sigma/regime` | **QuantumRegimePanel** + Sniper-Statusstreifen |
 | MP-08 Exhaustion + Async-Unwind | `GET /api/v1/sigma/exhaustion` | **UnwindPanel** (neu) |
-| MP-09 Dynamischer Pine-Provisionierer | `GET/POST /api/v1/sigma/provisions` | **ProvisionerPanel** (neu, bei TvJobs/PineStudio angedockt) |
+| MP-09 Dynamischer Pine-Provisionierer + Auto-Härtung fremder Skripte | `GET/POST /api/v1/sigma/provisions`, `POST .../provisions/harden` | **ProvisionerPanel** (neu, bei TvJobs/PineStudio angedockt) |
 | MP-15 Fraktaler Einzeltrade (40/30/20/10, Fee-BE, Kill-Switch) | `GET /api/v1/sigma/fractal/preview` | **FractalTradePanel** (neu) |
 | MP-11 ONNX-Tensor/Inferenz | `GET /api/v1/sigma/onnx` | **OnnxBrainPanel** (neu; NetronVisualizer bleibt Modellgraph) |
 | MP-12/MP-16 Backtest H1–H7 + Dashboard | `GET/POST /api/v1/research/...` | **ResearchLabPanel** (neu; erweitert BacktestPanel) |
@@ -199,9 +199,23 @@ SettingsPanel).
 - **Aktionen:** Code-Vorschau (generiertes Pine v6, read-only Dialog),
   Payload-Vorschau (Schema A / Fraktal-Payload mit tp1–3 +
   fee_covered_be_offset), „De-provisionieren“ (operator-bestätigt).
+- **Fremd-Pine-Härtung (Auto-Harden):** Button „Externes Pine härten“
+  öffnet ein Dialog mit Code-Textarea (Einfügen von Gemini-/manuellem
+  Skript) + Symbol/Parameterauswahl. Backend (`harden_pine_code`,
+  MP-09) liefert `code` + `transformations` + `hardening_ok` +
+  `reasons`. Der Dialog zeigt:
+  - Vorher/Nachher-Diff oder Transformations-Liste
+    (z. B. „v5→v6 portiert“, „Webhook-Payload an 3 strategy.entry
+    injiziert“, „Fremd-Webhook entfernt“, „barstate.isconfirmed
+    ergänzt“, „pyramiding=0 gesetzt“) als Häkchenliste,
+  - bei `hardening_ok=false`: roter Block mit den Ablehnungsgründen,
+    Deploy-Button deaktiviert (fail-closed),
+  - bei Erfolg: nur Pfad „Provisionieren“ über Bestätigungs-Modal
+    (Scout-Symbol + kraken_paper + TTL sichtbar) — kein Direkt-Upload.
 - **Wächter-Anzeige:** statische Prüfergebnisse des Generators
-  (lookahead_off vorhanden, bar-close-Alert, kein strategy.entry im
-  Webhook-Modus) als Häkchenliste.
+  (lookahead_off vorhanden, bar-close-Alert, Schema-A-Payload,
+  pyramiding=0, calc_on_every_tick=false) als Häkchenliste — dieselben
+  Checks für eigen-generierte und gehärtete Skripte.
 - Dock-Andockung bei TvJobs/PineStudio (neuer Tab, kein Ersatz).
 
 ### 3.9 OnnxBrainPanel — KNN-Tensor-Inspektor (MP-11)
