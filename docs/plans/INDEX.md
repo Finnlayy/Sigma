@@ -4,7 +4,7 @@
 |---|---|---|---|---|
 | MP-01 | PLAN-DONE | `docs/plans/MP-01.md` | — | MP-02 |
 | MP-02 | PLAN-DONE | `docs/plans/MP-02.md` | — | MP-03 |
-| MP-03 | OPEN | `docs/plans/MP-03.md` | vorheriger Pflicht-Plan | MP-04 |
+| MP-03 | PLAN-DONE | `docs/plans/MP-03.md` | — | MP-04 |
 | MP-04 | OPEN | `docs/plans/MP-04.md` | vorheriger Pflicht-Plan | MP-05 |
 | MP-05 | OPEN | `docs/plans/MP-05.md` | vorheriger Pflicht-Plan | MP-06 |
 | MP-06 | OPEN | `docs/plans/MP-06.md` | vorheriger Pflicht-Plan | MP-07 |
