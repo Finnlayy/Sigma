@@ -109,6 +109,9 @@ class MasterOrchestrator:
         self._screen_to_loop_d_academy(screen, session.session)
         # MP-05: passives 1h-Screening (Gate + Ranker) — nur ctx, keine Orders.
         screening = self._screening_ctx(series, session, now)
+        # MP-11: optionaler ONNX-Tensor (nur BTC-Makro Long/Flat/Short +
+        # begrenzter Hebel). Ohne Port fehlt der Key (wie screening).
+        onnx_result = self._onnx_ctx(htf, ltf, session, now)
         if not dual.htf_ready:
             return self._idle("htf_not_ready", session, throttle, dual, pair, poly, wave, screen, screening)
         if throttle.mode == "SLEEP" or session.liquidity_gap:
@@ -151,6 +154,8 @@ class MasterOrchestrator:
         }
         if screening:
             result["screening"] = screening
+        if onnx_result is not None:
+            result["onnx"] = onnx_result
         return result
 
     def _poll_c(self) -> Any:
@@ -212,6 +217,26 @@ class MasterOrchestrator:
             # (Kill-Switch dann via TTL/Sweep).
             "exhaustion": self.ports.get("exhaustion"),
         })
+
+    def _onnx_ctx(self, htf, ltf, session, now) -> Optional[Dict[str, Any]]:
+        """MP-11: optionaler ONNX-Port -> ctx[\"onnx\"]. Baut nur das
+        rohe Material; der Wrapper erzeugt Tensor + Fallback/Modell.
+        Fail-closed: Port-Fehler -> FLAT-Kontext, keine Orders."""
+        port = self.ports.get("onnx")
+        if port is None or not hasattr(port, "evaluate"):
+            return None
+        try:
+            return port.evaluate(
+                {
+                    "htf_candles": list(htf or []),
+                    "ltf_candles": list(ltf or []),
+                    "session": session.to_dict() if hasattr(session, "to_dict") else dict(session or {}),
+                    "now": now,
+                }
+            )
+        except Exception as exc:  # fail-closed
+            return {"action": "FLAT", "leverage": 0,
+                    "reason": f"onnx_error:{type(exc).__name__}", "model_available": False}
 
     @staticmethod
     def _symbol_recommendation(screening: Optional[Dict[str, Any]], symbol: str) -> str:
