@@ -531,3 +531,42 @@ def test_zero_mock_seams_are_honest_empty(client):
     assert lake.get("ok") is False and lake.get("mode") == "disabled"
     poly = client.get("/api/quant/polymarket/layer0").json()
     assert poly.get("valid") is False and poly.get("reason") == "missing_data"
+
+
+def test_logs_strategy_pnl_uses_sql_aggregates(client):
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "bolt_sql_agg",
+        "name": "Bolt SQL Agg",
+        "status": "inactive",
+        "assetPair": "BTC/USD",
+        "interval": 15,
+        "executionMode": "paper",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-sql-1", "strategy_id": "bolt_sql_agg",
+        "strategy_name": "Bolt SQL Agg", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": 7.5, "notional_usd": 200.0,
+        "exit_time": "2026-08-30 05:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "bolt-sql-2", "strategy_id": "bolt_sql_agg",
+        "strategy_name": "Bolt SQL Agg", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy",
+        "net_pnl_usd": -2.5, "notional_usd": 100.0,
+        "exit_time": "2026-08-30 05:01:00",
+    })
+    body = client.get("/api/logs").json()
+    row = next(r for r in body["strategyPnL"] if r["strategyId"] == "bolt_sql_agg")
+    assert row["totalTrades"] == 2
+    assert row["winningTrades"] == 1
+    assert row["losingTrades"] == 1
+    assert row["realizedPnL"] == 5.0
+    assert row["volumeTradedUSD"] == 300.0
+    assert body["metrics"]["totalTrades"] >= 2
+    assert any(o.get("id") == "bolt-sql-2" for o in body["orders"])

@@ -11,3 +11,7 @@
 ## 2026-08-29 - empty execution_mode vs SQL COALESCE
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
+
+## 2026-08-30 - LIMIT 10000 trades() snapshot undercounts dashboard totals
+**Learning:** Sharing one `trades(status="closed", limit=10000)` dump across `/api/logs` helpers still materializes ~8k full rows (~35 ms) and silently drops older trades from `totalTrades` / `strategyPnL` once history exceeds the LIMIT. DuckDB SUM/COUNT/GROUP BY is ~1 ms and exact.
+**Action:** On poll endpoints that only need aggregates, use SQL SUM/COUNT/GROUP BY. Fetch `trades()` only for the order tape (limit ~80). Never pass a capped snapshot into helpers that compute lifetime totals.
