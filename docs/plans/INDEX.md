@@ -21,3 +21,9 @@ Implementierungs-Loop: `docs/plans/EXECUTE-STATE.md` (Next-Zeiger) · Prompt: `d
 | MP-15 | PLAN-DONE | `docs/plans/MP-15.md` | — | MP-11 |
 | MP-16 | PLAN-DONE | `docs/plans/MP-16.md` | — | MP-17 |
 | MP-17 | PLAN-DONE | `docs/plans/MP-17.md` | — | STOP |
+
+## Feed-Verdrahtung (nach MP-Kette)
+
+| Plan | Status | Datei | Hinweis |
+|---|---|---|---|
+| Glint + Polymarket Live-Feeds | PLAN | `docs/plans/GLINT-POLYMARKET-WIRING.md` | Gamma + Kraken L2 in bestehende Engines; kein Ciel-Sandbox-Deploy |
