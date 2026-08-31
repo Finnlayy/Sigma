@@ -626,3 +626,42 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_queue_matrices_isolates_strategy_pnl(client):
+    """Hash-map grouping must not mix PnL across strategies on the 8s poll."""
+    import app.server.main as main
+
+    a = client.post("/api/strategies", json={
+        "name": "qm-iso-a", "assetPair": "BTC/USD", "executionMode": "paper",
+        "status": "inactive",
+    }).json()
+    b = client.post("/api/strategies", json={
+        "name": "qm-iso-b", "assetPair": "ETH/USD", "executionMode": "paper",
+        "status": "inactive",
+    }).json()
+    main.state.store.upsert_trade({
+        "trade_id": "qm-iso-a-1", "strategy_id": a["id"], "strategy_name": a["name"],
+        "status": "closed", "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0, "notional_usd": 100.0,
+        "entry_time": "2026-08-01 11:00:00", "exit_time": "2026-08-01 12:00:00",
+        "entry_price": 1.0, "quantity": 1.0,
+    })
+    main.state.store.upsert_trade({
+        "trade_id": "qm-iso-b-1", "strategy_id": b["id"], "strategy_name": b["name"],
+        "status": "closed", "execution_mode": "paper", "symbol": "ETH/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -4.0, "notional_usd": 50.0,
+        "entry_time": "2026-08-01 12:30:00", "exit_time": "2026-08-01 13:00:00",
+        "entry_price": 1.0, "quantity": 1.0,
+    })
+    body = client.get("/api/queue-matrices").json()
+    assert set(body) >= {"paper", "live"}
+    by_id = {row["strategyId"]: row for row in body["paper"]["strategies"]}
+    assert by_id[a["id"]]["realizedPnL"] == 10.0
+    assert by_id[a["id"]]["winningTrades"] == 1
+    assert by_id[a["id"]]["losingTrades"] == 0
+    assert by_id[b["id"]]["realizedPnL"] == -4.0
+    assert by_id[b["id"]]["winningTrades"] == 0
+    assert by_id[b["id"]]["losingTrades"] == 1
+    assert by_id[a["id"]]["totalTrades"] == 1
+    assert by_id[b["id"]]["totalTrades"] == 1
