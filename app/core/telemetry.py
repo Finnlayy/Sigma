@@ -23,8 +23,8 @@ VALID_BREAKERS = ("NORMAL", "TRIPPED", "HALTED")
 # SSE /api/quant/telemetry/stream ticks every sse_interval_seconds (2.0).
 # lake_summary() runs COUNT(*) + GROUP BY over all ohlcv rows AND walks the
 # parquet dir — the frame only needs file count + size. Cache those 15s.
-# Bench (50k ohlcv + 200 parquet files): 2× lake_summary ~18–40 ms/tick
-# vs 1× parquet_file_stats amortized ~0.0–0.5 ms (~30–80× on this path).
+# Bench @ 70k ohlcv + 200 parquet files: 2× lake_summary ~9.5 ms/tick
+# vs parquet_file_stats + 15s TTL ~0.06 ms amortized (~150× on this path).
 L2_PARQUET_STATS_TTL_S = 15.0
 
 
