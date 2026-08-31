@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -85,6 +86,64 @@ def test_tail_backfill(tailer):
 
 def test_tail_missing_file_is_empty(tailer):
     assert tailer.tail("SCRAPER") == []
+
+
+def test_read_last_lines_matches_readlines_on_small_file(tmp_path):
+    path = tmp_path / "small.log"
+    path.write_text("a\nb\nc\nd\n", encoding="utf-8")
+    assert rl.read_last_lines(str(path), 2) == ["c", "d"]
+    assert rl.read_last_lines(str(path), 10) == ["a", "b", "c", "d"]
+    assert rl.read_last_lines(str(path), 0) == []
+
+
+def test_read_last_lines_no_trailing_newline(tmp_path):
+    path = tmp_path / "partial.log"
+    path.write_text("one\ntwo\nthree", encoding="utf-8")
+    assert rl.read_last_lines(str(path), 2) == ["two", "three"]
+
+
+def test_read_last_lines_utf8_and_blank_skipped_by_tail(tailer, tmp_path):
+    path = tailer.sources["CORE"]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("alpha\n\nbeta ß\ngamma\n")
+    rows = tailer.tail("CORE", limit=10)
+    assert [r["raw_line"] for r in rows] == ["alpha", "beta ß", "gamma"]
+
+
+def test_tail_large_file_only_returns_last_n(tailer):
+    """EOF-seek must equal readlines()[-n] and stay cheap on a multi-MB log.
+
+    40k lines × ~40 bytes ≈ 1.6 MiB. Seeking 8 KiB blocks for limit=5
+    should finish well under a full-file scan (bench in this test).
+    """
+    path = tailer.sources["CORE"]
+    n_lines = 40_000
+    with open(path, "w", encoding="utf-8") as fh:
+        for i in range(n_lines):
+            fh.write(f"fill {i:06d} extra padding for realistic line width\n")
+
+    t0 = time.perf_counter()
+    rows = tailer.tail("CORE", limit=5)
+    seek_ms = (time.perf_counter() - t0) * 1000.0
+
+    t1 = time.perf_counter()
+    with open(path, "r", encoding="utf-8") as fh:
+        expected = [ln.rstrip("\n") for ln in fh.readlines()[-5:]]
+    scan_ms = (time.perf_counter() - t1) * 1000.0
+
+    assert [r["raw_line"] for r in rows] == expected
+    assert expected == [f"fill {i:06d} extra padding for realistic line width"
+                        for i in range(n_lines - 5, n_lines)]
+    # Seek path is the contract; timing is noisy on CI so we only log it.
+    logger = __import__("logging").getLogger("test_log_console")
+    logger.info("tail seek=%.2f ms vs readlines=%.2f ms (n=%d)",
+                seek_ms, scan_ms, n_lines)
+
+
+def test_read_last_lines_tiny_blocks_span_multiple_reads(tmp_path):
+    path = tmp_path / "blocks.log"
+    path.write_text("\n".join(f"L{i}" for i in range(50)) + "\n", encoding="utf-8")
+    assert rl.read_last_lines(str(path), 3, block_bytes=8) == ["L47", "L48", "L49"]
 
 
 def test_poll_once_only_returns_new_lines(tailer):

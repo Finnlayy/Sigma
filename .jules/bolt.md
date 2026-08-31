@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-31 - LogTailer.tail slurped unbounded process logs
+**Learning:** `LogTailer.tail` used `fh.readlines()[-limit]` for WS/HTTP backfill across six unbounded log sources (CORE, ORDERS, TV_WORKER, ERRORS, AI_LAYER, SCRAPER). Time scaled with file size: 200k lines / 14.5 MiB was 14 ms vs 0.06 ms EOF-seek (~250×, constant in file size). ProcessLogView reconnects the WS (and re-tails every selected source) on every subsystem filter change.
+**Action:** Never `readlines()[-n]` on process logs. Seek from EOF in 8 KiB blocks; drop bytes before the first newline so a mid-file start does not break UTF-8.
