@@ -603,6 +603,47 @@ class DuckDBStore:
         )
         return float(row["pnl"]) if row else 0.0
 
+    def closed_trade_stats(self, execution_mode: str = "paper") -> Dict[str, Any]:
+        """COUNT + SUM for one execution mode. GET /api/logs poll path.
+
+        Same NULL/'' → paper rule as sum_closed_pnl. One query instead of
+        materializing up to 10k trade dicts for totalTrades + total_pnl.
+        """
+        row = self._one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(net_pnl_usd), 0) AS pnl FROM trades "
+            "WHERE status = 'closed' "
+            "AND COALESCE(NULLIF(CAST(execution_mode AS VARCHAR), ''), ?) = ?",
+            [execution_mode, execution_mode],
+        )
+        return {
+            "count": int(row["n"]) if row else 0,
+            "pnl": float(row["pnl"]) if row else 0.0,
+        }
+
+    def strategy_closed_aggregates(self) -> List[Dict[str, Any]]:
+        """Per-strategy closed PnL. GROUP BY in DuckDB, not Python.
+
+        Matches `_strategy_pnl` Python: wins = net_pnl > 0, zeros count as
+        losses (len - wins). Bench @ 8k rows: SELECT * ~38 ms vs COUNT/SUM
+        GROUP BY + 80-row slice ~5 ms (~8×).
+        """
+        rows = self._rows(
+            """SELECT COALESCE(strategy_id, '') AS strategy_id,
+                      COALESCE(SUM(net_pnl_usd), 0) AS realized,
+                      COUNT(*) AS trades,
+                      SUM(CASE WHEN COALESCE(net_pnl_usd, 0) > 0 THEN 1 ELSE 0 END) AS wins,
+                      COALESCE(SUM(notional_usd), 0) AS volume
+               FROM trades WHERE status = 'closed'
+               GROUP BY COALESCE(strategy_id, '')"""
+        )
+        for r in rows:
+            r["strategy_id"] = str(r.get("strategy_id") or "")
+            r["realized"] = float(r.get("realized") or 0.0)
+            r["trades"] = int(r.get("trades") or 0)
+            r["wins"] = int(r.get("wins") or 0)
+            r["volume"] = float(r.get("volume") or 0.0)
+        return rows
+
     # -------------------------------------------------------------------- ohlcv
     def seed_ohlcv(self, symbol: str, interval_sec: int, candles: List[Dict[str, Any]]) -> int:
         if not candles:
