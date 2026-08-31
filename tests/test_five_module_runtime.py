@@ -442,6 +442,52 @@ def test_telemetry_center_can_enable_live_bridge():
     assert KrakenCliBridge(cfg, telemetry=telemetry).live_enabled is True
 
 
+def test_telemetry_frame_skips_lake_summary_and_caches_parquet_stats():
+    """SSE frames must not run lake_summary; parquet stats TTL is 15s."""
+    from app.core.telemetry import L2_PARQUET_STATS_TTL_S
+
+    class _Store:
+        def __init__(self):
+            self.summary_calls = 0
+            self.stat_calls = 0
+
+        def lake_summary(self):
+            self.summary_calls += 1
+            return {"total_files": 99, "total_size_mb": 12.5}
+
+        def parquet_file_stats(self):
+            self.stat_calls += 1
+            return 7, 1.25
+
+    store = _Store()
+    tele = TelemetryCenter()
+    frame = tele.build_frame(store=store)
+    assert store.summary_calls == 0
+    assert store.stat_calls == 1
+    assert frame["storage_tiering"]["l2_duckdb_parquet_files"] == 7
+    assert frame["storage_tiering"]["l2_total_mb"] == 1.25
+
+    tele.build_frame(store=store)
+    assert store.stat_calls == 1
+    assert store.summary_calls == 0
+
+    tele._l2_stats_at = time.time() - L2_PARQUET_STATS_TTL_S - 0.01
+    tele.build_frame(store=store)
+    assert store.stat_calls == 2
+    assert store.summary_calls == 0
+    assert L2_PARQUET_STATS_TTL_S == 15.0
+
+
+def test_parquet_file_stats_matches_lake_summary_file_fields(tmp_path):
+    store = DuckDBStore(str(tmp_path / "bolt-telemetry.duckdb"))
+    files, mb = store.parquet_file_stats()
+    summary = store.lake_summary()
+    assert files == summary["total_files"]
+    assert mb == summary["total_size_mb"]
+    assert files >= 0
+    assert mb >= 0.0
+
+
 def test_dispatcher_routes_futures_without_falling_back_to_spot(tmp_path):
     class Result:
         ok = True

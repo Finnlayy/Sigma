@@ -664,7 +664,7 @@ class DuckDBStore:
                 "startTime": str(p["start_time"]) if p.get("start_time") else None,
                 "endTime": str(p["end_time"]) if p.get("end_time") else None,
             })
-        parquet_count, parquet_mb = self._parquet_stats()
+        parquet_count, parquet_mb = self.parquet_file_stats()
         return {
             "total_rows": int(row["n"]) if row else 0,
             "total_size_mb": round(parquet_mb, 2),
@@ -687,6 +687,14 @@ class DuckDBStore:
 
     _memory_limit = "2GB"
     _threads = 4
+
+    def parquet_file_stats(self):
+        """(file_count, size_mb) of the parquet lake — no DuckDB ohlcv scan.
+
+        Telemetry SSE only needs these two numbers. lake_summary() also runs
+        COUNT(*) and GROUP BY over ohlcv; keep that for /api/lake/*.
+        """
+        return self._parquet_stats()
 
     def _parquet_stats(self):
         from app.core.config import load_config  # local import to avoid cycle

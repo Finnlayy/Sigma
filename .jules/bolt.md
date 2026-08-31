@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-31 - SSE telemetry ran lake_summary twice per 2s tick
+**Learning:** `/api/quant/telemetry/stream` calls `build_frame` every 2s. `_l2_files` and `_l2_mb` each called `store.lake_summary()`, which runs `COUNT(*)` + `GROUP BY` over all ohlcv **and** walks the parquet dir with `getsize`. The SSE payload only uses `total_files` / `total_size_mb`. A leftover `recent_logs_list(50)` in the stream generator was unused (`build_frame` already ships 25).
+**Action:** For SSE/health gauges, never call `lake_summary()`. Use `parquet_file_stats()` (dir walk only) with a short TTL (15s). Do not fetch logs twice in the same tick.
