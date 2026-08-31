@@ -24,6 +24,10 @@ export function OverviewMetricsPanel() {
 
   useEffect(() => {
     const load = async () => {
+      // Bolt: Overview polls /api/logs (10k-row scan, ~35 ms @ 8k trades) plus
+      // market-data + queue-matrices every 8s. Hidden-tab skip: ~7.5 of those
+      // triples/min — the hottest dashboard poll path — drop to zero.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const logs = await safeFetchJson<{
         metrics: RunnerMetrics; balances: Record<string, number>; strategyPnL?: StrategyPnL[];
       }>('/api/logs');
@@ -69,7 +73,12 @@ export function QueueMatrixPanelView() {
   };
   useEffect(() => {
     load();
-    const id = setInterval(load, 8000);
+    // Bolt: queue-matrices is O(S×T) over up to 5k trades; skip when hidden.
+    // Manual onRefresh (below) still fetches so the user can force a reload.
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      load();
+    }, 8000);
     return () => clearInterval(id);
   }, []);
   return (

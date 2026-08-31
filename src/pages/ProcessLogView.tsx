@@ -72,6 +72,9 @@ export default function ProcessLogView() {
       if (poll) return;
       void sigmaApi.logTail(filterParam, 200).then((r) => r && push(r.lines));
       poll = setInterval(() => {
+        // Bolt: WS-fallback polls /api/v1/logs/poll every 1s. A hidden tab
+        // used to keep the HTTP fallback hot (~60 GETs/min). Skip until focus.
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
         void sigmaApi.logPoll(filterParam).then((r) => r && push(r.lines));
       }, 1000);
     };

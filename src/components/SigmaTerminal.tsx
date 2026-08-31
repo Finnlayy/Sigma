@@ -241,6 +241,10 @@ export default function SigmaTerminal() {
 
   useEffect(() => {
     const load = () => {
+      // Bolt: chrome header polls health + kraken status every 5s. Skip while
+      // hidden — health also pings the scraper sidecar (5s cache, still a
+      // thread hop). ~24 request-pairs/min saved per background tab.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void sigmaApi.health().then(setHealth);
       void fetch('/api/kraken/status')
         .then((r) => r.ok ? r.json() : null)

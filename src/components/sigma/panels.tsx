@@ -53,7 +53,14 @@ export function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, (
   const refresh = useCallback(() => { void fn().then((d) => d && setData(d)); }, [fn]);
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, ms);
+    // Bolt: ~30 Sigma / MP-17 panels share this hook (3–10 s). A background
+    // tab still fired every interval — bots, confluence, research, jobs, …
+    // Hidden-tab skip: ~180–400 API calls/min avoided on a typical cockpit
+    // left in the background. Next tick after focus resumes (~ms latency).
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      refresh();
+    }, ms);
     return () => clearInterval(id);
   }, [refresh, ms]);
   return [data, refresh];

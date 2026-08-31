@@ -75,7 +75,13 @@ export function ExecutionRiskPanel() {
     runReconciliation();
     runRLInference();
     fetchM8();
-    const m8Timer = setInterval(fetchM8, 10000);
+    // Bolt: three parallel M8 GETs every 10s. Skip while hidden so promote /
+    // quarantine (fetchM8 on click) still works — visibility lives on the
+    // timer, not inside fetchM8. ~18 requests/min saved per background tab.
+    const m8Timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      fetchM8();
+    }, 10000);
     return () => clearInterval(m8Timer);
   }, []);
 
