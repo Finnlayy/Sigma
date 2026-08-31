@@ -18,4 +18,8 @@
 
 ## 2026-08-31 - Concurrent Bolt runs collide on the same hotspot
 **Learning:** Two cron Bolts independently implemented parquet_inventory + 5s TTL for SSE L2. #66 merged first; the second PR conflicted as a duplicate because memories already named that hotspot.
-**Action:** `git fetch origin main` before picking the daily boost. Skip work already in recent `⚡ Bolt` commits. `GET /api/logs` still did `SELECT * LIMIT 10000` every 8s after the shared-scan fix — use SQL COUNT/SUM/GROUP BY next.
+**Action:** `git fetch origin main` before picking the daily boost. Skip work already in recent `⚡ Bolt` commits. `GET /api/logs` SQL aggregates landed in #67; `GET /api/queue-matrices` O(T) grouping is the 8s-poll leftover after that.
+
+## 2026-08-31 - Second TestClient lifespan tears down the shared FastAPI loop
+**Learning:** `app.server.main` holds process-global `state`. A second module-scoped `TestClient(main.app)` after `test_api_contract` already entered lifespan raises `ValueError: The future belongs to a different loop` on teardown even when assertions passed (suite shows ERROR, not FAIL).
+**Action:** Put queue-matrices / dashboard HTTP contracts on `tests/test_api_contract.py`'s existing client. Helper-only tests may import `main` but must not open another TestClient.
