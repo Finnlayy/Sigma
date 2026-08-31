@@ -84,6 +84,16 @@ def test_extended_panels_are_registered(panel):
     assert panel in bp.ALL_TERMINAL_PANELS
 
 
+def test_use_poll_keeps_fetcher_out_of_effect_deps():
+    """Inline `() => api.x()` must not restart the poll interval on every setData."""
+    src = _read(PANELS_TSX)
+    hook = src.split("export function usePoll", 1)[1].split("export function PanelShell", 1)[0]
+    assert "fnRef" in hook
+    assert "fnRef.current" in hook
+    assert "inFlight" in hook
+    assert "[fn]" not in hook
+
+
 def test_terminal_is_wired_into_app_navigation():
     src = _read(APP_TSX)
     assert "SigmaTerminal" in src

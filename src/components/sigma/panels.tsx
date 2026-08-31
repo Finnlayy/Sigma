@@ -6,7 +6,7 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   Download, ExternalLink, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
@@ -50,7 +50,21 @@ import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
 
 export function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, () => void] {
   const [data, setData] = useState<T | null>(null);
-  const refresh = useCallback(() => { void fn().then((d) => d && setData(d)); }, [fn]);
+  // Keep the fetcher in a ref so an inline `() => api.x()` (new function every
+  // render) cannot sit in effect deps. Previously: fetch → setData → re-render
+  // → new `fn` → effect cleanup/restart → immediate refetch. Panels such as
+  // AcademyBadgeMatrix / TvJobs / receipts then requested as fast as RTT
+  // instead of every `ms` (~8s → ~50–200 ms, ~40–160× chatter).
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const inFlight = useRef(false);
+  const refresh = useCallback(() => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    void fnRef.current()
+      .then((d) => { if (d) setData(d); })
+      .finally(() => { inFlight.current = false; });
+  }, []);
   useEffect(() => {
     refresh();
     const id = setInterval(refresh, ms);
@@ -1007,8 +1021,13 @@ const SEV_STYLE: Record<string, string> = {
 export function DiagnosticsErrorPanel() {
   const [sev, setSev] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const fetcher = useCallback(() => sigmaApi.diagnostics(50, sev), [sev]);
-  const [data, refresh] = usePoll(fetcher, 5000);
+  const [data, refresh] = usePoll(() => sigmaApi.diagnostics(50, sev), 5000);
+  const prevSev = useRef(sev);
+  useEffect(() => {
+    if (prevSev.current === sev) return;
+    prevSev.current = sev;
+    refresh();
+  }, [sev, refresh]);
   const errors: any[] = data?.errors ?? [];
   const counts: Record<string, number> = data?.counts ?? {};
 

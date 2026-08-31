@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-31 - usePoll([fn]) + inline fetcher = RTT-rate request storm
+**Learning:** `usePoll` put `fn` in `useCallback`/`useEffect` deps. Panels pass `() => sigmaApi.x()` (new function every render). Fetch → `setData` → re-render → effect cleanup/restart → immediate refetch. Academy badges/jobs/receipts/paper-lab/netron then hit the core as fast as RTT (~50–200 ms) instead of the 5–10 s interval (~40–160×). `/api/v1/health` `uptime` also forces a SigmaTerminal re-render every 5 s, which used to walk the whole dock.
+**Action:** Keep poll fetchers in a ref; never put `fn` identity in the interval effect. Memo `SigmaDock` so health/uptime ticks cannot reconcile polling panels.
