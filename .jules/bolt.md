@@ -12,6 +12,10 @@
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
 
+## 2026-08-31 - usePoll + inline fetchers restart the interval every render
+**Learning:** `usePoll(fn)` listed `fn` in `useCallback` deps. Cockpit/MP-17 panels pass `() => sigmaApi.x(...)` which is a new function every render, so each successful `setData` rebuilt `refresh`, cleared the timer, and immediately refetched — a request storm (6 inline-fn panels × ~80 ms RTT ≈ 75 req/s) instead of a 5–8s poll.
+**Action:** Hold the fetcher in a ref. Never put inline-fn identity in the interval effect deps. Use an explicit `key` (severity, id) when the query must change. Skip `document.hidden` on dashboard polls.
+
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.

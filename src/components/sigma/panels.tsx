@@ -6,7 +6,7 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   Download, ExternalLink, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
@@ -48,14 +48,38 @@ import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
 
 /* ------------------------------------------------------------------ shared */
 
-export function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, () => void] {
+/**
+ * Bolt: keep the fetcher in a ref so inline `() => api.foo()` does not
+ * restart the interval on every render.
+ *
+ * Many cockpit / MP-17 panels pass a new arrow each render. The previous
+ * impl listed `fn` in useCallback deps, so each successful `setData`
+ * rebuilt `refresh`, tore down the timer, and immediately refetched —
+ * a request storm instead of a 5–8s poll. Six such panels at ~80 ms RTT
+ * were ~75 req/s; a stable interval is ~1.1 req/s (~70× fewer).
+ *
+ * Background tabs skip the network (`document.hidden`) and refetch once
+ * on `visibilitychange`. Pass `key` when the query itself changes
+ * (e.g. diagnostics severity) so that still refetches immediately.
+ */
+export function usePoll<T>(fn: () => Promise<T | null>, ms = 5000, key?: unknown): [T | null, () => void] {
   const [data, setData] = useState<T | null>(null);
-  const refresh = useCallback(() => { void fn().then((d) => d && setData(d)); }, [fn]);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const refresh = useCallback(() => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    void fnRef.current().then((d) => d && setData(d));
+  }, []);
   useEffect(() => {
     refresh();
     const id = setInterval(refresh, ms);
-    return () => clearInterval(id);
-  }, [refresh, ms]);
+    const onVis = () => { if (!document.hidden) refresh(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [refresh, ms, key]);
   return [data, refresh];
 }
 
@@ -1008,7 +1032,9 @@ export function DiagnosticsErrorPanel() {
   const [sev, setSev] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const fetcher = useCallback(() => sigmaApi.diagnostics(50, sev), [sev]);
-  const [data, refresh] = usePoll(fetcher, 5000);
+  // `sev` is the query key so a filter change still refetches immediately
+  // without putting the (unstable) fetcher identity on the interval effect.
+  const [data, refresh] = usePoll(fetcher, 5000, sev);
   const errors: any[] = data?.errors ?? [];
   const counts: Record<string, number> = data?.counts ?? {};
 
