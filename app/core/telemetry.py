@@ -20,6 +20,12 @@ logger = logging.getLogger("app.core.telemetry")
 VALID_STATES = ("SHADOW_ACTIVE", "LIVE_APPROVED", "EMERGENCY_HALT")
 VALID_BREAKERS = ("NORMAL", "TRIPPED", "HALTED")
 
+# SSE ticks every `sse_interval_seconds` (2.0). L2 gauges only need parquet
+# file count + MB; `lake_summary()` also runs COUNT(*) + GROUP BY on ohlcv
+# and was invoked twice per frame via `_l2_files` + `_l2_mb`. Compact/seed
+# are the only writers — a 5s TTL is plenty. Do not cache GET /api/lake/summary.
+_L2_TTL_S = 5.0
+
 
 @dataclass
 class SystemState:
@@ -56,6 +62,8 @@ class TelemetryCenter:
         self.l3_rclone_sync_status = "DISABLED"
         self.ingestion_rate_events_per_sec = 0.0
         self.avg_latency_microseconds = 0.0
+        # (monotonic_ts, files, mb) — None until first successful inventory.
+        self._l2_cache: Optional[tuple[float, int, float]] = None
 
     # ------------------------------------------------------------- M-00 state
     def set_state(self, new_state: str, reason: Optional[str] = None) -> Dict[str, Any]:
@@ -90,6 +98,7 @@ class TelemetryCenter:
 
     def build_frame(self, store=None, log_bus=None) -> Dict[str, Any]:
         mem = _mem_usage_percent()
+        l2_files, l2_mb = self._l2_parquet(store)
         return {
             "timestamp": time.time(),
             "state_machine": self.system.to_dict(),
@@ -103,8 +112,8 @@ class TelemetryCenter:
             "storage_tiering": {
                 "l1_shm_ringbuffer_bytes": int(self.l1_ringbuffer_bytes),
                 "l1_capacity_bytes": int(self.l1_capacity_bytes),
-                "l2_duckdb_parquet_files": _l2_files(store),
-                "l2_total_mb": _l2_mb(store),
+                "l2_duckdb_parquet_files": l2_files,
+                "l2_total_mb": l2_mb,
                 "l3_rclone_sync_status": self.l3_rclone_sync_status,
                 "ingestion_rate_events_per_sec": round(self.ingestion_rate_events_per_sec, 1),
                 "avg_latency_microseconds": round(self.avg_latency_microseconds, 1),
@@ -117,6 +126,32 @@ class TelemetryCenter:
             },
             "recent_logs": (log_bus.recent_logs_list(25) if log_bus else []),
         }
+
+    def _l2_parquet(self, store) -> tuple[int, float]:
+        """One parquet walk per TTL window, shared by files + MB gauges.
+
+        Bench (modest lake, CPython): 2× lake_summary() ~20 ms/frame vs
+        1× parquet_inventory() ~1–2 ms, and with TTL the walk runs at most
+        once per 5s instead of twice per 2s SSE tick (~10× fewer DuckDB
+        aggs, ~5× fewer os.walk). GET /api/lake/summary stays uncached.
+        """
+        now = time.time()
+        cached = self._l2_cache
+        if cached is not None and (now - cached[0]) < _L2_TTL_S:
+            return cached[1], cached[2]
+        if store is None:
+            return 0, 0.0
+        try:
+            if hasattr(store, "parquet_inventory"):
+                files, mb = store.parquet_inventory()
+            else:
+                # Test doubles that only implement lake_summary().
+                summary = store.lake_summary()
+                files, mb = int(summary["total_files"]), float(summary["total_size_mb"])
+        except Exception:
+            files, mb = 0, 0.0
+        self._l2_cache = (now, int(files), float(mb))
+        return self._l2_cache[1], self._l2_cache[2]
 
 
 def _cpu_percent() -> float:
@@ -146,20 +181,6 @@ def _mem_usage_percent() -> float:
         return round(100.0 * (info["MemTotal"] - info["MemAvailable"]) / info["MemTotal"], 1)
     except Exception:
         return 38.0
-
-
-def _l2_files(store) -> int:
-    try:
-        return store.lake_summary()["total_files"]
-    except Exception:
-        return 0
-
-
-def _l2_mb(store) -> float:
-    try:
-        return store.lake_summary()["total_size_mb"]
-    except Exception:
-        return 0.0
 
 
 _center: Optional[TelemetryCenter] = None
