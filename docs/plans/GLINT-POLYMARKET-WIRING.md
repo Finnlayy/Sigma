@@ -1,15 +1,15 @@
 # Blueprint füttern — Glint JIT + Polymarket Gamma
 
-**Status:** Plan (noch nicht implementiert)  
+**Status:** Implementiert (Branch jules/glint-polymarket-wiring)  
 **Overview:** Ciel-Sandbox/Ledger ≠ Sigma-Repo. Umsetzung = Gamma/Kraken-Feldmapping in bestehende Engines (Port, Verifier, Panel). Kein Phantom-Deploy, kein Telethon, Gate 0.60 nur Anzeige.
 
 ## Todos
 
-- [ ] Gamma-Parser (`groupItemTitle` / `outcomePrices` / `volume24hr`) → `PolymarketOdds`; Fixture; TTL; keine Fake-Trajektorie
-- [ ] `RUNTIME_MAP` + Port in `scheduler_matrix`; Tests Feed-aus
-- [ ] Layer-0 Snapshot → `GET /api/v1/sigma/polymarket` + `/api/quant/polymarket/layer0`; `gate_open=False`
-- [ ] Bestehenden `GlintOrderbookVerifier` + `KrakenDepthAdapter` füttern; kein `agents/kraken_l2_verifier.py`
-- [ ] Offline-Fixtures in `tests/`; MP-17 fail-closed; keine Ciel-`agents/`-Tests als Source of Truth
+- [x] Gamma-Parser (`groupItemTitle` / `outcomePrices` / `volume24hr`) → `PolymarketOdds`; Fixture; TTL; keine Fake-Trajektorie
+- [x] `RUNTIME_MAP` + Port in `scheduler_matrix`; Tests Feed-aus
+- [x] Layer-0 Snapshot → `GET /api/v1/sigma/polymarket` + `/api/quant/polymarket/layer0`; `gate_open=False`
+- [x] Bestehenden `GlintOrderbookVerifier` + `KrakenDepthAdapter` füttern; kein `agents/kraken_l2_verifier.py`
+- [x] Offline-Fixtures in `tests/`; MP-17 fail-closed; keine Ciel-`agents/`-Tests als Source of Truth
 
 ## Alignment (Ciel-Stand)
 

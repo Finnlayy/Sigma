@@ -1753,9 +1753,63 @@ async def sigma_scout_state():
 
 @router.get("/api/v1/sigma/polymarket", response_model=schemas.SigmaPolymarketState)
 async def sigma_polymarket_state():
-    """MP-06 — Layer 0; ohne Feed available=False, Gate inaktiv."""
-    return _sigma_empty(bins=[], term_structure=[], mu=None, bias=None,
-                        p_cal=None, gate_open=False)
+    """MP-06 — Layer 0. Mit Gamma-Port: echte Strike-Leiter, mu,
+    Bias, Trajektorien (1h/2h/4h/EOD/Res) und gate_060 als Telemetrie
+    (nie Trade-Blocker, gate_open bleibt False). Ohne Feed oder bei
+    invalidem/stalem Snapshot -> fail-closed Leerantwort."""
+    try:
+        from sigma.ports.polymarket_gamma_feeder import get_gamma_port
+        port = get_gamma_port()
+        odds = port.odds if port is not None else None
+    except Exception:
+        odds = None
+    if odds is None or not odds.valid:
+        return _sigma_empty(
+            bins=[], term_structure=[], mu=None, bias=None, p_cal=None,
+            gate_open=False, gate_060=False, density_bins=[], strikes=[],
+            trajectories={}, invalid_reason=(odds.reason if odds else "no_port"),
+        )
+    import datetime as _dt
+    stale = odds.is_stale(_dt.datetime.now(_dt.timezone.utc).timestamp())
+    if stale:
+        return _sigma_empty(
+            bins=[], term_structure=[], mu=None, bias=None, p_cal=None,
+            gate_open=False, gate_060=False, density_bins=[], strikes=[],
+            trajectories={}, invalid_reason="stale_snapshot",
+            source_ts=odds.source_ts, ttl_s=odds.ttl_s,
+        )
+    base = {
+        "ok": True,
+        "available": True,
+        "feed": {"source": "polymarket_gamma", "available": True,
+                 "degraded": False, "age_s": None, "error": None},
+        "generated_at": _sigma_generated_at(),
+    }
+    base.update({
+        "bins": odds.density_bins,
+        "term_structure": [{"horizon": k, "value": v}
+                           for k, v in sorted(odds.trajectories.items())],
+        "mu": odds.mu,
+        "bias": ("BULLISH" if (odds.bias_pct or 0) > 0
+                 else "BEARISH" if (odds.bias_pct or 0) < 0 else "CHOP"),
+        "bias_pct": odds.bias_pct,
+        "p_cal": None,
+        "gate_open": False,          # Gate 0.60 = Anzeige, kein Blocker
+        "gate_060": odds.gate_060,
+        "slug": odds.slug,
+        "title": odds.title,
+        "volume24hr_usd": odds.volume24hr_usd,
+        "liquidity_usd": odds.liquidity_usd,
+        "spot_price": odds.spot_price,
+        "strikes": odds.strikes,
+        "yes_probs": odds.yes_probs,
+        "density_bins": odds.density_bins,
+        "trajectories": odds.trajectories,
+        "source_ts": odds.source_ts,
+        "ttl_s": odds.ttl_s,
+        "stale": False,
+    })
+    return base
 
 
 @router.get("/api/v1/sigma/exhaustion", response_model=schemas.SigmaExhaustionState)
@@ -1795,8 +1849,37 @@ async def sigma_onnx_state():
 
 @router.get("/api/v1/sigma/orderflow", response_model=schemas.SigmaOrderflowState)
 async def sigma_orderflow_state():
-    """MP-10 (optional) — ohne L2-Feed immer leer (fail-closed)."""
-    return _sigma_empty(reason="orderflow_port_not_available")
+    """MP-10 (optional) — echter Kraken-L2-JIT-Audit-Status aus dem
+    GlintOrderbookVerifier (i_depth, spread, size_multiplier). Ohne
+    Feed oder ohne Audits -> fail-closed (reason orderflow_port_not_
+    available). Kein Netz hier: nur letzter JIT-Audit aus der History."""
+    try:
+        from app.quant.glint_orderbook_verifier import get_verifier
+        verifier = get_verifier()
+        audits = verifier.recent(limit=1)
+    except Exception:
+        audits = []
+    if not audits:
+        return _sigma_empty(reason="orderflow_port_not_available", audits=[])
+    latest = audits[-1]
+    return {
+        "ok": True,
+        "available": True,
+        "feed": {"source": "kraken_l2_jit", "available": True,
+                 "degraded": False, "age_s": latest.get("snapshot_age_s"),
+                 "error": None},
+        "generated_at": _sigma_generated_at(),
+        "reason": None,
+        "i_depth": latest.get("depth_imbalance"),
+        "spread_bps": latest.get("spread_bps"),
+        "size_multiplier": latest.get("size_multiplier"),
+        "audit_status": latest.get("verdict"),
+        "symbol": latest.get("symbol"),
+        "snapshot_age_s": latest.get("snapshot_age_s"),
+        "bid_volume_2pct": latest.get("bid_volume_2pct"),
+        "ask_volume_2pct": latest.get("ask_volume_2pct"),
+        "audits": get_verifier().recent(limit=10),
+    }
 
 
 # --- MP-17 Operator-Schreibzugriffe (POST, Token + fail-closed) --------------
