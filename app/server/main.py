@@ -2554,8 +2554,9 @@ async def telemetry_stream(request: Request):
         while True:
             if await request.is_disconnected():
                 break
+            # build_frame already includes the recent-log slice. A second,
+            # unused 50-line log scan used to run on every 2s tick.
             frame = state.telemetry.build_frame(store=state.store, log_bus=state.bus)
-            autopsies = state.bus.recent_logs_list(50)
             yield f"event: telemetry\ndata: {json.dumps(frame, default=str)}\n\n"
             await asyncio.sleep(state.config.sse_interval_seconds)
 

@@ -664,10 +664,10 @@ class DuckDBStore:
                 "startTime": str(p["start_time"]) if p.get("start_time") else None,
                 "endTime": str(p["end_time"]) if p.get("end_time") else None,
             })
-        parquet_count, parquet_mb = self._parquet_stats()
+        parquet_count, parquet_mb = self.parquet_inventory()
         return {
             "total_rows": int(row["n"]) if row else 0,
-            "total_size_mb": round(parquet_mb, 2),
+            "total_size_mb": parquet_mb,
             "total_files": parquet_count,
             "symbols": symbols,
             "storage_config": {
@@ -687,6 +687,18 @@ class DuckDBStore:
 
     _memory_limit = "2GB"
     _threads = 4
+
+    def parquet_inventory(self) -> tuple[int, float]:
+        """Parquet file count + MB only — no COUNT(*) / GROUP BY on ohlcv.
+
+        SSE L2 gauges (`l2_duckdb_parquet_files`, `l2_total_mb`) display
+        these two numbers. `lake_summary()` additionally scans ohlcv; keep
+        that for GET /api/lake/summary, compact, and seed. TelemetryCenter
+        TTL-caches this for 5s so the 2s SSE tick does not os.walk twice
+        per frame.
+        """
+        count, mb = self._parquet_stats()
+        return int(count), float(mb)
 
     def _parquet_stats(self):
         from app.core.config import load_config  # local import to avoid cycle

@@ -12,6 +12,6 @@
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
 
-## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
-**Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
-**Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+## 2026-08-31 - SSE L2 gauges paid for a full lake_summary twice per tick
+**Learning:** `/api/quant/telemetry/stream` ticks every 2s. `build_frame` filled `l2_duckdb_parquet_files` and `l2_total_mb` via two helpers that **each** called `store.lake_summary()` — `COUNT(*)` + `GROUP BY symbol, interval_sec` on `ohlcv` plus `os.walk` of parquet. The L2 fields only display parquet file count and MB. Compact/seed are the only writers; inventory does not change every 2s. Caching full `lake_summary` would also hide GET `/api/lake/summary` freshness if applied on the store.
+**Action:** SSE L2 must call walk-only `parquet_inventory()` once and TTL-cache (~5s) on `TelemetryCenter`, never on the store. Leave GET `/api/lake/summary` uncached. Do not use `lake_summary()` to populate two integers.
