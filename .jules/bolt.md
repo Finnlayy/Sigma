@@ -15,3 +15,7 @@
 ## 2026-08-31 - SSE L2 gauges paid for a full lake_summary twice per tick
 **Learning:** `/api/quant/telemetry/stream` ticks every 2s. `build_frame` filled `l2_duckdb_parquet_files` and `l2_total_mb` via two helpers that **each** called `store.lake_summary()` — `COUNT(*)` + `GROUP BY symbol, interval_sec` on `ohlcv` plus `os.walk` of parquet. The L2 fields only display parquet file count and MB. Compact/seed are the only writers; inventory does not change every 2s. Caching full `lake_summary` would also hide GET `/api/lake/summary` freshness if applied on the store.
 **Action:** SSE L2 must call walk-only `parquet_inventory()` once and TTL-cache (~5s) on `TelemetryCenter`, never on the store. Leave GET `/api/lake/summary` uncached. Do not use `lake_summary()` to populate two integers.
+
+## 2026-08-31 - Concurrent Bolt runs collide on the same hotspot
+**Learning:** Two cron Bolts independently implemented parquet_inventory + 5s TTL for SSE L2. #66 merged first; the second PR conflicted as a duplicate because memories already named that hotspot.
+**Action:** `git fetch origin main` before picking the daily boost. Skip work already in recent `⚡ Bolt` commits. `GET /api/logs` still did `SELECT * LIMIT 10000` every 8s after the shared-scan fix — use SQL COUNT/SUM/GROUP BY next.
