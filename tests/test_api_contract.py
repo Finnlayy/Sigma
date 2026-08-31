@@ -626,3 +626,88 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_queue_matrices_groups_trades_by_strategy_and_mode(client):
+    """HTTP contract for O(T) queue grouping. Numeric checks on our rows only
+    so leftover factory/webhook trades in this module-scoped store cannot flake.
+    """
+    import app.server.main as main
+
+    paper = client.post("/api/strategies", json={
+        "id": "qm_paper", "name": "QM Paper", "assetPair": "BTC/USD",
+        "executionMode": "paper", "status": "active", "interval": 15,
+    }).json()
+    live = client.post("/api/strategies", json={
+        "id": "qm_live", "name": "QM Live", "assetPair": "ETH/USD",
+        "executionMode": "live", "status": "inactive", "interval": 30,
+    }).json()
+    assert paper["id"] == "qm_paper" and live["id"] == "qm_live"
+
+    def trade(tid, sid, mode, pnl, notional, exit_time, status="closed",
+              symbol="BTC/USD", name=None):
+        return {
+            "trade_id": tid, "strategy_id": sid,
+            "strategy_name": name or sid, "status": status,
+            "execution_mode": mode, "symbol": symbol,
+            "direction": "LONG", "side": "buy",
+            "net_pnl_usd": pnl, "notional_usd": notional,
+            "entry_time": exit_time, "exit_time": exit_time,
+            "entry_price": 100.0, "quantity": 1.0,
+        }
+
+    store = main.state.store
+    store.upsert_trade(trade("qm1", "qm_paper", "paper", 10.0, 200.0,
+                             "2026-08-01 10:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm2", "qm_paper", "", 5.0, 50.0,
+                             "2026-08-01 11:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm3", "qm_paper", "paper", -4.0, 80.0,
+                             "2026-08-01 12:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm0", "qm_paper", "paper", 0.0, 30.0,
+                             "2026-08-01 09:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm_open", "qm_paper", "paper", 1.0, 10.0,
+                             "2026-08-01 13:00:00", status="open", name="QM Paper"))
+    store.upsert_trade(trade("qm5", "qm_live", "live", 20.0, 100.0,
+                             "2026-08-01 14:00:00", symbol="ETH/USD", name="QM Live"))
+
+    body = client.get("/api/queue-matrices").json()
+    prow = next(s for s in body["paper"]["strategies"] if s["strategyId"] == "qm_paper")
+    lrow = next(s for s in body["live"]["strategies"] if s["strategyId"] == "qm_live")
+
+    assert prow["totalTrades"] == 4
+    assert prow["winningTrades"] == 2
+    assert prow["losingTrades"] == 2
+    assert prow["realizedPnL"] == 11.0
+    assert prow["totalPnL"] == 11.0
+    assert prow["volumeTradedUSD"] == 360.0
+    assert prow["profitFactor"] == 3.75
+    assert prow["winRate"] == 50.0
+    assert prow["bestTrade"] == 10.0
+    assert prow["worstTrade"] == -4.0
+    assert prow["avgTradeReturn"] == 2.75
+    assert prow["maxDrawdown"] == 26.6667
+    assert prow["executionMode"] == "paper"
+    assert prow["status"] == "active"
+    assert {t["id"] for t in prow["trades"]} == {"qm1", "qm2", "qm3", "qm0"}
+
+    assert lrow["totalTrades"] == 1
+    assert lrow["winningTrades"] == 1
+    assert lrow["losingTrades"] == 0
+    assert lrow["realizedPnL"] == 20.0
+    assert lrow["volumeTradedUSD"] == 100.0
+    assert lrow["profitFactor"] == 999.0
+    assert lrow["executionMode"] == "live"
+    assert {t["id"] for t in lrow["trades"]} == {"qm5"}
+
+    ours = [p for p in body["paper"]["pnlTrajectory"] if p["strategyName"] == "QM Paper"]
+    assert [p["time"] for p in ours] == [
+        "2026-08-01T09:00:00",
+        "2026-08-01T10:00:00",
+        "2026-08-01T11:00:00",
+        "2026-08-01T12:00:00",
+    ]
+    assert [p["tradePnL"] for p in ours] == [0.0, 10.0, 5.0, -4.0]
+    assert "qm_live" not in {s["strategyId"] for s in body["paper"]["strategies"]}
+    assert "qm_paper" not in {s["strategyId"] for s in body["live"]["strategies"]}
+    assert "qm_open" not in {t["id"] for t in prow["trades"]}
+    assert body["paper"]["activeWorkers"] >= 1
