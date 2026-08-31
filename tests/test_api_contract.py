@@ -626,3 +626,83 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_index_closed_trades_by_queue_empty_mode_is_paper():
+    """O(T) index must match Python ``execution_mode or "paper"`` grouping."""
+    from app.server.main import _index_closed_trades_by_queue
+
+    by_mode, by_sid = _index_closed_trades_by_queue([
+        {"strategy_id": "a", "execution_mode": "", "net_pnl_usd": 1},
+        {"strategy_id": "a", "execution_mode": None, "net_pnl_usd": 2},
+        {"strategy_id": "b", "execution_mode": "live", "net_pnl_usd": 3},
+        {"strategy_id": "c", "execution_mode": "other", "net_pnl_usd": 4},
+    ])
+    assert len(by_mode["paper"]) == 2
+    assert len(by_mode["live"]) == 1
+    assert [t["net_pnl_usd"] for t in by_sid[("paper", "a")]] == [1, 2]
+    assert ("live", "b") in by_sid
+    assert ("paper", "c") not in by_sid
+    assert ("live", "c") not in by_sid
+
+
+def test_queue_matrices_pnl_per_strategy_no_crosstalk(client):
+    """Numeric contract: paper/live PnL stays isolated after the O(T) index."""
+    import app.server.main as main
+
+    paper = client.post("/api/strategies", json={
+        "id": "qm_paper", "name": "QM Paper", "assetPair": "BTC/USD",
+        "executionMode": "paper", "status": "active",
+    }).json()
+    live = client.post("/api/strategies", json={
+        "id": "qm_live", "name": "QM Live", "assetPair": "ETH/USD",
+        "executionMode": "live", "status": "inactive",
+    }).json()
+    assert paper["id"] == "qm_paper" and live["id"] == "qm_live"
+
+    store = main.state.store
+    store.upsert_trade({
+        "trade_id": "qm_p1", "strategy_id": "qm_paper", "strategy_name": "QM Paper",
+        "status": "closed", "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+        "notional_usd": 100.0, "exit_time": "2026-08-01T12:00:00",
+        "entry_time": "2026-08-01T11:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "qm_p2", "strategy_id": "qm_paper", "strategy_name": "QM Paper",
+        "status": "closed", "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
+        "notional_usd": 50.0, "exit_time": "2026-08-01T13:00:00",
+        "entry_time": "2026-08-01T12:30:00",
+    })
+    store.upsert_trade({
+        "trade_id": "qm_l1", "strategy_id": "qm_live", "strategy_name": "QM Live",
+        "status": "closed", "execution_mode": "live", "symbol": "ETH/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+        "notional_usd": 200.0, "exit_time": "2026-08-01T14:00:00",
+        "entry_time": "2026-08-01T13:00:00",
+    })
+    store.upsert_trade({
+        "trade_id": "qm_open", "strategy_id": "qm_paper",
+        "status": "open", "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 1000.0,
+    })
+
+    body = client.get("/api/queue-matrices").json()
+    paper_q, live_q = body["paper"], body["live"]
+    assert paper_q["totalClosedTrades"] == 2
+    assert paper_q["totalPnL"] == 15.0
+    assert paper_q["winningTrades"] == 2
+    assert paper_q["volumeTradedUSD"] == 150.0
+    paper_row = next(s for s in paper_q["strategies"] if s["strategyId"] == "qm_paper")
+    assert paper_row["realizedPnL"] == 15.0
+    assert paper_row["totalTrades"] == 2
+    assert paper_row["volumeTradedUSD"] == 150.0
+    live_row = next(s for s in live_q["strategies"] if s["strategyId"] == "qm_live")
+    assert live_row["realizedPnL"] == 99.0
+    assert live_q["totalPnL"] == 99.0
+    assert live_q["totalClosedTrades"] == 1
+    assert [p["tradePnL"] for p in paper_q["pnlTrajectory"]] == [10.0, 5.0]
+    assert paper_q["pnlTrajectory"][-1]["cumPnL"] == 15.0
+    # Open trade must not leak into closed aggregates.
+    assert paper_q["bestTradeUSD"] == 10.0

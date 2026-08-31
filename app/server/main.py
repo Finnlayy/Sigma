@@ -1897,17 +1897,52 @@ async def kraken_symbols():
 # =====================================================================
 # QUEUE MATRICES
 # =====================================================================
+def _index_closed_trades_by_queue(
+    closed: List[Dict[str, Any]],
+) -> tuple[Dict[str, List[Dict[str, Any]]], Dict[tuple, List[Dict[str, Any]]]]:
+    """O(T) index for GET /api/queue-matrices (polled every 8s).
+
+    The handler used to filter ``q_trades`` per strategy
+    (``mine = [t for t in q_trades if strategy_id == s.id]``) — O(S×T).
+    At 20 strategies × 5k closed rows that is ~200k extra scans per poll
+    (and Overview + Queue panels each hit this endpoint independently).
+    One pass preserves the original ``closed`` order (entry_time DESC)
+    so ``mine[:50]`` / ``q_trades[:100]`` stay identical.
+    Empty ``execution_mode`` maps to paper, matching ``x or "paper"``.
+    """
+    by_mode: Dict[str, List[Dict[str, Any]]] = {"paper": [], "live": []}
+    by_sid: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+    for t in closed:
+        mode = t.get("execution_mode") or "paper"
+        if mode not in by_mode:
+            continue
+        by_mode[mode].append(t)
+        by_sid[(mode, str(t.get("strategy_id") or ""))].append(t)
+    return by_mode, by_sid
+
+
 @app.get("/api/queue-matrices")
 async def queue_matrices():
     st = state
     closed = st.store.trades(status="closed", limit=5000)
+    # One list_strategies() + one O(T) index. Previously listed strategies
+    # twice and re-scanned q_trades for every strategy (O(S×T)).
+    strategies = st.store.list_strategies()
+    by_mode, by_sid = _index_closed_trades_by_queue(closed)
     out = {}
+    from app.backtest.BacktestEngine import _sharpe, _sortino
+
+    def _cl(v):
+        return round(max(-99.0, min(99.0, v)), 4)
+
     for queue in ("paper", "live"):
-        strats = [s for s in st.store.list_strategies() if s["executionMode"] == queue]
+        strats = [s for s in strategies if s["executionMode"] == queue]
         rows = []
-        q_trades = [t for t in closed if (t.get("execution_mode") or "paper") == queue]
+        q_trades = by_mode[queue]
+        # Sort once per queue (was 2× sorted(q_trades) + 1× sorted(mine) each).
+        q_sorted = sorted(q_trades, key=lambda x: str(x.get("exit_time") or ""))
         for s in strats:
-            mine = [t for t in q_trades if t.get("strategy_id") == s["id"]]
+            mine = by_sid.get((queue, s["id"]), [])
             realized = sum(float(t.get("net_pnl_usd") or 0.0) for t in mine)
             wins = [t for t in mine if float(t.get("net_pnl_usd") or 0) > 0]
             losses = [t for t in mine if float(t.get("net_pnl_usd") or 0) <= 0]
@@ -1950,17 +1985,13 @@ async def queue_matrices():
         gl = abs(sum(float(t["net_pnl_usd"]) for t in q_losses))
         baseline = st.config.paper_baseline_usd
         equity = [baseline]
-        for t in sorted(q_trades, key=lambda x: str(x.get("exit_time") or "")):
+        for t in q_sorted:
             equity.append(equity[-1] + float(t.get("net_pnl_usd") or 0.0))
         returns = [equity[i] / equity[i - 1] - 1 for i in range(1, len(equity)) if equity[i - 1] > 0]
-        from app.backtest.BacktestEngine import _sharpe, _sortino
-
-        def _cl(v):
-            return round(max(-99.0, min(99.0, v)), 4)
 
         trajectory = []
         cum = 0.0
-        for idx, t in enumerate(sorted(q_trades, key=lambda x: str(x.get("exit_time") or ""))):
+        for idx, t in enumerate(q_sorted):
             cum += float(t.get("net_pnl_usd") or 0.0)
             trajectory.append({
                 "tradeIndex": idx + 1,
