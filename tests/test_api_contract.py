@@ -626,3 +626,85 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_bucket_closed_trades_is_o_n_and_preserves_or_paper():
+    """Hash index: empty execution_mode → paper; unknown modes dropped; order kept."""
+    from app.server.main import _bucket_closed_trades
+
+    closed = [
+        {"trade_id": "t1", "strategy_id": "a", "execution_mode": "paper", "net_pnl_usd": 10.0},
+        {"trade_id": "t2", "strategy_id": "b", "execution_mode": "", "net_pnl_usd": 3.0},
+        {"trade_id": "t3", "strategy_id": "a", "execution_mode": None, "net_pnl_usd": -2.0},
+        {"trade_id": "t4", "strategy_id": "c", "execution_mode": "live", "net_pnl_usd": 7.0},
+        {"trade_id": "t5", "strategy_id": "d", "execution_mode": "demo", "net_pnl_usd": 99.0},
+    ]
+    by_queue, by_sid = _bucket_closed_trades(closed)
+    assert [t["trade_id"] for t in by_queue["paper"]] == ["t1", "t2", "t3"]
+    assert [t["trade_id"] for t in by_queue["live"]] == ["t4"]
+    assert [t["trade_id"] for t in by_sid[("paper", "a")]] == ["t1", "t3"]
+    assert [t["trade_id"] for t in by_sid[("paper", "b")]] == ["t2"]
+    assert ("live", "c") in by_sid
+    assert ("paper", "d") not in by_sid and ("live", "d") not in by_sid
+    # O(1) lookup — two strategies must not rescan the full paper list
+    assert len(by_sid[("paper", "a")]) == 2
+    assert sum(float(t["net_pnl_usd"]) for t in by_sid[("paper", "a")]) == 8.0
+
+
+def test_queue_matrices_groups_trades_per_strategy(client):
+    """Numeric contract: per-strategy realized PnL / counts after hash grouping."""
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "qm_paper_a", "name": "QM Paper A", "assetPair": "BTC/USD",
+        "interval": 15, "executionMode": "paper", "status": "active",
+    })
+    store.upsert_strategy({
+        "id": "qm_paper_b", "name": "QM Paper B", "assetPair": "ETH/USD",
+        "interval": 15, "executionMode": "paper", "status": "inactive",
+    })
+    store.upsert_strategy({
+        "id": "qm_live_c", "name": "QM Live C", "assetPair": "SOL/USD",
+        "interval": 60, "executionMode": "live", "status": "active",
+    })
+    for i, (sid, mode, pnl, notional) in enumerate((
+        ("qm_paper_a", "paper", 12.5, 1000.0),
+        ("qm_paper_a", "", -2.5, 400.0),
+        ("qm_paper_b", "paper", 4.0, 200.0),
+        ("qm_live_c", "live", 9.0, 300.0),
+    )):
+        store.upsert_trade({
+            "trade_id": f"qm-{i}",
+            "strategy_id": sid,
+            "strategy_name": sid,
+            "status": "closed",
+            "execution_mode": mode,
+            "symbol": "BTC/USD",
+            "direction": "LONG",
+            "side": "buy",
+            "net_pnl_usd": pnl,
+            "notional_usd": notional,
+            "entry_time": f"2026-08-01 10:0{i}:00",
+            "exit_time": f"2026-08-01 11:0{i}:00",
+            "entry_price": 100.0,
+            "quantity": 1.0,
+        })
+
+    body = client.get("/api/queue-matrices").json()
+    paper = body["paper"]
+    live = body["live"]
+    by_id = {s["strategyId"]: s for s in paper["strategies"]}
+    assert by_id["qm_paper_a"]["realizedPnL"] == 10.0
+    assert by_id["qm_paper_a"]["totalTrades"] == 2
+    assert by_id["qm_paper_a"]["winningTrades"] == 1
+    assert by_id["qm_paper_a"]["losingTrades"] == 1
+    assert by_id["qm_paper_a"]["volumeTradedUSD"] == 1400.0
+    assert by_id["qm_paper_b"]["realizedPnL"] == 4.0
+    assert by_id["qm_paper_b"]["totalTrades"] == 1
+    live_ids = {s["strategyId"]: s for s in live["strategies"]}
+    assert live_ids["qm_live_c"]["realizedPnL"] == 9.0
+    assert live_ids["qm_live_c"]["totalTrades"] == 1
+    assert paper["totalClosedTrades"] >= 3
+    assert live["totalClosedTrades"] >= 1
+    assert paper["activeWorkers"] >= 1

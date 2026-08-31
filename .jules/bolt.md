@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-31 - /api/queue-matrices nested strategy filter
+**Learning:** The 8s Overview/Queue-Matrix poll did `for s in strats: [t for t in q_trades if sid == s.id]`, called `list_strategies()` twice, and sorted `q_trades` twice per queue. Same O(S×T) class as the React `.find()`-in-map bug, on the Python side. Bench 40×5k: 4.5 ms → 1.8 ms; 80×8k: 13 ms → 3.3 ms. Overview also awaited `/api/logs` then `/api/queue-matrices` in series.
+**Action:** On any poll that groups trades by strategy_id, bucket in one O(T) pass first (`(mode or "paper")`). Call `list_strategies()` once. Sort chrono lists once and reuse. Fire independent dashboard GETs with `Promise.all`.
