@@ -2554,8 +2554,9 @@ async def telemetry_stream(request: Request):
         while True:
             if await request.is_disconnected():
                 break
+            # recent_logs already ride on the frame (limit 25). A second
+            # recent_logs_list(50) here was unused — extra deque copy every 2s.
             frame = state.telemetry.build_frame(store=state.store, log_bus=state.bus)
-            autopsies = state.bus.recent_logs_list(50)
             yield f"event: telemetry\ndata: {json.dumps(frame, default=str)}\n\n"
             await asyncio.sleep(state.config.sse_interval_seconds)
 

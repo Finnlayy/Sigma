@@ -442,6 +442,43 @@ def test_telemetry_center_can_enable_live_bridge():
     assert KrakenCliBridge(cfg, telemetry=telemetry).live_enabled is True
 
 
+def test_build_frame_scans_lake_once_per_ttl(monkeypatch):
+    """SSE used to call lake_summary twice per 2s tick (files helper + mb helper)."""
+    from app.core.telemetry import L2_SUMMARY_TTL_S
+
+    clock = {"t": 1_000.0}
+    monkeypatch.setattr("app.core.telemetry.time.time", lambda: clock["t"])
+    telemetry = TelemetryCenter()
+    calls = {"n": 0}
+
+    class FakeStore:
+        def lake_summary(self):
+            calls["n"] += 1
+            return {"total_files": 4, "total_size_mb": 2.25}
+
+    store = FakeStore()
+    frame = telemetry.build_frame(store=store)
+    assert calls["n"] == 1
+    assert frame["storage_tiering"]["l2_duckdb_parquet_files"] == 4
+    assert frame["storage_tiering"]["l2_total_mb"] == 2.25
+
+    clock["t"] = 1_000.0 + L2_SUMMARY_TTL_S - 0.5
+    again = telemetry.build_frame(store=store)
+    assert calls["n"] == 1
+    assert again["storage_tiering"]["l2_duckdb_parquet_files"] == 4
+
+    clock["t"] = 1_000.0 + L2_SUMMARY_TTL_S + 0.5
+    telemetry.build_frame(store=store)
+    assert calls["n"] == 2
+
+
+def test_build_frame_without_store_skips_lake_scan():
+    frame = TelemetryCenter().build_frame(store=None, log_bus=None)
+    assert frame["storage_tiering"]["l2_duckdb_parquet_files"] == 0
+    assert frame["storage_tiering"]["l2_total_mb"] == 0.0
+    assert frame["recent_logs"] == []
+
+
 def test_dispatcher_routes_futures_without_falling_back_to_spot(tmp_path):
     class Result:
         ok = True

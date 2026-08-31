@@ -20,6 +20,12 @@ logger = logging.getLogger("app.core.telemetry")
 VALID_STATES = ("SHADOW_ACTIVE", "LIVE_APPROVED", "EMERGENCY_HALT")
 VALID_BREAKERS = ("NORMAL", "TRIPPED", "HALTED")
 
+# SSE telemetry ticks every 2s (SigmaConfig.sse_interval_seconds). lake_summary()
+# runs COUNT(*)+GROUP BY on ohlcv plus a parquet directory walk. Bench @ 4×10k
+# candles: one summary ~3.5 ms, two helper calls ~7 ms/frame. SystemHealthPanel
+# keeps the stream open — 2× per tick was ~3.5 ms wasted every 2s.
+L2_SUMMARY_TTL_S = 8.0
+
 
 @dataclass
 class SystemState:
@@ -56,6 +62,9 @@ class TelemetryCenter:
         self.l3_rclone_sync_status = "DISABLED"
         self.ingestion_rate_events_per_sec = 0.0
         self.avg_latency_microseconds = 0.0
+        self._l2_cache_at = 0.0
+        self._l2_cached_files = 0
+        self._l2_cached_mb = 0.0
 
     # ------------------------------------------------------------- M-00 state
     def set_state(self, new_state: str, reason: Optional[str] = None) -> Dict[str, Any]:
@@ -90,6 +99,7 @@ class TelemetryCenter:
 
     def build_frame(self, store=None, log_bus=None) -> Dict[str, Any]:
         mem = _mem_usage_percent()
+        l2_files, l2_mb = self._l2_stats(store)
         return {
             "timestamp": time.time(),
             "state_machine": self.system.to_dict(),
@@ -103,8 +113,8 @@ class TelemetryCenter:
             "storage_tiering": {
                 "l1_shm_ringbuffer_bytes": int(self.l1_ringbuffer_bytes),
                 "l1_capacity_bytes": int(self.l1_capacity_bytes),
-                "l2_duckdb_parquet_files": _l2_files(store),
-                "l2_total_mb": _l2_mb(store),
+                "l2_duckdb_parquet_files": l2_files,
+                "l2_total_mb": l2_mb,
                 "l3_rclone_sync_status": self.l3_rclone_sync_status,
                 "ingestion_rate_events_per_sec": round(self.ingestion_rate_events_per_sec, 1),
                 "avg_latency_microseconds": round(self.avg_latency_microseconds, 1),
@@ -117,6 +127,28 @@ class TelemetryCenter:
             },
             "recent_logs": (log_bus.recent_logs_list(25) if log_bus else []),
         }
+
+    def _l2_stats(self, store) -> tuple[int, float]:
+        """One lake_summary() per TTL window — files+mb used to each re-query.
+
+        Combined with L2_SUMMARY_TTL_S=8s this is ~8× fewer lake scans than the
+        previous 2 calls × 0.5 Hz SSE tick (~7 ms → ~0.4 ms amortized / tick).
+        """
+        now = time.time()
+        if (now - self._l2_cache_at) < L2_SUMMARY_TTL_S:
+            return self._l2_cached_files, self._l2_cached_mb
+        files, mb = 0, 0.0
+        if store is not None:
+            try:
+                summary = store.lake_summary()
+                files = int(summary.get("total_files") or 0)
+                mb = float(summary.get("total_size_mb") or 0.0)
+            except Exception:
+                files, mb = 0, 0.0
+        self._l2_cache_at = now
+        self._l2_cached_files = files
+        self._l2_cached_mb = mb
+        return files, mb
 
 
 def _cpu_percent() -> float:
@@ -146,20 +178,6 @@ def _mem_usage_percent() -> float:
         return round(100.0 * (info["MemTotal"] - info["MemAvailable"]) / info["MemTotal"], 1)
     except Exception:
         return 38.0
-
-
-def _l2_files(store) -> int:
-    try:
-        return store.lake_summary()["total_files"]
-    except Exception:
-        return 0
-
-
-def _l2_mb(store) -> float:
-    try:
-        return store.lake_summary()["total_size_mb"]
-    except Exception:
-        return 0.0
 
 
 _center: Optional[TelemetryCenter] = None
