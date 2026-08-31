@@ -626,3 +626,37 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_logs_strategy_pnl_matches_sql_aggregates(client):
+    """GET /api/logs strategyPnL must match DuckDB GROUP BY, not a 10k-row scan."""
+    import app.server.main as main
+
+    sid = "bolt_sql_agg_s1"
+    main.state.store.upsert_strategy({
+        "id": sid, "name": "BoltAgg", "assetPair": "BTC/USD",
+        "interval": 15, "status": "inactive", "executionMode": "paper",
+    })
+    main.state.store.upsert_trade({
+        "trade_id": "bolt_t1", "strategy_id": sid, "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 12.5,
+        "notional_usd": 200.0, "exit_time": "2026-08-31 00:00:00",
+    })
+    main.state.store.upsert_trade({
+        "trade_id": "bolt_t2", "strategy_id": sid, "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -2.5,
+        "notional_usd": 50.0, "exit_time": "2026-08-31 01:00:00",
+    })
+    body = client.get("/api/logs").json()
+    row = next(r for r in body["strategyPnL"] if r["strategyId"] == sid)
+    assert row["totalTrades"] == 2
+    assert row["winningTrades"] == 1
+    assert row["losingTrades"] == 1
+    assert row["realizedPnL"] == 10.0
+    assert row["volumeTradedUSD"] == 250.0
+    assert body["metrics"]["totalTrades"] >= 2
+    aggs = main.state.store.strategy_closed_aggregates()[sid]
+    assert row["totalTrades"] == aggs["total_trades"]
+    assert row["realizedPnL"] == aggs["realized_pnl"]
