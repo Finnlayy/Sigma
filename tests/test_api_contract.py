@@ -626,3 +626,71 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_logs_sql_aggregates_match_closed_tape(client):
+    """GET /api/logs uses DuckDB SUM/COUNT/GROUP BY, not a 10k-row scan."""
+    import app.server.main as main
+
+    store = main.state.store
+    store.upsert_strategy({
+        "id": "logs-agg-a", "name": "Agg A", "status": "active",
+        "assetPair": "BTC/USD", "interval": 15, "executionMode": "paper",
+        "parameters": {},
+    })
+    store.upsert_strategy({
+        "id": "logs-agg-b", "name": "Agg B", "status": "inactive",
+        "assetPair": "ETH/USD", "interval": 15, "executionMode": "paper",
+        "parameters": {},
+    })
+    rows = [
+        ("logs-agg-a", 12.5, 200.0, "paper"),
+        ("logs-agg-a", -2.5, 80.0, ""),
+        ("logs-agg-b", 4.0, 50.0, None),
+        ("logs-agg-a", 1.0, 10.0, "live"),
+    ]
+    for i, (sid, pnl, notion, mode) in enumerate(rows):
+        store.upsert_trade({
+            "trade_id": f"logs-agg-{i}",
+            "strategy_id": sid,
+            "strategy_name": "Agg A" if sid.endswith("a") else "Agg B",
+            "status": "closed",
+            "execution_mode": mode,
+            "symbol": "BTC/USD",
+            "direction": "LONG",
+            "side": "buy",
+            "net_pnl_usd": pnl,
+            "notional_usd": notion,
+            "entry_time": f"2026-08-0{i + 1}T10:00:00",
+            "exit_time": f"2026-08-0{i + 1}T11:00:00",
+            "entry_price": 100.0,
+            "quantity": 1.0,
+        })
+
+    body = client.get("/api/logs").json()
+    metrics = body["metrics"]
+    paper_pnl = store.sum_closed_pnl("paper")
+    assert metrics["totalTrades"] == store.count_closed("paper")
+    assert abs(metrics["profitLossPercentage"] - (
+        paper_pnl / main.state.config.paper_baseline_usd * 100.0
+    )) < 1e-4
+    seed_usd = next(
+        float(s.split(":")[1]) for s in main.state.config.paper_seeds
+        if s.startswith("USD:")
+    )
+    assert abs(body["balances"]["USD"] - (seed_usd + paper_pnl)) < 1e-6
+
+    by_id = {s["strategyId"]: s for s in body["strategyPnL"]}
+    assert by_id["logs-agg-a"]["totalTrades"] == 3
+    assert by_id["logs-agg-a"]["realizedPnL"] == 11.0
+    assert by_id["logs-agg-a"]["winningTrades"] == 2
+    assert by_id["logs-agg-a"]["losingTrades"] == 1
+    assert by_id["logs-agg-a"]["volumeTradedUSD"] == 290.0
+    assert by_id["logs-agg-a"]["winRate"] == 66.7
+    assert by_id["logs-agg-b"]["totalTrades"] == 1
+    assert by_id["logs-agg-b"]["realizedPnL"] == 4.0
+    assert by_id["logs-agg-b"]["winRate"] == 100.0
+    assert len(body["orders"]) <= 80 + 20
+
+    tape = [o for o in body["orders"] if o.get("id") == "logs-agg-0"]
+    assert tape and tape[0]["pnl"] == 12.5

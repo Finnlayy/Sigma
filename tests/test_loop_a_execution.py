@@ -482,3 +482,11 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    assert store.sum_closed_pnl("live") == 99.0
+    assert store.count_closed("paper") == 2
+    assert store.count_closed("live") == 1
+    aggs = store.strategy_pnl_aggregates()
+    assert aggs["s"]["n"] == 3
+    assert aggs["s"]["realized"] == 112.0
+    assert aggs["s"]["wins"] == 3
+    assert aggs["s"]["volume"] == 0.0
