@@ -626,3 +626,86 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_queue_matrices_groups_trades_by_strategy_and_mode(client):
+    """Numeric contract for GET /api/queue-matrices after O(T) grouping."""
+    import app.server.main as main
+
+    for payload in (
+        {"id": "qm-paper-a", "name": "QM Paper A", "assetPair": "BTC/USD",
+         "executionMode": "paper", "status": "active"},
+        {"id": "qm-paper-b", "name": "QM Paper B", "assetPair": "ETH/USD",
+         "executionMode": "paper", "status": "inactive"},
+        {"id": "qm-live-s", "name": "QM Live", "assetPair": "SOL/USD",
+         "executionMode": "live", "status": "active"},
+    ):
+        assert client.post("/api/strategies", json=payload).status_code == 200
+
+    store = main.state.store
+    for row in (
+        {"trade_id": "qm-t1", "strategy_id": "qm-paper-a", "strategy_name": "QM Paper A",
+         "status": "closed", "execution_mode": "paper", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0, "notional_usd": 100.0,
+         "exit_time": "2026-01-01T10:00:00", "entry_time": "2026-01-01T09:00:00"},
+        {"trade_id": "qm-t2", "strategy_id": "qm-paper-a", "strategy_name": "QM Paper A",
+         "status": "closed", "execution_mode": "paper", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": -4.0, "notional_usd": 80.0,
+         "exit_time": "2026-01-01T11:00:00", "entry_time": "2026-01-01T10:30:00"},
+        {"trade_id": "qm-t3", "strategy_id": "qm-paper-b", "strategy_name": "QM Paper B",
+         "status": "closed", "execution_mode": "paper", "symbol": "ETH/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 2.5, "notional_usd": 50.0,
+         "exit_time": "2026-01-01T12:00:00", "entry_time": "2026-01-01T11:30:00"},
+        {"trade_id": "qm-t4", "strategy_id": "qm-live-s", "strategy_name": "QM Live",
+         "status": "closed", "execution_mode": "live", "symbol": "SOL/USD",
+         "direction": "SHORT", "side": "sell", "net_pnl_usd": 7.0, "notional_usd": 70.0,
+         "exit_time": "2026-01-01T13:00:00", "entry_time": "2026-01-01T12:30:00"},
+        {"trade_id": "qm-t5", "strategy_id": "qm-paper-a", "strategy_name": "QM Paper A",
+         "status": "closed", "execution_mode": "", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 1.0, "notional_usd": 20.0,
+         "exit_time": "2026-01-01T14:00:00", "entry_time": "2026-01-01T13:30:00"},
+        {"trade_id": "qm-t6", "strategy_id": "qm-paper-a", "strategy_name": "QM Paper A",
+         "status": "open", "execution_mode": "paper", "symbol": "BTC/USD",
+         "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0, "notional_usd": 9.0},
+    ):
+        store.upsert_trade(row)
+
+    body = client.get("/api/queue-matrices").json()
+    paper = {s["strategyId"]: s for s in body["paper"]["strategies"]}
+    live = {s["strategyId"]: s for s in body["live"]["strategies"]}
+
+    a = paper["qm-paper-a"]
+    assert a["totalTrades"] == 3
+    assert a["winningTrades"] == 2
+    assert a["losingTrades"] == 1
+    assert a["realizedPnL"] == 7.0
+    assert a["totalPnL"] == 7.0
+    assert a["volumeTradedUSD"] == 200.0
+    assert a["winRate"] == 66.7
+    assert a["bestTrade"] == 10.0
+    assert a["worstTrade"] == -4.0
+    assert a["profitFactor"] == 2.75
+    assert a["avgTradeReturn"] == round(7.0 / 3, 4)
+    assert a["executionMode"] == "paper"
+
+    b = paper["qm-paper-b"]
+    assert b["totalTrades"] == 1
+    assert b["realizedPnL"] == 2.5
+    assert b["winningTrades"] == 1
+    assert b["volumeTradedUSD"] == 50.0
+
+    lv = live["qm-live-s"]
+    assert lv["totalTrades"] == 1
+    assert lv["realizedPnL"] == 7.0
+    assert lv["executionMode"] == "live"
+    assert lv["winRate"] == 100.0
+    assert lv["volumeTradedUSD"] == 70.0
+
+    paper_times = [p["time"] for p in body["paper"]["pnlTrajectory"]
+                   if p.get("strategyName", "").startswith("QM Paper")]
+    assert paper_times == [
+        "2026-01-01T10:00:00",
+        "2026-01-01T11:00:00",
+        "2026-01-01T12:00:00",
+        "2026-01-01T14:00:00",
+    ]
