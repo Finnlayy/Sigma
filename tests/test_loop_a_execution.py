@@ -482,3 +482,63 @@ def test_sum_closed_pnl_matches_python_or_paper(tmp_path):
         "direction": "LONG", "side": "buy", "net_pnl_usd": 5.0,
     })
     assert store.sum_closed_pnl("paper") == 13.0
+    stats = store.closed_pnl_stats("paper")
+    assert stats["pnl"] == 13.0
+    assert stats["n"] == 2
+    assert store.closed_pnl_stats("live")["n"] == 1
+    assert store.closed_pnl_stats("live")["pnl"] == 99.0
+
+
+def test_closed_stats_by_strategy_matches_python_group(tmp_path):
+    from app.core.duckdb_store import DuckDBStore
+
+    store = DuckDBStore(str(tmp_path / "agg.duckdb"))
+    store.upsert_trade({
+        "trade_id": "w1", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 10.0,
+        "notional_usd": 100.0,
+    })
+    store.upsert_trade({
+        "trade_id": "l1", "strategy_id": "alpha", "status": "closed",
+        "execution_mode": "", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": -4.0,
+        "notional_usd": 80.0,
+    })
+    store.upsert_trade({
+        "trade_id": "w2", "strategy_id": "beta", "status": "closed",
+        "execution_mode": "live", "symbol": "ETH/USD",
+        "direction": "SHORT", "side": "sell", "net_pnl_usd": 2.5,
+        "notional_usd": 50.0,
+    })
+    store.upsert_trade({
+        "trade_id": "open", "strategy_id": "alpha", "status": "open",
+        "execution_mode": "paper", "symbol": "BTC/USD",
+        "direction": "LONG", "side": "buy", "net_pnl_usd": 99.0,
+        "notional_usd": 999.0,
+    })
+    by = {r["strategy_id"]: r for r in store.closed_stats_by_strategy()}
+    assert by["alpha"]["total_trades"] == 2
+    assert by["alpha"]["winning_trades"] == 1
+    assert by["alpha"]["realized"] == 6.0
+    assert by["alpha"]["volume"] == 180.0
+    assert by["beta"]["total_trades"] == 1
+    assert by["beta"]["winning_trades"] == 1
+    assert by["beta"]["realized"] == 2.5
+    assert by["beta"]["volume"] == 50.0
+    assert "alpha" in by and "beta" in by
+    closed = store.trades(status="closed", limit=100)
+    py = {}
+    for t in closed:
+        sid = str(t.get("strategy_id") or "")
+        rec = py.setdefault(sid, {"n": 0, "wins": 0, "pnl": 0.0, "vol": 0.0})
+        pnl = float(t.get("net_pnl_usd") or 0.0)
+        rec["n"] += 1
+        rec["wins"] += 1 if pnl > 0 else 0
+        rec["pnl"] += pnl
+        rec["vol"] += float(t.get("notional_usd") or 0.0)
+    for sid, rec in py.items():
+        assert by[sid]["total_trades"] == rec["n"]
+        assert by[sid]["winning_trades"] == rec["wins"]
+        assert by[sid]["realized"] == rec["pnl"]
+        assert by[sid]["volume"] == rec["vol"]

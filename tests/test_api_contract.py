@@ -626,3 +626,19 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_logs_poll_payload_has_numeric_aggregates(client):
+    """GET /api/logs is polled every 5–8s; aggregates must be numeric, not None."""
+    body = client.get("/api/logs").json()
+    assert isinstance(body["metrics"]["totalTrades"], int)
+    assert isinstance(body["metrics"]["profitLossPercentage"], (int, float))
+    assert isinstance(body["balances"], dict)
+    assert isinstance(body["strategyPnL"], list)
+    for row in body["strategyPnL"]:
+        assert isinstance(row["totalTrades"], int)
+        assert isinstance(row["winningTrades"], int)
+        assert isinstance(row["losingTrades"], int)
+        assert row["winningTrades"] + row["losingTrades"] == row["totalTrades"]
+        assert isinstance(row["realizedPnL"], (int, float))
+        assert isinstance(row["volumeTradedUSD"], (int, float))

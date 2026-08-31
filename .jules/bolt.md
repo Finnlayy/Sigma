@@ -15,3 +15,7 @@
 ## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
 **Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
 **Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
+
+## 2026-08-31 - COALESCE(NULLIF, bind-param) maps empty onto the queried mode
+**Learning:** `COALESCE(NULLIF(execution_mode, ''), ?) = ?` with both binds = `"live"` treats `""` as live. Python `(x or "paper")` always defaults to paper, never to the filter value. A live-mode SUM/COUNT silently double-counted empty-string paper rows (`n=2` instead of `1` in the existing paper/live fixture).
+**Action:** Hardcode the Python default in SQL: `COALESCE(NULLIF(col, ''), 'paper') = ?`. Never use the filter bind as the COALESCE fallback.
