@@ -48,6 +48,10 @@ RUNTIME_MAP: Dict[str, str] = {
     "SIGMA_TV_MCP_URL": "TradingView MCP URL (fake = sandbox)",
     "SIGMA_OLLAMA_URL": "Ollama URL",
     "SIGMA_PUBLIC_URL": "Public webhook base URL",
+    # MP-06 Production Wire — Polymarket Gamma-Feed (nur Telemetrie)
+    "POLYMARKET_GAMMA_URL": "Polymarket Gamma-API Basis-URL",
+    "POLYMARKET_MIN_VOLUME_USD": "Gamma-Minimum 24h-Volumen (USD) fuer Strike-Leiter",
+    "POLYMARKET_TTL_S": "Gamma-Snapshot-TTL (Sekunden)",
 }
 
 WRITABLE: Dict[str, str] = {**ENV_MAP, **SECRET_MAP, **RUNTIME_MAP}

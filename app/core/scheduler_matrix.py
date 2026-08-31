@@ -265,6 +265,7 @@ def install_canonical_tasks(
     orchestrator=None,
     webhook_event: Optional[TaskFn] = None,
     playwright_event: Optional[TaskFn] = None,
+    gamma_port=None,
 ) -> SchedulerMatrix:
     """Wire T0–T5 jobs so loops A–E are on the scheduler graph.
 
@@ -272,6 +273,14 @@ def install_canonical_tasks(
     Loop C sidecar down → degraded empty snapshot, kein Synthetic im Prod-Pfad.
     """
     sched = scheduler or get_scheduler()
+    # MP-06 Production Wire: Gamma-Port optional verdrahten; Feed aus
+    # (None) -> fail-closed, kein Fake-Port im Scheduler-Graph.
+    if gamma_port is not None:
+        try:
+            from sigma.ports.polymarket_gamma_feeder import set_gamma_port
+            set_gamma_port(gamma_port)
+        except Exception:
+            pass
     if sched.get("glint_orderbook_verify") is None:
         sched.register(
             "glint_orderbook_verify",

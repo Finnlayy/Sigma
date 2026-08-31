@@ -426,17 +426,34 @@ class SigmaScoutState(SigmaEmptyMixin):
 
 
 class SigmaPolymarketState(SigmaEmptyMixin):
-    """MP-06 Layer 0; ohne Feed available=False und Gate inaktiv."""
+    """MP-06 Layer 0; ohne Feed available=False und Gate inaktiv.
+    Mit Gamma-Port: echte Strike-Leiter (density_bins), mu, bias_pct,
+    Trajektorien und gate_060 (nur Telemetrie, nie Trade-Blocker)."""
 
     bins: List[Dict[str, Any]] = Field(default_factory=list)
     term_structure: List[Dict[str, Any]] = Field(default_factory=list)
     mu: Optional[float] = None
     bias: Optional[str] = None
+    bias_pct: Optional[float] = None
     platt_a: Optional[float] = None
     platt_b: Optional[float] = None
     brier: Optional[float] = None
     p_cal: Optional[float] = None
     gate_open: Optional[bool] = None
+    gate_060: Optional[bool] = None
+    slug: Optional[str] = None
+    title: Optional[str] = None
+    volume24hr_usd: Optional[float] = None
+    liquidity_usd: Optional[float] = None
+    spot_price: Optional[float] = None
+    strikes: List[float] = Field(default_factory=list)
+    yes_probs: List[float] = Field(default_factory=list)
+    density_bins: List[Dict[str, Any]] = Field(default_factory=list)
+    trajectories: Dict[str, float] = Field(default_factory=dict)
+    source_ts: Optional[float] = None
+    ttl_s: Optional[float] = None
+    stale: Optional[bool] = None
+    invalid_reason: Optional[str] = None
 
 
 class SigmaExhaustionState(SigmaEmptyMixin):
@@ -494,9 +511,20 @@ class SigmaOnnxState(SigmaEmptyMixin):
 
 
 class SigmaOrderflowState(SigmaEmptyMixin):
-    """MP-10 (optional) — ohne L2-Feed immer leer."""
+    """MP-10 (optional) — ohne L2-Feed immer leer. Mit Kraken-JIT:
+    echter Audit-Status (i_depth, spread_bps, size_multiplier,
+    audit_status) aus dem GlintOrderbookVerifier."""
 
     reason: Optional[str] = "orderflow_port_not_available"
+    i_depth: Optional[float] = None
+    spread_bps: Optional[float] = None
+    size_multiplier: Optional[float] = None
+    audit_status: Optional[str] = None
+    symbol: Optional[str] = None
+    snapshot_age_s: Optional[float] = None
+    bid_volume_2pct: Optional[float] = None
+    ask_volume_2pct: Optional[float] = None
+    audits: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class SigmaWriteResult(BaseModel):
