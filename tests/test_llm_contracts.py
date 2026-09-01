@@ -323,8 +323,35 @@ def test_websocket_tool_call_flow(client):
 
 
 def test_websocket_text_chunks(client):
+    """Prompt echo streams in 8-word frames; content and order unchanged."""
     with client.websocket_connect(bp.LLM_STREAM_ROUTE) as ws:
         ws.send_json({"session_id": "s1", "prompt": "status bitte"})
-        assert ws.receive_json()["content_chunk"] == "status "
-        assert ws.receive_json()["content_chunk"] == "bitte "
-        assert ws.receive_json()["is_complete"] is True
+        text, frames, done = "", 0, False
+        for _ in range(8):
+            msg = ws.receive_json()
+            frames += 1
+            if msg.get("content_chunk"):
+                text += msg["content_chunk"]
+            if msg.get("is_complete"):
+                done = True
+                break
+        assert done is True
+        assert text.strip() == "status bitte"
+        # 2 Wörter -> 1 Batch-Frame + is_complete (kein Frame pro Wort)
+        assert frames == 2
+
+
+def test_websocket_text_chunks_batches_8_words(client):
+    with client.websocket_connect(bp.LLM_STREAM_ROUTE) as ws:
+        prompt = " ".join(f"w{i}" for i in range(17))
+        ws.send_json({"session_id": "s1", "prompt": prompt})
+        text, frames = "", 0
+        for _ in range(16):
+            msg = ws.receive_json()
+            frames += 1
+            if msg.get("content_chunk"):
+                text += msg["content_chunk"]
+            if msg.get("is_complete"):
+                break
+        assert text.strip() == prompt
+        assert frames == 4  # 17 Wörter -> 8 + 8 + 1 + is_complete
