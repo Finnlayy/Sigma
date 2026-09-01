@@ -16,6 +16,8 @@ Verwendung:
   bin/sigma-tv-login --check         # nur Status prüfen
   bin/sigma-tv-login --out PATH      # abweichender Zielpfad
   bin/sigma-tv-login --timeout 600   # Sekunden Wartezeit auf Login
+  bin/sigma-tv-login --verify        # Session + Playwright-Treiber prüfen
+  bin/sigma-tv-login --json          # maschinenlesbarer Status
 
 Hinweis: TradingView-Credentials werden NIE gespeichert oder
 geloggt — nur der Session-State (Cookies/localStorage).
@@ -47,9 +49,55 @@ def _resolve(path: str) -> str:
     return os.path.abspath(os.path.expanduser(os.environ.get("SIGMA_TV_STORAGE_STATE", path)))
 
 
+def status_payload(path: str) -> dict:
+    """Kanonischer Status — teilt die Logik mit app/tv/tv_driver.py."""
+    try:
+        from app.core.config import load_config
+        from app.tv.tv_driver import driver_snapshot
+
+        cfg = load_config()
+        cfg.tv_storage_state_path = path
+        return driver_snapshot(cfg)
+    except Exception:  # pragma: no cover - standalone fallback
+        return {"path": path, "present": os.path.exists(path), "valid": False,
+                "error": "sigma_runtime_unavailable"}
+
+
+def verify(path: str) -> int:
+    """Öffnet den echten Alert-Treiber und listet die TV-Alerts."""
+    rc = check(path)
+    if rc != 0:
+        return rc
+    try:
+        from app.core.config import load_config
+        from app.tv.tv_driver import get_tv_alert_driver
+    except Exception as exc:
+        print(f"[sigma-tv-login] runtime import failed: {exc}")
+        return 6
+    cfg = load_config()
+    cfg.tv_storage_state_path = path
+    driver = None
+    try:
+        driver = get_tv_alert_driver(cfg, required=True)
+        alerts = driver.list_alerts()
+        print(f"[sigma-tv-login] driver OK — {len(alerts)} alert(s) visible")
+        for alert in alerts[:20]:
+            print(f"  - {alert.get('name')} enabled={alert.get('enabled')}")
+        return 0
+    except Exception as exc:
+        print(f"[sigma-tv-login] driver verification FAILED: {exc}")
+        return 6
+    finally:
+        if driver is not None:
+            try:
+                driver.close()
+            except Exception:
+                pass
+
+
 def check(path: str) -> int:
     if not os.path.exists(path):
-        print(f"[sigma-tv-login] NO SESSION at {path} — TV driver runs in FakeDriver mode.")
+        print(f"[sigma-tv-login] NO SESSION at {path} — TradingView alert driver stays disabled (fail-closed).")
         return 1
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -71,6 +119,8 @@ def check(path: str) -> int:
         print("[sigma-tv-login] WARNING: no TradingView auth cookie — re-run the login.")
         return 3
     print("[sigma-tv-login] OK — Playwright driver will be used.")
+    print("[sigma-tv-login] next: bin/sigma-tv-login --verify   "
+          "(opens the alert driver)  |  POST /api/v1/alerts/driver/attach")
     return 0
 
 
@@ -127,9 +177,18 @@ def main() -> int:
     ap.add_argument("--out", default=DEFAULT_OUT, help=f"storage_state path (default {DEFAULT_OUT})")
     ap.add_argument("--check", action="store_true", help="only report current session status")
     ap.add_argument("--timeout", type=int, default=600, help="seconds to wait for the manual login")
+    ap.add_argument("--verify", action="store_true",
+                    help="open the Playwright alert driver and list TV alerts")
+    ap.add_argument("--json", action="store_true", help="machine-readable status")
     args = ap.parse_args()
 
     path = _resolve(args.out)
+    if args.json:
+        payload = status_payload(path)
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if payload.get("valid") else 1
+    if args.verify:
+        return verify(path)
     if args.check:
         return check(path)
     return login(path, args.timeout)

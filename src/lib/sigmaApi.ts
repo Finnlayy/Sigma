@@ -754,6 +754,107 @@ export interface ResearchDashboard extends SigmaPanelBase {
 
 const sigmaGet = <T,>(path: string) => request<T>(path);
 
+// =============================================================================
+// MP-17 — LIVE-PANEL-ENDPUNKTE (scharf, keine Mocks)
+// Envelope: { ok, available, source, generated_at, feed, payload }.
+// Liefert eine Quelle nichts, antwortet das Backend mit HTTP 503 und einem
+// konkreten Grund — es gibt keinen available=false-Stub mehr.
+// =============================================================================
+
+export interface SigmaLivePanel<T> {
+  ok: boolean;
+  available: boolean;
+  source: string;
+  generated_at: string;
+  feed: SigmaFeedMeta;
+  payload: T;
+}
+
+export interface MarketGeometryPayload {
+  symbol: string;
+  generated_ts: number;
+  snapshot_ts: number;
+  depth_levels: number;
+  best_bid: number | null;
+  best_ask: number | null;
+  mid: number | null;
+  spread_bps: number | null;
+  imbalance: {
+    top_n: number;
+    bid_volume: number | null;
+    ask_volume: number | null;
+    ratio: number | null;
+    band_pct: number;
+    band_bid_volume: number | null;
+    band_ask_volume: number | null;
+    band_ratio: number | null;
+    pressure: 'BID' | 'ASK' | 'BALANCED';
+  };
+  vpoc: number | null;
+  liquidity_clusters: Array<{ price: number; low: number; high: number; volume: number; share: number }>;
+  support_levels: number[];
+  resistance_levels: number[];
+  bids: Array<{ price: number | null; volume: number | null }>;
+  asks: Array<{ price: number | null; volume: number | null }>;
+}
+
+export interface QuantumRegimePayload {
+  symbol: string;
+  generated_ts: number;
+  volatility_regime: Record<string, unknown>;
+  brier: { score: number | null; threshold: number | null; drifting: boolean | null; samples: number | null; temperature: number | null };
+  fractal: { hurst: number | null; hurst_class: string | null; dimension: number | null };
+  kelly: Record<string, unknown> & { half_kelly_multiplier: number | null };
+  m8: { available: boolean; instances: number; status_counts: Record<string, number>; avg_budget_multiplier: number | null };
+}
+
+export interface PowerPhysicsPayload {
+  symbol: string;
+  generated_ts: number;
+  window_s: number;
+  bars: number;
+  kinetic_momentum: number | null;
+  velocity: number | null;
+  orderflow_acceleration: number | null;
+  acceleration_series: Array<number | null>;
+  exhaustion_index: number | null;
+  volatility_energy: number | null;
+  realized_volatility: number | null;
+  direction: 'UP' | 'DOWN' | 'FLAT';
+}
+
+export interface GlintPolymarketPayload {
+  symbol: string;
+  generated_ts: number;
+  polymarket: Record<string, unknown> & { jit_gate_060: boolean; gate_is_blocker: false };
+  glint_radar: Record<string, unknown> & { status: string; available: boolean };
+  spread: { bps: number | null; max_bps: number; efficiency: number | null };
+  directional_bias: { label: 'BULLISH' | 'BEARISH' | 'CHOP'; pct: number | null; confirmed_by_orderflow: boolean };
+}
+
+const panelQuery = (symbol?: string) =>
+  symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+
+export const sigmaLivePanelsApi = {
+  marketGeometry: (symbol?: string) =>
+    sigmaGet<SigmaLivePanel<MarketGeometryPayload>>(`/api/v1/sigma/panels/market-geometry${panelQuery(symbol)}`),
+  quantumRegime: (symbol?: string) =>
+    sigmaGet<SigmaLivePanel<QuantumRegimePayload>>(`/api/v1/sigma/panels/quantum-regime${panelQuery(symbol)}`),
+  powerPhysics: (symbol?: string) =>
+    sigmaGet<SigmaLivePanel<PowerPhysicsPayload>>(`/api/v1/sigma/panels/power-physics${panelQuery(symbol)}`),
+  glintPolymarket: (symbol?: string) =>
+    sigmaGet<SigmaLivePanel<GlintPolymarketPayload>>(`/api/v1/sigma/panels/glint-polymarket${panelQuery(symbol)}`),
+};
+
+/** §17.5 — TradingView-Alert-Treiber (Playwright-Session-Status). */
+export const tvAlertDriverApi = {
+  status: () => sigmaGet<Record<string, unknown>>('/api/v1/alerts/driver'),
+  attach: (settingsToken: string) =>
+    operatorPost<Record<string, unknown>>('/api/v1/alerts/driver/attach', settingsToken),
+  syncM8: (settingsToken: string) =>
+    operatorPost<Record<string, unknown>>('/api/v1/alerts/sync-m8', settingsToken),
+};
+
 export const sigmaResearchApi = {
   regime: () => sigmaGet<SigmaRegimeState>('/api/v1/sigma/regime'),
   risk: () => sigmaGet<SigmaRiskState>('/api/v1/sigma/risk'),

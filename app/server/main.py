@@ -429,7 +429,11 @@ class AppState:
             pressure_hook=self._memory_pressure,
         )
         set_memory_watchdog(self.memory_watchdog)
-        alloc = get_allocator(alert_provisioner=get_alert_provisioner())
+        alerts = get_alert_provisioner()
+        if self.m8 is not None:
+            # §4.6 — nativer M8-Lifecycle-Rückkanal in die TV-Alert-Matrix
+            self.m8.alert_provisioner = alerts
+        alloc = get_allocator(alert_provisioner=alerts)
         self.scorecard = StrategyScorecard(
             store=self.store,
             queue=get_tv_queue(cfg),

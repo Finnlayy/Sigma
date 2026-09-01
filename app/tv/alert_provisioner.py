@@ -37,6 +37,8 @@ class AlertRecord:
     message_template: str = ""
     updated_at: float = field(default_factory=time.time)
     last_reason: str = ""
+    remote_synced: bool = False
+    last_error: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -105,15 +107,52 @@ class AlertProvisioner:
     """Persistiert Alert-Zustände lokal und spiegelt sie via Driver nach TV."""
 
     def __init__(self, config: Optional[SigmaConfig] = None, driver=None,
-                 store_path: Optional[str] = None, public_webhook_base: str = ""):
+                 store_path: Optional[str] = None, public_webhook_base: str = "",
+                 *, auto_driver: bool = True):
         self.config = config or load_config()
+        self.auto_driver = auto_driver and driver is None
         self.driver = driver
+        self.driver_error: str = ""
         self.store_path = store_path or os.path.join(
             os.path.dirname(self.config.tv_jobs_dir), "tv_alerts.json")
         self.public_webhook_base = (public_webhook_base
                                     or os.environ.get("SIGMA_PUBLIC_URL", "http://127.0.0.1:8000"))
         self._alerts: Dict[str, AlertRecord] = {}
         self._load()
+        if self.auto_driver:
+            self._attach_driver()
+
+    # -------------------------------------------------------- driver wiring
+    def _attach_driver(self) -> None:
+        """Bindet den echten Playwright-Treiber, sobald eine TV-Session
+        existiert. Ohne Session bleibt ``driver=None`` — kein Fake-Transport,
+        der Provisioner arbeitet dann rein lokal und fail-closed."""
+        try:
+            from app.tv.tv_driver import get_tv_alert_driver
+
+            self.driver = get_tv_alert_driver(self.config, required=False)
+            self.driver_error = "" if self.driver is not None else "no_tv_session"
+        except Exception as exc:  # pragma: no cover - defensiv
+            self.driver = None
+            self.driver_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("TV alert driver not attached: %s", self.driver_error)
+
+    def ensure_driver(self):
+        """Lazy Re-Bind: nach `bin/sigma-tv-login` ohne Neustart scharf."""
+        if self.driver is None and self.auto_driver:
+            self._attach_driver()
+        return self.driver
+
+    def driver_status(self) -> Dict[str, Any]:
+        try:
+            from app.tv.tv_driver import driver_snapshot
+
+            status = driver_snapshot(self.config)
+        except Exception as exc:  # pragma: no cover
+            status = {"driver": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
+        status["attached"] = self.driver is not None
+        status["attach_error"] = self.driver_error or None
+        return status
 
     # ------------------------------------------------------------ persistence
     def _load(self) -> None:
@@ -164,9 +203,10 @@ class AlertProvisioner:
         rec.updated_at = time.time()
         self._alerts[strategy_id] = rec
 
-        if self.driver is not None and hasattr(self.driver, "upsert_alert"):
+        driver = self.ensure_driver()
+        if driver is not None and hasattr(driver, "upsert_alert"):
             try:
-                remote = self.driver.upsert_alert(
+                remote = driver.upsert_alert(
                     name=name, symbol=symbol, interval=interval,
                     webhook_url=rec.webhook_url, message=rec.message_template)
                 rec.tv_alert_id = str(remote.get("tv_alert_id", rec.tv_alert_id))
@@ -218,6 +258,46 @@ class AlertProvisioner:
         return {**out, "action": action, "budget_multiplier": policy.budget_multiplier,
                 "accept_webhook": policy.accept_webhook}
 
+    async def sync_all_with_m8(self, m8_engine, *,
+                               runner_running: bool = True) -> Dict[str, Any]:
+        """Nativer M8-Lifecycle-Rückkanal (§4.6).
+
+        Liest die kanonischen Zustände direkt aus der ``M8StateEngine``
+        (Redis SCAN ``m8:state:*`` mit Local-Fallback) und spiegelt die
+        Alert-Matrix nach TradingView. Strategien ohne Alert-Record werden
+        übersprungen; Waisen (Record ohne M8-State) werden abgeschaltet.
+        """
+        try:
+            states = await m8_engine.scan_states()
+        except Exception as exc:
+            logger.error("M8 scan for alert sync failed: %s", exc)
+            return {"ok": False, "reason": f"m8_scan_failed: {exc}", "results": []}
+
+        results: List[Dict[str, Any]] = []
+        seen: List[str] = []
+        for instance_id, state in (states or {}).items():
+            if instance_id not in self._alerts:
+                continue
+            seen.append(instance_id)
+            status = str(state.get("status") or "ACTIVE").upper()
+            try:
+                results.append(self.sync_with_m8(instance_id, status,
+                                                 runner_running=runner_running))
+            except Exception as exc:  # pragma: no cover - defensiv
+                logger.error("alert sync failed for %s: %s", instance_id, exc)
+                results.append({"strategy_id": instance_id, "action": "error",
+                                "reason": str(exc)})
+
+        orphans: List[str] = []
+        for sid, rec in self._alerts.items():
+            if sid in seen or not rec.enabled:
+                continue
+            orphans.append(sid)
+            self.disable(sid, reason="m8_state_missing")
+
+        return {"ok": True, "synced": len(results), "orphans_disabled": orphans,
+                "results": results, "driver": self.driver_status()}
+
     def disable_all(self, reason: str = "kill_switch") -> List[Dict[str, Any]]:
         return [self.disable(sid, reason) for sid in list(self._alerts)]
 
@@ -240,13 +320,24 @@ class AlertProvisioner:
         return rec
 
     def _drive(self, method: str, rec: AlertRecord) -> None:
-        if self.driver is None or not hasattr(self.driver, method):
+        driver = self.ensure_driver()
+        if driver is None:
+            rec.remote_synced = False
+            rec.last_error = self.driver_error or "no_tv_driver"
+            return
+        if not hasattr(driver, method):
+            rec.remote_synced = False
+            rec.last_error = f"driver_missing_{method}"
             return
         try:
-            getattr(self.driver, method)(rec.tv_alert_id or rec.name)
+            getattr(driver, method)(rec.tv_alert_id or rec.name)
+            rec.remote_synced = True
+            rec.last_error = ""
         except Exception as exc:
             logger.error("TV %s failed for %s: %s", method, rec.name, exc)
             rec.last_reason = f"{method}_failed: {exc}"
+            rec.remote_synced = False
+            rec.last_error = f"{method}_failed: {exc}"
 
     def snapshot(self) -> Dict[str, Any]:
         return {
@@ -254,6 +345,9 @@ class AlertProvisioner:
             "secret_configured": bool(self.config.webhook_secret),
             "alerts": self.list(),
             "enabled_count": sum(1 for a in self._alerts.values() if a.enabled),
+            "remote_synced_count": sum(1 for a in self._alerts.values()
+                                       if a.remote_synced),
+            "driver": self.driver_status(),
         }
 
 
