@@ -493,3 +493,38 @@ def test_orchestrator_ignores_synthetic_movers():
     )
     out = orch.tick(_snapshot(btc_htf), now=now)
     assert out["screen"]["defaults"] == ["BTC/USD", "ETH/USD"]
+
+
+class _CountingMoversScraper(_MoversScraper):
+    """Movers-Abruf-Zähler: verifiziert den 300s-TTL-Cache im Orchestrator."""
+
+    def __init__(self, rows, meta=None):
+        super().__init__(rows, meta)
+        self.calls = 0
+
+    def movers(self, market="crypto", category="gainers", limit=25):
+        self.calls += 1
+        return super().movers(market, category, limit)
+
+
+def test_orchestrator_caches_movers_across_ticks():
+    """Zwei Ticks innerhalb des TTL-Fensters → nur EIN Sidecar-Abruf."""
+    btc_htf = _bars(20, start=1_700_000_000.0, step=H1)
+    now = max(NY_FRIDAY, _closed_now(btc_htf, H1))
+    loop_d, acad = _CaptureLoopD(), _CaptureAcademy()
+    scraper = _CountingMoversScraper([{"ticker": "ETHUSD"}])
+    orch = MasterOrchestrator(
+        ports={
+            "polymarket": None,
+            "loop_c": LoopCPort(scraper=scraper, store=None),
+            "loop_d": loop_d,
+            "academy": acad,
+        },
+        universe=KrakenExecutionUniverse(),
+        hydrate_cooldown_s=0,
+    )
+    orch.tick(_snapshot(btc_htf), now=now)
+    orch.tick(_snapshot(btc_htf), now=now)
+    assert scraper.calls == 1  # Cache-Hit im zweiten Tick
+    assert orch._movers_cache is not None
+    assert orch._movers_cache[1] == [{"ticker": "ETHUSD"}]

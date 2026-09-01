@@ -23,3 +23,15 @@
 ## 2026-08-31 - Second TestClient lifespan tears down the shared FastAPI loop
 **Learning:** `app.server.main` holds process-global `state`. A second module-scoped `TestClient(main.app)` after `test_api_contract` already entered lifespan raises `ValueError: The future belongs to a different loop` on teardown even when assertions passed (suite shows ERROR, not FAIL).
 **Action:** Put queue-matrices / dashboard HTTP contracts on `tests/test_api_contract.py`'s existing client. Helper-only tests may import `main` but must not open another TestClient.
+
+## 2026-09-01 - CSV row parsing: per-row dicts were the parse bottleneck
+**Learning:** `parse_trades_csv` used `csv.DictReader` + a second `_map_trade_row` dict per row (~10k rows → 2 dicts/row). Worse, `_parse_number` ran an unconditional `.replace(",", "").replace("%", "").replace("$", "")` chain per cell (8 calls/row ≈ 40% of parse time). Positional `csv.reader` with pre-resolved column indexes + a fast path for clean numerics cut 53 ms → 37 ms (~31%) on 10k-row result CSVs with identical output (verified by differential test vs git HEAD).
+**Action:** For CSV seams, resolve alias→column once and index rows positionally (bounds-check for short rows); guard number cleaning behind a `"," in s or "%" in s or "$" in s` check. Apply to `parse_parameter_csv` / `parse_performance_csv` if they ever become hot.
+
+## 2026-09-01 - Orchestrator hit the TV sidecar over HTTP every tick
+**Learning:** `MasterOrchestrator._mover_rows()` → `client.movers(...)` is an httpx round-trip to the scraper sidecar on the tick critical path — and movers only *sort* the watchlist (they never add symbols). A 300s per-instance TTL cache (same pattern as `scraper_client._health_cache`, never on the store) removes the blocking call from every tick; failures are NOT cached so a recovered sidecar is picked up immediately.
+**Action:** Anything fetched for sort-order-only is a TTL-cache candidate. Cache on the orchestrator instance, not the store; keep failure paths uncached.
+
+## 2026-09-01 - LLM echo stream sent one WebSocket frame per word
+**Learning:** `llm_stream` echoed the prompt with one `send_json` + pydantic `model_dump` per word — a 200-word prompt = 200 JSON frames. Frontend (`panels.tsx`) just appends `content_chunk` frames, so batching to 8 words/frame is transparent: 200 → 26 frames (87% fewer) with identical text/order (`split(" ")` preserves double spaces).
+**Action:** Streaming endpoints should batch frames (8–16 words) instead of emitting per token/word. Contract test must assert frame count + reassembled text, not per-word boundaries.

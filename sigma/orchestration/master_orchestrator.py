@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sigma.signals.dual_hurst import evaluate_dual_hurst
 from sigma.signals.polymarket_layer0 import layer0_from_port, layer0_pre_regime
@@ -32,6 +32,12 @@ from sigma.strategies.htf_trend_ltf_reversion import HtfTrendLtfReversion
 from sigma.strategies.quantum_sniper_dca import QuantumSniperDCA
 
 logger = logging.getLogger("sigma.orchestration")
+
+# TV-Movers beeinflussen nur die Watchlist-Reihenfolge (Sortierung), ändern
+# sich aber nur im Minuten-Takt. Der Abruf ist ein HTTP-Roundtrip zum
+# Scraper-Sidecar auf dem Tick-Pfad — TTL-Cache (300s, = T2_MID-Cadence)
+# entfernt den Blocking-Call aus jedem Tick.
+_MOVERS_CACHE_TTL_S = 300.0
 
 
 class MasterOrchestrator:
@@ -73,6 +79,9 @@ class MasterOrchestrator:
         # Rate-Limit-Schutz: Lücken-Hydrate nur im Cooldown-Raster.
         self.hydrate_cooldown_s = float(hydrate_cooldown_s)
         self._last_hydrate_ts = 0.0
+        # TV-Movers-Sortierung: (fetch_ts, rows) TTL-Cache, siehe
+        # _MOVERS_CACHE_TTL_S — kein Sidecar-HTTP pro Tick.
+        self._movers_cache: Optional[Tuple[float, List[Dict[str, Any]]]] = None
 
     def tick(self, snapshot: Optional[Any] = None, *, now: Optional[float] = None) -> Dict[str, Any]:
         self.ticks += 1
@@ -386,10 +395,19 @@ class MasterOrchestrator:
     def _mover_rows(self) -> List[Dict[str, Any]]:
         """TV-Movers nur zur Sortierung. Fail-closed; erweitert das Universe nicht.
 
+        TTL-cached (300s): Movers ändern die Watchlist nur als Sortierung,
+        aber der Abruf ist ein HTTP-Roundtrip zum Sidecar auf dem Tick-Pfad.
+        Der Cache entfernt den Blocking-Call aus jedem Tick; Fehlschläge
+        werden nicht gecacht, damit ein erholter Sidecar sofort wieder
+        gelesen wird.
+
         Nur über den injizierten Loop-C-Scraper — kein globaler Client in
         Tests, der eine lebende Sidecar-Reihenfolge einschleusen könnte.
         Synthetic / degraded Meta → leere Liste (Watchlist bleibt Universe-Order).
         """
+        now = time.time()
+        if self._movers_cache is not None and now - self._movers_cache[0] < _MOVERS_CACHE_TTL_S:
+            return self._movers_cache[1]
         port = self.ports.get("loop_c")
         if port is None:
             return []
@@ -405,12 +423,14 @@ class MasterOrchestrator:
             rows = client.movers("crypto", "gainers", 25) or []
         except Exception as exc:
             logger.info("wave screen movers failed: %s", exc)
-            return []
+            return []  # bewusst NICHT gecacht — nächster Tick versucht erneut
         meta = getattr(client, "last_meta", {}) or {}
         origin = str(meta.get("source") or "").lower()
         if meta.get("degraded") or origin in ("synthetic", "synth", "seed"):
-            return []
-        return [row for row in rows if isinstance(row, dict)]
+            rows = []
+        rows = [row for row in rows if isinstance(row, dict)]
+        self._movers_cache = (now, rows)
+        return rows
 
     def _hydrate_due(self) -> bool:
         if self.hydrate_cooldown_s <= 0:

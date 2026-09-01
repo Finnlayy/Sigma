@@ -1043,10 +1043,16 @@ async def llm_stream(websocket: WebSocket):
                     if trigger in bp.LLM_UI_TRIGGERS else None).model_dump())
                 continue
             prompt = str(payload.get("prompt") or "")
-            for chunk in (prompt.split(" ") or [""]):
+            # Echo-Stream in 8er-Wort-Batches: eine WebSocket-JSON-Frame pro
+            # Wort hieß N send_json() + model_dump() für ein N-Wort-Prompt
+            # (200 Wörter → 200 Frames). Batchen hält den Streaming-Effekt
+            # bei ~8× weniger Frames; Text und Reihenfolge bleiben identisch
+            # (split(" ") bewahrt Mehrfach-Leerzeichen).
+            words = prompt.split(" ") or [""]
+            for i in range(0, len(words), 8):
                 await websocket.send_json(ChatStreamMessage(
                     session_id=session, sender="ASSISTANT",
-                    content_chunk=chunk + " ").model_dump())
+                    content_chunk=" ".join(words[i:i + 8]) + " ").model_dump())
             await websocket.send_json(ChatStreamMessage(
                 session_id=session, sender="ASSISTANT",
                 is_complete=True).model_dump())
