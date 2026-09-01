@@ -262,16 +262,33 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
     return visibleOrderMarkers.map(order => {
       const orderMs = new Date(order.timestamp).getTime();
       
-      // Find candle with closest timestamp
+      // Binary search for closest candle timestamp
+      let left = 0;
+      let right = chartCandles.length - 1;
       let closestCandle = chartCandles[0];
-      let minDiff = Math.abs(chartCandles[0].timestampMs - orderMs);
 
-      for (let i = 1; i < chartCandles.length; i++) {
-        const diff = Math.abs(chartCandles[i].timestampMs - orderMs);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestCandle = chartCandles[i];
+      while (left <= right) {
+        const mid = Math.floor((left + right) / 2);
+        if (chartCandles[mid].timestampMs === orderMs) {
+          closestCandle = chartCandles[mid];
+          left = mid; // Break out, avoiding using flag
+          break;
+        } else if (chartCandles[mid].timestampMs < orderMs) {
+          left = mid + 1;
+        } else {
+          right = mid - 1;
         }
+      }
+
+      if (left > right && chartCandles[left] && chartCandles[right]) {
+        // If not exact match, compare neighbors
+        const diffLeft = Math.abs(chartCandles[left].timestampMs - orderMs);
+        const diffRight = Math.abs(chartCandles[right].timestampMs - orderMs);
+        closestCandle = diffLeft < diffRight ? chartCandles[left] : chartCandles[right];
+      } else if (left > right) {
+        // Out of bounds check
+        if (left >= chartCandles.length) closestCandle = chartCandles[chartCandles.length - 1];
+        else if (right < 0) closestCandle = chartCandles[0];
       }
 
       return {
