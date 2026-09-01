@@ -19,3 +19,7 @@
 ## 2024-05-19 - [O(N) Loops Condensation and Binary Search on Frontend]
 **Learning:** In backtest parsing (e.g. `tv_csv.py`), Python generator expressions and list comprehensions to calculate single values across an array of objects can create high `O(N)` repeated overhead for big backtests. In frontend React logic, matching arrays against sequential time series arrays can degrade to $O(N \times M)$ if a linear search is done for finding closest timestamps.
 **Action:** Replace multiple sequential traversals calculating single aggregated metrics over trades with a single `for` loop traversal. Use Binary Search when querying values from pre-sorted time series arrays.
+
+## 2026-09-01 - Avoid Spread Operator on Large OHLC Arrays
+**Learning:** Found an instance in `MarketPanel.tsx` where a large array of OHLC chart candles was mapped and then spread into `Math.min(...prices)` and `Math.max(...prices)`. For arrays larger than the JavaScript engine's call stack limit (often around 10k-100k items), this throws `RangeError: Maximum call stack size exceeded`. It also incurs unnecessary memory allocation by creating intermediate arrays with `.map()`.
+**Action:** When calculating min/max over potentially large time series or OHLC arrays on the frontend, always use a single iterative O(N) loop instead of `Math.min(...array)` or `Math.max(...array)`.

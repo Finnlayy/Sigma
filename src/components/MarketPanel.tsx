@@ -314,14 +314,25 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
   // Calculate Price Range (Min & Max for domain)
   const priceDomain = useMemo(() => {
     if (chartCandles.length === 0) return ['auto', 'auto'];
-    const prices = chartCandles.map(c => c.price);
-    // Include order marker prices so markers never fall outside the chart
-    positionedMarkers.forEach(m => {
-      if (m.order.price) prices.push(m.order.price);
-    });
 
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
+    // Bolt Optimization: Prevent Call Stack Limit & Memory Bloat
+    // Replaced `.map()` and `Math.min(...prices)` with a single O(N) iteration
+    let min = Infinity;
+    let max = -Infinity;
+
+    for (const c of chartCandles) {
+      if (c.price < min) min = c.price;
+      if (c.price > max) max = c.price;
+    }
+
+    // Include order marker prices so markers never fall outside the chart
+    for (const m of positionedMarkers) {
+      if (m.order.price !== undefined) {
+        if (m.order.price < min) min = m.order.price;
+        if (m.order.price > max) max = m.order.price;
+      }
+    }
+
     const padding = (max - min) * 0.08 || min * 0.01;
     return [Math.max(0, Number((min - padding).toFixed(2))), Number((max + padding).toFixed(2))];
   }, [chartCandles, positionedMarkers]);
