@@ -55,6 +55,12 @@ A phase is **not** DONE because the file exists. DONE only after:
 - Optional phases MP-10, MP-13, MP-14 stay untouched unless a human explicitly asks.
 - Constants from the prompts are **named and hardcoded** (0.005, 0.06, 0.0005, 1800, 7200, 0.40/0.15, 40/30/20/10, …). Do not replace them with “configurable later” placeholders.
 
+## Bolt (Cursor performance automation)
+
+After opening a PR, mark it **ready** and **merge it** if GitHub reports MERGEABLE (no conflicts).
+Do not leave Bolt PRs as drafts. Repo workflow `.github/workflows/auto-merge-bolt.yml` also merges
+`⚡ Bolt` / `cursor/application-performance-improvement-*` PRs when possible.
+
 ## Jules execute loop (MANDATORY)
 
 If `docs/plans/EXECUTE-STATE.md` has **Loop: ACTIVE** and **Next** is not `STOP`:

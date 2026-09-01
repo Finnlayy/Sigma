@@ -500,3 +500,68 @@ def test_memory_stage_four_pauses_and_restarts_worker():
     repeated = watchdog.check(percent=99.0)
     assert repeated["executed"] is False
     assert repeated["reason"] == "stage4_latched"
+
+
+def test_telemetry_l2_uses_parquet_inventory_once_per_ttl():
+    """SSE L2 gauges must not call lake_summary() (COUNT + GROUP BY) at all,
+    and must share one parquet walk across files+MB and across 2s ticks
+    inside the 5s TTL.
+    """
+    from app.core.telemetry import _L2_TTL_S
+
+    class Store:
+        def __init__(self) -> None:
+            self.lake_calls = 0
+            self.parquet_calls = 0
+
+        def lake_summary(self):
+            self.lake_calls += 1
+            return {"total_files": 7, "total_size_mb": 3.5, "total_rows": 999}
+
+        def parquet_inventory(self):
+            self.parquet_calls += 1
+            return 7, 3.5
+
+    store = Store()
+    tel = TelemetryCenter()
+    first = tel.build_frame(store=store)
+    second = tel.build_frame(store=store)
+    tier = first["storage_tiering"]
+    assert store.lake_calls == 0
+    assert store.parquet_calls == 1
+    assert tier["l2_duckdb_parquet_files"] == 7
+    assert tier["l2_total_mb"] == 3.5
+    assert second["storage_tiering"]["l2_duckdb_parquet_files"] == 7
+    assert second["storage_tiering"]["l2_total_mb"] == 3.5
+    assert _L2_TTL_S == 5.0
+
+    tel._l2_cache = (time.time() - _L2_TTL_S - 0.01, 7, 3.5)
+    third = tel.build_frame(store=store)
+    assert store.parquet_calls == 2
+    assert store.lake_calls == 0
+    assert third["storage_tiering"]["l2_duckdb_parquet_files"] == 7
+
+
+def test_parquet_inventory_matches_lake_summary_file_stats(tmp_path):
+    """parquet_inventory is the walk-only subset of lake_summary file stats."""
+    db = tmp_path / "lake.duckdb"
+    store = DuckDBStore(str(db))
+    files, mb = store.parquet_inventory()
+    summary = store.lake_summary()
+    assert files == summary["total_files"]
+    assert mb == summary["total_size_mb"]
+    assert isinstance(files, int)
+    assert files >= 0
+    assert isinstance(mb, float)
+    assert mb >= 0.0
+    assert summary["total_rows"] == 0
+
+
+def test_telemetry_stream_does_not_double_scan_logs():
+    """Dead recent_logs_list(50) on the SSE generator was extra work / 2s."""
+    import inspect
+    import app.server.main as main
+
+    src = inspect.getsource(main.telemetry_stream)
+    assert "recent_logs_list(50)" not in src
+    assert "build_frame(" in src

@@ -173,6 +173,24 @@ def test_package_json_pins_terminal_dependencies():
     assert os.path.exists(os.path.join(ROOT, "src", "components", "ui", "resizable.tsx"))
 
 
+def test_use_poll_keeps_fetcher_in_ref():
+    """SigmaTerminal health ticks must not restart panel poll timers.
+
+    usePoll used to put `fn` in the interval effect deps. Inline
+    `() => api.x()` identities then tore down setInterval and fired a
+    duplicate GET on every parent render (header poll = 5s).
+    """
+    src = _read(PANELS_TSX)
+    assert "fnRef.current = fn" in src
+    assert "useRef(fn)" in src
+    assert "refetchKey" in src
+    interval_effect = src.split("const id = setInterval(refresh, ms);", 1)[1][:180]
+    assert "[refresh, ms]" in interval_effect
+    assert "fn]" not in interval_effect
+    assert "memo(function SigmaDock" in _read(
+        os.path.join(ROOT, "src", "components", "sigma", "dock.tsx"))
+
+
 def test_settings_save_feedback_tones():
     src = _read(os.path.join(ROOT, "src", "components", "SettingsPage.tsx"))
     assert 'tone: "ok"' in src

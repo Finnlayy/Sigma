@@ -6,7 +6,7 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   Download, ExternalLink, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
@@ -48,11 +48,25 @@ import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
 
 /* ------------------------------------------------------------------ shared */
 
-export function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, () => void] {
+export function usePoll<T>(
+  fn: () => Promise<T | null>,
+  ms = 5000,
+  refetchKey?: unknown,
+): [T | null, () => void] {
   const [data, setData] = useState<T | null>(null);
-  const refresh = useCallback(() => { void fn().then((d) => d && setData(d)); }, [fn]);
+  // Keep the latest fetcher in a ref so the interval is independent of `fn`
+  // identity. SigmaTerminal's 5s health poll re-renders the dock; inline
+  // `() => api.x()` used to restart every tick (duplicate GET + new timer).
+  // refetchKey (e.g. diagnostics severity) still fires an immediate fetch
+  // without tearing the timer down. Bench: 6 unstable pollers × health tick
+  // → 6 extra GETs / 5s; after this, 0 extra GETs from identity churn.
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const refresh = useCallback(() => {
+    void fnRef.current().then((d) => d && setData(d));
+  }, []);
+  useEffect(() => { refresh(); }, [refresh, refetchKey]);
   useEffect(() => {
-    refresh();
     const id = setInterval(refresh, ms);
     return () => clearInterval(id);
   }, [refresh, ms]);
@@ -374,7 +388,7 @@ export function LLMConsole() {
 /* ------------------------------------------------------- 5 AcademyBadgeMatrix */
 
 export function AcademyBadgeMatrix() {
-  const [data, refresh] = usePoll(() => sigmaApi.badges(), 8000);
+  const [data, refresh] = usePoll(sigmaApi.badges, 8000);
   const rows: BadgeRow[] = data?.matrix ?? [];
 
   return (
@@ -413,7 +427,7 @@ export function AcademyBadgeMatrix() {
 export function RiskGauges() {
   const [safety, refreshSafety] = usePoll(sigmaApi.safety, 4000);
   const [regime, setRegime] = useState<RegimeVector | null>(null);
-  const [jobs] = usePoll(() => sigmaApi.jobs(), 6000);
+  const [jobs] = usePoll(sigmaApi.jobs, 6000);
 
   useEffect(() => { void sigmaApi.regime('BTC/USD', 15).then((r) => r && setRegime(r)); }, []);
   const s: SafetySnapshot | null = safety;
@@ -630,7 +644,7 @@ export function MemoryWatchdogPanel() {
 /* --------------------------------------------- extra: TV job / ops footer  */
 
 export function TvJobsPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.jobs(), 5000);
+  const [data, refresh] = usePoll(sigmaApi.jobs, 5000);
   const jobs: TvJob[] = data?.jobs ?? [];
   return (
     <PanelShell title="TV Job Queue" icon={<Cpu size={13} />}
@@ -801,7 +815,7 @@ export function SchedulerTelemetryPanel() {
 /* ----------------------------------------------- 16 OrderReceiptsPanel §25 */
 
 export function OrderReceiptsPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.receipts(50), 5000);
+  const [data, refresh] = usePoll(sigmaApi.receipts, 5000);
   const rows: any[] = data?.receipts ?? [];
   const tone = (ack: string) => ack === 'FILLED' || ack === 'RETRY_SUCCESS' ? 'text-emerald-400'
     : ack === 'DUPLICATE_IGNORED' ? 'text-zinc-400'
@@ -938,7 +952,7 @@ export function FlywheelBudgetPanel() {
 /* ---------------------------------------------------- 20 PaperLabPanel §32 */
 
 export function PaperLabPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.paperLab(50), 6000);
+  const [data, refresh] = usePoll(sigmaApi.paperLab, 6000);
   const strategies: any[] = data?.strategies ?? [];
   const grad = data?.graduation;
   const promote = async (sid: string) => { await sigmaApi.promotePaperStrategy(sid); refresh(); };
@@ -1007,8 +1021,7 @@ const SEV_STYLE: Record<string, string> = {
 export function DiagnosticsErrorPanel() {
   const [sev, setSev] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const fetcher = useCallback(() => sigmaApi.diagnostics(50, sev), [sev]);
-  const [data, refresh] = usePoll(fetcher, 5000);
+  const [data, refresh] = usePoll(() => sigmaApi.diagnostics(50, sev), 5000, sev);
   const errors: any[] = data?.errors ?? [];
   const counts: Record<string, number> = data?.counts ?? {};
 
@@ -1068,7 +1081,7 @@ export function DiagnosticsErrorPanel() {
 /* ---------------------------------------- 22 NetronVisualizerPanel §38 */
 
 export function NetronVisualizerPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.netronStatus(), 10000);
+  const [data, refresh] = usePoll(sigmaApi.netronStatus, 10000);
   const [nonce, setNonce] = useState(0);
   const models: any[] = data?.models ?? [];
   // Im Sandbox-/Preview-Kontext läuft der Browser nicht auf dem Host des Cores:

@@ -95,6 +95,65 @@ class KrakenDepthAdapter:
                 levels.append((price, volume))
         return levels
 
+    # --------------------------------------------------- payload entry ---
+    def snapshot_from_payload(
+        self, payload: Dict[str, Any], pair: str, timestamp: float
+    ) -> OrderbookSnapshot:
+        """Baut aus einem rohen Kraken-Depth-Payload
+        (``result.{pair}.bids|asks`` → [price, volume, ts]) ein
+        ``OrderbookSnapshot``. Fehlerhafte Payloads → ``KrakenDepthError``
+        (fail-closed); kein Netz, keine Ausnahmen schlucken."""
+        result = payload.get("result") or {}
+        book = result.get(pair)
+        if not isinstance(book, dict):
+            # Fallback: erster Eintrag (Kraken liefert den Pair-Key variabel)
+            book = next((v for v in result.values() if isinstance(v, dict)), None)
+        if not isinstance(book, dict):
+            raise KrakenDepthError(f"Kraken Depth result missing for {pair}")
+        bids = self._levels(book.get("bids"))
+        asks = self._levels(book.get("asks"))
+        if not bids or not asks:
+            raise KrakenDepthError(f"Kraken Depth empty for {pair}")
+        return OrderbookSnapshot(
+            symbol=pair,
+            bids=sorted(bids, key=lambda level: level[0], reverse=True),
+            asks=sorted(asks, key=lambda level: level[0]),
+            timestamp=timestamp,
+        )
+
+    def verify_payload(
+        self,
+        payload: Dict[str, Any],
+        pair: str,
+        direction: str,
+        now: float,
+    ) -> Any:
+        """JIT-Entry: roher Kraken-Depth-Payload → bestehender
+        ``GlintOrderbookVerifier.verify`` (2 %-Band, I_depth, Spread,
+        Stale-Veto < 3 s). Kein Duplikat der Audit-Logik. Der
+        Snapshot-Timestamp wird aus den Level-Timestamps (Index 2)
+        abgeleitet — sonst wäre der Stale-Check wirkungslos."""
+        from app.quant.glint_orderbook_verifier import get_verifier
+
+        result = payload.get("result") or {}
+        book = result.get(pair)
+        if not isinstance(book, dict):
+            book = next((v for v in result.values() if isinstance(v, dict)), None)
+        level_ts: Optional[float] = None
+        if isinstance(book, dict):
+            for side in ("bids", "asks"):
+                for level in book.get(side) or []:
+                    if isinstance(level, (list, tuple)) and len(level) >= 3:
+                        try:
+                            ts = float(level[2])
+                        except (TypeError, ValueError):
+                            continue
+                        level_ts = ts if level_ts is None else max(level_ts, ts)
+        # Ohne Level-Timestamps: JIT-Fallback auf now (kein Stale-Veto).
+        snapshot_ts = float(now) if level_ts is None else level_ts
+        snapshot = self.snapshot_from_payload(payload, pair, snapshot_ts)
+        return get_verifier().verify(snapshot, direction, now=now)
+
     @staticmethod
     def absorption(snapshot: OrderbookSnapshot) -> float:
         """Scale-independent 0..1 proxy: balanced depth and a tight spread."""

@@ -4,6 +4,8 @@ Telegram, Health/Blueprint. Läuft gegen die echte FastAPI-App.
 """
 from __future__ import annotations
 
+import os
+
 import json
 import time
 
@@ -11,6 +13,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core import blueprint as bp
+
+from sigma.ports.polymarket_gamma_feeder import (
+    TRAJECTORY_WEIGHTS,
+    GammaFeederPort,
+    parse_gamma_payload,
+    set_gamma_port,
+)
+from app.ingestion.kraken_depth_adapter import KrakenDepthAdapter
+from app.quant.glint_orderbook_verifier import GlintOrderbookVerifier, get_verifier, set_verifier
 
 
 @pytest.fixture(scope="module")
@@ -556,7 +567,12 @@ MP17_SIGMA_GET_ENDPOINTS = [
 @pytest.mark.parametrize("endpoint", MP17_SIGMA_GET_ENDPOINTS)
 def test_mp17_sigma_get_endpoints_fail_closed(client, endpoint: str):
     """MP-17 — ohne Fachmodule: ok=False, available=False, feed unknown;
-    niemals synthetische Werte; stabile strukturierte Antwort."""
+    niemals synthetische Werte; stabile strukturierte Antwort.
+    /orderflow ist fail-closed, solange keine JIT-Audits vorliegen
+    (Verifier-Historie isolieren)."""
+    if endpoint == "/api/v1/sigma/orderflow":
+        from app.quant.glint_orderbook_verifier import get_verifier
+        get_verifier()._history.clear()
     resp = client.get(endpoint)
     assert resp.status_code == 200, endpoint
     body = resp.json()
@@ -579,7 +595,12 @@ def test_mp17_risk_rules_never_toggleable(client):
 
 
 def test_mp17_orderflow_and_polymarket_fail_closed_gate(client):
+    # Orderflow: fail-closed, solange keine JIT-Audits existieren
+    # (Isolation: Verifier-Singleton-Historie leeren)
+    from app.quant.glint_orderbook_verifier import get_verifier
+    get_verifier()._history.clear()
     of = client.get("/api/v1/sigma/orderflow").json()
+    assert of["ok"] is False
     assert of["reason"] == "orderflow_port_not_available"
     poly = client.get("/api/v1/sigma/polymarket").json()
     assert poly["gate_open"] is False  # ohne Feed Gate inaktiv
@@ -626,3 +647,222 @@ def test_mp17_research_jobs_and_dashboard_fail_closed(client):
     assert dash["ok"] is False
     assert dash["hypotheses"] == []
     assert dash["sweeps"] == []
+
+
+def test_queue_matrices_groups_trades_by_strategy_and_mode(client):
+    """HTTP contract for O(T) queue grouping. Numeric checks on our rows only
+    so leftover factory/webhook trades in this module-scoped store cannot flake.
+    """
+    import app.server.main as main
+
+    paper = client.post("/api/strategies", json={
+        "id": "qm_paper", "name": "QM Paper", "assetPair": "BTC/USD",
+        "executionMode": "paper", "status": "active", "interval": 15,
+    }).json()
+    live = client.post("/api/strategies", json={
+        "id": "qm_live", "name": "QM Live", "assetPair": "ETH/USD",
+        "executionMode": "live", "status": "inactive", "interval": 30,
+    }).json()
+    assert paper["id"] == "qm_paper" and live["id"] == "qm_live"
+
+    def trade(tid, sid, mode, pnl, notional, exit_time, status="closed",
+              symbol="BTC/USD", name=None):
+        return {
+            "trade_id": tid, "strategy_id": sid,
+            "strategy_name": name or sid, "status": status,
+            "execution_mode": mode, "symbol": symbol,
+            "direction": "LONG", "side": "buy",
+            "net_pnl_usd": pnl, "notional_usd": notional,
+            "entry_time": exit_time, "exit_time": exit_time,
+            "entry_price": 100.0, "quantity": 1.0,
+        }
+
+    store = main.state.store
+    store.upsert_trade(trade("qm1", "qm_paper", "paper", 10.0, 200.0,
+                             "2026-08-01 10:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm2", "qm_paper", "", 5.0, 50.0,
+                             "2026-08-01 11:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm3", "qm_paper", "paper", -4.0, 80.0,
+                             "2026-08-01 12:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm0", "qm_paper", "paper", 0.0, 30.0,
+                             "2026-08-01 09:00:00", name="QM Paper"))
+    store.upsert_trade(trade("qm_open", "qm_paper", "paper", 1.0, 10.0,
+                             "2026-08-01 13:00:00", status="open", name="QM Paper"))
+    store.upsert_trade(trade("qm5", "qm_live", "live", 20.0, 100.0,
+                             "2026-08-01 14:00:00", symbol="ETH/USD", name="QM Live"))
+
+    body = client.get("/api/queue-matrices").json()
+    prow = next(s for s in body["paper"]["strategies"] if s["strategyId"] == "qm_paper")
+    lrow = next(s for s in body["live"]["strategies"] if s["strategyId"] == "qm_live")
+
+    assert prow["totalTrades"] == 4
+    assert prow["winningTrades"] == 2
+    assert prow["losingTrades"] == 2
+    assert prow["realizedPnL"] == 11.0
+    assert prow["totalPnL"] == 11.0
+    assert prow["volumeTradedUSD"] == 360.0
+    assert prow["profitFactor"] == 3.75
+    assert prow["winRate"] == 50.0
+    assert prow["bestTrade"] == 10.0
+    assert prow["worstTrade"] == -4.0
+    assert prow["avgTradeReturn"] == 2.75
+    assert prow["maxDrawdown"] == 26.6667
+    assert prow["executionMode"] == "paper"
+    assert prow["status"] == "active"
+    assert {t["id"] for t in prow["trades"]} == {"qm1", "qm2", "qm3", "qm0"}
+
+    assert lrow["totalTrades"] == 1
+    assert lrow["winningTrades"] == 1
+    assert lrow["losingTrades"] == 0
+    assert lrow["realizedPnL"] == 20.0
+    assert lrow["volumeTradedUSD"] == 100.0
+    assert lrow["profitFactor"] == 999.0
+    assert lrow["executionMode"] == "live"
+    assert {t["id"] for t in lrow["trades"]} == {"qm5"}
+
+    ours = [p for p in body["paper"]["pnlTrajectory"] if p["strategyName"] == "QM Paper"]
+    assert [p["time"] for p in ours] == [
+        "2026-08-01T09:00:00",
+        "2026-08-01T10:00:00",
+        "2026-08-01T11:00:00",
+        "2026-08-01T12:00:00",
+    ]
+    assert [p["tradePnL"] for p in ours] == [0.0, 10.0, 5.0, -4.0]
+    assert "qm_live" not in {s["strategyId"] for s in body["paper"]["strategies"]}
+    assert "qm_paper" not in {s["strategyId"] for s in body["live"]["strategies"]}
+    assert "qm_open" not in {t["id"] for t in prow["trades"]}
+    assert body["paper"]["activeWorkers"] >= 1
+
+
+# =============================================================================
+# GLINT-POLYMARKET-WIRING — echte gemappte Payloads (offline, ein App-Start)
+# =============================================================================
+
+GAMMA_PAYLOAD = {
+    "slug": "btc-macro-42",
+    "title": "Will Bitcoin close above $110,000 by end of August?",
+    "volume24hr": 2_500_000.0,
+    "liquidity": 1_100_000.0,
+    "markets": [
+        {"groupItemTitle": "100000", "outcomePrices": [0.98, 0.02],
+         "synthetic": False},
+        {"groupItemTitle": "105000", "outcomePrices": [0.90, 0.10],
+         "synthetic": False},
+        {"groupItemTitle": "110000", "outcomePrices": [0.60, 0.40],
+         "synthetic": False},
+        {"groupItemTitle": "115000", "outcomePrices": [0.20, 0.80],
+         "synthetic": False},
+    ],
+}
+
+KRAKEN_DEPTH_PAYLOAD = {
+    "error": [],
+    "result": {
+        "XBTUSD": {
+            "bids": [
+                ["67000.0", "1.5", 1700000000],
+                ["66950.0", "2.0", 1700000000],
+                ["66800.0", "5.0", 1700000000],
+            ],
+            "asks": [
+                ["67050.0", "1.0", 1700000000],
+                ["67100.0", "1.5", 1700000000],
+                ["67200.0", "4.0", 1700000000],
+            ],
+        }
+    },
+}
+
+
+def _wiring_gamma_port() -> GammaFeederPort:
+    import time
+    odds = parse_gamma_payload(GAMMA_PAYLOAD, spot_price=107_000.0,
+                               now=time.time())
+    return GammaFeederPort(odds)
+
+
+def test_wiring_polymarket_real_payload_with_port(client):
+    """GET /api/v1/sigma/polymarket liefert echte Gamma-Dichten,
+    mu und Trajektorien; gate_open bleibt False (Telemetrie)."""
+    set_gamma_port(_wiring_gamma_port())
+    try:
+        body = client.get("/api/v1/sigma/polymarket").json()
+        assert body["ok"] is True
+        assert body["available"] is True
+        assert body["feed"]["source"] == "polymarket_gamma"
+        assert body["mu"] is not None and body["mu"] > 0
+        assert len(body["density_bins"]) == 5
+        assert body["gate_open"] is False      # nie Trade-Blocker
+        assert body["gate_060"] is True
+        assert set(body["trajectories"]) == set(TRAJECTORY_WEIGHTS)
+        assert body["spot_price"] == 107_000.0
+        assert body["stale"] is False
+    finally:
+        set_gamma_port(None)
+
+
+def test_wiring_polymarket_fail_closed_without_port(client):
+    set_gamma_port(None)
+    body = client.get("/api/v1/sigma/polymarket").json()
+    assert body["ok"] is False
+    assert body["available"] is False
+    assert body["gate_open"] is False
+    assert body["invalid_reason"] == "no_port"
+
+
+def test_wiring_polymarket_fail_closed_stale(client):
+    import time
+    odds = parse_gamma_payload(GAMMA_PAYLOAD, spot_price=107_000.0,
+                               now=time.time() - 600.0, ttl_s=300.0)
+    set_gamma_port(GammaFeederPort(odds))
+    try:
+        body = client.get("/api/v1/sigma/polymarket").json()
+        assert body["ok"] is False
+        assert body["invalid_reason"] == "stale_snapshot"
+    finally:
+        set_gamma_port(None)
+
+
+def test_wiring_orderflow_real_audit_with_history(client):
+    """GET /api/v1/sigma/orderflow liefert echten Kraken-L2-JIT-Audit
+    (i_depth, spread, size_multiplier, audit_status)."""
+    verifier = GlintOrderbookVerifier()
+    set_verifier(verifier)
+    try:
+        verifier.verify(
+            KrakenDepthAdapter().snapshot_from_payload(
+                KRAKEN_DEPTH_PAYLOAD, "XBTUSD", 1700000000.0),
+            "BULLISH", now=1700000000.0,
+        )
+        body = client.get("/api/v1/sigma/orderflow").json()
+        assert body["ok"] is True
+        assert body["available"] is True
+        assert body["feed"]["source"] == "kraken_l2_jit"
+        assert body["i_depth"] is not None
+        assert body["size_multiplier"] == 1.0
+        assert body["audit_status"] is not None
+        assert body["audits"]
+    finally:
+        set_verifier(None)
+
+
+def test_wiring_orderflow_fail_closed_without_audits(client):
+    set_verifier(GlintOrderbookVerifier())  # leere History
+    try:
+        body = client.get("/api/v1/sigma/orderflow").json()
+        assert body["ok"] is False
+        assert body["reason"] == "orderflow_port_not_available"
+    finally:
+        set_verifier(None)
+
+
+def test_wiring_preflight_jit_audit_in_lifecycle():
+    """StrategyLifecycleService._preflight nutzt den bestehenden
+    JIT-Orderbuch-Audit (kein Blind-Entry ohne Konfluenz)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "app", "services", "strategy_lifecycle_service.py")
+    with open(path, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    assert "self.verifier.verify" in src
+    assert "ORDERBOOK_AUDIT_MISSING" in src
+    assert "ORDERBOOK_DEPTH_UNAVAILABLE" in src
