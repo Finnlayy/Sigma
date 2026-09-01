@@ -351,10 +351,36 @@ def _summary_from_trades(
             "assetHoldings": 0.0,
         })
 
-    wins = [t for t in trades if float(t.get("pnl") or 0) > 0]
-    losses = [t for t in trades if float(t.get("pnl") or 0) <= 0]
-    gross_win = sum(float(t["pnl"]) for t in wins)
-    gross_loss = abs(sum(float(t["pnl"]) for t in losses))
+    wins_count = 0
+    losses_count = 0
+    gross_win = 0.0
+    gross_loss = 0.0
+    sum_pnl_percent = 0.0
+    best_trade = float('-inf')
+    worst_trade = float('inf')
+
+    for t in trades:
+        pnl = float(t.get("pnl") or 0)
+        pnl_pct = float(t.get("pnlPercent") or 0)
+        sum_pnl_percent += pnl_pct
+
+        if pnl > best_trade:
+            best_trade = pnl
+        if pnl < worst_trade:
+            worst_trade = pnl
+
+        if pnl > 0:
+            wins_count += 1
+            gross_win += pnl
+        else:
+            losses_count += 1
+            gross_loss += abs(pnl)
+
+    if best_trade == float('-inf'):
+        best_trade = 0.0
+    if worst_trade == float('inf'):
+        worst_trade = 0.0
+
     pf = (gross_win / gross_loss) if gross_loss > 0 else (999.0 if gross_win > 0 else 0.0)
 
     returns = []
@@ -384,16 +410,16 @@ def _summary_from_trades(
         "sharpeRatio": round(float(perf.get("sharpeRatio", sharpe)), 4),
         "sortinoRatio": round(float(perf.get("sortinoRatio", sortino)), 4),
         "profitFactor": round(min(float(perf.get("profitFactor", pf)), 999.0), 4),
-        "winRate": round(float(perf.get("winRate", (len(wins) / len(trades) * 100.0) if trades else 0.0)), 2),
+        "winRate": round(float(perf.get("winRate", (wins_count / len(trades) * 100.0) if trades else 0.0)), 2),
         "totalTrades": int(perf.get("totalTrades", len(trades))),
-        "winningTrades": int(perf.get("winningTrades", len(wins))),
-        "losingTrades": int(perf.get("losingTrades", len(losses))),
+        "winningTrades": int(perf.get("winningTrades", wins_count)),
+        "losingTrades": int(perf.get("losingTrades", losses_count)),
         "averageTradeReturn": round(
             float(perf.get("averageTradeReturn",
-                           (sum(float(t.get("pnlPercent") or 0) for t in trades) / len(trades)) if trades else 0.0)),
+                           (sum_pnl_percent / len(trades)) if trades else 0.0)),
             4),
-        "bestTradeUSD": round(float(perf.get("bestTradeUSD", max((float(t.get("pnl") or 0) for t in trades), default=0.0))), 2),
-        "worstTradeUSD": round(float(perf.get("worstTradeUSD", min((float(t.get("pnl") or 0) for t in trades), default=0.0))), 2),
+        "bestTradeUSD": round(float(perf.get("bestTradeUSD", best_trade)), 2),
+        "worstTradeUSD": round(float(perf.get("worstTradeUSD", worst_trade)), 2),
         "avgHoldCandles": round(float(perf.get("avgHoldCandles", 0.0)), 2),
         "totalFeesPaid": round(float(perf.get("totalFeesPaid", total_fees)), 2),
     }
