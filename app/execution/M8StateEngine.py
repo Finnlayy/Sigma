@@ -231,6 +231,44 @@ class M8StateEngine:
         self.states: Dict[str, StrategyState] = {}
         self.local_processed_trades: Set[str] = set()
         self.store = None  # injektierbarer DuckDBStore (Default: get_store())
+        # §4.6 — nativer Alert-Rückkanal (lazy; None = nicht verdrahtet)
+        self.alert_provisioner = None
+        self._last_alert_status: Dict[str, str] = {}
+
+    # ------------------------------------------------------- alert coupling
+    def _alerts(self):
+        if self.alert_provisioner is None:
+            try:
+                from app.tv.alert_provisioner import get_alert_provisioner
+
+                self.alert_provisioner = get_alert_provisioner()
+            except Exception as exc:  # pragma: no cover - defensiv
+                logger.warning("alert provisioner unavailable: %s", exc)
+                return None
+        return self.alert_provisioner
+
+    def _notify_alert_matrix(self, instance_id: str, status: str,
+                             *, runner_running: bool = True) -> None:
+        """Spiegelt jeden M8-Statuswechsel sofort in die TV-Alert-Matrix.
+
+        Idempotent: gleicher Status -> kein Driver-Call. Fehler dürfen den
+        State-Übergang nie abbrechen (Alerts sind nachgelagert).
+        """
+        status = str(status or "").upper()
+        if not status or self._last_alert_status.get(instance_id) == status:
+            return
+        provisioner = self._alerts()
+        if provisioner is None:
+            return
+        try:
+            if provisioner.get(instance_id) is None:
+                return
+            provisioner.sync_with_m8(instance_id, status,
+                                     runner_running=runner_running)
+            self._last_alert_status[instance_id] = status
+        except Exception as exc:  # pragma: no cover - defensiv
+            logger.warning("alert sync for %s (%s) failed: %s",
+                           instance_id, status, exc)
 
     def _store(self):
         if self.store is None:
@@ -405,7 +443,14 @@ class M8StateEngine:
             logger.warning("Vault sweep failed for %s: %s", instance_id, exc)
 
     def _persist_budget(self, state: Dict[str, Any]) -> None:
-        """Write-Through: DuckDB strategy_budgets + Redis m8:state-Hash (Konsistenz für SCAN)."""
+        """Write-Through: DuckDB strategy_budgets + Redis m8:state-Hash (Konsistenz für SCAN).
+
+        Zugleich der kanonische Choke-Point für den Alert-Rückkanal: jeder
+        persistierte Statuswechsel schaltet den TradingView-Alert nach §4.6.
+        """
+        iid_for_alert = state.get("strategy_id") or state.get("instance_id")
+        if iid_for_alert:
+            self._notify_alert_matrix(str(iid_for_alert), state.get("status"))
         try:
             self._store().sync_budget(state)
         except Exception as exc:  # pragma: no cover - defensive

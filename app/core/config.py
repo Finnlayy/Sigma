@@ -194,6 +194,10 @@ class SigmaConfig:
     tv_scraper_url: str = bp.SCRAPER_BASE_URL
     tv_scraper_timeout_s: float = float(bp.SCRAPER_TIMEOUT_S)
 
+    # --- MP-06/MP-17 Polymarket (Gamma) ---------------------------------------
+    polymarket_event_slug: str = ""
+    polymarket_ttl_s: float = 300.0
+
     # --- §21 Quant / ONNX ------------------------------------------------------
     onnx_model_path: str = bp.PATH_ONNX_REGIME
     brier_drift_threshold: float = bp.BRIER_DRIFT_THRESHOLD
@@ -294,6 +298,8 @@ class SigmaConfig:
             self.tv_export_dir = _env("SIGMA_TV_EXPORT_DIR", self.tv_export_dir)
             self.tv_max_concurrency = _env_int("SIGMA_TV_CONCURRENCY", self.tv_max_concurrency)
             self.onnx_model_path = _env("SIGMA_ONNX_MODEL_PATH", self.onnx_model_path)
+            self.polymarket_event_slug = _env("SIGMA_POLYMARKET_SLUG", self.polymarket_event_slug)
+            self.polymarket_ttl_s = _env_float("SIGMA_POLYMARKET_TTL_S", self.polymarket_ttl_s)
             self.selectors_path = _env(bp.SELECTORS_LOCAL_PATH_ENV, self.selectors_path)
             self.selectors_remote_url = _env(bp.SELECTORS_REMOTE_URL_ENV, self.selectors_remote_url)
             self.selectors_sha256 = _env(bp.SELECTORS_SHA256_ENV, self.selectors_sha256)

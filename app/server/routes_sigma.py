@@ -655,6 +655,43 @@ async def alerts_overview():
     return get_alert_provisioner().snapshot()
 
 
+@router.get("/api/v1/alerts/driver")
+async def alerts_driver_status():
+    """§17.5 — Playwright-Alert-Treiber: Session, Cookies, Bindung."""
+    return get_alert_provisioner().driver_status()
+
+
+@router.post("/api/v1/alerts/driver/attach")
+async def alerts_driver_attach(request: Request,
+                               x_sigma_settings_token: Optional[str] = Header(default=None)):
+    """Nach `bin/sigma-tv-login` den Treiber ohne Neustart scharf schalten."""
+    _require_operator(request, x_sigma_settings_token)
+    prov = get_alert_provisioner()
+    driver = prov.ensure_driver()
+    status = prov.driver_status()
+    if driver is None:
+        raise HTTPException(503, detail={
+            "code": "TV_DRIVER_UNAVAILABLE",
+            "reason": status.get("error") or status.get("attach_error")
+                      or "no_tv_session",
+            "status": status})
+    return {"ok": True, "attached": True, "status": status}
+
+
+@router.post("/api/v1/alerts/sync-m8")
+async def alerts_sync_m8(request: Request,
+                         x_sigma_settings_token: Optional[str] = Header(default=None)):
+    """Nativer M8-Lifecycle-Rückkanal: m8:state:* -> TradingView-Alerts."""
+    _require_operator(request, x_sigma_settings_token)
+    from app.server.main import state as server_state
+
+    m8 = getattr(server_state, "m8", None)
+    if m8 is None:
+        raise HTTPException(503, detail={"code": "M8_ENGINE_UNAVAILABLE",
+                                         "reason": "M8StateEngine not started"})
+    return await get_alert_provisioner().sync_all_with_m8(m8)
+
+
 # =============================================================================
 # TV Jobs (§7)
 # =============================================================================
@@ -706,11 +743,16 @@ async def tv_session_status():
     cfg = load_config()
     from app.tv.chrome_login import chrome_binary, get_tv_chrome_launcher
 
+    from app.tv.tv_driver import driver_snapshot
+
     chrome = get_tv_chrome_launcher(cfg).snapshot()
+    tv_driver = driver_snapshot(cfg)
     return {
         "storage_state_path": cfg.tv_storage_state_path,
         "session_present": os.path.exists(cfg.tv_storage_state_path),
         "driver": "playwright" if os.path.exists(cfg.tv_storage_state_path) else "fake",
+        "alert_driver": tv_driver,
+        "session": tv_driver,
         "selectors": get_selector_manager().snapshot(),
         "worker": get_tv_queue().snapshot(),
         "login_url": bp.TV_LOGIN_URL,
@@ -1962,3 +2004,102 @@ async def research_job(job_id: str):
 async def research_dashboard():
     """MP-12/16 — H1-H7-Status + Sweeps; ohne Backend leer."""
     return _sigma_empty(hypotheses=[], sweeps=[], export_html_path=None)
+
+
+# =============================================================================
+# MP-17 — LIVE-PANEL-ROUTEN (scharf, keine Mocks)
+# -----------------------------------------------------------------------------
+# /api/v1/sigma/panels/{market-geometry|quantum-regime|power-physics|
+#                       glint-polymarket}
+# Datenquellen: Kraken L2 (Redis `sigma:orderbook:depth`), onnx_kelly +
+# M8StateEngine, DuckDB tick_buffer_5m, Polymarket Gamma (+ Glint-Radar).
+# Kein Stub, kein available=False: liefert die Quelle nichts, antwortet die
+# Route fail-closed mit HTTP 503 und einem konkreten Grund.
+# =============================================================================
+
+from app.panels import panel_engine as _panels  # noqa: E402
+
+panels_router = APIRouter(prefix="/api/v1/sigma/panels", tags=["MP-17 Panels"])
+
+
+async def get_panel_redis():
+    """Geteilter async Redis-Client (AOF; fakeredis nur wenn erlaubt)."""
+    return await _redis_client()
+
+
+async def _redis_client():
+    from app.core.redis_client import get_redis as _get_redis
+
+    return await _get_redis(load_config())
+
+
+def _panel_envelope(source: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    generated_ts = payload.get("generated_ts")
+    age = None
+    if generated_ts:
+        try:
+            age = round(max(0.0, time.time() - float(generated_ts)), 3)
+        except (TypeError, ValueError):
+            age = None
+    return {
+        "ok": True,
+        "available": True,
+        "source": source,
+        "generated_at": _sigma_generated_at(),
+        "feed": {"source": source, "available": True, "degraded": False,
+                 "age_s": age, "error": None},
+        "payload": payload,
+    }
+
+
+async def _serve_panel(name: str, source: str, coro_factory) -> Dict[str, Any]:
+    redis = await _redis_client()
+    try:
+        payload = await coro_factory(redis)
+    except _panels.PanelUnavailable as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "PANEL_FEED_UNAVAILABLE", "panel": name,
+            "source": exc.source, "reason": exc.detail})
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - unerwartete Quellenfehler
+        logger.exception("panel %s failed", name)
+        raise HTTPException(status_code=503, detail={
+            "code": "PANEL_FEED_ERROR", "panel": name, "source": source,
+            "reason": f"{type(exc).__name__}: {exc}"})
+    return _panel_envelope(source, payload)
+
+
+@panels_router.get("/market-geometry")
+async def get_market_geometry(symbol: Optional[str] = None):
+    """Top-20 Orderbuch-Imbalance, VPOC, Liquiditätscluster, dyn. S/R."""
+    return await _serve_panel(
+        "market-geometry", "kraken_live_l2",
+        lambda r: _panels.market_geometry(r, symbol=symbol))
+
+
+@panels_router.get("/quantum-regime")
+async def get_quantum_regime(symbol: Optional[str] = None):
+    """Volatilitäts-Regime, Brier-Drift, fraktale Dimension, Half-Kelly."""
+    return await _serve_panel(
+        "quantum-regime", "onnx_kelly_m8",
+        lambda r: _panels.quantum_regime(r, symbol=symbol))
+
+
+@panels_router.get("/power-physics")
+async def get_power_physics(symbol: Optional[str] = None):
+    """Kinetic Momentum, Orderflow-Beschleunigung, Exhaustion, Vol-Energie."""
+    return await _serve_panel(
+        "power-physics", "duckdb_orderflow",
+        lambda r: _panels.power_physics(r, symbol=symbol))
+
+
+@panels_router.get("/glint-polymarket")
+async def get_glint_polymarket(symbol: Optional[str] = None):
+    """Polymarket JIT-Gate, Glint-Radar, Spread-Effizienz, Richtungs-Bias."""
+    return await _serve_panel(
+        "glint-polymarket", "polymarket_gamma_live",
+        lambda r: _panels.glint_polymarket(r, symbol=symbol))
+
+
+router.include_router(panels_router)
