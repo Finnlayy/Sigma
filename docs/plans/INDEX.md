@@ -26,4 +26,4 @@ Implementierungs-Loop: `docs/plans/EXECUTE-STATE.md` (Next-Zeiger) · Prompt: `d
 
 | Plan | Status | Datei | Hinweis |
 |---|---|---|---|
-| Glint + Polymarket Live-Feeds | PLAN | `docs/plans/GLINT-POLYMARKET-WIRING.md` | Gamma + Kraken L2 in bestehende Engines; kein Ciel-Sandbox-Deploy |
+| Glint + Polymarket Live-Feeds | DONE | `docs/plans/GLINT-POLYMARKET-WIRING.md` | Gamma + Kraken L2 in bestehende Engines verdrahtet; Closeout-Befund in `EXECUTE-STATE.md` (885 Tests grün) |
