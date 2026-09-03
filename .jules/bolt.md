@@ -26,3 +26,6 @@
 ## 2026-09-02 - Use useMemo for expensive derived arrays based on props in modals
 **Learning:** Component `StrategyMatrixModal` processes large datasets of trades via `.filter` and `.map` including `.sort` and string operations (like formatting times) on every render (e.g. when changing tabs). Modals tracking hundreds of orders will experience heavy slowdown.
 **Action:** Always wrap `filter` and `.sort()` chains on prop arrays (e.g., arrays of trades) in `useMemo` hooks, specifying exactly what props affect them, to avoid O(N log N) or O(N) operations running on every tab switch.
+## 2026-09-03 - Memoizing prop-dependent filters in panels
+**Learning:** In React components like `QueueMatrixPanel.tsx` and `BacktestingPanel.tsx`, iterating and filtering large arrays via `.filter()` directly inside the render logic creates an O(N) penalty (or more with nested loop string matching like `.includes`) on every re-render. We saw instances where `filteredTrades` was calculated on every keystroke in search inputs because it was unmemoized.
+**Action:** Always wrap `.filter()` operations on arrays (especially derived arrays or those bound to input search states) in `useMemo`. Cache string transformations like `.toLowerCase()` outside the `.filter` loop to further micro-optimize.

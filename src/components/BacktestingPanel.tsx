@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   TradingStrategy, 
   BacktestResult, 
@@ -233,12 +233,15 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
   };
 
   // Filter Trades (Only count trades as wins/losses if closed)
-  const filteredTrades = backtestResult?.trades.filter(t => {
-    if (tradeFilter === 'wins') return t.status === 'closed' && t.pnl > 0;
-    if (tradeFilter === 'losses') return t.status === 'closed' && t.pnl < 0;
-    if (tradeFilter === 'stops') return t.status === 'closed' && t.reason.toLowerCase().includes('stop');
-    return true;
-  }) || [];
+  // Bolt Optimization: Added useMemo to prevent O(N) array filtering recalculation on every React re-render
+  const filteredTrades = useMemo(() => {
+    return backtestResult?.trades.filter(t => {
+      if (tradeFilter === 'wins') return t.status === 'closed' && t.pnl > 0;
+      if (tradeFilter === 'losses') return t.status === 'closed' && t.pnl < 0;
+      if (tradeFilter === 'stops') return t.status === 'closed' && t.reason.toLowerCase().includes('stop');
+      return true;
+    }) || [];
+  }, [backtestResult?.trades, tradeFilter]);
 
   // Popular Pairs List
   const popularPairs = [
