@@ -194,11 +194,21 @@ export default function MetricsPanel({
           generated.push({ time: timeLabel, pnl: val });
         }
 
-        const vals = generated.map(g => g.pnl);
+        // Bolt Optimization: Replaced O(N) .map() and spread operators with a single O(N) loop.
+        // Prevents intermediate array allocation and avoids RangeError (call stack limit) on large arrays.
+        let high = -Infinity;
+        let low = Infinity;
+        for (const g of generated) {
+          if (g.pnl > high) high = g.pnl;
+          if (g.pnl < low) low = g.pnl;
+        }
+        if (high === -Infinity) high = 0;
+        if (low === Infinity) low = 0;
+
         setHistoryData(generated);
         setHistoryStats({
-          high: Math.max(...vals),
-          low: Math.min(...vals),
+          high,
+          low,
           current: targetPnL
         });
         setIsLoadingHistory(false);
