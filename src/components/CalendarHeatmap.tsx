@@ -100,7 +100,9 @@ export default function CalendarHeatmap({
     if (viewScope === 'combined_live') return strategies.filter(s => s.executionMode === 'live');
     if (viewScope === 'combined_paper') return strategies.filter(s => (s.executionMode || 'paper') === 'paper');
     if (viewScope === 'custom_multi') {
-      const filtered = strategies.filter(s => selectedMultiIds.includes(s.id));
+      // Bolt Optimization: Replace O(N*M) array .includes with O(1) Set .has lookup
+      const multiIdsSet = new Set(selectedMultiIds);
+      const filtered = strategies.filter(s => multiIdsSet.has(s.id));
       return filtered.length > 0 ? filtered : strategies.slice(0, 1);
     }
     // Single mode:
@@ -242,12 +244,25 @@ export default function CalendarHeatmap({
       });
     }
 
-    const total30DPnL = Number(days.reduce((acc, d) => acc + d.pnl, 0).toFixed(2));
-    const greenDays = days.filter(d => d.pnl > 0).length;
-    const redDays = days.filter(d => d.pnl < 0).length;
-    const flatDays = days.filter(d => d.pnl === 0).length;
+    // Bolt Optimization: Condense 5 consecutive O(N) array passes (.reduce and 4x .filter) into a single O(N) loop
+    let total30DPnL = 0;
+    let greenDays = 0;
+    let redDays = 0;
+    let flatDays = 0;
+    const activeDays: DailyPnLDay[] = [];
 
-    const activeDays = days.filter(d => d.tradesCount > 0 || d.pnl !== 0 || d.isToday);
+    for (const d of days) {
+      total30DPnL += d.pnl;
+      if (d.pnl > 0) greenDays++;
+      else if (d.pnl < 0) redDays++;
+      else flatDays++;
+
+      if (d.tradesCount > 0 || d.pnl !== 0 || d.isToday) {
+        activeDays.push(d);
+      }
+    }
+    total30DPnL = Number(total30DPnL.toFixed(2));
+
     const candidateDays = activeDays.length > 0 ? activeDays : [days[0]];
 
     let bestDay = { date: candidateDays[0].date, formattedDate: candidateDays[0].formattedDate, pnl: candidateDays[0].pnl };

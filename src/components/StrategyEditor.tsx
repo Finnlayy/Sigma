@@ -161,6 +161,11 @@ export default function StrategyEditor({
     };
   }, [krakenSymbols]);
 
+  // Bolt Optimization: Prevent O(N) array filtering recalculation on every React re-render
+  const activeWorkersCount = useMemo(() => {
+    return strategies.filter(s => s.status === 'active').length;
+  }, [strategies]);
+
   // Fetch Manifest
   const fetchManifest = async () => {
     setIsLoadingManifest(true);
@@ -530,7 +535,7 @@ if (diff > parameters.threshold) {
                 <div>
                   <span className="text-[10px] text-zinc-500 block uppercase">Active Running</span>
                   <span className="text-emerald-400 font-semibold">
-                    {strategies.filter(s => s.status === 'active').length} workers
+                    {activeWorkersCount} workers
                   </span>
                 </div>
               </div>
