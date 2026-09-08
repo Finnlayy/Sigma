@@ -66,7 +66,9 @@ export default function ProcessLogView() {
     setLines([]);
     let ws: WebSocket | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    let attempt = 0;
 
     const startPolling = () => {
       if (poll) return;
@@ -76,18 +78,39 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    const connectWs = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+        ws.onopen = () => {
+          attempt = 0;
+          setConnected(true);
+          if (poll) { clearInterval(poll); poll = null; }
+        };
+        ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
+        ws.onerror = () => { /* wait for onclose */ };
+        ws.onclose = () => {
+          setConnected(false);
+          if (closed) return;
+          if (attempt < 5) {
+            const delay = Math.min(1000 * (2 ** attempt), 30000);
+            attempt++;
+            reconnectTimeout = setTimeout(connectWs, delay);
+          } else {
+            startPolling();
+          }
+        };
+      } catch {
+        startPolling();
+      }
+    };
+
+    connectWs();
+
     return () => {
       closed = true;
       if (poll) clearInterval(poll);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       ws?.close();
     };
   }, [filterParam, push]);
