@@ -328,6 +328,7 @@ export function LLMConsole() {
         append(JSON.stringify(out ?? { error: 'no result' }).slice(0, 800));
         return;
       }
+
       const ws = new WebSocket(sigmaApi.llmStreamUrl());
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('LLM stream timeout')), 20000);

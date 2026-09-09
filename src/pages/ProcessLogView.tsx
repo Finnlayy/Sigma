@@ -10,8 +10,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Pause, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { sigmaApi, type LogLine, type LogSources } from '../lib/sigmaApi';
+import { z } from 'zod';
 
 export const RING_BUFFER_LINES = 2000;
+
+export const LogLineSchema = z.object({
+  subsystem: z.string(),
+  level: z.string(),
+  raw_line: z.string(),
+  timestamp: z.number()
+});
 
 export const LEVEL_COLOR: Record<string, string> = {
   CRITICAL: 'text-rose-400',
@@ -67,6 +75,8 @@ export default function ProcessLogView() {
     let ws: WebSocket | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
     let closed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
 
     const startPolling = () => {
       if (poll) return;
@@ -76,18 +86,57 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+        ws.onopen = () => {
+          setConnected(true);
+          retryCount = 0;
+          if (poll) {
+            clearInterval(poll);
+            poll = null;
+          }
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            const validLine = LogLineSchema.parse(data) as LogLine;
+            push([validLine]);
+          } catch (e) {
+            console.error('[ProcessLogView] Payload parsing failure:', e, 'Payload:', ev.data);
+          }
+        };
+        ws.onerror = () => {
+          if (!closed) {
+            setConnected(false);
+          }
+        };
+        ws.onclose = () => {
+          if (!closed) {
+            setConnected(false);
+            const delay = Math.min(1000 * 2 ** retryCount, 30000);
+            retryCount++;
+            reconnectTimer = setTimeout(() => {
+              // Try WebSocket again, but also fallback to polling if it takes too long to connect
+              if (retryCount > 2 && !poll) {
+                startPolling();
+              }
+              connect();
+            }, delay);
+          }
+        };
+      } catch {
+        startPolling();
+      }
+    };
+
+    connect();
+
     return () => {
       closed = true;
       if (poll) clearInterval(poll);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
     };
   }, [filterParam, push]);
