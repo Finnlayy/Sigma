@@ -100,7 +100,9 @@ export default function CalendarHeatmap({
     if (viewScope === 'combined_live') return strategies.filter(s => s.executionMode === 'live');
     if (viewScope === 'combined_paper') return strategies.filter(s => (s.executionMode || 'paper') === 'paper');
     if (viewScope === 'custom_multi') {
-      const filtered = strategies.filter(s => selectedMultiIds.includes(s.id));
+      // Bolt Optimization: O(1) Set lookup instead of O(N) Array includes. Wrapped in useMemo with activeStrategies so the Set is not re-allocated on every render.
+      const selectedSet = new Set(selectedMultiIds);
+      const filtered = strategies.filter(s => selectedSet.has(s.id));
       return filtered.length > 0 ? filtered : strategies.slice(0, 1);
     }
     // Single mode:
