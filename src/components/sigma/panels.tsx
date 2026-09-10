@@ -23,6 +23,7 @@ import {
 import TvLightweightChart from '../TvLightweightChart';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { sanitizeUrl } from '../../lib/security';
 import { Button } from '@/components/ui/button';
 import {
   OverviewMetricsPanel as OverviewMetricsPanelImpl,
@@ -1103,7 +1104,7 @@ export function NetronVisualizerPanel() {
     <PanelShell title="Netron ONNX Inspector" icon={<Brain size={13} className="text-fuchsia-400" />}
       actions={<>
         <IconBtn onClick={() => { setNonce((n) => n + 1); refresh(); }} title="Reload"><RefreshCw size={12} /></IconBtn>
-        <a href={url} target="_blank" rel="noreferrer" title="Extern öffnen"
+        <a href={sanitizeUrl(url)} target="_blank" rel="noopener noreferrer" title="Extern öffnen"
           className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><ExternalLink size={12} /></a>
       </>}>
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">
