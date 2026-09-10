@@ -30,13 +30,15 @@ export const SUBSYSTEM_COLOR: Record<string, string> = {
   SCRAPER: 'text-amber-300',
 };
 
-export function matches(line: LogLine, subsystems: string[], search: string): boolean {
-  if (subsystems.length && !subsystems.includes(line.subsystem)) return false;
-  if (!search) return true;
-  try {
-    return new RegExp(search, 'i').test(line.raw_line);
-  } catch {
-    return line.raw_line.toLowerCase().includes(search.toLowerCase());
+export function matches(line: LogLine, subsystems: string[] | Set<string>, searchRegex: RegExp | null, searchRaw: string): boolean {
+  const hasSubsystem = subsystems instanceof Set ? subsystems.has(line.subsystem) : subsystems.includes(line.subsystem);
+  if ((subsystems instanceof Set ? subsystems.size : subsystems.length) && !hasSubsystem) return false;
+  if (!searchRaw) return true;
+
+  if (searchRegex) {
+    return searchRegex.test(line.raw_line);
+  } else {
+    return line.raw_line.toLowerCase().includes(searchRaw.toLowerCase());
   }
 }
 
@@ -96,9 +98,20 @@ export default function ProcessLogView() {
     if (autoScroll && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
   }, [lines, autoScroll]);
 
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const searchRegex = useMemo(() => {
+    if (!search) return null;
+    try {
+      return new RegExp(search, 'i');
+    } catch {
+      return null;
+    }
+  }, [search]);
+
   const visible = useMemo(
-    () => lines.filter((l) => matches(l, selected, search)),
-    [lines, selected, search],
+    () => lines.filter((l) => matches(l, selectedSet, searchRegex, search)),
+    [lines, selectedSet, searchRegex, search],
   );
 
   const toggle = (name: string) =>
