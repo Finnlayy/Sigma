@@ -10,8 +10,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Pause, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { sigmaApi, type LogLine, type LogSources } from '../lib/sigmaApi';
+import { z } from 'zod';
 
 export const RING_BUFFER_LINES = 2000;
+
+const LogLineSchema = z.object({
+  subsystem: z.string(),
+  level: z.string(),
+  raw_line: z.string(),
+  timestamp: z.number(),
+});
 
 export const LEVEL_COLOR: Record<string, string> = {
   CRITICAL: 'text-rose-400',
@@ -67,6 +75,8 @@ export default function ProcessLogView() {
     let ws: WebSocket | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
     let closed = false;
+    let retryCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const startPolling = () => {
       if (poll) return;
@@ -76,18 +86,50 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+        ws.onopen = () => {
+          setConnected(true);
+          retryCount = 0; // reset on success
+          if (poll) {
+            clearInterval(poll);
+            poll = null;
+          }
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const parsed = LogLineSchema.parse(JSON.parse(ev.data));
+            push([parsed]);
+          } catch (err) {
+            console.error('Failed to parse log payload', err);
+          }
+        };
+        const handleDisconnect = () => {
+          if (closed) return;
+          if (retryTimer) clearTimeout(retryTimer);
+          setConnected(false);
+          retryCount++;
+          if (retryCount > 5) {
+            startPolling();
+          } else {
+            retryTimer = setTimeout(connect, Math.min(1000 * 2 ** retryCount, 30000));
+          }
+        };
+        ws.onerror = (err) => console.error('WebSocket Error', err);
+        ws.onclose = handleDisconnect;
+      } catch {
+        startPolling();
+      }
+    };
+
+    connect();
+
     return () => {
       closed = true;
       if (poll) clearInterval(poll);
+      if (retryTimer) clearTimeout(retryTimer);
       ws?.close();
     };
   }, [filterParam, push]);
