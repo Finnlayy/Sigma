@@ -66,7 +66,10 @@ export default function ProcessLogView() {
     setLines([]);
     let ws: WebSocket | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
 
     const startPolling = () => {
       if (poll) return;
@@ -76,19 +79,62 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+        ws.onopen = () => {
+          setConnected(true);
+          retryCount = 0; // reset on successful connection
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data && typeof data === 'object' && 'timestamp' in data && 'raw_line' in data) {
+              push([data as LogLine]);
+            } else {
+              console.error('WebSocket payload missing required schema fields (timestamp, raw_line):', data);
+            }
+          } catch (err) {
+            console.error('Failed to parse WebSocket payload:', err);
+          }
+        };
+        ws.onerror = () => {
+          // let onclose handle reconnects
+        };
+        ws.onclose = () => {
+          setConnected(false);
+          ws = null;
+          if (!closed) {
+            if (retryCount < MAX_RETRIES) {
+              const delay = Math.min(1000 * (2 ** retryCount), 30000);
+              retryCount++;
+              reconnectTimer = setTimeout(connect, delay);
+            } else {
+              startPolling();
+            }
+          }
+        };
+      } catch {
+        if (!closed) {
+          if (retryCount < MAX_RETRIES) {
+             const delay = Math.min(1000 * (2 ** retryCount), 30000);
+             retryCount++;
+             reconnectTimer = setTimeout(connect, delay);
+          } else {
+            startPolling();
+          }
+        }
+      }
+    };
+
+    connect();
+
     return () => {
       closed = true;
       if (poll) clearInterval(poll);
-      ws?.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
     };
   }, [filterParam, push]);
 
