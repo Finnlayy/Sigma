@@ -30,7 +30,7 @@ function Bar({ value, max = 1, tone = 'bg-emerald-500/70' }: { value: number; ma
   const w = Math.max(0, Math.min(100, (Math.abs(value) / max) * 100));
   return (
     <div className="h-1.5 w-full overflow-hidden rounded bg-zinc-800">
-      <div className={`h-full ${tone}`} style={{ width: `${w}%` }} />
+      <div className={`w-full h-full transition-transform ${tone}`} style={{ transform: `scaleX(${w / 100})`, transformOrigin: 'left' }} />
     </div>
   );
 }

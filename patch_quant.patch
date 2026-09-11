@@ -1,0 +1,35 @@
+--- src/components/quant/SystemHealthPanel.tsx
++++ src/components/quant/SystemHealthPanel.tsx
+@@ -212,8 +212,8 @@
+                 <span className="text-zinc-500 font-mono text-[9px]">{((storageTiering.l1_shm_ringbuffer_bytes / 1024 / 1024) || 0).toFixed(1)}MB</span>
+               </div>
+               <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                 <div
+-                  className="bg-purple-500 h-full rounded-full"
+-                  style={{ width: `${Math.min(100, (storageTiering.l1_shm_ringbuffer_bytes / storageTiering.l1_capacity_bytes) * 100)}%` }}
++                  className="bg-purple-500 w-full h-full rounded-full transition-transform"
++                  style={{ transform: `scaleX(${Math.min(100, (storageTiering.l1_shm_ringbuffer_bytes / storageTiering.l1_capacity_bytes) * 100) / 100})`, transformOrigin: 'left' }}
+                 />
+               </div>
+@@ -262,8 +262,8 @@
+                 <span className="text-zinc-500 font-mono text-[9px]">{resourceGuard.cpu_cores_active || 12} cores</span>
+               </div>
+               <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                 <div
+-                  className="bg-amber-500 h-full rounded-full"
+-                  style={{ width: `${Math.min(100, resourceGuard.cpu_percent || 24.5)}%` }}
++                  className="bg-amber-500 w-full h-full rounded-full transition-transform"
++                  style={{ transform: `scaleX(${Math.min(100, resourceGuard.cpu_percent || 24.5) / 100})`, transformOrigin: 'left' }}
+                 />
+               </div>
+@@ -275,8 +275,8 @@
+                 <span className="text-zinc-500 font-mono text-[9px]">{((resourceGuard.memory_rss_bytes || 1024 * 1024 * 512) / 1024 / 1024).toFixed(0)}MB</span>
+               </div>
+               <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                 <div
+-                  className="bg-cyan-500 h-full rounded-full"
+-                  style={{ width: `${Math.min(100, resourceGuard.memory_percent || 38.2)}%` }}
++                  className="bg-cyan-500 w-full h-full rounded-full transition-transform"
++                  style={{ transform: `scaleX(${Math.min(100, resourceGuard.memory_percent || 38.2) / 100})`, transformOrigin: 'left' }}
+                 />
+               </div>
