@@ -1,3 +1,4 @@
+import React from "react";
 import { motion } from "motion/react";
 import {
   Zap, Pause, Ban, Skull, ArrowUpCircle, Wallet, Activity,
@@ -55,7 +56,7 @@ const STATUS_META: Record<string, { label: string; cls: string; icon: any; desc:
  * StrategyCard — Blueprint v1.2.0 "Still Missing" UI (M8-Instanz-Karte).
  * Zeigt Live-Status, Budget-HWM-Fortschritt & State-Transitions-Steuerung.
  */
-export function StrategyCard({ state, name, symbol, onPromote, onQuarantine }: StrategyCardProps) {
+export const StrategyCard = React.memo(function StrategyCard({ state, name, symbol, onPromote, onQuarantine }: StrategyCardProps) {
   const meta = STATUS_META[state.status] || STATUS_META.ACTIVE;
   const Icon = meta.icon;
   const pct = Math.min(100, Math.max(0, (state.current_budget_usd / Math.max(1e-9, state.base_budget_usd)) * 100));
@@ -166,4 +167,17 @@ export function StrategyCard({ state, name, symbol, onPromote, onQuarantine }: S
       )}
     </motion.div>
   );
-}
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.name === nextProps.name &&
+    prevProps.symbol === nextProps.symbol &&
+    prevProps.state.status === nextProps.state.status &&
+    prevProps.state.current_budget_usd === nextProps.state.current_budget_usd &&
+    prevProps.state.base_budget_usd === nextProps.state.base_budget_usd &&
+    prevProps.state.budget_multiplier === nextProps.state.budget_multiplier &&
+    prevProps.state.consecutive_losses === nextProps.state.consecutive_losses &&
+    prevProps.state.consecutive_low_pf_days === nextProps.state.consecutive_low_pf_days &&
+    prevProps.state.shadow_trades_count === nextProps.state.shadow_trades_count &&
+    prevProps.state.shadow_wins === nextProps.state.shadow_wins
+  );
+});
