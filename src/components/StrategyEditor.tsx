@@ -432,7 +432,7 @@ if (diff > parameters.threshold) {
           <button
             onClick={handleOpenManifest}
             className="bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800/60 hover:border-emerald-700 text-emerald-400 px-2.5 py-1 rounded text-[11px] font-mono transition-all flex items-center space-x-1.5"
-            title="Inspect trans-session persistent strategy manifest"
+            title="Inspect trans-session persistent strategy manifest" aria-label="Inspect trans-session persistent strategy manifest"
           >
             <HardDrive className="w-3 h-3 text-emerald-400" />
             <span className="font-semibold">Persistent Manifest:</span>
@@ -967,7 +967,7 @@ if (diff > parameters.threshold) {
               onClick={handleTriggerEmergencyStop}
               disabled={isTriggeringEmergency}
               className="w-full bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/80 hover:border-rose-700 text-rose-300 hover:text-white py-1.5 px-2 rounded text-[11px] font-mono font-medium transition-all flex items-center justify-center space-x-1.5 group"
-              title="Immediately send emergency cancel-all signal to Kraken CLI"
+              title="Immediately send emergency cancel-all signal to Kraken CLI" aria-label="Immediately send emergency cancel-all signal to Kraken CLI"
             >
               <AlertOctagon className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" />
               <span>{isTriggeringEmergency ? "Dispatching Signal..." : "🚨 Emergency Cancel All (Kraken CLI)"}</span>

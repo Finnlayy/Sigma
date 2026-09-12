@@ -815,7 +815,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                     onClick={handleRunAIAnalysis}
                     disabled={isAnalyzingAI}
                     className="p-1 rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
-                    title="Re-audit"
+                    title="Re-audit" aria-label="Re-audit"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isAnalyzingAI ? 'animate-spin' : ''}`} />
                   </button>
@@ -976,7 +976,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                 <button
                   onClick={handleExportCSV}
                   className="px-2.5 py-1 rounded border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 text-zinc-300 text-[11px] font-mono flex items-center space-x-1 transition-colors"
-                  title="Export Trades as CSV"
+                  title="Export Trades as CSV" aria-label="Export Trades as CSV"
                 >
                   <Download className="w-3 h-3 text-zinc-400" />
                   <span>Export CSV</span>
@@ -984,7 +984,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                 <button
                   onClick={handleExportJSON}
                   className="px-2.5 py-1 rounded border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 text-zinc-300 text-[11px] font-mono flex items-center space-x-1 transition-colors"
-                  title="Export Complete JSON Report"
+                  title="Export Complete JSON Report" aria-label="Export Complete JSON Report"
                 >
                   <Download className="w-3 h-3 text-zinc-400" />
                   <span>Export JSON</span>

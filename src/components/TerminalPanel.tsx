@@ -130,14 +130,14 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
           </button>
           <button 
             onClick={onRefresh}
-            title="Force synchronization"
+            title="Force synchronization" aria-label="Force synchronization"
             className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors rounded hover:bg-zinc-800"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
           <button 
             onClick={onClearLogs}
-            title="Flush buffer screen"
+            title="Flush buffer screen" aria-label="Flush buffer screen"
             className="p-1 text-zinc-500 hover:text-rose-400 transition-colors rounded hover:bg-zinc-800"
           >
             <Trash2 className="w-3.5 h-3.5" />

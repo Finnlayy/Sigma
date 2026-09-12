@@ -136,13 +136,13 @@ export default function ProcessLogView() {
             <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
             auto-scroll
           </label>
-          <button onClick={() => setPaused((p) => !p)} title={paused ? 'Fortsetzen' : 'Pause'}
+          <button onClick={() => setPaused((p) => !p)} title={paused ? 'Fortsetzen' : 'Pause'} aria-label={paused ? 'Fortsetzen' : 'Pause'}
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
             {paused ? <Play size={12} /> : <Pause size={12} />}
           </button>
-          <button onClick={download} title="Sichtbare Logs exportieren"
+          <button onClick={download} title="Sichtbare Logs exportieren" aria-label="Sichtbare Logs exportieren"
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Download size={12} /></button>
-          <button onClick={() => setLines([])} title="View leeren"
+          <button onClick={() => setLines([])} title="View leeren" aria-label="View leeren"
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Trash2 size={12} /></button>
           <button onClick={() => void sigmaApi.logTail(filterParam, 200).then((r) => r && setLines(r.lines))}
             title="Backfill" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">

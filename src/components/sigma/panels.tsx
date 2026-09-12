@@ -99,7 +99,7 @@ export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; 
 );
 
 const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: string; children: React.ReactNode }) => (
-  <button onClick={onClick} title={title}
+  <button onClick={onClick} title={title} aria-label={title}
     className="rounded border border-zinc-700 p-1 text-zinc-400 transition hover:border-sky-500 hover:text-sky-400">
     {children}
   </button>
@@ -541,7 +541,7 @@ export function DeadmanSwitchPanel() {
   return (
     <PanelShell title="Deadman Switch" icon={<HeartPulse size={13} />}
       actions={<button onClick={override}
-        title="Manueller Override — Puls kommt vom Kraken-Time-Ping"
+        title="Manueller Override — Puls kommt vom Kraken-Time-Ping" aria-label="Manueller Override — Puls kommt vom Kraken-Time-Ping"
         className="rounded border border-zinc-600/60 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800">OVERRIDE</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
         <div className={`h-full transition-all ${d?.expired || pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}

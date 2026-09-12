@@ -107,7 +107,7 @@ export default function KrakenSymbolModal({
                 onClick={onRefreshSymbols}
                 disabled={isLoading}
                 className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 px-2.5 py-1.5 rounded text-xs font-mono transition-all flex items-center space-x-1 disabled:opacity-50"
-                title="Refresh symbol catalog from Kraken API"
+                title="Refresh symbol catalog from Kraken API" aria-label="Refresh symbol catalog from Kraken API"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-emerald-400' : 'text-zinc-400'}`} />
                 <span className="hidden sm:inline">Sync</span>
