@@ -67,6 +67,9 @@ export default function ProcessLogView() {
     let ws: WebSocket | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
     let closed = false;
+    let retryCount = 0;
+    const maxRetries = 5;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const startPolling = () => {
       if (poll) return;
@@ -76,18 +79,55 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+        ws.onopen = () => {
+          setConnected(true);
+          retryCount = 0;
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (!data || typeof data !== 'object' || typeof data.raw_line !== 'string') {
+              throw new Error('Invalid payload schema');
+            }
+            push([data as LogLine]);
+          } catch (e) {
+            console.error('Failed to parse log payload:', e, ev.data);
+          }
+        };
+        const handleDisconnect = () => {
+          setConnected(false);
+          if (closed || reconnectTimer) return;
+          if (retryCount < maxRetries) {
+            const delay = Math.min(1000 * 2 ** retryCount, 30000);
+            retryCount++;
+            console.warn(`WebSocket disconnected, reconnecting in ${delay}ms (Attempt ${retryCount}/${maxRetries})`);
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, delay);
+          } else {
+            console.error('WebSocket max retries reached, falling back to polling');
+            startPolling();
+          }
+        };
+        ws.onerror = handleDisconnect;
+        ws.onclose = handleDisconnect;
+      } catch (e) {
+        console.error('WebSocket connection error:', e);
+        startPolling();
+      }
+    };
+
+    connect();
+
     return () => {
       closed = true;
       if (poll) clearInterval(poll);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
     };
   }, [filterParam, push]);
