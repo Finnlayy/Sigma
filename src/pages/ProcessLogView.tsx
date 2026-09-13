@@ -76,18 +76,64 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    let retryCount = 0;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    const MAX_RETRIES = 5;
+
+    const connectWs = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+        ws.onopen = () => {
+          setConnected(true);
+          retryCount = 0; // reset on successful connection
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (
+              data &&
+              typeof data.subsystem === 'string' &&
+              typeof data.level === 'string' &&
+              typeof data.raw_line === 'string' &&
+              typeof data.timestamp === 'number'
+            ) {
+              push([data as LogLine]);
+            } else {
+              console.error('WebSocket payload parsing failed: Invalid schema', data);
+            }
+          } catch (err) {
+             console.error('WebSocket payload parsing failed:', err, ev.data);
+          }
+        };
+
+        const handleDisconnect = () => {
+          setConnected(false);
+          if (closed) return;
+
+          if (retryCount < MAX_RETRIES) {
+             const delay = Math.min(1000 * (2 ** retryCount), 30000);
+             retryCount++;
+             if (retryTimeout) clearTimeout(retryTimeout);
+             retryTimeout = setTimeout(connectWs, delay);
+          } else {
+             startPolling();
+          }
+        };
+
+        ws.onerror = () => { console.error('WebSocket error occurred'); };
+        ws.onclose = handleDisconnect;
+      } catch (err) {
+        startPolling();
+      }
+    };
+
+    connectWs();
+
     return () => {
       closed = true;
       if (poll) clearInterval(poll);
+      if (retryTimeout) clearTimeout(retryTimeout);
       ws?.close();
     };
   }, [filterParam, push]);
