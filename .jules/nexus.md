@@ -16,3 +16,7 @@
 ## 2025-03-09 - [IPC/API Integration Insight]
 **Learning:** Silent payload parsing failures on raw WebSocket listeners can mask corrupted or desynced event payloads. Missing robust reconnect loops with exponential backoff on active subscriptions causes silent stream deaths.
 **Action:** Always wrap WebSocket `.onmessage` handlers in strict JSON schema validation, explicitly logging failures to `console.error`. Implement a reconnect loop with exponential backoff for stream resilience before falling back to HTTP polling.
+
+## 2026-09-12 - [WebSocket Reconnection Architecture]
+**Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections, while missing cleanup in unmounts causes memory leaks and duplicate message streams.
+**Action:** Always wrap WebSocket logic with an exponential backoff loop, ensure state clearing within event handlers (to avoid concurrent reconnect timers on `error` + `close` sequential triggers), and always validate incoming IPC payloads explicitly.
