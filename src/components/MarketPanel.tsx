@@ -875,7 +875,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             id="btn-reset-trade-history"
             onClick={handleResetHistory}
             disabled={isResetting}
-            title="Reset trade history and strategy P&L scorecards to zero baseline"
+            title="Reset trade history and strategy P&L scorecards to zero baseline" aria-label="Reset trade history and strategy P&L scorecards to zero baseline"
             className="flex items-center space-x-1 text-[10px] font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700/80 px-2 py-1 rounded transition-colors disabled:opacity-50 cursor-pointer"
           >
             <RotateCcw className={`w-3 h-3 ${isResetting ? 'animate-spin text-emerald-400' : ''}`} />

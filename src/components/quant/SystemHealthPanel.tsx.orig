@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { 
-  Activity, ShieldAlert, Cpu, HardDrive, Zap, Radio, RefreshCw, 
+import {
+  Activity, ShieldAlert, Cpu, HardDrive, Zap, Radio, RefreshCw,
   AlertTriangle, CheckCircle2, XCircle, Play, Pause, Flame, Server
 } from "lucide-react";
 
@@ -103,7 +103,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
     <div className="space-y-6" id="quant-system-health-panel">
       {/* Top Banner Alert if Emergency Halt */}
       {isEmergency && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           className="p-4 rounded-xl border border-red-500/40 bg-red-950/40 backdrop-blur-md flex items-center justify-between shadow-lg shadow-red-950/20"
@@ -141,7 +141,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 State Machine (M-00)
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wide uppercase ${
-                stateMachine.state === "LIVE_APPROVED" 
+                stateMachine.state === "LIVE_APPROVED"
                   ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
                   : stateMachine.state === "SHADOW_ACTIVE"
                   ? "bg-blue-950/70 text-blue-300 border border-blue-500/30"
@@ -211,9 +211,9 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                   </span>
                 </div>
                 <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div 
-                    className="bg-purple-500 w-full h-full rounded-full transition-transform"
-                    style={{ transform: `scaleX(${Math.min(100, (storageTiering.l1_shm_ringbuffer_bytes / storageTiering.l1_capacity_bytes) * 100) / 100})`, transformOrigin: 'left' }}
+                  <div
+                    className="bg-purple-500 h-full rounded-full"
+                    style={{ width: `${Math.min(100, (storageTiering.l1_shm_ringbuffer_bytes / storageTiering.l1_capacity_bytes) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -244,7 +244,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 Resource Guard (M-11)
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                resourceGuard.load_shedding_level === "NORMAL" 
+                resourceGuard.load_shedding_level === "NORMAL"
                   ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
                   : resourceGuard.load_shedding_level === "WARNING"
                   ? "bg-amber-950/70 text-amber-300 border border-amber-500/30"
@@ -261,9 +261,9 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                   <span className="font-mono text-amber-300">{resourceGuard.cpu_percent || 24.5}%</span>
                 </div>
                 <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div 
-                    className="bg-amber-500 w-full h-full rounded-full transition-transform"
-                    style={{ transform: `scaleX(${Math.min(100, resourceGuard.cpu_percent || 24.5) / 100})`, transformOrigin: 'left' }}
+                  <div
+                    className="bg-amber-500 h-full rounded-full"
+                    style={{ width: `${Math.min(100, resourceGuard.cpu_percent || 24.5)}%` }}
                   />
                 </div>
               </div>
@@ -274,9 +274,9 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                   <span className="font-mono text-cyan-300">{resourceGuard.memory_percent || 38.2}%</span>
                 </div>
                 <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div 
-                    className="bg-cyan-500 w-full h-full rounded-full transition-transform"
-                    style={{ transform: `scaleX(${Math.min(100, resourceGuard.memory_percent || 38.2) / 100})`, transformOrigin: 'left' }}
+                  <div
+                    className="bg-cyan-500 h-full rounded-full"
+                    style={{ width: `${Math.min(100, resourceGuard.memory_percent || 38.2)}%` }}
                   />
                 </div>
               </div>
@@ -303,7 +303,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 SSE Watchdog (M-17)
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-mono flex items-center gap-1.5 ${
-                isConnected 
+                isConnected
                   ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
                   : "bg-amber-950/70 text-amber-300 border border-amber-500/30"
               }`}>

@@ -41,3 +41,15 @@
 ## 2024-05-24 - [React.memo in StrategyCard]
 **Learning:** In the `ExecutionRiskPanel`, the parent component was passing inline arrow functions (`onPromote={(sid) => m8Action(sid, "promote")}`) and creating a lot of cards. Standard `React.memo` fails here because referential equality of those functions changes on every render.
 **Action:** When memoizing React components that receive inline functions, write a custom `areEqual` function that compares the specific data properties rather than just using the default shallow prop comparison.
+
+## 2025-03-01 - O(N) Sets vs Arrays for Filtering
+**Learning:** Found array `.includes()` within `.filter()` on React renders (e.g. `CalendarHeatmap.tsx:103` - `strategies.filter(s => selectedMultiIds.includes(s.id))`). React re-renders might call this often, leading to O(N*M) time complexity. Also learning: just instantiating a Set inside a React render causes an allocation on every render, which is bad, so we need to use `useMemo`.
+**Action:** Replaced array lookups in filters with `Set.has()` to ensure O(1) membership checks, reducing time complexity to O(N), and wrapped it in `useMemo` to prevent allocation on every render.
+
+## 2026-09-10 - [O(1) Set Search & RegExp Memoization]
+**Learning:** During heavy log streaming (e.g. up to 2000 lines matching via WebSocket), using `Array.includes()` for checking if a subsystem is selected or inline-compiling a regex using `new RegExp()` in a tight filtering loop causes main thread blockage and memory spikes.
+**Action:** When filtering large arrays or streaming logs inside React, use `new Set()` wrapped in `useMemo` for O(1) membership testing and memoize the regex outside the loop to prevent repeated re-allocation and re-compilation on every render cycle.
+
+## 2024-09-11 - [Optimize RegExp/Set within Array Filter loops]
+**Learning:** Avoid compiling `new RegExp()` or instantiating a `new Set()` inside a tight iteration loop such as `array.filter()` during React render phases, as it reallocates and recompiles for each item, and on every render cycle.
+**Action:** Memoize loop-invariant operations like building a `Set` or compiling a `RegExp` using `useMemo` outside of the `.filter()` / `.map()` blocks to prevent unnecessary reallocations and O(N) penalties.

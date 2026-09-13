@@ -103,9 +103,8 @@ export default function CalendarHeatmap({
     if (viewScope === 'combined_live') return strategies.filter(s => s.executionMode === 'live');
     if (viewScope === 'combined_paper') return strategies.filter(s => (s.executionMode || 'paper') === 'paper');
     if (viewScope === 'custom_multi') {
-      // Bolt Optimization: Replace O(N*M) array .includes with O(1) Set .has lookup
-      const multiIdsSet = new Set(selectedMultiIds);
-      // ⚡ Bolt Optimization: Use the memoized Set for O(1) .has() checks instead of O(N) .includes()
+      // Bolt Optimization: O(1) Set .has() lookups instead of O(N) Array .includes(),
+      // using the memoized `multiIdsSet` above so the Set is not re-allocated on every render.
       const filtered = strategies.filter(s => multiIdsSet.has(s.id));
       return filtered.length > 0 ? filtered : strategies.slice(0, 1);
     }
@@ -624,7 +623,7 @@ export default function CalendarHeatmap({
           <button
             onClick={loadDailyHeatmap}
             disabled={isLoading || activeStrategies.length === 0}
-            title="Refresh heatmap for selected month/year"
+            title="Refresh heatmap for selected month/year" aria-label="Refresh heatmap for selected month/year"
             className="p-1 rounded bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
           >
             <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-emerald-400' : ''}`} />
