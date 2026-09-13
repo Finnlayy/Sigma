@@ -132,7 +132,7 @@ export const StrategyQueueConfirmModal: React.FC<StrategyQueueConfirmModalProps>
               By promoting this strategy to <strong>Level 4 Live Queue</strong>, all future buy and sell signals triggered by this worker will be routed directly to the <strong>Kraken Pro Exchange</strong> matching engine. Real account capital will be deployed.
             </p>
             <ul className="list-disc list-inside text-[10px] text-rose-300/80 space-y-0.5 pt-1">
-              <li>Requires valid Kraken API Key with trading permissions.</li>
+              <li>This build stores no exchange credentials — order placement is not wired (paper only).</li>
               <li>Stop-loss rules configured in strategy parameters remain active.</li>
               <li>Other strategies in the Paper Queue will continue running independently.</li>
             </ul>
