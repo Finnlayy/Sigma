@@ -1,3 +1,6 @@
+## 2025-03-09 - [O(1) Set Lookups inside tight render loops]
+**Learning:** Found O(N) array `.includes()` operations inside `.filter()` blocks during React rendering (like `selectedMultiIds.includes(s.id)` in CalendarHeatmap or `mainQuotes.includes(q)` in KrakenSymbolModal). These cause quadratic time complexity on large collections, and running them frequently can drop frames on interactive UI actions.
+**Action:** Always convert lookup arrays to Sets for O(1) `.has()` checks before iterating with `.filter()`. Crucially, when doing this in a React component's body, the Set must be wrapped in `useMemo` so it's not reallocated from scratch on every render pass.
 ## 2024-09-12 - [RegExp and Lookup Arrays in React Render Loops]
 **Learning:** Instantiating `new RegExp()` inside a tight iteration loop such as `lines.filter()` results in high overhead, as it reallocates and recompiles the expression for every item on every render cycle. Additionally, performing lookups via `.includes()` on arrays inside filter blocks adds O(N) overhead per item.
 **Action:** Extract inline `new RegExp()` logic, as well as lookup arrays, and wrap them in a `useMemo` block. For arrays, convert them into `Set` instances to ensure O(1) `.has()` checks during array iterations, saving significant main-thread block time.

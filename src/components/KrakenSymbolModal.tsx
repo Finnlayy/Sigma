@@ -37,7 +37,9 @@ export default function KrakenSymbolModal({
       if (s.quote) set.add(s.quote);
     });
     const mainQuotes = ["ALL", "USD", "EUR", "USDT", "USDC", "BTC", "ETH", "GBP", "CAD", "AUD"];
-    const otherQuotes = Array.from(set).filter(q => !mainQuotes.includes(q)).sort();
+    // ⚡ Bolt Optimization: Use Set for O(1) lookups instead of O(N) array includes
+    const mainQuotesSet = new Set(mainQuotes);
+    const otherQuotes = Array.from(set).filter(q => !mainQuotesSet.has(q)).sort();
     return [...mainQuotes.filter(q => q === "ALL" || set.has(q)), ...otherQuotes];
   }, [symbols]);
 
