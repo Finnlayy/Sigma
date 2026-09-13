@@ -9,9 +9,27 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Pause, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { z } from 'zod';
 import { sigmaApi, type LogLine, type LogSources } from '../lib/sigmaApi';
 
 export const RING_BUFFER_LINES = 2000;
+
+/** §37.5 — max. WS-Reconnect-Versuche, danach greift der HTTP-Poll-Fallback. */
+export const MAX_WS_RETRIES = 5;
+
+/** §37.5 — Deckel für den exponentiellen Reconnect-Backoff in ms. */
+export const WS_BACKOFF_MAX_MS = 30_000;
+
+/**
+ * §37.3 — Schema eines WS-Frames. Frames, die das Schema verletzen, werden
+ * verworfen und geloggt (kein Crash, kein halber Render).
+ */
+export const LogLineSchema = z.object({
+  subsystem: z.string(),
+  level: z.string(),
+  raw_line: z.string(),
+  timestamp: z.number(),
+});
 
 export const LEVEL_COLOR: Record<string, string> = {
   CRITICAL: 'text-rose-400',
@@ -58,14 +76,15 @@ export default function ProcessLogView() {
 
   useEffect(() => { void sigmaApi.logSources().then((s) => s && setSources(s)); }, []);
 
-  // WS-Stream mit HTTP-Poll-Fallback (§37.2 / §37.5)
+  // WS-Stream mit HTTP-Poll-Fallback (§37.2 / §37.5):
+  // Reconnect mit exponentiellem Backoff (max. MAX_WS_RETRIES), danach Polling.
   useEffect(() => {
     setLines([]);
     let ws: WebSocket | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
-    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
-    let attempt = 0;
+    let retryCount = 0;
 
     const startPolling = () => {
       if (poll) return;
@@ -75,83 +94,70 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    let retryCount = 0;
-    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
-    const MAX_RETRIES = 5;
+    const stopPolling = () => {
+      if (!poll) return;
+      clearInterval(poll);
+      poll = null;
+    };
 
-    const connectWs = () => {
+    const connect = () => {
       if (closed) return;
       try {
         ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+
         ws.onopen = () => {
-          attempt = 0;
           setConnected(true);
-          if (poll) { clearInterval(poll); poll = null; }
+          retryCount = 0;
+          stopPolling(); // WS lebt wieder → Polling ist redundant
         };
-        ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-        ws.onerror = () => { /* wait for onclose */ };
+
+        ws.onmessage = (ev) => {
+          try {
+            const parsed = LogLineSchema.safeParse(JSON.parse(ev.data));
+            if (parsed.success) {
+              push([parsed.data as LogLine]);
+            } else {
+              console.error('[ProcessLogView] WS-Frame verworfen (Schema):', parsed.error.issues, ev.data);
+            }
+          } catch (err) {
+            console.error('[ProcessLogView] WS-Frame verworfen (JSON):', err, ev.data);
+          }
+        };
+
+        ws.onerror = () => {
+          // UI sofort auf POLL schalten; den Reconnect steuert onclose (firet immer).
+          if (!closed) setConnected(false);
+        };
+
         ws.onclose = () => {
           setConnected(false);
-          if (closed) return;
-          if (attempt < 5) {
-            const delay = Math.min(1000 * (2 ** attempt), 30000);
-            attempt++;
-            reconnectTimeout = setTimeout(connectWs, delay);
+          // Guard: onerror + onclose dürfen nicht doppelt einplanen.
+          if (closed || reconnectTimer) return;
+          if (retryCount < MAX_WS_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCount, WS_BACKOFF_MAX_MS);
+            retryCount++;
+            console.warn(`[ProcessLogView] WS getrennt — Reconnect in ${delay}ms (${retryCount}/${MAX_WS_RETRIES})`);
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, delay);
           } else {
+            console.error('[ProcessLogView] WS-Retries erschöpft — HTTP-Poll-Fallback aktiv');
             startPolling();
           }
         };
-      } catch {
-          setConnected(true);
-          retryCount = 0; // reset on successful connection
-        };
-        ws.onmessage = (ev) => {
-          try {
-            const data = JSON.parse(ev.data);
-            if (
-              data &&
-              typeof data.subsystem === 'string' &&
-              typeof data.level === 'string' &&
-              typeof data.raw_line === 'string' &&
-              typeof data.timestamp === 'number'
-            ) {
-              push([data as LogLine]);
-            } else {
-              console.error('WebSocket payload parsing failed: Invalid schema', data);
-            }
-          } catch (err) {
-             console.error('WebSocket payload parsing failed:', err, ev.data);
-          }
-        };
-
-        const handleDisconnect = () => {
-          setConnected(false);
-          if (closed) return;
-
-          if (retryCount < MAX_RETRIES) {
-             const delay = Math.min(1000 * (2 ** retryCount), 30000);
-             retryCount++;
-             if (retryTimeout) clearTimeout(retryTimeout);
-             retryTimeout = setTimeout(connectWs, delay);
-          } else {
-             startPolling();
-          }
-        };
-
-        ws.onerror = () => { console.error('WebSocket error occurred'); };
-        ws.onclose = handleDisconnect;
       } catch (err) {
+        console.error('[ProcessLogView] WS-Verbindung fehlgeschlagen:', err);
         startPolling();
       }
     };
 
-    connectWs();
+    connect();
 
     return () => {
       closed = true;
-      if (poll) clearInterval(poll);
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (retryTimeout) clearTimeout(retryTimeout);
+      stopPolling();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
     };
   }, [filterParam, push]);
