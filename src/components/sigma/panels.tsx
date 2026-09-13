@@ -100,7 +100,7 @@ export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; 
 );
 
 const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: string; children: React.ReactNode }) => (
-  <button onClick={onClick} title={title}
+  <button onClick={onClick} title={title} aria-label={title}
     className="rounded border border-zinc-700 p-1 text-zinc-400 transition hover:border-sky-500 hover:text-sky-400">
     {children}
   </button>
