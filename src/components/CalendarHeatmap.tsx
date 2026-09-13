@@ -94,6 +94,9 @@ export default function CalendarHeatmap({
     }
   }, [selectedStrategy?.id]);
 
+  // ⚡ Bolt Optimization: Memoize the Set for O(1) lookups to prevent reallocation on every render
+  const multiIdsSet = useMemo(() => new Set(selectedMultiIds), [selectedMultiIds]);
+
   // Target strategies currently active in this heatmap view
   const activeStrategies = useMemo(() => {
     if (viewScope === 'combined_all') return strategies;
@@ -102,13 +105,14 @@ export default function CalendarHeatmap({
     if (viewScope === 'custom_multi') {
       // Bolt Optimization: Replace O(N*M) array .includes with O(1) Set .has lookup
       const multiIdsSet = new Set(selectedMultiIds);
+      // ⚡ Bolt Optimization: Use the memoized Set for O(1) .has() checks instead of O(N) .includes()
       const filtered = strategies.filter(s => multiIdsSet.has(s.id));
       return filtered.length > 0 ? filtered : strategies.slice(0, 1);
     }
     // Single mode:
     if (selectedStrategy) return [selectedStrategy];
     return strategies.length > 0 ? [strategies[0]] : [];
-  }, [viewScope, strategies, selectedStrategy, selectedMultiIds]);
+  }, [viewScope, strategies, selectedStrategy, multiIdsSet]);
 
   // Live aggregate session PnL for active scope
   const aggregateActivePnL = useMemo(() => {

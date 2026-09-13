@@ -30,14 +30,11 @@ export const SUBSYSTEM_COLOR: Record<string, string> = {
   SCRAPER: 'text-amber-300',
 };
 
-export function matches(line: LogLine, subsystems: string[], search: string): boolean {
-  if (subsystems.length && !subsystems.includes(line.subsystem)) return false;
+export function matches(line: LogLine, selectedSet: Set<string>, search: string, searchRegex: RegExp | null): boolean {
+  if (selectedSet.size > 0 && !selectedSet.has(line.subsystem)) return false;
   if (!search) return true;
-  try {
-    return new RegExp(search, 'i').test(line.raw_line);
-  } catch {
-    return line.raw_line.toLowerCase().includes(search.toLowerCase());
-  }
+  if (searchRegex) return searchRegex.test(line.raw_line);
+  return line.raw_line.toLowerCase().includes(search.toLowerCase());
 }
 
 export default function ProcessLogView() {
@@ -76,18 +73,64 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    let retryCount = 0;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    const MAX_RETRIES = 5;
+
+    const connectWs = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+        ws.onopen = () => {
+          setConnected(true);
+          retryCount = 0; // reset on successful connection
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (
+              data &&
+              typeof data.subsystem === 'string' &&
+              typeof data.level === 'string' &&
+              typeof data.raw_line === 'string' &&
+              typeof data.timestamp === 'number'
+            ) {
+              push([data as LogLine]);
+            } else {
+              console.error('WebSocket payload parsing failed: Invalid schema', data);
+            }
+          } catch (err) {
+             console.error('WebSocket payload parsing failed:', err, ev.data);
+          }
+        };
+
+        const handleDisconnect = () => {
+          setConnected(false);
+          if (closed) return;
+
+          if (retryCount < MAX_RETRIES) {
+             const delay = Math.min(1000 * (2 ** retryCount), 30000);
+             retryCount++;
+             if (retryTimeout) clearTimeout(retryTimeout);
+             retryTimeout = setTimeout(connectWs, delay);
+          } else {
+             startPolling();
+          }
+        };
+
+        ws.onerror = () => { console.error('WebSocket error occurred'); };
+        ws.onclose = handleDisconnect;
+      } catch (err) {
+        startPolling();
+      }
+    };
+
+    connectWs();
+
     return () => {
       closed = true;
       if (poll) clearInterval(poll);
+      if (retryTimeout) clearTimeout(retryTimeout);
       ws?.close();
     };
   }, [filterParam, push]);
@@ -96,9 +139,22 @@ export default function ProcessLogView() {
     if (autoScroll && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
   }, [lines, autoScroll]);
 
+  // ⚡ Bolt: Prevent O(N) regex reallocation and compilation overhead by memoizing it outside the log iteration loop
+  const searchRegex = useMemo(() => {
+    if (!search) return null;
+    try {
+      return new RegExp(search, 'i');
+    } catch {
+      return null;
+    }
+  }, [search]);
+
+  // ⚡ Bolt: Convert array to Set for O(1) .has() lookups inside the tight log filter loop
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
   const visible = useMemo(
-    () => lines.filter((l) => matches(l, selected, search)),
-    [lines, selected, search],
+    () => lines.filter((l) => matches(l, selectedSet, search, searchRegex)),
+    [lines, selectedSet, search, searchRegex],
   );
 
   const toggle = (name: string) =>
@@ -137,15 +193,19 @@ export default function ProcessLogView() {
             auto-scroll
           </label>
           <button onClick={() => setPaused((p) => !p)} title={paused ? 'Fortsetzen' : 'Pause'}
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+            aria-label={paused ? 'Fortsetzen' : 'Pause'}
+            aria-pressed={paused}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none">
             {paused ? <Play size={12} /> : <Pause size={12} />}
           </button>
           <button onClick={download} title="Sichtbare Logs exportieren"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Download size={12} /></button>
+            aria-label="Sichtbare Logs exportieren"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none"><Download size={12} /></button>
           <button onClick={() => setLines([])} title="View leeren"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Trash2 size={12} /></button>
+            aria-label="View leeren"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none"><Trash2 size={12} /></button>
           <button onClick={() => void sigmaApi.logTail(filterParam, 200).then((r) => r && setLines(r.lines))}
-            title="Backfill" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+            title="Backfill" aria-label="Backfill" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none">
             <RefreshCw size={12} />
           </button>
         </div>

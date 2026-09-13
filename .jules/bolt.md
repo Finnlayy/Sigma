@@ -32,3 +32,12 @@
 ## 2024-05-20 - Set.has() for O(1) lookups in React iterative methods
 **Learning:** Found an $O(N \times M)$ anti-pattern in `CalendarHeatmap.tsx` where `.includes()` on an array was used inside a `.filter()` callback. When working with large sets, this creates significant iteration overhead. Also found multiple consecutive `.filter()` passes over the same array instead of doing a single $O(N)$ pass.
 **Action:** When filtering arrays against a list of IDs, always cast the lookup list to a `Set` first to achieve $O(1)$ lookup time inside the loop (`new Set(ids)` then `set.has(id)`). Condense consecutive `.filter()` or `.reduce()` passes over the same array into a single `for` loop traversal.
+## 2025-03-09 - [O(1) Set Lookups inside tight render loops]
+**Learning:** Found O(N) array `.includes()` operations inside `.filter()` blocks during React rendering (like `selectedMultiIds.includes(s.id)` in CalendarHeatmap or `mainQuotes.includes(q)` in KrakenSymbolModal). These cause quadratic time complexity on large collections, and running them frequently can drop frames on interactive UI actions.
+**Action:** Always convert lookup arrays to Sets for O(1) `.has()` checks before iterating with `.filter()`. Crucially, when doing this in a React component's body, the Set must be wrapped in `useMemo` so it's not reallocated from scratch on every render pass.
+## 2024-09-12 - [RegExp and Lookup Arrays in React Render Loops]
+**Learning:** Instantiating `new RegExp()` inside a tight iteration loop such as `lines.filter()` results in high overhead, as it reallocates and recompiles the expression for every item on every render cycle. Additionally, performing lookups via `.includes()` on arrays inside filter blocks adds O(N) overhead per item.
+**Action:** Extract inline `new RegExp()` logic, as well as lookup arrays, and wrap them in a `useMemo` block. For arrays, convert them into `Set` instances to ensure O(1) `.has()` checks during array iterations, saving significant main-thread block time.
+## 2024-05-24 - [React.memo in StrategyCard]
+**Learning:** In the `ExecutionRiskPanel`, the parent component was passing inline arrow functions (`onPromote={(sid) => m8Action(sid, "promote")}`) and creating a lot of cards. Standard `React.memo` fails here because referential equality of those functions changes on every render.
+**Action:** When memoizing React components that receive inline functions, write a custom `areEqual` function that compares the specific data properties rather than just using the default shallow prop comparison.
