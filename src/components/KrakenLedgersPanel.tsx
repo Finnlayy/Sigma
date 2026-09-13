@@ -348,8 +348,8 @@ export default function KrakenLedgersPanel({
                               <span className="text-xs font-semibold text-zinc-300">{asset.portfolioPercentage}%</span>
                               <div className="w-16 bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                                 <div 
-                                  className="bg-emerald-400 h-full rounded-full" 
-                                  style={{ width: `${Math.min(asset.portfolioPercentage, 100)}%` }}
+                                  className="bg-emerald-400 w-full h-full rounded-full transition-transform"
+                                  style={{ transform: `scaleX(${Math.min(asset.portfolioPercentage, 100) / 100})`, transformOrigin: 'left' }}
                                 />
                               </div>
                             </div>
