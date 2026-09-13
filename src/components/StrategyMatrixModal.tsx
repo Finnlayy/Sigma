@@ -142,7 +142,7 @@ export default function StrategyMatrixModal({
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
-                title="Close template"
+                title="Close template" aria-label="Close template"
               >
                 <X className="w-4 h-4" />
               </button>

@@ -733,7 +733,7 @@ export default function MetricsPanel({
             {onOpenLedgersPage && (
               <button
                 onClick={onOpenLedgersPage}
-                title="Expand Full Kraken Spot & Pro Ledgers Page"
+                title="Expand Full Kraken Spot & Pro Ledgers Page" aria-label="Expand Full Kraken Spot & Pro Ledgers Page"
                 className="p-1 rounded bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/60 text-emerald-300 text-xs transition-colors"
               >
                 <ArrowUpRight className="w-3 h-3" />

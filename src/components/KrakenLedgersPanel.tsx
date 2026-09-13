@@ -145,7 +145,7 @@ export default function KrakenLedgersPanel({
             onClick={handleManualSync}
             disabled={isSyncing}
             className="px-3 py-1.5 rounded bg-zinc-800/90 hover:bg-zinc-750 border border-zinc-700 text-xs text-zinc-200 hover:text-white transition-all flex items-center space-x-1.5 disabled:opacity-50"
-            title="Force refresh balances & positions directly from Kraken"
+            title="Force refresh balances & positions directly from Kraken" aria-label="Force refresh balances & positions directly from Kraken"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Sync</span>

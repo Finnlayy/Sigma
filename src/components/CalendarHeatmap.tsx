@@ -623,7 +623,7 @@ export default function CalendarHeatmap({
           <button
             onClick={loadDailyHeatmap}
             disabled={isLoading || activeStrategies.length === 0}
-            title="Refresh heatmap for selected month/year"
+            title="Refresh heatmap for selected month/year" aria-label="Refresh heatmap for selected month/year"
             className="p-1 rounded bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
           >
             <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-emerald-400' : ''}`} />
