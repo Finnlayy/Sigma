@@ -208,7 +208,7 @@ export function GeneticOptimizerPanel({
                 <span className="flex items-center gap-1"><Database className="w-3 h-3" /> cache required · param cache hit = instant</span>
               </div>
               <div className="w-full h-2 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
-                <div className="h-full bg-gradient-to-r from-purple-600 to-emerald-500 transition-all" style={{ width: `${progressPercent}%` }} />
+                <div className="h-full bg-gradient-to-r from-purple-600 to-emerald-500 transition-transform" style={{ transform: `scaleX(${progressPercent / 100})`, transformOrigin: 'left' }} />
               </div>
             </div>
           )}
