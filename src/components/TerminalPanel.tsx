@@ -94,7 +94,8 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
               id="terminal-filter-last-3"
               onClick={() => setViewLimit('3')}
               title="Only show the last 3 runner log messages"
-              className={`px-2 py-0.5 rounded transition-all flex items-center space-x-1 ${
+              aria-pressed={viewLimit === '3'}
+              className={`px-2 py-0.5 rounded transition-all flex items-center space-x-1 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                 viewLimit === '3'
                   ? 'bg-emerald-950/80 text-emerald-400 font-bold border border-emerald-800/70 shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -107,7 +108,8 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
               id="terminal-filter-all"
               onClick={() => setViewLimit('all')}
               title="Show all recorded logs"
-              className={`px-2 py-0.5 rounded transition-all ${
+              aria-pressed={viewLimit === 'all'}
+              className={`px-2 py-0.5 rounded transition-all outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                 viewLimit === 'all'
                   ? 'bg-zinc-800 text-white font-bold border border-zinc-700 shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-300'
@@ -120,7 +122,8 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
           <button 
             onClick={() => setAutoScroll(!autoScroll)}
             title="Toggle auto-scrolling terminal logs"
-            className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors ${
+            aria-pressed={autoScroll}
+            className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
               autoScroll 
                 ? 'bg-emerald-950/60 border-emerald-800/80 text-emerald-400' 
                 : 'bg-zinc-800/50 border-zinc-700/50 text-zinc-400 hover:text-zinc-200'
@@ -131,14 +134,16 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
           <button 
             onClick={onRefresh}
             title="Force synchronization"
-            className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors rounded hover:bg-zinc-800"
+            aria-label="Force synchronization"
+            className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors rounded hover:bg-zinc-800 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
           <button 
             onClick={onClearLogs}
             title="Flush buffer screen"
-            className="p-1 text-zinc-500 hover:text-rose-400 transition-colors rounded hover:bg-zinc-800"
+            aria-label="Flush buffer screen"
+            className="p-1 text-zinc-500 hover:text-rose-400 transition-colors rounded hover:bg-zinc-800 outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -198,11 +203,12 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Enter shell script or CLI prompt..."
+          aria-label="Terminal command input"
           className="flex-1 bg-transparent border-0 outline-0 ring-0 focus:outline-none focus:ring-0 text-white font-mono text-xs placeholder-zinc-600 caret-emerald-400"
         />
         <button
           onClick={handleSubmit}
-          className="bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700/80 px-2.5 py-1 rounded text-emerald-400 text-[11px] font-mono transition-all flex items-center space-x-1 shrink-0"
+          className="bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700/80 px-2.5 py-1 rounded text-emerald-400 text-[11px] font-mono transition-all flex items-center space-x-1 shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
         >
           <Play className="w-3 h-3" />
           <span>RUN</span>
