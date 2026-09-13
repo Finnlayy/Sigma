@@ -169,4 +169,17 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
       )}
     </motion.div>
   );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.name === nextProps.name &&
+    prevProps.symbol === nextProps.symbol &&
+    prevProps.state.status === nextProps.state.status &&
+    prevProps.state.current_budget_usd === nextProps.state.current_budget_usd &&
+    prevProps.state.base_budget_usd === nextProps.state.base_budget_usd &&
+    prevProps.state.budget_multiplier === nextProps.state.budget_multiplier &&
+    prevProps.state.consecutive_losses === nextProps.state.consecutive_losses &&
+    prevProps.state.consecutive_low_pf_days === nextProps.state.consecutive_low_pf_days &&
+    prevProps.state.shadow_trades_count === nextProps.state.shadow_trades_count &&
+    prevProps.state.shadow_wins === nextProps.state.shadow_wins
+  );
 });
