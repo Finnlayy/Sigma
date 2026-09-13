@@ -2,7 +2,7 @@
  * Sigma dock — FlexLayout semantics with shadcn Resizable + Tabs.
  * Nested rows stack vertically; a row of tabsets splits horizontally.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -256,7 +256,11 @@ function containsId(node: DockNode, id: string): boolean {
   return false;
 }
 
-export function SigmaDock({
+// Memoized so SigmaTerminal's 5s health/latency poll (header badges only)
+// does not reconcile every mounted cockpit panel. tree/persist/tabset stay
+// stable across those ticks; skipping the dock saves a full panel tree
+// render (~4–8 panels, charts + tables) every 5s.
+export const SigmaDock = memo(function SigmaDock({
   tree,
   onChange,
   activeTabsetId,
@@ -287,4 +291,4 @@ export function SigmaDock({
       <span className="hidden">{active}</span>
     </div>
   );
-}
+});

@@ -112,14 +112,26 @@ export default function CalendarHeatmap({
   const aggregateActivePnL = useMemo(() => {
     const targetIds = new Set(activeStrategies.map(s => s.id));
     const matched = strategyPnL.filter(p => targetIds.has(p.strategyId));
-    const totalPnL = matched.reduce((acc, p) => acc + (p.totalPnL || 0), 0);
-    const realizedPnL = matched.reduce((acc, p) => acc + (p.realizedPnL || 0), 0);
-    const unrealizedPnL = matched.reduce((acc, p) => acc + (p.unrealizedPnL || 0), 0);
-    const totalTrades = matched.reduce((acc, p) => acc + (p.totalTrades || 0), 0);
-    const wins = matched.reduce((acc, p) => acc + (p.winningTrades || 0), 0);
-    const losses = matched.reduce((acc, p) => acc + (p.losingTrades || 0), 0);
-    const volumeUSD = matched.reduce((acc, p) => acc + (p.volumeTradedUSD || 0), 0);
-    return { totalPnL, realizedPnL, unrealizedPnL, totalTrades, wins, losses, volumeUSD };
+
+    // Bolt Optimization: Condensed 7 consecutive reduce passes into a single O(N) traversal.
+    return matched.reduce((acc, p) => {
+      acc.totalPnL += (p.totalPnL || 0);
+      acc.realizedPnL += (p.realizedPnL || 0);
+      acc.unrealizedPnL += (p.unrealizedPnL || 0);
+      acc.totalTrades += (p.totalTrades || 0);
+      acc.wins += (p.winningTrades || 0);
+      acc.losses += (p.losingTrades || 0);
+      acc.volumeUSD += (p.volumeTradedUSD || 0);
+      return acc;
+    }, {
+      totalPnL: 0,
+      realizedPnL: 0,
+      unrealizedPnL: 0,
+      totalTrades: 0,
+      wins: 0,
+      losses: 0,
+      volumeUSD: 0
+    });
   }, [activeStrategies, strategyPnL]);
 
   // Fetch or compute monthly daily P&L heatmap data for selected scope, year and month

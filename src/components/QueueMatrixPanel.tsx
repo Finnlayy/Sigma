@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { motion } from "motion/react";
 import { 
   TrendingUp, TrendingDown, Layers, Activity, ShieldCheck, Zap,
@@ -96,20 +96,24 @@ export default function QueueMatrixPanel({
     const isPaper = queueType === 'paper';
 
     // Filter all time trades
-    const filteredTrades = matrix.allTimeTrades.filter(t => {
-      const matchesSearch = tradeSearch === "" || 
-        t.pair.toLowerCase().includes(tradeSearch.toLowerCase()) ||
-        t.strategyName.toLowerCase().includes(tradeSearch.toLowerCase()) ||
-        t.id.toLowerCase().includes(tradeSearch.toLowerCase());
+    // Bolt Optimization: Added useMemo and extracted search string manipulation to prevent O(N) array filtering and string recalculations on every React re-render, especially for fast inputs
+    const filteredTrades = useMemo(() => {
+      const searchLower = tradeSearch.toLowerCase();
+      return matrix.allTimeTrades.filter(t => {
+        const matchesSearch = tradeSearch === "" ||
+          t.pair.toLowerCase().includes(searchLower) ||
+          t.strategyName.toLowerCase().includes(searchLower) ||
+          t.id.toLowerCase().includes(searchLower);
 
-      if (!matchesSearch) return false;
+        if (!matchesSearch) return false;
 
-      if (tradeTypeFilter === 'buy') return t.type === 'buy';
-      if (tradeTypeFilter === 'sell') return t.type === 'sell';
-      if (tradeTypeFilter === 'wins') return t.pnl !== undefined && t.pnl > 0;
-      if (tradeTypeFilter === 'losses') return t.pnl !== undefined && t.pnl <= 0;
-      return true;
-    });
+        if (tradeTypeFilter === 'buy') return t.type === 'buy';
+        if (tradeTypeFilter === 'sell') return t.type === 'sell';
+        if (tradeTypeFilter === 'wins') return t.pnl !== undefined && t.pnl > 0;
+        if (tradeTypeFilter === 'losses') return t.pnl !== undefined && t.pnl <= 0;
+        return true;
+      });
+    }, [matrix.allTimeTrades, tradeSearch, tradeTypeFilter]);
 
     const PIE_COLORS = ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
 

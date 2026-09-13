@@ -536,24 +536,28 @@ export function ExecutionRiskPanel() {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Inference Latency:</span>
                   <span className="font-mono text-emerald-400">
-                    {rlInference?.inference_time_ms ? `${rlInference.inference_time_ms.toFixed(2)} ms` : "1.24 ms"}
+                    {rlInference?.inference_time_ms != null ? `${rlInference.inference_time_ms.toFixed(2)} ms` : "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Actor Action:</span>
                   <span className="font-mono text-amber-300 font-bold">
-                    {rlInference?.action_name || "EXECUTE_IMMEDIATE_POST"}
+                    {rlInference?.action_name || "UNAVAILABLE"}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Critic Value Q(s, a):</span>
                   <span className="font-mono text-cyan-300">
-                    {rlInference?.q_value ? `+${rlInference.q_value.toFixed(4)}` : "+0.8420"}
+                    {rlInference?.q_value != null ? `+${rlInference.q_value.toFixed(4)}` : "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Fast vs Safe Routing:</span>
-                  <span className="font-mono text-purple-300">94.5% / 5.5%</span>
+                    <span className="font-mono text-purple-300">
+                      {rlInference?.fast_path_share != null
+                        ? `${(rlInference.fast_path_share * 100).toFixed(1)}% / ${((rlInference.safe_path_share || 0) * 100).toFixed(1)}%`
+                        : "—"}
+                    </span>
                 </div>
               </div>
             </div>

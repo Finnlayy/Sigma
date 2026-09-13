@@ -11,8 +11,8 @@ export function AcademyRegistryPanel() {
   const [activeSubTab, setActiveSubTab] = useState<'evolution' | 'bootstrap' | 'registry' | 'drills' | 'shadow' | 'postmortem'>('drills');
   
   // Module 04: Differential Evolution state
-  const [deGens, setDeGens] = useState<number>(12);
-  const [dePop, setDePop] = useState<number>(14);
+  const [deGens, setDeGens] = useState<number>(5);
+  const [dePop, setDePop] = useState<number>(15);
   const [deResult, setDeResult] = useState<any>(null);
   const [isLoadingDE, setIsLoadingDE] = useState<boolean>(false);
 
@@ -278,8 +278,8 @@ export function AcademyRegistryPanel() {
                 <label className="text-[10px] text-slate-400 uppercase block mb-1">Max Generations: {deGens}</label>
                 <input
                   type="range"
-                  min="5"
-                  max="30"
+                  min="1"
+                  max="5"
                   value={deGens}
                   onChange={(e) => setDeGens(parseInt(e.target.value))}
                   className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
@@ -289,8 +289,8 @@ export function AcademyRegistryPanel() {
                 <label className="text-[10px] text-slate-400 uppercase block mb-1">Population Vectors: {dePop}</label>
                 <input
                   type="range"
-                  min="8"
-                  max="32"
+                  min="1"
+                  max="15"
                   value={dePop}
                   onChange={(e) => setDePop(parseInt(e.target.value))}
                   className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"

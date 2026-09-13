@@ -2,8 +2,8 @@
  * TvLightweightChart — §8.2a: Primärchart ist Lightweight Charts (OSS),
  * TV-Widget-Embeds bleiben optionale Ergänzung.
  */
-import { useEffect, useRef } from 'react';
-import { createChart, ColorType, CandlestickSeries, LineSeries, type IChartApi, type Time } from 'lightweight-charts';
+import { useEffect, useRef, memo } from 'react';
+import { createChart, ColorType, CandlestickSeries, LineSeries, type IChartApi, type ISeriesApi, type Time } from 'lightweight-charts';
 import type { Candle } from '../lib/sigmaApi';
 
 interface Marker { time: number; position: 'aboveBar' | 'belowBar'; color: string; shape: 'arrowUp' | 'arrowDown'; text: string }
@@ -15,9 +15,11 @@ interface Props {
   height?: number;
 }
 
-export default function TvLightweightChart({ candles, equityCurve, height = 260 }: Props) {
+export default memo(function TvLightweightChart({ candles, equityCurve, height = 260 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const equitySeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -38,26 +40,52 @@ export default function TvLightweightChart({ candles, equityCurve, height = 260 
     });
     chartRef.current = chart;
 
-    if (candles.length) {
-      const series = chart.addSeries(CandlestickSeries, {
-        upColor: '#10b981', downColor: '#ef4444',
-        wickUpColor: '#10b981', wickDownColor: '#ef4444', borderVisible: false,
-      });
-      series.setData(candles.map((c) => ({
-        time: c.ts as Time, open: c.o, high: c.h, low: c.l, close: c.c,
-      })));
-    }
+    candleSeriesRef.current = chart.addSeries(CandlestickSeries, {
+      upColor: '#10b981', downColor: '#ef4444',
+      wickUpColor: '#10b981', wickDownColor: '#ef4444', borderVisible: false,
+    });
 
-    if (equityCurve?.length) {
-      const line = chart.addSeries(LineSeries, { color: '#38bdf8', lineWidth: 2 });
-      line.setData(equityCurve.map((p) => ({ time: p.ts as Time, value: p.value })));
-    }
+    equitySeriesRef.current = chart.addSeries(LineSeries, { color: '#38bdf8', lineWidth: 2 });
 
-    chart.timeScale().fitContent();
     const observer = new ResizeObserver(() => chart.applyOptions({ width: ref.current?.clientWidth ?? 300 }));
     observer.observe(ref.current);
-    return () => { observer.disconnect(); chart.remove(); chartRef.current = null; };
+
+    return () => {
+      observer.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      equitySeriesRef.current = null;
+    };
+  }, []); // Only run once on mount
+
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({ height });
+    }
+
+    if (candleSeriesRef.current) {
+      if (candles.length) {
+        candleSeriesRef.current.setData(candles.map((c) => ({
+          time: c.ts as Time, open: c.o, high: c.h, low: c.l, close: c.c,
+        })));
+      } else {
+        candleSeriesRef.current.setData([]);
+      }
+    }
+
+    if (equitySeriesRef.current) {
+      if (equityCurve?.length) {
+        equitySeriesRef.current.setData(equityCurve.map((p) => ({ time: p.ts as Time, value: p.value })));
+      } else {
+        equitySeriesRef.current.setData([]);
+      }
+    }
+
+    if (chartRef.current && (candles.length > 0 || equityCurve?.length)) {
+      chartRef.current.timeScale().fitContent();
+    }
   }, [candles, equityCurve, height]);
 
   return <div ref={ref} className="w-full" style={{ height }} />;
-}
+});

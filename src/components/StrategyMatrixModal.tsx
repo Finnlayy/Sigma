@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   X, TrendingUp, TrendingDown, Target, Activity, ShieldAlert,
@@ -34,33 +34,40 @@ export default function StrategyMatrixModal({
 
   const isProfit = strategyMatrix.totalPnL >= 0;
   const isPaper = queue === 'paper';
-  const closedTrades = strategyMatrix.trades.filter(t => t.pnl !== undefined && t.type === 'sell');
+
+  const closedTrades = useMemo(() =>
+    strategyMatrix.trades.filter(t => t.pnl !== undefined && t.type === 'sell'),
+  [strategyMatrix.trades]);
 
   // Build cumulative P&L chart data for this strategy
-  let runningPnL = 0;
-  const chartData = closedTrades
-    .slice()
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    .map((t, idx) => {
-      const pnl = t.pnl || 0;
-      runningPnL = Number((runningPnL + pnl).toFixed(2));
-      return {
-        tradeNum: idx + 1,
-        time: new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
-        pnl,
-        cumPnL: runningPnL,
-        price: t.price
-      };
-    });
+  const chartData = useMemo(() => {
+    let runningPnL = 0;
+    return closedTrades
+      .slice()
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .map((t, idx) => {
+        const pnl = t.pnl || 0;
+        runningPnL = Number((runningPnL + pnl).toFixed(2));
+        return {
+          tradeNum: idx + 1,
+          time: new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+          pnl,
+          cumPnL: runningPnL,
+          price: t.price
+        };
+      });
+  }, [closedTrades]);
 
   // Filter strategy trades
-  const filteredTrades = strategyMatrix.trades.filter(t => {
-    if (tradeFilter === 'wins') return t.pnl !== undefined && t.pnl > 0;
-    if (tradeFilter === 'losses') return t.pnl !== undefined && t.pnl <= 0;
-    if (tradeFilter === 'buys') return t.type === 'buy';
-    if (tradeFilter === 'sells') return t.type === 'sell';
-    return true;
-  });
+  const filteredTrades = useMemo(() =>
+    strategyMatrix.trades.filter(t => {
+      if (tradeFilter === 'wins') return t.pnl !== undefined && t.pnl > 0;
+      if (tradeFilter === 'losses') return t.pnl !== undefined && t.pnl <= 0;
+      if (tradeFilter === 'buys') return t.type === 'buy';
+      if (tradeFilter === 'sells') return t.type === 'sell';
+      return true;
+    }),
+  [strategyMatrix.trades, tradeFilter]);
 
   return (
     <AnimatePresence>

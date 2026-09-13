@@ -6,7 +6,7 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   Download, ExternalLink, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
@@ -18,7 +18,7 @@ import {
   type FeedMeta, type MoverRow, type ScraperHealth,
   type BadgeRow, type BotCard, type Candle, type DeadmanSnapshot, type MemorySnapshot,
   type MlSnapshot, type RegimeVector, type RewardRow, type SafetySnapshot,
-  type TelegramSnapshot, type TvJob,
+  type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart from '../TvLightweightChart';
 import { Card } from '@/components/ui/card';
@@ -38,23 +38,42 @@ import {
   SettingsPanel as SettingsPanelImpl,
 } from './legacyPanels';
 import { StrategyLibraryPanel as StrategyLibraryPanelImpl } from './StrategyLibraryPanel';
+import {
+  QuantumRegimePanel, MarketGeometryPanel, PowerPhysicsPanel, SymbolScoutPanel,
+  PolymarketPanel, LadderArchitectPanel, FractalTradePanel, ProvisionerPanel,
+  OnnxBrainPanel, RiskGuardPanel, UnwindPanel, ResearchLabPanel,
+} from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
 
 /* ------------------------------------------------------------------ shared */
 
-function usePoll<T>(fn: () => Promise<T | null>, ms = 5000): [T | null, () => void] {
+export function usePoll<T>(
+  fn: () => Promise<T | null>,
+  ms = 5000,
+  refetchKey?: unknown,
+): [T | null, () => void] {
   const [data, setData] = useState<T | null>(null);
-  const refresh = useCallback(() => { void fn().then((d) => d && setData(d)); }, [fn]);
+  // Keep the latest fetcher in a ref so the interval is independent of `fn`
+  // identity. SigmaTerminal's 5s health poll re-renders the dock; inline
+  // `() => api.x()` used to restart every tick (duplicate GET + new timer).
+  // refetchKey (e.g. diagnostics severity) still fires an immediate fetch
+  // without tearing the timer down. Bench: 6 unstable pollers × health tick
+  // → 6 extra GETs / 5s; after this, 0 extra GETs from identity churn.
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const refresh = useCallback(() => {
+    void fnRef.current().then((d) => d && setData(d));
+  }, []);
+  useEffect(() => { refresh(); }, [refresh, refetchKey]);
   useEffect(() => {
-    refresh();
     const id = setInterval(refresh, ms);
     return () => clearInterval(id);
   }, [refresh, ms]);
   return [data, refresh];
 }
 
-function PanelShell({ title, icon, actions, children }: {
+export function PanelShell({ title, icon, actions, children }: {
   title: string; icon: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
@@ -72,7 +91,7 @@ function PanelShell({ title, icon, actions, children }: {
   );
 }
 
-const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; value: React.ReactNode; tone?: string }) => (
+export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; value: React.ReactNode; tone?: string }) => (
   <div className="rounded border border-zinc-800 bg-zinc-900/50 px-2 py-1.5">
     <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
     <div className={`font-mono text-sm ${tone}`}>{value}</div>
@@ -87,7 +106,7 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 );
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
-function FeedBadge({ feed }: { feed?: FeedMeta | null }) {
+export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
   if (!feed) return null;
   const tone = feed.source === 'tv_scraper'
     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
@@ -193,10 +212,15 @@ atrMult = input.float(1.5, "ATR Stop Multiplier")
 fast = ta.ema(close, fastLen)
 slow = ta.ema(close, slowLen)
 atr  = ta.atr(atrLen)
+plot(ta.rsi(close, 14), "rsi", display=display.none)
+plot(atr, "atr", display=display.none)
+plot(0.5, "cisd", display=display.none)
+plot(close - atr * atrMult, "sl", display=display.none)
+plot(close + atr * atrMult * 2, "tp", display=display.none)
 
 longCond = ta.crossover(fast, slow)
 if longCond
-    strategy.entry("L", strategy.long, alert_message = '{"symbol":"{{ticker}}","action":"BUY","price":{{close}},"rsi":50,"atr":0,"timestamp":{{timenow}},"strategy_id":"REPLACE_ME","secret":"REPLACE_SECRET"}')
+    strategy.entry("L", strategy.long, alert_message='{"secret":"<SIGMA_WEBHOOK_SECRET>","idempotency_key":"{{strategy.order.id}}","strategy_id":"REPLACE_ME","bot_id":"REPLACE_ME","symbol":"{{ticker}}","action":"{{strategy.order.action}}","order_type":"MARKET","price":"{{close}}","stop_loss":"{{plot_3}}","take_profit":"{{plot_4}}","fixed_leverage":1,"timestamp":"{{timenow}}","interval":"{{interval}}","execution_mode":"kraken_paper","features":{"rsi":"{{plot_0}}","atr":"{{plot_1}}","cisd_score":"{{plot_2}}"}}')
     strategy.exit("X", "L", stop = close - atr * atrMult, limit = close + atr * atrMult * 2)
 `;
 
@@ -364,7 +388,7 @@ export function LLMConsole() {
 /* ------------------------------------------------------- 5 AcademyBadgeMatrix */
 
 export function AcademyBadgeMatrix() {
-  const [data, refresh] = usePoll(() => sigmaApi.badges(), 8000);
+  const [data, refresh] = usePoll(sigmaApi.badges, 8000);
   const rows: BadgeRow[] = data?.matrix ?? [];
 
   return (
@@ -403,7 +427,7 @@ export function AcademyBadgeMatrix() {
 export function RiskGauges() {
   const [safety, refreshSafety] = usePoll(sigmaApi.safety, 4000);
   const [regime, setRegime] = useState<RegimeVector | null>(null);
-  const [jobs] = usePoll(() => sigmaApi.jobs(), 6000);
+  const [jobs] = usePoll(sigmaApi.jobs, 6000);
 
   useEffect(() => { void sigmaApi.regime('BTC/USD', 15).then((r) => r && setRegime(r)); }, []);
   const s: SafetySnapshot | null = safety;
@@ -520,8 +544,8 @@ export function DeadmanSwitchPanel() {
         title="Manueller Override — Puls kommt vom Kraken-Time-Ping"
         className="rounded border border-zinc-600/60 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800">OVERRIDE</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
-        <div className={`h-full transition-all ${d?.expired || pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-          style={{ width: `${pct}%` }} />
+        <div className={`h-full transition-transform ${d?.expired || pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+          style={{ transform: `scaleX(${pct / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Heartbeat Age" value={`${(d?.age_s ?? 0).toFixed(1)}s`}
@@ -593,8 +617,8 @@ export function MemoryWatchdogPanel() {
       actions={<button onClick={check}
         className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] hover:border-sky-500">CHECK</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
-        <div className={`h-full ${(m?.percent ?? 0) > 85 ? 'bg-red-500' : (m?.percent ?? 0) > 72 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-          style={{ width: `${Math.min(100, m?.percent ?? 0)}%` }} />
+        <div className={`h-full transition-transform ${(m?.percent ?? 0) > 85 ? 'bg-red-500' : (m?.percent ?? 0) > 72 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+          style={{ transform: `scaleX(${Math.min(100, m?.percent ?? 0) / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Stat label="RAM" value={`${(m?.percent ?? 0).toFixed(1)}%`} />
@@ -620,7 +644,7 @@ export function MemoryWatchdogPanel() {
 /* --------------------------------------------- extra: TV job / ops footer  */
 
 export function TvJobsPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.jobs(), 5000);
+  const [data, refresh] = usePoll(sigmaApi.jobs, 5000);
   const jobs: TvJob[] = data?.jobs ?? [];
   return (
     <PanelShell title="TV Job Queue" icon={<Cpu size={13} />}
@@ -791,7 +815,7 @@ export function SchedulerTelemetryPanel() {
 /* ----------------------------------------------- 16 OrderReceiptsPanel §25 */
 
 export function OrderReceiptsPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.receipts(50), 5000);
+  const [data, refresh] = usePoll(sigmaApi.receipts, 5000);
   const rows: any[] = data?.receipts ?? [];
   const tone = (ack: string) => ack === 'FILLED' || ack === 'RETRY_SUCCESS' ? 'text-emerald-400'
     : ack === 'DUPLICATE_IGNORED' ? 'text-zinc-400'
@@ -837,8 +861,8 @@ export function RateLimiterPanel() {
           tone={kraken?.soft_cap_reached ? 'text-amber-400' : 'text-zinc-100'} />
         <Stat label="Reserve" value={kraken?.reserve_emergency_tokens ?? 3} />
       </div>
-      <div className="mt-2 h-1.5 w-full rounded bg-zinc-800">
-        <div className={`h-1.5 rounded ${pct >= 80 ? 'bg-amber-500' : 'bg-sky-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      <div className="mt-2 h-1.5 w-full rounded bg-zinc-800 overflow-hidden">
+        <div className={`h-1.5 rounded transition-transform ${pct >= 80 ? 'bg-amber-500' : 'bg-sky-500'}`} style={{ transform: `scaleX(${Math.min(100, pct) / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="mt-1 text-[10px] text-zinc-500">
         Soft-Cap bei {Math.round((kraken?.soft_cap_pct ?? 0.8) * 100)}% · Backoff {(data?.backoff_ladder_s ?? []).join('s / ')}s
@@ -928,7 +952,7 @@ export function FlywheelBudgetPanel() {
 /* ---------------------------------------------------- 20 PaperLabPanel §32 */
 
 export function PaperLabPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.paperLab(50), 6000);
+  const [data, refresh] = usePoll(sigmaApi.paperLab, 6000);
   const strategies: any[] = data?.strategies ?? [];
   const grad = data?.graduation;
   const promote = async (sid: string) => { await sigmaApi.promotePaperStrategy(sid); refresh(); };
@@ -997,8 +1021,7 @@ const SEV_STYLE: Record<string, string> = {
 export function DiagnosticsErrorPanel() {
   const [sev, setSev] = useState('');
   const [open, setOpen] = useState<string | null>(null);
-  const fetcher = useCallback(() => sigmaApi.diagnostics(50, sev), [sev]);
-  const [data, refresh] = usePoll(fetcher, 5000);
+  const [data, refresh] = usePoll(() => sigmaApi.diagnostics(50, sev), 5000, sev);
   const errors: any[] = data?.errors ?? [];
   const counts: Record<string, number> = data?.counts ?? {};
 
@@ -1058,7 +1081,7 @@ export function DiagnosticsErrorPanel() {
 /* ---------------------------------------- 22 NetronVisualizerPanel §38 */
 
 export function NetronVisualizerPanel() {
-  const [data, refresh] = usePoll(() => sigmaApi.netronStatus(), 10000);
+  const [data, refresh] = usePoll(sigmaApi.netronStatus, 10000);
   const [nonce, setNonce] = useState(0);
   const models: any[] = data?.models ?? [];
   // Im Sandbox-/Preview-Kontext läuft der Browser nicht auf dem Host des Cores:
@@ -1131,6 +1154,18 @@ export function RegimePanel() { return <RegimePanelImpl />; }
 export function ExecutionRiskPanel() { return <ExecutionRiskPanelImpl />; }
 export function AcademyRegistryPanel() { return <AcademyRegistryPanelImpl />; }
 export function SettingsPanel() { return <SettingsPanelImpl />; }
+export function QuantumRegimePanel_() { return <QuantumRegimePanel />; }
+export function MarketGeometryPanel_() { return <MarketGeometryPanel />; }
+export function PowerPhysicsPanel_() { return <PowerPhysicsPanel />; }
+export function SymbolScoutPanel_() { return <SymbolScoutPanel />; }
+export function PolymarketPanel_() { return <PolymarketPanel />; }
+export function LadderArchitectPanel_() { return <LadderArchitectPanel />; }
+export function FractalTradePanel_() { return <FractalTradePanel />; }
+export function ProvisionerPanel_() { return <ProvisionerPanel />; }
+export function OnnxBrainPanel_() { return <OnnxBrainPanel />; }
+export function RiskGuardPanel_() { return <RiskGuardPanel />; }
+export function UnwindPanel_() { return <UnwindPanel />; }
+export function ResearchLabPanel_() { return <ResearchLabPanel />; }
 
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   VirtualBotDeck,
@@ -1168,6 +1203,18 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
   ExecutionRiskPanel,
   AcademyRegistryPanel,
   SettingsPanel,
+  QuantumRegimePanel_,
+  MarketGeometryPanel_,
+  PowerPhysicsPanel_,
+  SymbolScoutPanel_,
+  PolymarketPanel_,
+  LadderArchitectPanel_,
+  FractalTradePanel_,
+  ProvisionerPanel_,
+  OnnxBrainPanel_,
+  RiskGuardPanel_,
+  UnwindPanel_,
+  ResearchLabPanel_,
 };
 
 export const PANEL_TITLES: Record<string, string> = {
@@ -1206,4 +1253,16 @@ export const PANEL_TITLES: Record<string, string> = {
   ExecutionRiskPanel: 'Execution Risk',
   AcademyRegistryPanel: 'Academy Registry',
   SettingsPanel: 'Settings',
+  QuantumRegimePanel_: 'Quantum Regime',
+  MarketGeometryPanel_: 'Market Geometry',
+  PowerPhysicsPanel_: 'Power Physics',
+  SymbolScoutPanel_: 'Symbol Scout',
+  PolymarketPanel_: 'Polymarket L0',
+  LadderArchitectPanel_: 'Ladder Architect',
+  FractalTradePanel_: 'Fractal Trade',
+  ProvisionerPanel_: 'Provisioner',
+  OnnxBrainPanel_: 'ONNX Brain',
+  RiskGuardPanel_: 'Risk Guard',
+  UnwindPanel_: 'Unwind',
+  ResearchLabPanel_: 'Research Lab',
 };

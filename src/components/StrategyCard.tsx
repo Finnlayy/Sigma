@@ -1,4 +1,4 @@
-import React from "react";
+import { memo } from "react";
 import { motion } from "motion/react";
 import {
   Zap, Pause, Ban, Skull, ArrowUpCircle, Wallet, Activity,
@@ -56,7 +56,8 @@ const STATUS_META: Record<string, { label: string; cls: string; icon: any; desc:
  * StrategyCard — Blueprint v1.2.0 "Still Missing" UI (M8-Instanz-Karte).
  * Zeigt Live-Status, Budget-HWM-Fortschritt & State-Transitions-Steuerung.
  */
-export const StrategyCard = React.memo(function StrategyCard({ state, name, symbol, onPromote, onQuarantine }: StrategyCardProps) {
+// Bolt Optimization: Added React.memo() to prevent unnecessary re-renders of list items in strategy lists
+export const StrategyCard = memo(function StrategyCard({ state, name, symbol, onPromote, onQuarantine }: StrategyCardProps) {
   const meta = STATUS_META[state.status] || STATUS_META.ACTIVE;
   const Icon = meta.icon;
   const pct = Math.min(100, Math.max(0, (state.current_budget_usd / Math.max(1e-9, state.base_budget_usd)) * 100));
@@ -71,6 +72,7 @@ export const StrategyCard = React.memo(function StrategyCard({ state, name, symb
       className={`bg-slate-950/60 border rounded-xl p-3.5 space-y-2.5 ${
         state.status === "QUARANTINED" ? "border-red-800/70" : "border-slate-800"
       }`}
+      style={{ contain: 'layout paint' }}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
@@ -107,8 +109,8 @@ export const StrategyCard = React.memo(function StrategyCard({ state, name, symb
         </div>
         <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full ${barColor} transition-all`}
-            style={{ width: `${pct}%` }}
+            className={`h-full rounded-full ${barColor} transition-transform`}
+            style={{ transform: `scaleX(${pct / 100})`, transformOrigin: 'left' }}
           />
         </div>
         <div className="flex justify-between mt-1 text-[9px] font-mono text-slate-500">
