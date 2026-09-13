@@ -113,14 +113,13 @@ export default function ProcessLogView() {
 
         ws.onmessage = (ev) => {
           try {
-            const parsed = LogLineSchema.safeParse(JSON.parse(ev.data));
-            if (parsed.success) {
-              push([parsed.data as LogLine]);
-            } else {
-              console.error('[ProcessLogView] WS-Frame verworfen (Schema):', parsed.error.issues, ev.data);
-            }
+            // Schema-Check (§37.3): ungültige Frames verwerfen statt halb zu rendern.
+            // parse() statt safeParse(), weil ohne strictNullChecks (tsconfig) die
+            // Discriminated-Union von SafeParseReturnType nicht narrowt.
+            const line = LogLineSchema.parse(JSON.parse(ev.data)) as LogLine;
+            push([line]);
           } catch (err) {
-            console.error('[ProcessLogView] WS-Frame verworfen (JSON):', err, ev.data);
+            console.error('[ProcessLogView] WS-Frame verworfen:', err, ev.data);
           }
         };
 
