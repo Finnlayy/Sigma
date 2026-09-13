@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import { krakenRouter } from './src/server/kraken/routes';
 
 async function startServer() {
   const app = express();
@@ -9,6 +10,10 @@ async function startServer() {
 
   app.use(cors());
   app.use(express.json());
+
+  // K-1 — Kraken-Layer (public data only, paper only, fail-closed).
+  // Muss VOR dem Mock-Catch-all gemountet werden.
+  app.use('/api/kraken', krakenRouter());
 
   // Mock API routes
   app.get('/api/v1/health', (req, res) => {
