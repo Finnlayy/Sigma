@@ -19,6 +19,7 @@ import {
   PanelShell, Stat, FeedBadge, usePoll,
 } from './panels';
 import { sigmaResearchApi, blindedSymbol, type SigmaPanelBase } from '../../lib/sigmaApi';
+import { sanitizeUrl } from '../../lib/security';
 
 /* ------------------------------------------------------- shared helpers */
 
@@ -530,7 +531,7 @@ export function ResearchLabPanel() {
             );
           })}
           {data.export_html_path && (
-            <a href={data.export_html_path} className="mt-2 block text-[10px] text-sky-400 hover:underline">
+            <a href={sanitizeUrl(data.export_html_path)} className="mt-2 block text-[10px] text-sky-400 hover:underline">
               HTML-Dashboard exportieren (MP-16)
             </a>
           )}
