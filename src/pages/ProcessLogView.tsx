@@ -30,14 +30,11 @@ export const SUBSYSTEM_COLOR: Record<string, string> = {
   SCRAPER: 'text-amber-300',
 };
 
-export function matches(line: LogLine, subsystems: string[], search: string): boolean {
-  if (subsystems.length && !subsystems.includes(line.subsystem)) return false;
+export function matches(line: LogLine, selectedSet: Set<string>, search: string, searchRegex: RegExp | null): boolean {
+  if (selectedSet.size > 0 && !selectedSet.has(line.subsystem)) return false;
   if (!search) return true;
-  try {
-    return new RegExp(search, 'i').test(line.raw_line);
-  } catch {
-    return line.raw_line.toLowerCase().includes(search.toLowerCase());
-  }
+  if (searchRegex) return searchRegex.test(line.raw_line);
+  return line.raw_line.toLowerCase().includes(search.toLowerCase());
 }
 
 export default function ProcessLogView() {
@@ -142,9 +139,22 @@ export default function ProcessLogView() {
     if (autoScroll && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
   }, [lines, autoScroll]);
 
+  // ⚡ Bolt: Prevent O(N) regex reallocation and compilation overhead by memoizing it outside the log iteration loop
+  const searchRegex = useMemo(() => {
+    if (!search) return null;
+    try {
+      return new RegExp(search, 'i');
+    } catch {
+      return null;
+    }
+  }, [search]);
+
+  // ⚡ Bolt: Convert array to Set for O(1) .has() lookups inside the tight log filter loop
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
   const visible = useMemo(
-    () => lines.filter((l) => matches(l, selected, search)),
-    [lines, selected, search],
+    () => lines.filter((l) => matches(l, selectedSet, search, searchRegex)),
+    [lines, selectedSet, search, searchRegex],
   );
 
   const toggle = (name: string) =>
