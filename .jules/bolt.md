@@ -45,3 +45,7 @@
 ## 2025-03-01 - O(N) Sets vs Arrays for Filtering
 **Learning:** Found array `.includes()` within `.filter()` on React renders (e.g. `CalendarHeatmap.tsx:103` - `strategies.filter(s => selectedMultiIds.includes(s.id))`). React re-renders might call this often, leading to O(N*M) time complexity. Also learning: just instantiating a Set inside a React render causes an allocation on every render, which is bad, so we need to use `useMemo`.
 **Action:** Replaced array lookups in filters with `Set.has()` to ensure O(1) membership checks, reducing time complexity to O(N), and wrapped it in `useMemo` to prevent allocation on every render.
+
+## 2026-09-10 - [O(1) Set Search & RegExp Memoization]
+**Learning:** During heavy log streaming (e.g. up to 2000 lines matching via WebSocket), using `Array.includes()` for checking if a subsystem is selected or inline-compiling a regex using `new RegExp()` in a tight filtering loop causes main thread blockage and memory spikes.
+**Action:** When filtering large arrays or streaming logs inside React, use `new Set()` wrapped in `useMemo` for O(1) membership testing and memoize the regex outside the loop to prevent repeated re-allocation and re-compilation on every render cycle.
