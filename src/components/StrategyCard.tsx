@@ -109,6 +109,12 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
         </div>
         <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
           <div
+            className={`h-full rounded-full ${barColor} transition-all duration-150`}
+            style={{
+              transform: `scaleX(${pct / 100})`,
+              transformOrigin: 'left',
+              willChange: 'transform'
+            }}
             className={`h-full rounded-full ${barColor} transition-transform`}
             style={{ transform: `scaleX(${pct / 100})`, transformOrigin: 'left' }}
           />
