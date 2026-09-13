@@ -1,0 +1,3 @@
+## 2025-03-09 - [O(1) Set Lookups inside tight render loops]
+**Learning:** Found O(N) array `.includes()` operations inside `.filter()` blocks during React rendering (like `selectedMultiIds.includes(s.id)` in CalendarHeatmap or `mainQuotes.includes(q)` in KrakenSymbolModal). These cause quadratic time complexity on large collections, and running them frequently can drop frames on interactive UI actions.
+**Action:** Always convert lookup arrays to Sets for O(1) `.has()` checks before iterating with `.filter()`. Crucially, when doing this in a React component's body, the Set must be wrapped in `useMemo` so it's not reallocated from scratch on every render pass.
