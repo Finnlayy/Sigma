@@ -137,15 +137,19 @@ export default function ProcessLogView() {
             auto-scroll
           </label>
           <button onClick={() => setPaused((p) => !p)} title={paused ? 'Fortsetzen' : 'Pause'}
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+            aria-label={paused ? 'Fortsetzen' : 'Pause'}
+            aria-pressed={paused}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none">
             {paused ? <Play size={12} /> : <Pause size={12} />}
           </button>
           <button onClick={download} title="Sichtbare Logs exportieren"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Download size={12} /></button>
+            aria-label="Sichtbare Logs exportieren"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none"><Download size={12} /></button>
           <button onClick={() => setLines([])} title="View leeren"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Trash2 size={12} /></button>
+            aria-label="View leeren"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none"><Trash2 size={12} /></button>
           <button onClick={() => void sigmaApi.logTail(filterParam, 200).then((r) => r && setLines(r.lines))}
-            title="Backfill" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+            title="Backfill" aria-label="Backfill" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none">
             <RefreshCw size={12} />
           </button>
         </div>
