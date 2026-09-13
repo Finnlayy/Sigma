@@ -72,7 +72,7 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
       className={`bg-slate-950/60 border rounded-xl p-3.5 space-y-2.5 ${
         state.status === "QUARANTINED" ? "border-red-800/70" : "border-slate-800"
       }`}
-      style={{ contain: 'layout paint' }}
+      style={{ contain: "layout paint" }}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
@@ -109,14 +109,13 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
         </div>
         <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full ${barColor} transition-all duration-150`}
+            className={`h-full rounded-full ${barColor}`}
             style={{
               transform: `scaleX(${pct / 100})`,
-              transformOrigin: 'left',
-              willChange: 'transform'
+              transformOrigin: "left",
+              willChange: "transform",
+              transition: "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
-            className={`h-full rounded-full ${barColor} transition-transform`}
-            style={{ transform: `scaleX(${pct / 100})`, transformOrigin: 'left' }}
           />
         </div>
         <div className="flex justify-between mt-1 text-[9px] font-mono text-slate-500">
