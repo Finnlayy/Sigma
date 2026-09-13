@@ -69,6 +69,7 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
+      style={{ contain: 'layout paint' }}
       className={`bg-slate-950/60 border rounded-xl p-3.5 space-y-2.5 ${
         state.status === "QUARANTINED" ? "border-red-800/70" : "border-slate-800"
       }`}
@@ -109,12 +110,12 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
         </div>
         <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full ${barColor}`}
+            className={`h-full w-full rounded-full ${barColor} transition-transform`}
             style={{
               transform: `scaleX(${pct / 100})`,
               transformOrigin: "left",
               willChange: "transform",
-              transition: "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+              transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           />
         </div>
