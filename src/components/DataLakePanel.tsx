@@ -236,7 +236,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
             onClick={fetchSummary}
             disabled={loading}
             className="p-1.5 bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-300 rounded-lg text-xs font-mono flex items-center space-x-1.5 transition-colors"
-            title="Refresh Lake Metrics"
+            title="Refresh Lake Metrics" aria-label="Refresh Lake Metrics"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-emerald-400" : ""}`} />
             <span>Refresh</span>

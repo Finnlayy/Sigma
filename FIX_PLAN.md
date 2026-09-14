@@ -3,7 +3,7 @@
 > **Date:** 2026-08-29  
 > **Branch:** arena/01a04af2-sigma  
 > **Spec Freeze:** v3.0 implemented, docs v3.6 canonical — `app/core/blueprint.py` is single source of truth  
-> **Status:** 576 tests green, but architectural gaps visible from UI screenshots / task board
+> **Status:** ✅ CLOSED 2026-09-02 (`arena/01a05f15-sigma`) — all P0–P6 items and deliverables ticked off below; verified by 885 passing tests, `vite build` + `tsc --noEmit` clean, completeness gate zero-hit, runtime boot check OK. Historical note: 576 tests green at plan time, architectural gaps were visible from UI screenshots / task board
 
 This document is a **complete remediation plan** for all problem clusters that typically appear on Sigma screenshots: broken panels, TV login, Kraken bridge, GA hardening, memory/deadman, webhook safety, and doc drift. If you attached Kanban pictures, map each card to the P0–P6 sections below.
 
@@ -51,20 +51,20 @@ If any fix mutates `app/core/blueprint.py`, it **must** update `docs/BLUEPRINT-S
 ## 2. Prioritized Backlog — Aligned to Delivery Phases P0–P6
 
 ### P0 — Spec & Config (Blocker)
-- [ ] **P0-1** Ensure `FACTORY_STRATEGIES` are Pine v6 templates, not JS archetypes. Replace `code` field with `//@version=6 strategy(...)` minimal seed.
-- [ ] **P0-2** Verify `config/autonomy-level-4.yaml` `version: "3.0"` matches `BLUEPRINT_VERSION`. Keep `DOCS_PENDING_SECTIONS=()` — v3.6 is fully wired.
-- [ ] **P0-3** Add `SIGMA_WEBHOOK_SECRET` to `.env.example` and enforce in `alert_provisioner.py` template.
+- [x] **P0-1** Ensure `FACTORY_STRATEGIES` are Pine v6 templates, not JS archetypes. Replace `code` field with `//@version=6 strategy(...)` minimal seed.
+- [x] **P0-2** Verify `config/autonomy-level-4.yaml` `version: "3.0"` matches `BLUEPRINT_VERSION`. Keep `DOCS_PENDING_SECTIONS=()` — v3.6 is fully wired.
+- [x] **P0-3** Add `SIGMA_WEBHOOK_SECRET` to `.env.example` and enforce in `alert_provisioner.py` template.
 
 ### P1 — Scraper Sidecar + Market Feed (Loop C)
-- [ ] **P1-1** Vendor scraper `vendor/tradingview-scraper` healthcheck: `GET /api/v1/scraper/health` must report `ok`, `degraded`, cache hit ratio.
-- [ ] **P1-2** `app/tv/scraper_client.py` must fail closed: if `:8001` down, `FeedMeta.source=synthetic` + `degraded=True`, never silent fallback to empty.
-- [ ] **P1-3** Add `KrakenDepthAdapter` rate limit test: bucket decays, emergency tokens reserved.
+- [x] **P1-1** Vendor scraper `vendor/tradingview-scraper` healthcheck: `GET /api/v1/scraper/health` must report `ok`, `degraded`, cache hit ratio.
+- [x] **P1-2** `app/tv/scraper_client.py` must fail closed: if `:8001` down, `FeedMeta.source=synthetic` + `degraded=True`, never silent fallback to empty.
+- [x] **P1-3** Add `KrakenDepthAdapter` rate limit test: bucket decays, emergency tokens reserved.
 - **Fix:** `app/ingestion/kraken_depth_adapter.py:60` already raises `KrakenDepthError` on missing result — ensure `routes_sigma.py` catches and returns 503 with `ErrorDetail`.
 
 ### P2 — TV CSV Seam + Job Queue (Loop B)
-- [ ] **P2-1** Exact CSV roundtrip: `ExactTradingViewCSVHandler` must keep original filename byte-identical. Tests in `test_exact_csv_roundtrip.py` already cover.
-- [ ] **P2-2** `TvJobQueue` cache key: `cache_key(strategy_id, params, symbol, interval, from, to)` — ensure `result_csv_to_backtest_result` uses same.
-- [ ] **P2-3** FakeDriver contract: `FakeTvMcpTransport` must return trades + performance CSV with header row. Already done, but add `source: "fake"` tag.
+- [x] **P2-1** Exact CSV roundtrip: `ExactTradingViewCSVHandler` must keep original filename byte-identical. Tests in `test_exact_csv_roundtrip.py` already cover.
+- [x] **P2-2** `TvJobQueue` cache key: `cache_key(strategy_id, params, symbol, interval, from, to)` — ensure `result_csv_to_backtest_result` uses same.
+- [x] **P2-3** FakeDriver contract: `FakeTvMcpTransport` must return trades + performance CSV with header row. Already done, but add `source: "fake"` tag.
 - **Fix snippet:**
 ```python
 # app/backtest/TvMcpBacktest.py
@@ -73,15 +73,15 @@ def cache_key(...):
 ```
 
 ### P3 — Real Playwright Driver + Login Bootstrap
-- [ ] **P3-1** `bin/sigma-tv-login` must be executable, writes `./data/secrets/tv_storage_state.json` and validates `version` in `selectors.yaml`.
-- [ ] **P3-2** Self-healing selector engine: `selector_manager.py` 3-stage: local → remote (`SIGMA_SELECTORS_REMOTE_URL`) → builtin. Circuit breaker 3 downloads / 5min.
-- [ ] **P3-3** `sigma-up` must `ensure_tv_session` before starting core/scraper/worker. Already checks `tv_storage_state.json` exists, else `refusing to start the stack`.
+- [x] **P3-1** `bin/sigma-tv-login` must be executable, writes `./data/secrets/tv_storage_state.json` and validates `version` in `selectors.yaml`.
+- [x] **P3-2** Self-healing selector engine: `selector_manager.py` 3-stage: local → remote (`SIGMA_SELECTORS_REMOTE_URL`) → builtin. Circuit breaker 3 downloads / 5min.
+- [x] **P3-3** `sigma-up` must `ensure_tv_session` before starting core/scraper/worker. Already checks `tv_storage_state.json` exists, else `refusing to start the stack`.
 - **Fix:** Add remote URL default to GitHub raw CDN + SHA256 optional check.
 
 ### P4 — GA on Job Queue (Loop B Hardening)
-- [ ] **P4-1** Enforce caps: `SIGMA_GA_MAX_POPULATION` env cannot exceed 15, `SIGMA_GA_MAX_GENERATIONS` ≤5, `SIGMA_TV_CONCURRENCY` ≤1. Already in `app/core/config.py` — verify frontend does not allow 50.
-- [ ] **P4-2** UI `GeneticOptimizerPanel` must show ETA / progress / stall detection (3 generations no improvement → stop).
-- [ ] **P4-3** DSR Shadow Gate 0.95, min 30 trades — `GeneticOptimizer.run()` must return `shadowGate.passed` bool.
+- [x] **P4-1** Enforce caps: `SIGMA_GA_MAX_POPULATION` env cannot exceed 15, `SIGMA_GA_MAX_GENERATIONS` ≤5, `SIGMA_TV_CONCURRENCY` ≤1. Already in `app/core/config.py` — verify frontend does not allow 50.
+- [x] **P4-2** UI `GeneticOptimizerPanel` must show ETA / progress / stall detection (3 generations no improvement → stop).
+- [x] **P4-3** DSR Shadow Gate 0.95, min 30 trades — `GeneticOptimizer.run()` must return `shadowGate.passed` bool.
 - **Fix frontend:**
 ```ts
 // src/components/GeneticOptimizerPanel.tsx
@@ -90,21 +90,21 @@ if (population > MAX_POP) setPopulation(MAX_POP);
 ```
 
 ### P5 — Webhook + Safety + ONNX/Kelly + Kraken Bridge (Loop A)
-- [ ] **P5-1** **Security:** `KrakenCliBridge._subprocess_runner` already validates `argv` is `str` and no `\0\n\r`. Extend to block `--` injection? Current fix returns `EGeneral` early.
-- [ ] **P5-2** Webhook auth: timing-safe compare `SIGMA_WEBHOOK_SECRET` vs `secret` field OR `X-Sigma-Webhook-Secret` header. Return 401 `UNAUTHORIZED`, not 403.
-- [ ] **P5-3** Timestamp normalization: if `>1e11` → ms→s, reject if `now - ts > max(2*interval_seconds, 120)`.
-- [ ] **P5-4** Kraken output parsing: text `EOrder:`, `EGeneral:`, `EAPI:` → failed, even if exit 0. Implemented in `blueprint.kraken_output_is_error`.
-- [ ] **P5-5** ONNX + Kelly: `calculate_kelly` half-Kelly capped at 0.10, `bracket_prices` ATR 1.5/3.0 directional.
-- [ ] **P5-6** Contagion veto: `EpidemicContagionEngine.r0 = beta/gamma`, `R0>=1.5` → `FLIGHT_TO_CASH_AND_HEDGE`, `apply_sizing(0.0)`.
-- [ ] **P5-7** Flywheel: deposit 100% → futures, profit split 50/50 only if `> min_split_trigger_eur=10`. Vault→Futures requires `operator_confirmed=True`.
+- [x] **P5-1** **Security:** `KrakenCliBridge._subprocess_runner` already validates `argv` is `str` and no `\0\n\r`. Extend to block `--` injection? Current fix returns `EGeneral` early.
+- [x] **P5-2** Webhook auth: timing-safe compare `SIGMA_WEBHOOK_SECRET` vs `secret` field OR `X-Sigma-Webhook-Secret` header. Return 401 `UNAUTHORIZED`, not 403.
+- [x] **P5-3** Timestamp normalization: if `>1e11` → ms→s, reject if `now - ts > max(2*interval_seconds, 120)`.
+- [x] **P5-4** Kraken output parsing: text `EOrder:`, `EGeneral:`, `EAPI:` → failed, even if exit 0. Implemented in `blueprint.kraken_output_is_error`.
+- [x] **P5-5** ONNX + Kelly: `calculate_kelly` half-Kelly capped at 0.10, `bracket_prices` ATR 1.5/3.0 directional.
+- [x] **P5-6** Contagion veto: `EpidemicContagionEngine.r0 = beta/gamma`, `R0>=1.5` → `FLIGHT_TO_CASH_AND_HEDGE`, `apply_sizing(0.0)`.
+- [x] **P5-7** Flywheel: deposit 100% → futures, profit split 50/50 only if `> min_split_trigger_eur=10`. Vault→Futures requires `operator_confirmed=True`.
 - **Fix:** Set `SIGMA_FLYWHEEL_USD_TO_EUR_RATE` env, else `register_realized_profit` no-ops.
 
 ### P6 — Monaco + Job Status UI + Systemd (Final)
-- [ ] **P6-1** Frontend: `App.tsx` must only mount `SigmaTerminal`, no legacy `activePage` nav. Already fixed — verify `test_terminal_is_wired_into_app_navigation`.
-- [ ] **P6-2** Panel registry: all 11 core + 22 extended panels must be in `PANEL_REGISTRY` and `PANEL_TITLES`. Use `react-resizable-panels`, not `flexlayout-react`.
-- [ ] **P6-3** ProcessLogView: WS `/api/v1/logs/stream` with 250ms poll, ring buffer 2000, secret masking. Ensure Vite proxy `ws:true`.
-- [ ] **P6-4** Netron: `sigma-netron.service` port 8082, `browse=False`, only `models/*.onnx`. UI `NetronVisualizerPanel` iframe `http://localhost:8082`.
-- [ ] **P6-5** Systemd: `sigma-core.service`, `sigma-scraper.service`, `sigma-tv-worker.service`, `sigma-netron.service`, `sigma-redis.service` all `Restart=always RestartSec=3`.
+- [x] **P6-1** Frontend: `App.tsx` must only mount `SigmaTerminal`, no legacy `activePage` nav. Already fixed — verify `test_terminal_is_wired_into_app_navigation`.
+- [x] **P6-2** Panel registry: all 11 core + 22 extended panels must be in `PANEL_REGISTRY` and `PANEL_TITLES`. Use `react-resizable-panels`, not `flexlayout-react`.
+- [x] **P6-3** ProcessLogView: WS `/api/v1/logs/stream` with 250ms poll, ring buffer 2000, secret masking. Ensure Vite proxy `ws:true`.
+- [x] **P6-4** Netron: `sigma-netron.service` port 8082, `browse=False`, only `models/*.onnx`. UI `NetronVisualizerPanel` iframe `http://localhost:8082`.
+- [x] **P6-5** Systemd: `sigma-core.service`, `sigma-scraper.service`, `sigma-tv-worker.service`, `sigma-netron.service`, `sigma-redis.service` all `Restart=always RestartSec=3`.
 
 ---
 
@@ -170,7 +170,7 @@ def _subprocess_runner(argv: List[str], timeout_s: float):
 
 | Check | Command | Expected |
 |---|---|---|
-| All 576 tests | `pytest -v` | 576 passed |
+| All tests | `pytest -v` | 576 at plan time → **885 passed** at closeout (2026-09-02) |
 | Blueprint spec | `pytest tests/test_blueprint_spec.py` | 35 passed |
 | API contract | `pytest tests/test_api_contract.py` | health returns blueprint v3.0, webhook 401 on bad secret, kill switch blocks |
 | Frontend panels | `pytest tests/test_frontend_terminal.py` | 11 core + 22 extended registered |
@@ -221,14 +221,14 @@ def _subprocess_runner(argv: List[str], timeout_s: float):
 
 ## 7. Deliverables
 
-- [ ] `FIX_PLAN.md` (this file)
-- [ ] Updated `FACTORY_STRATEGIES` Pine v6 seeds
-- [ ] `app/tv/selector_manager.py` with remote + builtin fallback
-- [ ] `bin/sigma-up` ensures TV session before stack
-- [ ] Frontend `GeneticOptimizerPanel` caps + ETA
-- [ ] `KrakenCliBridge` extended validation
-- [ ] `docs/BLUEPRINT-SIGMA.md` version alignment note
-- [ ] Green CI: 576 tests
+- [x] `FIX_PLAN.md` (this file)
+- [x] Updated `FACTORY_STRATEGIES` Pine v6 seeds
+- [x] `app/tv/selector_manager.py` with remote + builtin fallback
+- [x] `bin/sigma-up` ensures TV session before stack
+- [x] Frontend `GeneticOptimizerPanel` caps + ETA
+- [x] `KrakenCliBridge` extended validation
+- [x] `docs/BLUEPRINT-SIGMA.md` version alignment note
+- [x] Green CI: 576 tests → 885 passed (+ `vite build`, `tsc --noEmit`) at closeout
 
 ---
 

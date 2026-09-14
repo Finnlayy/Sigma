@@ -12,14 +12,44 @@
 **Learning:** Python `(execution_mode or "paper")` treats `""` as paper. SQL `COALESCE(execution_mode, 'paper')` does **not** — empty string is not NULL, so a SUM filter would drop those rows. Use `COALESCE(NULLIF(execution_mode, ''), 'paper')`.
 **Action:** When replacing a Python `x or default` scan with SQL, match empty-string and NULL, not just NULL.
 
-## 2026-08-31 - SSE L2 gauges paid for a full lake_summary twice per tick
-**Learning:** `/api/quant/telemetry/stream` ticks every 2s. `build_frame` filled `l2_duckdb_parquet_files` and `l2_total_mb` via two helpers that **each** called `store.lake_summary()` — `COUNT(*)` + `GROUP BY symbol, interval_sec` on `ohlcv` plus `os.walk` of parquet. The L2 fields only display parquet file count and MB. Compact/seed are the only writers; inventory does not change every 2s. Caching full `lake_summary` would also hide GET `/api/lake/summary` freshness if applied on the store.
-**Action:** SSE L2 must call walk-only `parquet_inventory()` once and TTL-cache (~5s) on `TelemetryCenter`, never on the store. Leave GET `/api/lake/summary` uncached. Do not use `lake_summary()` to populate two integers.
+## 2026-08-30 - React Render O(N^2) Anti-Patterns in UI Maps
+**Learning:** Found an instance in `MetricsPanel.tsx` where `.find()` was being executed inside `.reduce()` and `.map()` iterations during render, turning a simple linear transformation into an $O(N \times M)$ scaling issue. Additionally, multiple consecutive `.reduce()` passes over the same array were found in `CalendarHeatmap.tsx`.
+**Action:** Always pre-compute a `Map` (e.g. `const tickerMap = new Map()`) and wrap with `useMemo` when looking up reference data inside iterators during React renders. Use a single `.reduce()` pass when accumulating multiple stats from the same array.
 
-## 2026-08-31 - Concurrent Bolt runs collide on the same hotspot
-**Learning:** Two cron Bolts independently implemented parquet_inventory + 5s TTL for SSE L2. #66 merged first; the second PR conflicted as a duplicate because memories already named that hotspot.
-**Action:** `git fetch origin main` before picking the daily boost. Skip work already in recent `⚡ Bolt` commits. `GET /api/logs` SQL aggregates landed in #67; `GET /api/queue-matrices` O(T) grouping is the 8s-poll leftover after that.
+## 2024-05-19 - [O(N) Loops Condensation and Binary Search on Frontend]
+**Learning:** In backtest parsing (e.g. `tv_csv.py`), Python generator expressions and list comprehensions to calculate single values across an array of objects can create high `O(N)` repeated overhead for big backtests. In frontend React logic, matching arrays against sequential time series arrays can degrade to $O(N \times M)$ if a linear search is done for finding closest timestamps.
+**Action:** Replace multiple sequential traversals calculating single aggregated metrics over trades with a single `for` loop traversal. Use Binary Search when querying values from pre-sorted time series arrays.
 
-## 2026-08-31 - Second TestClient lifespan tears down the shared FastAPI loop
-**Learning:** `app.server.main` holds process-global `state`. A second module-scoped `TestClient(main.app)` after `test_api_contract` already entered lifespan raises `ValueError: The future belongs to a different loop` on teardown even when assertions passed (suite shows ERROR, not FAIL).
-**Action:** Put queue-matrices / dashboard HTTP contracts on `tests/test_api_contract.py`'s existing client. Helper-only tests may import `main` but must not open another TestClient.
+## 2026-09-01 - Avoid Spread Operator on Large OHLC Arrays
+**Learning:** Found an instance in `MarketPanel.tsx` where a large array of OHLC chart candles was mapped and then spread into `Math.min(...prices)` and `Math.max(...prices)`. For arrays larger than the JavaScript engine's call stack limit (often around 10k-100k items), this throws `RangeError: Maximum call stack size exceeded`. It also incurs unnecessary memory allocation by creating intermediate arrays with `.map()`.
+**Action:** When calculating min/max over potentially large time series or OHLC arrays on the frontend, always use a single iterative O(N) loop instead of `Math.min(...array)` or `Math.max(...array)`.
+## 2026-09-02 - Use useMemo for expensive derived arrays based on props in modals
+**Learning:** Component `StrategyMatrixModal` processes large datasets of trades via `.filter` and `.map` including `.sort` and string operations (like formatting times) on every render (e.g. when changing tabs). Modals tracking hundreds of orders will experience heavy slowdown.
+**Action:** Always wrap `filter` and `.sort()` chains on prop arrays (e.g., arrays of trades) in `useMemo` hooks, specifying exactly what props affect them, to avoid O(N log N) or O(N) operations running on every tab switch.
+## 2026-09-03 - Memoizing prop-dependent filters in panels
+**Learning:** In React components like `QueueMatrixPanel.tsx` and `BacktestingPanel.tsx`, iterating and filtering large arrays via `.filter()` directly inside the render logic creates an O(N) penalty (or more with nested loop string matching like `.includes`) on every re-render. We saw instances where `filteredTrades` was calculated on every keystroke in search inputs because it was unmemoized.
+**Action:** Always wrap `.filter()` operations on arrays (especially derived arrays or those bound to input search states) in `useMemo`. Cache string transformations like `.toLowerCase()` outside the `.filter` loop to further micro-optimize.
+## 2024-05-20 - Set.has() for O(1) lookups in React iterative methods
+**Learning:** Found an $O(N \times M)$ anti-pattern in `CalendarHeatmap.tsx` where `.includes()` on an array was used inside a `.filter()` callback. When working with large sets, this creates significant iteration overhead. Also found multiple consecutive `.filter()` passes over the same array instead of doing a single $O(N)$ pass.
+**Action:** When filtering arrays against a list of IDs, always cast the lookup list to a `Set` first to achieve $O(1)$ lookup time inside the loop (`new Set(ids)` then `set.has(id)`). Condense consecutive `.filter()` or `.reduce()` passes over the same array into a single `for` loop traversal.
+## 2025-03-09 - [O(1) Set Lookups inside tight render loops]
+**Learning:** Found O(N) array `.includes()` operations inside `.filter()` blocks during React rendering (like `selectedMultiIds.includes(s.id)` in CalendarHeatmap or `mainQuotes.includes(q)` in KrakenSymbolModal). These cause quadratic time complexity on large collections, and running them frequently can drop frames on interactive UI actions.
+**Action:** Always convert lookup arrays to Sets for O(1) `.has()` checks before iterating with `.filter()`. Crucially, when doing this in a React component's body, the Set must be wrapped in `useMemo` so it's not reallocated from scratch on every render pass.
+## 2024-09-12 - [RegExp and Lookup Arrays in React Render Loops]
+**Learning:** Instantiating `new RegExp()` inside a tight iteration loop such as `lines.filter()` results in high overhead, as it reallocates and recompiles the expression for every item on every render cycle. Additionally, performing lookups via `.includes()` on arrays inside filter blocks adds O(N) overhead per item.
+**Action:** Extract inline `new RegExp()` logic, as well as lookup arrays, and wrap them in a `useMemo` block. For arrays, convert them into `Set` instances to ensure O(1) `.has()` checks during array iterations, saving significant main-thread block time.
+## 2024-05-24 - [React.memo in StrategyCard]
+**Learning:** In the `ExecutionRiskPanel`, the parent component was passing inline arrow functions (`onPromote={(sid) => m8Action(sid, "promote")}`) and creating a lot of cards. Standard `React.memo` fails here because referential equality of those functions changes on every render.
+**Action:** When memoizing React components that receive inline functions, write a custom `areEqual` function that compares the specific data properties rather than just using the default shallow prop comparison.
+
+## 2025-03-01 - O(N) Sets vs Arrays for Filtering
+**Learning:** Found array `.includes()` within `.filter()` on React renders (e.g. `CalendarHeatmap.tsx:103` - `strategies.filter(s => selectedMultiIds.includes(s.id))`). React re-renders might call this often, leading to O(N*M) time complexity. Also learning: just instantiating a Set inside a React render causes an allocation on every render, which is bad, so we need to use `useMemo`.
+**Action:** Replaced array lookups in filters with `Set.has()` to ensure O(1) membership checks, reducing time complexity to O(N), and wrapped it in `useMemo` to prevent allocation on every render.
+
+## 2026-09-10 - [O(1) Set Search & RegExp Memoization]
+**Learning:** During heavy log streaming (e.g. up to 2000 lines matching via WebSocket), using `Array.includes()` for checking if a subsystem is selected or inline-compiling a regex using `new RegExp()` in a tight filtering loop causes main thread blockage and memory spikes.
+**Action:** When filtering large arrays or streaming logs inside React, use `new Set()` wrapped in `useMemo` for O(1) membership testing and memoize the regex outside the loop to prevent repeated re-allocation and re-compilation on every render cycle.
+
+## 2024-09-11 - [Optimize RegExp/Set within Array Filter loops]
+**Learning:** Avoid compiling `new RegExp()` or instantiating a `new Set()` inside a tight iteration loop such as `array.filter()` during React render phases, as it reallocates and recompiles for each item, and on every render cycle.
+**Action:** Memoize loop-invariant operations like building a `Set` or compiling a `RegExp` using `useMemo` outside of the `.filter()` / `.map()` blocks to prevent unnecessary reallocations and O(N) penalties.

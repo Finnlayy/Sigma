@@ -9,9 +9,27 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Pause, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { z } from 'zod';
 import { sigmaApi, type LogLine, type LogSources } from '../lib/sigmaApi';
 
 export const RING_BUFFER_LINES = 2000;
+
+/** §37.5 — max. WS-Reconnect-Versuche, danach greift der HTTP-Poll-Fallback. */
+export const MAX_WS_RETRIES = 5;
+
+/** §37.5 — Deckel für den exponentiellen Reconnect-Backoff in ms. */
+export const WS_BACKOFF_MAX_MS = 30_000;
+
+/**
+ * §37.3 — Schema eines WS-Frames. Frames, die das Schema verletzen, werden
+ * verworfen und geloggt (kein Crash, kein halber Render).
+ */
+export const LogLineSchema = z.object({
+  subsystem: z.string(),
+  level: z.string(),
+  raw_line: z.string(),
+  timestamp: z.number(),
+});
 
 export const LEVEL_COLOR: Record<string, string> = {
   CRITICAL: 'text-rose-400',
@@ -30,14 +48,11 @@ export const SUBSYSTEM_COLOR: Record<string, string> = {
   SCRAPER: 'text-amber-300',
 };
 
-export function matches(line: LogLine, subsystems: string[], search: string): boolean {
-  if (subsystems.length && !subsystems.includes(line.subsystem)) return false;
+export function matches(line: LogLine, selectedSet: Set<string>, search: string, searchRegex: RegExp | null): boolean {
+  if (selectedSet.size > 0 && !selectedSet.has(line.subsystem)) return false;
   if (!search) return true;
-  try {
-    return new RegExp(search, 'i').test(line.raw_line);
-  } catch {
-    return line.raw_line.toLowerCase().includes(search.toLowerCase());
-  }
+  if (searchRegex) return searchRegex.test(line.raw_line);
+  return line.raw_line.toLowerCase().includes(search.toLowerCase());
 }
 
 export default function ProcessLogView() {
@@ -61,12 +76,15 @@ export default function ProcessLogView() {
 
   useEffect(() => { void sigmaApi.logSources().then((s) => s && setSources(s)); }, []);
 
-  // WS-Stream mit HTTP-Poll-Fallback (§37.2 / §37.5)
+  // WS-Stream mit HTTP-Poll-Fallback (§37.2 / §37.5):
+  // Reconnect mit exponentiellem Backoff (max. MAX_WS_RETRIES), danach Polling.
   useEffect(() => {
     setLines([]);
     let ws: WebSocket | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
+    let retryCount = 0;
 
     const startPolling = () => {
       if (poll) return;
@@ -76,18 +94,69 @@ export default function ProcessLogView() {
       }, 1000);
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => { try { push([JSON.parse(ev.data) as LogLine]); } catch { /* noop */ } };
-      ws.onerror = () => { if (!closed) { setConnected(false); startPolling(); } };
-      ws.onclose = () => { if (!closed) { setConnected(false); startPolling(); } };
-    } catch {
-      startPolling();
-    }
+    const stopPolling = () => {
+      if (!poll) return;
+      clearInterval(poll);
+      poll = null;
+    };
+
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.logStreamUrl(filterParam));
+
+        ws.onopen = () => {
+          setConnected(true);
+          retryCount = 0;
+          stopPolling(); // WS lebt wieder → Polling ist redundant
+        };
+
+        ws.onmessage = (ev) => {
+          try {
+            // Schema-Check (§37.3): ungültige Frames verwerfen statt halb zu rendern.
+            // parse() statt safeParse(), weil ohne strictNullChecks (tsconfig) die
+            // Discriminated-Union von SafeParseReturnType nicht narrowt.
+            const line = LogLineSchema.parse(JSON.parse(ev.data)) as LogLine;
+            push([line]);
+          } catch (err) {
+            console.error('[ProcessLogView] WS-Frame verworfen:', err, ev.data);
+          }
+        };
+
+        ws.onerror = () => {
+          // UI sofort auf POLL schalten; den Reconnect steuert onclose (firet immer).
+          if (!closed) setConnected(false);
+        };
+
+        ws.onclose = () => {
+          setConnected(false);
+          // Guard: onerror + onclose dürfen nicht doppelt einplanen.
+          if (closed || reconnectTimer) return;
+          if (retryCount < MAX_WS_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCount, WS_BACKOFF_MAX_MS);
+            retryCount++;
+            console.warn(`[ProcessLogView] WS getrennt — Reconnect in ${delay}ms (${retryCount}/${MAX_WS_RETRIES})`);
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, delay);
+          } else {
+            console.error('[ProcessLogView] WS-Retries erschöpft — HTTP-Poll-Fallback aktiv');
+            startPolling();
+          }
+        };
+      } catch (err) {
+        console.error('[ProcessLogView] WS-Verbindung fehlgeschlagen:', err);
+        startPolling();
+      }
+    };
+
+    connect();
+
     return () => {
       closed = true;
-      if (poll) clearInterval(poll);
+      stopPolling();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
     };
   }, [filterParam, push]);
@@ -96,9 +165,22 @@ export default function ProcessLogView() {
     if (autoScroll && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
   }, [lines, autoScroll]);
 
+  // ⚡ Bolt: Prevent O(N) regex reallocation and compilation overhead by memoizing it outside the log iteration loop
+  const searchRegex = useMemo(() => {
+    if (!search) return null;
+    try {
+      return new RegExp(search, 'i');
+    } catch {
+      return null;
+    }
+  }, [search]);
+
+  // ⚡ Bolt: Convert array to Set for O(1) .has() lookups inside the tight log filter loop
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
   const visible = useMemo(
-    () => lines.filter((l) => matches(l, selected, search)),
-    [lines, selected, search],
+    () => lines.filter((l) => matches(l, selectedSet, search, searchRegex)),
+    [lines, selectedSet, search, searchRegex],
   );
 
   const toggle = (name: string) =>
@@ -137,15 +219,19 @@ export default function ProcessLogView() {
             auto-scroll
           </label>
           <button onClick={() => setPaused((p) => !p)} title={paused ? 'Fortsetzen' : 'Pause'}
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+            aria-label={paused ? 'Fortsetzen' : 'Pause'}
+            aria-pressed={paused}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none">
             {paused ? <Play size={12} /> : <Pause size={12} />}
           </button>
           <button onClick={download} title="Sichtbare Logs exportieren"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Download size={12} /></button>
+            aria-label="Sichtbare Logs exportieren"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none"><Download size={12} /></button>
           <button onClick={() => setLines([])} title="View leeren"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Trash2 size={12} /></button>
+            aria-label="View leeren"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none"><Trash2 size={12} /></button>
           <button onClick={() => void sigmaApi.logTail(filterParam, 200).then((r) => r && setLines(r.lines))}
-            title="Backfill" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100">
+            title="Backfill" aria-label="Backfill" className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:outline-none">
             <RefreshCw size={12} />
           </button>
         </div>

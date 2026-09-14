@@ -262,16 +262,33 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
     return visibleOrderMarkers.map(order => {
       const orderMs = new Date(order.timestamp).getTime();
       
-      // Find candle with closest timestamp
+      // Binary search for closest candle timestamp
+      let left = 0;
+      let right = chartCandles.length - 1;
       let closestCandle = chartCandles[0];
-      let minDiff = Math.abs(chartCandles[0].timestampMs - orderMs);
 
-      for (let i = 1; i < chartCandles.length; i++) {
-        const diff = Math.abs(chartCandles[i].timestampMs - orderMs);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestCandle = chartCandles[i];
+      while (left <= right) {
+        const mid = Math.floor((left + right) / 2);
+        if (chartCandles[mid].timestampMs === orderMs) {
+          closestCandle = chartCandles[mid];
+          left = mid; // Break out, avoiding using flag
+          break;
+        } else if (chartCandles[mid].timestampMs < orderMs) {
+          left = mid + 1;
+        } else {
+          right = mid - 1;
         }
+      }
+
+      if (left > right && chartCandles[left] && chartCandles[right]) {
+        // If not exact match, compare neighbors
+        const diffLeft = Math.abs(chartCandles[left].timestampMs - orderMs);
+        const diffRight = Math.abs(chartCandles[right].timestampMs - orderMs);
+        closestCandle = diffLeft < diffRight ? chartCandles[left] : chartCandles[right];
+      } else if (left > right) {
+        // Out of bounds check
+        if (left >= chartCandles.length) closestCandle = chartCandles[chartCandles.length - 1];
+        else if (right < 0) closestCandle = chartCandles[0];
       }
 
       return {
@@ -297,14 +314,25 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
   // Calculate Price Range (Min & Max for domain)
   const priceDomain = useMemo(() => {
     if (chartCandles.length === 0) return ['auto', 'auto'];
-    const prices = chartCandles.map(c => c.price);
-    // Include order marker prices so markers never fall outside the chart
-    positionedMarkers.forEach(m => {
-      if (m.order.price) prices.push(m.order.price);
-    });
 
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
+    // Bolt Optimization: Prevent Call Stack Limit & Memory Bloat
+    // Replaced `.map()` and `Math.min(...prices)` with a single O(N) iteration
+    let min = Infinity;
+    let max = -Infinity;
+
+    for (const c of chartCandles) {
+      if (c.price < min) min = c.price;
+      if (c.price > max) max = c.price;
+    }
+
+    // Include order marker prices so markers never fall outside the chart
+    for (const m of positionedMarkers) {
+      if (m.order.price !== undefined) {
+        if (m.order.price < min) min = m.order.price;
+        if (m.order.price > max) max = m.order.price;
+      }
+    }
+
     const padding = (max - min) * 0.08 || min * 0.01;
     return [Math.max(0, Number((min - padding)?.toFixed(2))), Number((max + padding)?.toFixed(2))];
   }, [chartCandles, positionedMarkers]);
@@ -847,7 +875,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             id="btn-reset-trade-history"
             onClick={handleResetHistory}
             disabled={isResetting}
-            title="Reset trade history and strategy P&L scorecards to zero baseline"
+            title="Reset trade history and strategy P&L scorecards to zero baseline" aria-label="Reset trade history and strategy P&L scorecards to zero baseline"
             className="flex items-center space-x-1 text-[10px] font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700/80 px-2 py-1 rounded transition-colors disabled:opacity-50 cursor-pointer"
           >
             <RotateCcw className={`w-3 h-3 ${isResetting ? 'animate-spin text-emerald-400' : ''}`} />

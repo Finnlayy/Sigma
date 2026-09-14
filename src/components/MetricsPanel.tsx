@@ -194,11 +194,21 @@ export default function MetricsPanel({
           generated.push({ time: timeLabel, pnl: val });
         }
 
-        const vals = generated.map(g => g.pnl);
+        // Bolt Optimization: Replaced O(N) .map() and spread operators with a single O(N) loop.
+        // Prevents intermediate array allocation and avoids RangeError (call stack limit) on large arrays.
+        let high = -Infinity;
+        let low = Infinity;
+        for (const g of generated) {
+          if (g.pnl > high) high = g.pnl;
+          if (g.pnl < low) low = g.pnl;
+        }
+        if (high === -Infinity) high = 0;
+        if (low === Infinity) low = 0;
+
         setHistoryData(generated);
         setHistoryStats({
-          high: Math.max(...vals),
-          low: Math.min(...vals),
+          high,
+          low,
           current: targetPnL
         });
         setIsLoadingHistory(false);
@@ -723,7 +733,7 @@ export default function MetricsPanel({
             {onOpenLedgersPage && (
               <button
                 onClick={onOpenLedgersPage}
-                title="Expand Full Kraken Spot & Pro Ledgers Page"
+                title="Expand Full Kraken Spot & Pro Ledgers Page" aria-label="Expand Full Kraken Spot & Pro Ledgers Page"
                 className="p-1 rounded bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/60 text-emerald-300 text-xs transition-colors"
               >
                 <ArrowUpRight className="w-3 h-3" />

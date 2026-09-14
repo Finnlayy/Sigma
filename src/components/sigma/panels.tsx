@@ -23,6 +23,7 @@ import {
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { sanitizeUrl } from '../../lib/security';
 import { Button } from '@/components/ui/button';
 import {
   OverviewMetricsPanel as OverviewMetricsPanelImpl,
@@ -99,7 +100,7 @@ export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; 
 );
 
 const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: string; children: React.ReactNode }) => (
-  <button onClick={onClick} title={title}
+  <button onClick={onClick} title={title} aria-label={title}
     className="rounded border border-zinc-700 p-1 text-zinc-400 transition hover:border-sky-500 hover:text-sky-400">
     {children}
   </button>
@@ -398,6 +399,7 @@ export function LLMConsole() {
         append(JSON.stringify(out ?? { error: 'no result' }).slice(0, 800));
         return;
       }
+
       const ws = new WebSocket(sigmaApi.llmStreamUrl());
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('LLM stream timeout')), 20000);
@@ -414,7 +416,8 @@ export function LLMConsole() {
               ws.close();
               resolve();
             }
-          } catch {
+          } catch (e) {
+            console.error('Failed to parse LLM stream payload:', e, ev.data);
             append(String(ev.data).slice(0, 400));
           }
         };
@@ -611,11 +614,11 @@ export function DeadmanSwitchPanel() {
   return (
     <PanelShell title="Deadman Switch" icon={<HeartPulse size={13} />}
       actions={<button onClick={override}
-        title="Manueller Override — Puls kommt vom Kraken-Time-Ping"
+        title="Manueller Override — Puls kommt vom Kraken-Time-Ping" aria-label="Manueller Override — Puls kommt vom Kraken-Time-Ping"
         className="rounded border border-zinc-600/60 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800">OVERRIDE</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
-        <div className={`h-full transition-all ${d?.expired || pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-          style={{ width: `${pct}%` }} />
+        <div className={`w-full h-full transition-transform ${d?.expired || pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+          style={{ transform: `scaleX(${pct / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Heartbeat Age" value={`${(d?.age_s ?? 0)?.toFixed(1)}s`}
@@ -687,8 +690,8 @@ export function MemoryWatchdogPanel() {
       actions={<button onClick={check}
         className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] hover:border-sky-500">CHECK</button>}>
       <div className="mb-2 h-2 w-full overflow-hidden rounded bg-zinc-800">
-        <div className={`h-full ${(m?.percent ?? 0) > 85 ? 'bg-red-500' : (m?.percent ?? 0) > 72 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-          style={{ width: `${Math.min(100, m?.percent ?? 0)}%` }} />
+        <div className={`w-full h-full transition-transform ${(m?.percent ?? 0) > 85 ? 'bg-red-500' : (m?.percent ?? 0) > 72 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+          style={{ transform: `scaleX(${Math.min(100, m?.percent ?? 0) / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Stat label="RAM" value={`${(m?.percent ?? 0)?.toFixed(1)}%`} />
@@ -931,8 +934,8 @@ export function RateLimiterPanel() {
           tone={kraken?.soft_cap_reached ? 'text-amber-400' : 'text-zinc-100'} />
         <Stat label="Reserve" value={kraken?.reserve_emergency_tokens ?? 3} />
       </div>
-      <div className="mt-2 h-1.5 w-full rounded bg-zinc-800">
-        <div className={`h-1.5 rounded ${pct >= 80 ? 'bg-amber-500' : 'bg-sky-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+      <div className="mt-2 h-1.5 w-full rounded bg-zinc-800 overflow-hidden">
+        <div className={`w-full h-1.5 rounded transition-transform ${pct >= 80 ? 'bg-amber-500' : 'bg-sky-500'}`} style={{ transform: `scaleX(${Math.min(100, pct) / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="mt-1 text-[10px] text-zinc-500">
         Soft-Cap bei {Math.round((kraken?.soft_cap_pct ?? 0.8) * 100)}% · Backoff {(data?.backoff_ladder_s ?? []).join('s / ')}s
@@ -1180,7 +1183,7 @@ export function NetronVisualizerPanel() {
     <PanelShell title="Netron ONNX Inspector" icon={<Brain size={13} className="text-fuchsia-400" />}
       actions={<>
         <IconBtn onClick={() => { setNonce((n) => n + 1); refresh(); }} title="Reload"><RefreshCw size={12} /></IconBtn>
-        <a href={url} target="_blank" rel="noreferrer" title="Extern öffnen"
+        <a href={sanitizeUrl(url)} target="_blank" rel="noopener noreferrer" title="Extern öffnen"
           className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><ExternalLink size={12} /></a>
       </>}>
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">

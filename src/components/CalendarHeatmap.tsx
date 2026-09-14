@@ -264,7 +264,7 @@ export default function CalendarHeatmap({
         activeDays.push(d);
       }
     }
-    total30DPnL = Number(total30DPnL?.toFixed(2));
+    total30DPnL = Number(total30DPnL.toFixed(2));
 
     const candidateDays = activeDays.length > 0 ? activeDays : [days[0]];
 

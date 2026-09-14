@@ -19,6 +19,7 @@ import {
   PanelShell, Stat, FeedBadge, usePoll,
 } from './panels';
 import { sigmaResearchApi, blindedSymbol, type SigmaPanelBase } from '../../lib/sigmaApi';
+import { sanitizeUrl } from '../../lib/security';
 
 /* ------------------------------------------------------- shared helpers */
 
@@ -30,7 +31,7 @@ function Bar({ value, max = 1, tone = 'bg-emerald-500/70' }: { value: number; ma
   const w = Math.max(0, Math.min(100, (Math.abs(value) / max) * 100));
   return (
     <div className="h-1.5 w-full overflow-hidden rounded bg-zinc-800">
-      <div className={`h-full ${tone}`} style={{ width: `${w}%` }} />
+      <div className={`w-full h-full transition-transform ${tone}`} style={{ transform: `scaleX(${w / 100})`, transformOrigin: 'left' }} />
     </div>
   );
 }
@@ -158,7 +159,7 @@ export function SymbolScoutPanel() {
   return (
     <PanelShell title="Symbol Scout" icon={<Sparkles size={13} />}
       actions={
-        <button onClick={() => setBlinded(!blinded)} title="Blinded-Modus (Ticker ausblenden)"
+        <button onClick={() => setBlinded(!blinded)} title="Blinded-Modus (Ticker ausblenden)" aria-label="Blinded-Modus (Ticker ausblenden)"
           className="rounded border border-zinc-700 p-1 text-zinc-400 hover:border-sky-500 hover:text-sky-400">
           {blinded ? <EyeOff size={11} /> : <Eye size={11} />}
         </button>
@@ -204,7 +205,7 @@ export function SymbolScoutPanel() {
               </tbody>
             </table>
           )}
-          <button disabled title="Scan-Trigger: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
+          <button disabled title="Scan-Trigger: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)" aria-label="Scan-Trigger: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
             className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-500 disabled:cursor-not-allowed">
             Scan anstoßen (Operator + Modal)
           </button>
@@ -351,7 +352,7 @@ export function ProvisionerPanel() {
             Wächter: lookahead_off · bar-close-Alert · Schema-A-Payload · initial_capital=10000 ·
             pyramiding=1 · 0,04 % · calc_on_every_tick=false · idempotency_key je Alert
           </div>
-          <button disabled title="Externes Pine härten: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
+          <button disabled title="Externes Pine härten: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)" aria-label="Externes Pine härten: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
             className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-500 disabled:cursor-not-allowed">
             Externes Pine härten (Operator + Modal)
           </button>
@@ -530,11 +531,11 @@ export function ResearchLabPanel() {
             );
           })}
           {data.export_html_path && (
-            <a href={data.export_html_path} className="mt-2 block text-[10px] text-sky-400 hover:underline">
+            <a href={sanitizeUrl(data.export_html_path)} className="mt-2 block text-[10px] text-sky-400 hover:underline">
               HTML-Dashboard exportieren (MP-16)
             </a>
           )}
-          <button disabled title="Hypothesen-Run: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
+          <button disabled title="Hypothesen-Run: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)" aria-label="Hypothesen-Run: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
             className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-500 disabled:cursor-not-allowed">
             Run (Operator + Modal)
           </button>

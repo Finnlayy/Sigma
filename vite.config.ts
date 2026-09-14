@@ -26,26 +26,11 @@ export default defineConfig(() => {
       host: true,
       port: 3000,
       allowedHosts: true as const,
-      proxy: {
-        // Sigma Execution Core (Ubuntu, Local: 127.0.0.1:8000)
-        '/api': {
-          target: process.env.SIGMA_CORE_PROXY || process.env.ALPHA_CORE_PROXY || 'http://127.0.0.1:8000',
-          changeOrigin: true,
-          ws: true,
-        },
-      },
     },
     preview: {
       host: true,
       port: 3000,
       allowedHosts: true as const,
-      proxy: {
-        '/api': {
-          target: process.env.SIGMA_CORE_PROXY || process.env.ALPHA_CORE_PROXY || 'http://127.0.0.1:8000',
-          changeOrigin: true,
-          ws: true,
-        },
-      },
     },
   };
 });

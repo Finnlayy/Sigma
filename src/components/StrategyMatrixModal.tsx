@@ -47,7 +47,7 @@ export default function StrategyMatrixModal({
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .map((t, idx) => {
         const pnl = t.pnl || 0;
-        runningPnL = Number((runningPnL + pnl)?.toFixed(2));
+        runningPnL = Number((runningPnL + pnl).toFixed(2));
         return {
           tradeNum: idx + 1,
           time: new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
