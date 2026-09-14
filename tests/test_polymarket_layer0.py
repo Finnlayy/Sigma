@@ -37,6 +37,7 @@ def ladder_payload(**overrides):
         "yes_prices": [0.85, 0.62, 0.25],
         "volume_usd": 2_500_000.0,
         "ts": 1_704_067_200,
+        "expiry": 1_704_067_200 + 86_400.0,  # +1d for T×0.75 window
         "quotes": {"1h": 0.40, "2h": 0.46, "4h": 0.55, "EOD": 0.72},
     }
     payload.update(overrides)
@@ -143,7 +144,8 @@ def test_layer0_port_rejects_synthetic_and_missing():
 
 def test_layer0_port_injected_payload_telemetry():
     port = FakePolymarketPort(ladder_payload())
-    r = layer0_from_port(port, "btc-macro")
+    now = 1_704_067_200.0
+    r = layer0_from_port(port, "btc-macro", now_ts=now)
     assert r.valid is True
     assert r.event_id == "btc-macro"
     assert r.implied_prob is not None and 0.0 <= r.implied_prob <= 1.0
@@ -151,9 +153,27 @@ def test_layer0_port_injected_payload_telemetry():
     d = r.to_dict()
     assert d["details"]["density"]["valid"] is True
     assert d["details"]["trajectory"]["bias"] == "BULLISH"
+    assert d["details"]["expiry"] == pytest.approx(now + 86_400.0)
+    win = d["details"]["entry_window"]
+    assert win is not None and win["valid"] is True
+    # start=ts, duration=1d → T_opt = ts + 0.75×duration
+    assert win["t_opt_ts"] == pytest.approx(now + 0.75 * 86_400.0)
+    assert win["entry_allowed"] is True
     # Gate-Schwelle existiert als Konstante, ist aber NICHT aktiv
     assert POLYMARKET_GATE_THRESHOLD == 0.60
     assert d["details"]["gate_active"] is False
+
+
+def test_platt_calibrated_stays_in_unit_interval_after_skew():
+    # Non-default Platt params must still yield a finite calibrated mid;
+    # renormalized weights keep the result in a sensible strike range.
+    d = density_from_ladder(
+        [95000.0, 100000.0, 105000.0], [0.85, 0.62, 0.25],
+        platt_a=1.5, platt_b=-0.2,
+    )
+    assert d.valid is True
+    assert d.mu_calibrated is not None
+    assert 90_000.0 < d.mu_calibrated < 120_000.0
 
 
 def test_orchestrator_without_port_unchanged():

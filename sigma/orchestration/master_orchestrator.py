@@ -93,7 +93,7 @@ class MasterOrchestrator:
         if _poly_port is not None and hasattr(_poly_port, "fetch_event_odds"):
             # MP-06: echter Port -> validierte Dichte/Term-Struktur als
             # Telemetrie-Kontext; ohne Feed bleibt valid=False wie bisher.
-            poly = layer0_from_port(_poly_port, "btc-macro")
+            poly = layer0_from_port(_poly_port, "btc-macro", now_ts=now)
         else:
             poly = layer0_pre_regime(_poly_port)
         wave = self.collider.evaluate(

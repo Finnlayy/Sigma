@@ -92,14 +92,22 @@ def classify_bias(delta_mu_per_h: float) -> str:
 def optimal_entry_window(
     expiry_ts: float,
     now_ts: float,
+    *,
+    start_ts: float = 0.0,
 ) -> TrajectoryResult:
-    """T_opt = Expiry x 0,75; Remaining < Expiry x 0,25 -> kein Entry mehr
-    (Spaet-Fenster-Sperre). Fail-closed bei ungueltigen Zeiten."""
+    """T_opt = start + (Expiry-start)×0,75; Remaining < Duration×0,25 ->
+    kein Entry mehr (Spaet-Fenster-Sperre). Default start=0 preserves the
+    0-origin contract (T_opt = Expiry×0,75). Fail-closed bei ungueltigen Zeiten."""
     if expiry_ts <= 0 or now_ts <= 0 or now_ts >= expiry_ts:
         return TrajectoryResult(False, "invalid_times")
+    if start_ts < 0 or start_ts >= expiry_ts:
+        return TrajectoryResult(False, "invalid_times")
+    duration = expiry_ts - start_ts
+    if duration <= 0:
+        return TrajectoryResult(False, "invalid_times")
     remaining = expiry_ts - now_ts
-    remaining_frac = remaining / expiry_ts
-    t_opt = expiry_ts * 0.75
+    remaining_frac = remaining / duration
+    t_opt = start_ts + duration * 0.75
     entry_allowed = remaining_frac >= 0.25
     return TrajectoryResult(
         valid=True,
