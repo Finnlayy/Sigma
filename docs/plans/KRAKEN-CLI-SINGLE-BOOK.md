@@ -53,8 +53,7 @@
 
 | Gap | Status | Reason |
 |-----|--------|--------|
-| Spot `close_all_market` flatten | **IMPOSSIBLE on 0.4.1** | No `order close-all` leaf. Fail-closed `CLI_UNSUPPORTED`. |
-| Futures deadman flatten | **BEST-EFFORT** | `cancel-all` + gated reduce-only closes from `futures/[paper/]positions`. Not a native flatten leaf. |
+| Spot / Futures flatten | **DONE** | `kraken_cli_flatten.py` — cancel → positions → reduce-only/market → verify/retry |
 | Market feed = scraper | **BY DESIGN** | Dual-Hurst/Wave/ATR stay on scraper OHLC; sizing/risk consume CLI capital/fees/ticker. |
 | `ws/*` long-lived streams | **CALLABLE / LIMITED** | `run_leaf` can spawn argv; no production WS supervisor for all leaves yet. |
 | VirtualBotDeck soft-cap equity | Soft | Ringfence budget ≠ CLI paper book; capital UI uses CLI. |

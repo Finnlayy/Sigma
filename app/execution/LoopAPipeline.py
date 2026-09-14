@@ -192,8 +192,11 @@ class LoopAPipeline:
         trace.append(bp.LOOP_A_PIPELINE[2])
         win_prob = float(conf["win_prob"])
 
+        # Book early: Kelly equity must come from the matching Spot vs Futures CLI SoT.
+        futures = execution_market == "futures" or market_type(sig.symbol) == "FUTURES"
+
         # Schritt 4+5: Kelly + Brackets (Bot-Equity, wenn ein Virtual Bot existiert)
-        equity, bot = self._equity_for(sig.strategy_id)
+        equity, bot = self._equity_for(sig.strategy_id, futures=futures)
         sizing = self.quant.size_position(equity=equity, price=sig.price, win_prob=win_prob,
                                           atr=sig.atr, action=sig.action)
         quantity = (
@@ -208,7 +211,6 @@ class LoopAPipeline:
             return self._reject("sizing", "ZERO_SIZE", "kelly size is zero", 200, sig, trace)
 
         # Schritt 6: Symbol-Map + Notional-Limits
-        futures = execution_market == "futures" or market_type(sig.symbol) == "FUTURES"
         pair = (
             f"PF_{to_kraken_pair(sig.symbol)}"
             if futures else to_kraken_pair(sig.symbol)
@@ -244,13 +246,21 @@ class LoopAPipeline:
             self._daily_notional[mkt] += notional # add correct
             trace.append("notional_capped")
 
-        # Schritt 7: Judge
+        # Schritt 7: Judge — spread from CLI ticker when available
         gates: List[Dict[str, Any]] = []
         if self.judge is not None:
+            spread_bps = 3.0
+            try:
+                from app.execution.kraken_ticker_spread import fetch_spread_bps
+                spread_bps = float(fetch_spread_bps(
+                    self.kraken, pair, futures=futures, default_bps=3.0,
+                ))
+            except Exception:  # pragma: no cover
+                spread_bps = 3.0
             result = self.judge.evaluate(
                 symbol=sig.symbol, qty=quantity, side="buy" if sig.action.upper() == "BUY" else "sell",
                 win_rate=win_prob, win_loss_ratio=bp.KELLY_DEFAULT_RRR, target_vol=0.02,
-                context={"spread_bps": 3.0, "system_state": self._telemetry_state()})
+                context={"spread_bps": spread_bps, "system_state": self._telemetry_state()})
             gates = result.get("gates", [])
             trace.append(bp.LOOP_A_PIPELINE[6])
             if not result.get("approved", result.get("passed", True)):
@@ -396,11 +406,21 @@ class LoopAPipeline:
             strategy_id=sig.strategy_id or "", symbol=sig.symbol, action=sig.action.upper(),
             gates=gates or [], trace=trace)
 
-    def _equity_for(self, strategy_id: Optional[str]):
+    def _equity_for(self, strategy_id: Optional[str], *, futures: bool = False):
         if self.virtual_bots is not None and strategy_id:
             bots = self.virtual_bots.for_strategy(strategy_id)
             if bots:
                 return bots[0].current_equity, bots[0]
+        # Prefer CLI paper capital SoT for the execution book (spot vs futures).
+        if self.kraken is not None:
+            try:
+                from app.execution.kraken_paper_sot import fetch_paper_capital
+                use_fut = bool(futures) or bool(getattr(self.kraken, "futures", False))
+                snap = fetch_paper_capital(self.kraken, futures=use_fut)
+                if snap.ok and snap.current_value is not None and float(snap.current_value) > 0:
+                    return float(snap.current_value), None
+            except Exception:  # pragma: no cover
+                pass
         return float(self._equity_provider()), None
 
     def _m8_state(self, strategy_id: Optional[str]) -> Optional[str]:

@@ -211,13 +211,34 @@ class PaperExecutionEngine:
                 gross = (entry - fill_price) * qty
             notional_exit = qty * fill_price
 
+        funding_usd = float(position.get("funding_usd") or 0.0)
+        if funding_usd == 0.0:
+            try:
+                from app.execution.kraken_funding_rates import (
+                    estimate_funding_fee_usd,
+                    fetch_latest_funding_rate,
+                )
+                sym = str(position.get("symbol") or "")
+                if sym.startswith(("PF_", "PI_")) or str(position.get("market") or "").upper() == "FUTURES":
+                    # No bridge on paper engine — relative rate only if caller stashed it.
+                    rel = position.get("relative_funding_rate")
+                    if rel is None and position.get("fundingRate") is not None:
+                        # absolute CLI rate is not always a fraction; prefer relative
+                        rel = None
+                    if rel is not None:
+                        funding_usd = estimate_funding_fee_usd(
+                            notional_entry, float(rel), periods=1,
+                        )
+            except Exception:
+                funding_usd = float(position.get("funding_usd") or 0.0)
+
         fees = self.fee_engine.calculate_net_pnl(
             entry_notional_usd=notional_entry,
             exit_notional_usd=notional_exit,
             gross_pnl_usd=gross,
             entry_execution_type="TAKER",
             exit_execution_type="TAKER",
-            funding_fee_accumulated_usd=float(position.get("funding_usd") or 0.0),
+            funding_fee_accumulated_usd=funding_usd,
         )
 
         stop_distance_pct = 0.0

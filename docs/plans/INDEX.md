@@ -27,3 +27,5 @@ Implementierungs-Loop: `docs/plans/EXECUTE-STATE.md` (Next-Zeiger) · Prompt: `d
 | Plan | Status | Datei | Hinweis |
 |---|---|---|---|
 | Glint + Polymarket Live-Feeds | PLAN | `docs/plans/GLINT-POLYMARKET-WIRING.md` | Gamma + Kraken L2 in bestehende Engines; kein Ciel-Sandbox-Deploy |
+| Kraken CLI Inventar | DONE | `docs/plans/KRAKEN-CLI-INVENTORY.md` | 181 Leaves, argv 0.4.1, Single-Book SoT |
+| Kraken CLI Single-Book | BAU | `docs/plans/KRAKEN-CLI-SINGLE-BOOK.md` | CLI = Execution-Engine |
