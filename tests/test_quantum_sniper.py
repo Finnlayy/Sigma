@@ -34,7 +34,6 @@ from sigma.strategies.quantum_sniper_dca import (
     retest_confirmed,
     utc_minute,
 )
-from sigma.strategies.dca_ladder import LADDER_TTL_SECONDS
 
 M15 = 900
 M1 = 60
@@ -183,13 +182,37 @@ def test_full_cycle_collapsed_retest_ranker_buy_intent():
     assert d["path"] == "alpha"
     assert d["confirmed_breakout_retest"] is False
     assert d["retest"]["confirmed"] is True
-    assert d["ttl_seconds"] == LADDER_TTL_SECONDS
+    # Minute 37 → remaining to minute-48 flat = 11 min
+    assert d["ttl_seconds"] == (ENTRY_MINUTE_MAX - 37) * 60
     assert d["ladder"]["n_safety"] == N_SAFETY
     assert d["ladder"]["side"] == "buy"
     assert d["ladder"]["step_pct"] == 0.002
-    assert d["risk_guards"]["hard_sl_basis"] == "liquidation_price"
+    # liq=95 → stop 95.475; range_low=99 → stop 98.901; stricter wins
+    assert d["risk_guards"]["hard_sl_basis"] == "range_low_high"
+    assert intent.stop_loss == pytest.approx(99.0 * (1.0 - 0.001))
     # TP relativ zum AVG (nicht Entry)
     assert intent.take_profit == pytest.approx(d["avg_fill_price"] * 1.02)
+
+
+def test_hard_sl_picks_stricter_of_liq_and_range():
+    """Hard SL = stricter of liq×1.005 vs range_low×0.999 (long)."""
+    # Liq well below range → range buffer is stricter
+    intent = plan_sniper(_ctx(liquidation_price=95.0))
+    assert intent.action == "BUY"
+    range_low = float(intent.details["range_low"])
+    liq_stop = 95.0 * 1.005
+    range_stop = range_low * (1.0 - 0.001)
+    assert range_stop > liq_stop
+    assert intent.stop_loss == pytest.approx(range_stop)
+    assert intent.details["risk_guards"]["hard_sl_basis"] == "range_low_high"
+    # Liq just under wick → liq buffer sits above range buffer → liq wins
+    near_liq = range_low * 0.995
+    intent2 = plan_sniper(_ctx(liquidation_price=near_liq))
+    assert intent2.action == "BUY"
+    liq_stop2 = near_liq * 1.005
+    assert liq_stop2 > range_stop
+    assert intent2.stop_loss == pytest.approx(liq_stop2)
+    assert intent2.details["risk_guards"]["hard_sl_basis"] == "liquidation_price"
 
 
 def test_retest_confirmed_helper_uses_closed_bars_only():

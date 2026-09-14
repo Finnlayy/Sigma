@@ -20,7 +20,7 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 | MP-03 | DONE | DONE | Candle/regime · `cbd3c3b` · `closed_only` + thrust field contract |
 | MP-04 | DONE | DONE | Power/phasor · `19f2df3` · `ATR_PERIOD` + physics/hilbert/mtf |
 | MP-05 | DONE | DONE | Hourly gate wall-clock + JULES constants/`from_dict`/`binding` · `tests/test_hourly_ranker.py` |
-| MP-06 | DONE | DONE | expiry + T×0.75 entry window in layer0; Platt clip/renorm · `tests/test_polymarket_layer0.py` |
+| MP-06 | DONE | DONE | `3efc828` · expiry + T×0.75 entry window; Platt clip/renorm · `tests/test_polymarket_layer0.py` |
 | MP-07 | PENDING | PENDING | |
 | MP-08 | PENDING | PENDING | |
 | MP-09 | PENDING | PENDING | |
