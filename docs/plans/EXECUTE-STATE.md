@@ -1,10 +1,10 @@
 # Jules Execute State
 
 <!-- jules-loop:ACTIVE -->
-<!-- jules-next:MP-09 -->
+<!-- jules-next:MP-15 -->
 
 **Loop:** ACTIVE
-**Next:** MP-09
+**Next:** MP-15
 **Branch:** `jules/mp-execute`
 **PR:** one accumulating PR from that branch — do not open a new PR per phase
 **Human:** not available. Do not wait. Do not ask. Continue until **Next** is `STOP`.
@@ -22,8 +22,8 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 | MP-05 | DONE | DONE | Hourly gate wall-clock + JULES constants/`from_dict`/`binding` · `tests/test_hourly_ranker.py` |
 | MP-06 | DONE | DONE | `3efc828` · expiry + T×0.75 entry window; Platt clip/renorm · `tests/test_polymarket_layer0.py` |
 | MP-07 | DONE | DONE | `cd0a5b7` · stricter Hard-SL (liq vs range) + minute-48 TTL · `tests/test_quantum_sniper.py` |
-| MP-08 | DONE | DONE | exhaustion + async unwind complete · `tests/test_exhaustion_unwind.py` |
-| MP-09 | PENDING | PENDING | |
+| MP-08 | DONE | DONE | `bfd6cda` · exhaustion + async unwind · `tests/test_exhaustion_unwind.py` |
+| MP-09 | DONE | DONE | mirrored short fractal TP hits; drop type:ignore · `tests/test_dynamic_pine.py` |
 | MP-15 | PENDING | PENDING | |
 | MP-11 | PENDING | PENDING | |
 | MP-12 | PENDING | PENDING | |

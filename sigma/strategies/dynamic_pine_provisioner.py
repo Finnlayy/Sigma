@@ -268,9 +268,14 @@ def generate_dynamic_pine(request: ProvisionRequest) -> str:
         blocks.append("tp1 = " + repr(tp1))
         blocks.append("tp2 = " + repr(tp2))
         blocks.append("tp3 = " + repr(tp3))
-        blocks.append("tp1Hit = confirmed and high >= tp1")
-        blocks.append("tp2Hit = confirmed and high >= tp2")
-        blocks.append("tp3Hit = confirmed and high >= tp3")
+        if side == "buy":
+            blocks.append("tp1Hit = confirmed and high >= tp1")
+            blocks.append("tp2Hit = confirmed and high >= tp2")
+            blocks.append("tp3Hit = confirmed and high >= tp3")
+        else:
+            blocks.append("tp1Hit = confirmed and low <= tp1")
+            blocks.append("tp2Hit = confirmed and low <= tp2")
+            blocks.append("tp3Hit = confirmed and low <= tp3")
         blocks.append("if tp1Hit")
         blocks.append(f"    alert('{_json_pine(tp1_payload)}', alert.freq_once_per_bar_close)")
         blocks.append("if tp2Hit")
@@ -412,14 +417,13 @@ def _inject_alert_messages(
         call_src = code[i:end + 1]
         inner_body = call_src[len(found) + 1: -1]
         if "alert_message" not in inner_body:
-            key: Optional[str] = None
             if found == "strategy.entry":
                 key = "entry_short" if "strategy.short" in inner_body else "entry_long"
             elif found == "strategy.exit":
                 key = "exit"
             else:
                 key = "close"
-            base = payloads.get(key)  # type: ignore[arg-type]
+            base = payloads.get(key)
             if base is not None:
                 action = str(base["action"])
                 used[action] = used.get(action, 0) + 1

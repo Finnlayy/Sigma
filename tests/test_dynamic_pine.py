@@ -119,10 +119,15 @@ def test_fractal_mode_tps_and_update_sl():
     upd = json.loads(update.replace("\\'", "'"))
     assert upd["new_sl"] == pytest.approx(100.0 * 1.0005)  # long: entry x 1,0005
     assert upd["reason"] == "TP1_HIT_FEE_COVERED_BREAKEVEN"
-    # short: entry x 0,9995
+    # short: entry x 0,9995 + mirrored low <= tpN hits
     short_code = generate_dynamic_pine(_req(side="sell", tp1=98.0, tp2=95.0, tp3=92.0))
     upd_s = [p for p in _payloads(short_code) if '"UPDATE_SL"' in p][0]
     assert json.loads(upd_s.replace("\\'", "'"))["new_sl"] == pytest.approx(100.0 * 0.9995)
+    assert "tp1Hit = confirmed and low <= tp1" in short_code
+    assert "tp2Hit = confirmed and low <= tp2" in short_code
+    assert "tp3Hit = confirmed and low <= tp3" in short_code
+    assert "high >= tp1" not in short_code
+    assert "tp1Hit = confirmed and high >= tp1" in code
     # alle 6 Alert-Keys paarweise verschieden
     keys = _keys(code)
     assert len(keys) == len(set(keys)) == 6
