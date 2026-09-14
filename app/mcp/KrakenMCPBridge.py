@@ -74,6 +74,8 @@ class KrakenMCPBridge:
             "mutating": sum(1 for t in self.tools if t["mutating"]),
             "readOnly": sum(1 for t in self.tools if not t["mutating"]),
             "passkeyIntercept": "armed",
+            "available": not QUARANTINED,
+            "quarantined": QUARANTINED,
             "tools": self.tools[:200],
         }
 
@@ -82,6 +84,9 @@ class KrakenMCPBridge:
 
     def execute(self, tool_name: str, args: Dict[str, Any],
                 settings_token: Optional[str] = None) -> Dict[str, Any]:
+        if QUARANTINED:
+            return {"ok": False, "error_code": "MCP_QUARANTINED"}
+
         tool = next((t for t in self.tools if t["name"] == tool_name), None)
         if tool is None:
             return {"ok": False, "error": f"Unknown MCP tool '{tool_name}'."}
@@ -127,3 +132,6 @@ class KrakenMCPBridge:
         if "asset_pairs" in tool_name:
             return {"data": list(self.config.market_symbols)}
         return {"data": None, "note": f"[MOCK] {tool_name} ohne Paper-Implementierung (read-only no-op)"}
+
+QUARANTINED = True
+

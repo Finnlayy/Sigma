@@ -104,6 +104,8 @@ class LoopAPipeline:
         self.open_positions = 0
         self.processed = 0
         self.rejected = 0
+        self._daily_notional_day = ''
+        self._daily_notional = {'spot': 0.0, 'futures': 0.0}
 
     # ------------------------------------------------------------- entrypoint
     def handle_signal(self, sig: SignalRequest, *, provided_secret: Optional[str] = None,
@@ -217,9 +219,29 @@ class LoopAPipeline:
                                 f"{pair} not in allowed_symbols", 403, sig, trace)
         limits = notional_limits(sig.symbol)
         notional = quantity * sig.price
+        
+        # Enforce max daily notional
+        import time
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        if self._daily_notional_day != today:
+            self._daily_notional_day = today
+            self._daily_notional = {"spot": 0.0, "futures": 0.0}
+            
+        mkt = "futures" if futures else "spot"
+        used = self._daily_notional[mkt]
+        max_daily = limits["max_daily_notional_usd"]
+        
+        if used + notional > max_daily:
+            return self._reject("symbol", "DAILY_NOTIONAL_CAP",
+                                f"Daily notional limit exceeded ({used} + {notional} > {max_daily})", 403, sig, trace)
+            
+        self._daily_notional[mkt] += notional
+
         if notional > limits["max_order_notional_usd"]:
             quantity = limits["max_order_notional_usd"] / sig.price
             notional = limits["max_order_notional_usd"]
+            self._daily_notional[mkt] -= (quantity * sig.price) # revert
+            self._daily_notional[mkt] += notional # add correct
             trace.append("notional_capped")
 
         # Schritt 7: Judge

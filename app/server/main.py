@@ -869,16 +869,16 @@ def _pair_prices(state: AppState) -> Dict[str, float]:
 
 
 def _paper_balances(
-    state: AppState,
+    state: "AppState",
     closed_trades: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, float]:
-    """Paper-Basket (50k USD + 1.5 BTC + 10 ETH + 100 SOL + 5000 XRP) + Realised PnL.
+    from app.execution.kraken_paper_sot import fetch_paper_capital
+    cap = fetch_paper_capital(state.kraken_cli, futures=False)
+    if cap.ok and getattr(cap, "available", True):
+        return cap.balances
 
-    Pass *closed_trades* to reuse an in-request scan. GET /api/logs used to
-    call trades() four times per 5–8s poll (~40k row materializations).
-    """
     balances: Dict[str, float] = {}
-    for seed in state.config.paper_seeds:
+    for seed in getattr(getattr(state, "config", None), "paper_seeds", []):
         asset, amt = seed.split(":")
         balances[asset] = float(amt)
     if closed_trades is not None:
@@ -886,9 +886,8 @@ def _paper_balances(
             if (t.get("execution_mode") or "paper") == "paper":
                 balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
     else:
-        # /api/kraken/ledgers polls this every 12s and only needs the SUM.
-        # SQL aggregate ~0.5 ms vs ~22 ms pulling 4k full trade rows.
-        balances["USD"] = balances.get("USD", 0.0) + state.store.sum_closed_pnl("paper")
+        if hasattr(state, "store") and state.store:
+            balances["USD"] = balances.get("USD", 0.0) + state.store.sum_closed_pnl("paper")
     return balances
 
 
@@ -1762,7 +1761,7 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
 @app.get("/api/kraken/ledgers")
 async def kraken_ledgers():
     st = state
-    balances = _paper_balances(st)
+    balances = st.live_kraken_balances if st.config.live_trading else _paper_balances(st)
     prices = _pair_prices(st)
     assets = []
     for asset, amt in sorted(balances.items()):
@@ -1787,11 +1786,11 @@ async def kraken_ledgers():
     free_cash = balances.get("USD", 0.0)
     crypto_value = total - free_cash
     change_usd = sum(a["change24h"] / 100.0 * a["totalValueUSD"] for a in assets)
-    positions = [_pro_position(p) for p in st.paper.all_positions()]
+    positions = [] if st.config.live_trading else [_pro_position(p) for p in st.paper.all_positions()]
     collateral = sum(p["collateralUSD"] for p in positions)
     upnl = sum(p["unrealizedPnLUSD"] for p in positions)
     return {
-        "mode": "paper" if st.is_paper_trading else "live",
+        "mode": "live" if st.config.live_trading else "paper",
         "hasCredentials": st.has_credentials,
         "lastSync": _iso(time.time()),
         "spot": {
@@ -1842,7 +1841,11 @@ def _pro_position(p: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.post("/api/kraken/ledgers/sync")
 async def kraken_ledgers_sync():
-    state.bus.log("info", "Ledger-Sync (Paper) ausgeführt", category="SYSTEM")
+    if state.config.live_trading:
+        _refresh_live_kraken_balances(state)
+        state.bus.log("info", "Ledger-Sync (Live) ausgeführt", category="SYSTEM")
+    else:
+        state.bus.log("info", "Ledger-Sync (Paper) ausgeführt", category="SYSTEM")
     return await kraken_ledgers()
 
 
@@ -1863,18 +1866,62 @@ async def kraken_sync_balance():
 
 @app.get("/api/kraken/positions/pro")
 async def kraken_positions_pro():
-    """Live futures book is not wired. Paper is not a live substitute."""
-    return {
-        "ok": False,
-        "source": "unavailable",
-        "live": False,
-        "reason": "live_futures_not_wired",
-        "positions": [],
-        "totalCollateralUSD": None,
-        "freeMarginUSD": None,
-        "totalUnrealizedPnL": None,
-    }
+    from app.execution.kraken_futures_positions_sot import fetch_futures_positions
+    from app.execution.kraken_paper_sot import fetch_paper_capital
 
+    if state.config.live_trading and getattr(state, "has_credentials", False):
+        res = fetch_futures_positions(state.kraken_cli, paper=False)
+        if not res.get("ok"):
+            return {
+                "ok": False,
+                "source": "unavailable",
+                "live": True,
+                "reason": "cli_offline" if "CLI_NOT_FOUND" in res.get("error", "") else res.get("error"),
+                "positions": [],
+                "totalCollateralUSD": None,
+                "freeMarginUSD": None,
+                "totalUnrealizedPnL": None,
+            }
+        return {
+            "ok": True,
+            "source": "futures/live/positions",
+            "live": True,
+            "reason": None,
+            "positions": res.get("positions", []),
+            "totalCollateralUSD": res.get("total_collateral_usd"),
+            "freeMarginUSD": res.get("free_margin_usd"),
+            "totalUnrealizedPnL": res.get("unrealized_pnl_usd"),
+        }
+    else:
+        # Paper
+        cap = fetch_paper_capital(state.kraken_cli, futures=True)
+        is_offline = getattr(cap, "cli_offline", False)
+        if not is_offline and hasattr(cap, "available"):
+            is_offline = not cap.available
+
+        if is_offline:
+            return {
+                "ok": False,
+                "source": "unavailable",
+                "live": False,
+                "reason": "cli_offline",
+                "positions": [],
+                "totalCollateralUSD": None,
+                "freeMarginUSD": None,
+                "totalUnrealizedPnL": None,
+            }
+        res = fetch_futures_positions(state.kraken_cli, paper=True)
+        pos = res.get("positions", []) if isinstance(res, dict) else getattr(res, "positions", [])
+        return {
+            "ok": True,
+            "source": "futures/paper/positions",
+            "live": False,
+            "reason": None,
+            "positions": pos,
+            "totalCollateralUSD": cap.current_value,
+            "freeMarginUSD": cap.balances.get("USD", cap.current_value),
+            "totalUnrealizedPnL": cap.unrealized_pnl,
+        }
 
 @app.get("/api/kraken/symbols")
 async def kraken_symbols():
@@ -2333,9 +2380,15 @@ async def passkey_verify(body: PasskeyVerifyBody):
 
 
 def _kraken_credentials_present() -> bool:
+    import os
+    from pathlib import Path
     key = os.environ.get("KRAKEN_API_KEY", "").strip()
     secret = os.environ.get("KRAKEN_API_SECRET", "").strip()
-    return bool(key and secret)
+    if bool(key and secret):
+        return True
+    
+    config_path = Path.home() / ".config" / "kraken" / "config.toml"
+    return config_path.exists()
 
 
 def _persist_live_kraken_snapshot(st: AppState, out: Dict[str, Any]) -> Dict[str, Any]:

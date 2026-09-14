@@ -507,6 +507,12 @@ export const sigmaApi = {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${window.location.host}/api/v1/llm/stream`;
   },
+  /** LWC guide §6 — visualization-plane candle / execution stream. */
+  marketFeedUrl: (symbol: string, interval = 15) => {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const sym = encodeURIComponent(symbol);
+    return `${proto}//${window.location.host}/ws/market-feed/${sym}?interval=${interval}`;
+  },
   fromTemplate: (template: string, name?: string) =>
     post<any>('/api/strategies/from-template', { template, name }),
   tvScripts: () => request<TvLibraryCatalog>('/api/strategies/tv/scripts', undefined, 25000),

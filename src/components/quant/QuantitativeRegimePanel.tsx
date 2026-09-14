@@ -228,7 +228,7 @@ export function QuantitativeRegimePanel() {
               <div>
                 <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Hurst (H)</span>
                 <p className="text-xl font-bold font-mono text-cyan-300 mt-0.5">
-                  {typeof hurstExponent === "number" ? hurstExponent.toFixed(4) : "0.6200"}
+                  {typeof hurstExponent === "number" ? hurstExponent?.toFixed(4) : "0.6200"}
                 </p>
               </div>
               <div>
@@ -240,7 +240,7 @@ export function QuantitativeRegimePanel() {
               <div>
                 <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Confidence (R²)</span>
                 <p className="text-sm font-mono text-emerald-400 mt-0.5">
-                  {dfaData?.r_squared ? `${(dfaData.r_squared * 100).toFixed(1)}%` : "98.4%"}
+                  {dfaData?.r_squared ? `${(dfaData.r_squared * 100)?.toFixed(1)}%` : "98.4%"}
                 </p>
               </div>
             </div>
@@ -423,13 +423,13 @@ export function QuantitativeRegimePanel() {
                   }`}>
                     {sentimentResult.available === false || sentimentResult.score == null
                       ? "—"
-                      : (sentimentResult.score > 0 ? `+${sentimentResult.score.toFixed(3)}` : sentimentResult.score.toFixed(3))}
+                      : (sentimentResult.score > 0 ? `+${sentimentResult.score?.toFixed(3)}` : sentimentResult.score?.toFixed(3))}
                   </p>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase">Confidence</span>
                   <p className="text-xl font-bold font-mono text-cyan-400 mt-0.5">
-                    {sentimentResult.confidence == null ? "—" : `${(sentimentResult.confidence * 100).toFixed(1)}%`}
+                    {sentimentResult.confidence == null ? "—" : `${(sentimentResult.confidence * 100)?.toFixed(1)}%`}
                   </p>
                 </div>
                 <div>
@@ -490,13 +490,13 @@ export function QuantitativeRegimePanel() {
                                 ? "bg-purple-950/80 text-purple-300 font-bold"
                                 : "bg-blue-950/60 text-blue-300"
                             }`}>
-                              {corr.toFixed(2)}
+                              {corr?.toFixed(2)}
                             </span>
                           </td>
                         );
                       })}
                       <td className="py-2 text-right text-purple-300 font-semibold">
-                        {((row.spillover || 0) * 100).toFixed(1)}%
+                        {((row.spillover || 0) * 100)?.toFixed(1)}%
                       </td>
                     </tr>
                   )) : (

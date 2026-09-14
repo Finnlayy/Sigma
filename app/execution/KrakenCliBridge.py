@@ -89,8 +89,8 @@ class KrakenCliBridge:
 
     def balance(self) -> OrderResult:
         """Paper- bzw. Live-Kontostand ueber die CLI (§32.2)."""
-        argv = self._prefix() + ["balance"] if self.paper_mode else \
-            [self.binary, "account", "balance"]
+        argv = self._prefix() + ["balance", "--output=json"] if self.paper_mode else \
+            [self.binary, "balance", "--output=json"]
         if self.paper_mode and not self._cli_available():
             return OrderResult(True, "paper", txid="SIM-BALANCE", argv=argv,
                                stdout=f"[PAPER] balance {bp.KRAKEN_PAPER_INITIAL_BALANCE_USD}")
@@ -99,6 +99,71 @@ class KrakenCliBridge:
         return OrderResult(not failed, "paper" if self.paper_mode else "live",
                            stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
                            error_code=_extract_error(stdout, stderr) if failed else "")
+
+    def _json_flag(self) -> List[str]:
+        return ["-o", "json"]
+
+    def _run_paper_read(self, argv: List[str]) -> OrderResult:
+        stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+        failed = bp.kraken_output_is_error(stdout, stderr, code)
+        return OrderResult(
+            not failed, "paper", stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+            error_code=_extract_error(stdout, stderr) if failed else ""
+        )
+
+    def paper_status(self) -> OrderResult:
+        base = [self.binary, "futures", "paper"] if self.futures else [self.binary, "paper"]
+        return self._run_paper_read(base + ["status"] + self._json_flag())
+
+    def paper_balance(self) -> OrderResult:
+        base = [self.binary, "futures", "paper"] if self.futures else [self.binary, "paper"]
+        return self._run_paper_read(base + ["balance"] + self._json_flag())
+
+    def paper_history(self) -> OrderResult:
+        base = [self.binary, "futures", "paper"] if self.futures else [self.binary, "paper"]
+        return self._run_paper_read(base + ["history"] + self._json_flag())
+
+    def run_leaf(self, name: str, *extra: str, confirmed: bool = False, json_output: bool = True) -> OrderResult:
+        from app.execution.kraken_cli_registry import argv_for, get_command
+        try:
+            cmd = get_command(name)
+            if not cmd:
+                return OrderResult(False, "sim", error_code="ERR_UNKNOWN_LEAF")
+            if "wallet/transfer" in name or "withdraw" in name:
+                return OrderResult(False, "sim", error_code="L5_FORBIDDEN")
+            is_dangerous = cmd.get("dangerous", False)
+            if is_dangerous and not confirmed:
+                return OrderResult(False, "sim", error_code="DANGEROUS_REQUIRES_CONFIRM")
+            if is_dangerous and not self.paper_mode and not self.live_enabled:
+                return OrderResult(False, "sim", error_code="ERR_LIVE_NOT_APPROVED")
+            
+            argv = argv_for(name, *extra, binary=self.binary)
+            if json_output and "-o" not in argv and "--output=json" not in argv:
+                argv.extend(self._json_flag())
+            
+            stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+            failed = bp.kraken_output_is_error(stdout, stderr, code)
+            return OrderResult(
+                not failed, "paper" if self.paper_mode else "live",
+                stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                error_code=_extract_error(stdout, stderr) if failed else ""
+            )
+        except Exception as e:
+            return OrderResult(False, "sim", error_code=f"ERR_RUN_LEAF_FAIL: {e}")
+
+    def cancel_after(self, timeout_s: int, confirmed: bool = False) -> OrderResult:
+        if self.paper_mode:
+            return OrderResult(True, "paper", argv=[self.binary, "futures", "cancel-after", str(timeout_s)])
+        if self.futures and self.live_enabled and confirmed:
+            argv = [self.binary, "futures", "cancel-after", str(timeout_s)]
+            stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+            failed = bp.kraken_output_is_error(stdout, stderr, code)
+            return OrderResult(
+                not failed, "live", stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                error_code=_extract_error(stdout, stderr) if failed else ""
+            )
+        return OrderResult(False, "sim", error_code="ERR_CANCEL_AFTER_NOT_ALLOWED")
+
 
     def futures_fills(self, *, since: Optional[float] = None) -> List[Dict[str, Any]]:
         """Authenticated recent futures fills; no simulated records are ever returned.
@@ -142,6 +207,9 @@ class KrakenCliBridge:
             raise ValueError(f"invalid side {side!r}")
         if volume <= 0:
             return OrderResult(False, "sim", error_code="ZERO_VOLUME", pair=pair, side=side)
+            
+        if self.futures and ordertype not in ("market", "limit", "stop", "take-profit"):
+            return OrderResult(False, "sim", error_code="ERR_INVALID_ORDERTYPE", stdout=f"Ordertype {ordertype} restricted")
 
         argv = self._prefix() + (
             [side, pair, f"{volume:g}"] if self.paper_mode or self.futures
@@ -151,8 +219,6 @@ class KrakenCliBridge:
             argv += [f"--type={ordertype}"]
             if price is not None:
                 argv.append(f"--price={price}")
-            if stop_price is not None and self.futures:
-                argv.append(f"--stop-price={stop_price}")
             return self._dispatch_paper(argv, pair=pair, side=side, volume=volume,
                                         ordertype=ordertype, stop_price=stop_price,
                                         strategy_id=strategy_id)
@@ -184,25 +250,21 @@ class KrakenCliBridge:
                 )
                 self._audit(result, strategy_id)
                 return result
+            
+            # live stop logic
             has_stop = False
-            stop_argv: List[str] = []
             if stop_price is not None:
-                close_side = "sell" if side == "buy" else "buy"
-                stop_argv = self._prefix() + [
-                    close_side, pair, f"{volume:g}",
-                    "--type=stop", f"--stop-price={stop_price:g}", "--reduce-only",
-                ]
+                stop_side = "sell" if side == "buy" else "buy"
+                stop_argv = self._prefix() + [stop_side, pair, f"{volume:g}", "--type=stop", f"--stop-price={stop_price}", "--reduce-only"]
                 if strategy_id:
-                    stop_argv.append(f"--client-order-id={(strategy_id[:28] + '-sl')[:32]}")
+                    stop_argv.append(f"--client-order-id={strategy_id[:32]}-SL")
                 s_out, s_err, s_code = self._runner(stop_argv, self.config.tv_scraper_timeout_s)
                 if bp.kraken_output_is_error(s_out, s_err, s_code):
                     result = OrderResult(
                         ok=False, mode="live", txid=_extract_txid(stdout),
                         pair=pair, side=side, volume=volume, ordertype=ordertype,
-                        has_native_stop_loss=False,
-                        stdout=stdout + "\n" + s_out, stderr=s_err, exit_code=s_code,
-                        argv=argv + stop_argv,
-                        error_code="FUTURES_STOP_ATTACH_FAILED",
+                        stdout=s_out, stderr=s_err, exit_code=s_code, argv=stop_argv,
+                        error_code=_extract_error(s_out, s_err),
                     )
                     self._audit(result, strategy_id)
                     return result
@@ -216,6 +278,8 @@ class KrakenCliBridge:
             )
             self._audit(result, strategy_id)
             return result
+            
+        # Spot path
         argv += [f"--pair={pair}", f"--type={side}",
                 f"--ordertype={ordertype}", f"--volume={volume:.8f}".rstrip("0").rstrip(".")]
         if price is not None and ordertype in ("limit", "stop", "take-profit"):
@@ -243,7 +307,7 @@ class KrakenCliBridge:
         stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
         failed = bp.kraken_output_is_error(stdout, stderr, code)
         result = OrderResult(
-            ok=not failed, mode="live", txid=_extract_txid(stdout),
+            not failed, "live", txid=_extract_txid(stdout),
             pair=pair, side=side, volume=volume, ordertype=ordertype,
             has_native_stop_loss=has_stop and not failed,
             stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
@@ -260,14 +324,36 @@ class KrakenCliBridge:
         """§32 — Paper-Order: identische Struktur, 0 EUR Risiko, kein Live-Gate."""
         has_stop = stop_price is not None
         if not self._cli_available():
-            result = OrderResult(
-                ok=True, mode="paper", txid=f"PAPER-{uuid.uuid4().hex[:10].upper()}",
-                pair=pair, side=side, volume=volume, ordertype=ordertype,
-                has_native_stop_loss=has_stop, argv=argv,
-                stdout="[PAPER] kraken CLI nicht installiert — simulierter Paper-Fill",
-            )
-            self._audit(result, strategy_id)
-            return result
+            return OrderResult(False, "paper", error_code="ERR_KRAKEN_CLI_NOT_FOUND")
+            
+        if self.futures:
+            # Check capital SoT before acting
+            from app.execution.kraken_paper_sot import fetch_paper_capital
+            st = fetch_paper_capital(self)
+            if not st.ok:
+                return OrderResult(False, "paper", error_code="ERR_PAPER_CAPITAL_UNAVAILABLE")
+
+        stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+        failed = bp.kraken_output_is_error(stdout, stderr, code)
+        result = OrderResult(
+            not failed, "paper", txid=_extract_txid(stdout),
+            pair=pair, side=side, volume=volume, ordertype=ordertype,
+            has_native_stop_loss=has_stop and not failed,
+            stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+            error_code=_extract_error(stdout, stderr) if failed else "",
+        )
+        self._audit(result, strategy_id)
+        
+        # In paper mode, if stop_price is set, we need to issue a separate reduce-only stop order (like live)
+        if not failed and has_stop and self.futures:
+            stop_side = "sell" if side == "buy" else "buy"
+            stop_argv = self._prefix() + [stop_side, pair, f"{volume:g}", "--type=stop", f"--stop-price={stop_price}", "--reduce-only"]
+            s_out, s_err, s_code = self._runner(stop_argv, self.config.tv_scraper_timeout_s)
+            s_failed = bp.kraken_output_is_error(s_out, s_err, s_code)
+            if s_failed:
+                logger.error(f"Paper stop order failed: {s_err}")
+                
+        return result
         stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
         failed = bp.kraken_output_is_error(stdout, stderr, code)
         result = OrderResult(
@@ -282,12 +368,38 @@ class KrakenCliBridge:
 
     # ------------------------------------------------------ cancel / deadman
     def cancel_all(self, reason: str = "kill_switch") -> OrderResult:
-        argv = [self.binary, "trade", "cancel-all"]
-        if not self.live_enabled:
+        if self.futures:
+            if self.paper_mode:
+                argv = [self.binary, "futures", "paper", "cancel-all"]
+            else:
+                argv = [self.binary, "futures", "cancel-all"]
+        else:
+            if self.paper_mode:
+                argv = [self.binary, "paper", "cancel-all"]
+            else:
+                argv = [self.binary, "order", "cancel-all"]
+
+        if not self.live_enabled and not self.paper_mode:
             res = OrderResult(True, "sim", txid="SIM-CANCEL-ALL", argv=argv,
                               stdout=f"[SIM] cancel_all ({reason})")
             self._audit(res, "")
             return res
+        
+        stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+        failed = bp.kraken_output_is_error(stdout, stderr, code)
+        mode = "paper" if self.paper_mode else "live"
+        res = OrderResult(not failed, mode, stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                          error_code=_extract_error(stdout, stderr) if failed else "")
+        self._audit(res, "")
+        return res
+        
+        stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
+        failed = bp.kraken_output_is_error(stdout, stderr, code)
+        mode = "paper" if self.paper_mode else "live"
+        res = OrderResult(not failed, mode, stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
+                          error_code=_extract_error(stdout, stderr) if failed else "")
+        self._audit(res, "")
+        return res
         stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
         failed = bp.kraken_output_is_error(stdout, stderr, code)
         res = OrderResult(not failed, "live", stdout=stdout, stderr=stderr, exit_code=code, argv=argv,
@@ -310,12 +422,43 @@ class KrakenCliBridge:
         return res
 
     def close_all_market(self, reason: str = "deadman_no_native_stop") -> OrderResult:
-        argv = [self.binary, "trade", "close-all", "--ordertype=market"]
-        if not self.live_enabled:
-            res = OrderResult(True, "sim", txid="SIM-CLOSE-ALL", argv=argv,
-                              stdout=f"[SIM] close_all_market ({reason})")
-            self._audit(res, "")
-            return res
+        if not self.futures:
+            return OrderResult(False, "sim", error_code="CLI_UNSUPPORTED", stdout="Spot close_all_market not supported")
+        
+        # Flatten futures book
+        # 1. Cancel all
+        c_res = self.cancel_all(reason)
+        if not c_res.ok:
+            return c_res
+            
+        # 2. Get open positions and market close them
+        from app.execution.kraken_futures_positions_sot import fetch_futures_positions
+        pos_res = fetch_futures_positions(self, paper=self.paper_mode)
+        
+        # fetch_futures_positions returns a dict like {"ok": bool, "positions": list, ...}
+        if isinstance(pos_res, dict):
+            positions = pos_res.get("positions", []) if pos_res.get("ok") else []
+        else:
+            positions = getattr(pos_res, "positions", []) if getattr(pos_res, "ok", False) else []
+            
+        if not positions:
+            return OrderResult(True, "paper" if self.paper_mode else "live", stdout="Book empty after cancel-all")
+            
+        errors = []
+        for p in positions:
+            side = "sell" if p.get("side") == "long" else "buy"
+            pair = p.get("symbol", p.get("pair", ""))
+            vol = float(p.get("size", 0.0))
+            if pair and vol > 0:
+                # Issue reduce-only market order
+                res = self.add_order(pair=pair, side=side, volume=vol, ordertype="market", validate=False, strategy_id="FLATTEN")
+                if not res.ok:
+                    errors.append(f"{pair}: {res.error_code}")
+                    
+        if errors:
+            return OrderResult(False, "paper" if self.paper_mode else "live", error_code="FLATTEN_ERRORS", stdout=", ".join(errors))
+            
+        return OrderResult(True, "paper" if self.paper_mode else "live", stdout="Flattened all positions")
         stdout, stderr, code = self._runner(argv, self.config.tv_scraper_timeout_s)
         failed = bp.kraken_output_is_error(stdout, stderr, code)
         res = OrderResult(not failed, "live", stdout=stdout, stderr=stderr, exit_code=code, argv=argv)

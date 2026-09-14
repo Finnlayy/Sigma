@@ -142,7 +142,7 @@ export default function MetricsPanel({
   }, [selectedStrategy, strategyPnL]);
 
   // Active pair and ledger currency resolution
-  const activePair = selectedStrategy?.assetPair || (strategies.length > 0 ? strategies[0].assetPair : "BTC/USD");
+  const activePair = selectedStrategy?.assetPair || (strategies?.length > 0 ? strategies[0].assetPair : "BTC/USD");
   const activeCurrency = useMemo(() => getLedgerCurrency(activePair), [activePair]);
 
   // Fetch or generate 1-hour historical P&L for selected strategy
@@ -190,7 +190,7 @@ export default function MetricsPanel({
           const timeLabel = pointTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
           const progress = i / intervals;
           const noise = ((Math.sin(i * 3.7) + 1) / 2 - 0.5) * (Math.abs(targetPnL) * 0.2 + 4);
-          const val = i === intervals ? targetPnL : Number((pnlCursor + delta * Math.pow(progress, 1.2) + noise).toFixed(2));
+          const val = i === intervals ? targetPnL : Number((pnlCursor + delta * Math.pow(progress, 1.2) + noise)?.toFixed(2));
           generated.push({ time: timeLabel, pnl: val });
         }
 
@@ -214,11 +214,11 @@ export default function MetricsPanel({
 
   // Update latest point when live P&L changes
   useEffect(() => {
-    if (currentStrategyPnL && historyData.length > 0) {
+    if (currentStrategyPnL && historyData?.length > 0) {
       setHistoryData(prev => {
-        if (prev.length === 0) return prev;
+        if (prev?.length === 0) return prev;
         const updated = [...prev];
-        const lastIndex = updated.length - 1;
+        const lastIndex = updated?.length - 1;
         updated[lastIndex] = {
           ...updated[lastIndex],
           pnl: currentStrategyPnL.totalPnL,
@@ -259,7 +259,7 @@ export default function MetricsPanel({
             {/* Dynamic Baseline Tag with Active Ledger Currency */}
             <div id="metrics-dynamic-baseline-tag" className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-700/60 shadow-xs">
               <span className="text-amber-500 font-normal">Baseline:</span>
-              <span className="text-amber-200">{activeCurrency.symbol}{((defaultMetrics.baselineUSD ?? (defaultMetrics.activeLedgerMode === 'live' ? defaultMetrics.portfolioUSD : 190412.50)) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              <span className="text-amber-200">{activeCurrency.symbol}{((defaultMetrics.baselineUSD ?? (defaultMetrics.activeLedgerMode === 'live' ? defaultMetrics.portfolioUSD : 190412.50)) || 0)?.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
               <span className="text-[9px] text-amber-400/80 uppercase">{activeCurrency.quote}</span>
             </div>
 
@@ -308,13 +308,13 @@ export default function MetricsPanel({
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-400">Baseline Reference ({activeCurrency.quote}):</span>
                       <span className="font-bold text-amber-300">
-                        {activeCurrency.symbol}{((defaultMetrics.baselineUSD ?? (defaultMetrics.activeLedgerMode === 'live' ? defaultMetrics.portfolioUSD : 190412.50)) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {activeCurrency.quote}
+                        {activeCurrency.symbol}{((defaultMetrics.baselineUSD ?? (defaultMetrics.activeLedgerMode === 'live' ? defaultMetrics.portfolioUSD : 190412.50)) || 0)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {activeCurrency.quote}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-400">Current Valuation:</span>
                       <span className="font-bold text-white">
-                        {activeCurrency.symbol}{((defaultMetrics.portfolioUSD || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {activeCurrency.quote}
+                        {activeCurrency.symbol}{((defaultMetrics.portfolioUSD || 0))?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {activeCurrency.quote}
                       </span>
                     </div>
                     <div className="flex justify-between items-center pt-1 border-t border-zinc-800/80">
@@ -368,7 +368,7 @@ export default function MetricsPanel({
 
         <div className="flex items-baseline space-x-2">
           <span className="text-3xl font-mono font-bold text-white tracking-tight">
-            {activeCurrency.symbol}{((defaultMetrics as any).portfolioUSD || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {activeCurrency.symbol}{((defaultMetrics as any).portfolioUSD || 0)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
           <span className="text-zinc-400 text-xs font-mono">{activeCurrency.quote}</span>
         </div>
@@ -382,7 +382,7 @@ export default function MetricsPanel({
           </div>
           <span className="text-zinc-400 text-[11px] font-mono flex items-center space-x-1">
             <span>{defaultMetrics.activeLedgerMode === 'live' ? 'vs. initial live baseline' : 'vs. paper seed baseline'}</span>
-            <span className="text-zinc-400 font-semibold">({activeCurrency.symbol}{((defaultMetrics.baselineUSD ?? (defaultMetrics.activeLedgerMode === 'live' ? defaultMetrics.portfolioUSD : 190412.50)) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} {activeCurrency.quote})</span>
+            <span className="text-zinc-400 font-semibold">({activeCurrency.symbol}{((defaultMetrics.baselineUSD ?? (defaultMetrics.activeLedgerMode === 'live' ? defaultMetrics.portfolioUSD : 190412.50)) || 0)?.toLocaleString(undefined, { maximumFractionDigits: 0 })} {activeCurrency.quote})</span>
           </span>
         </div>
       </motion.div>
@@ -431,9 +431,9 @@ export default function MetricsPanel({
               <div className="bg-zinc-950/70 border border-zinc-850 p-2.5 rounded">
                 <span className="text-[10px] text-zinc-400 block uppercase">Net Total P&amp;L</span>
                 <span className={`font-bold text-sm block mt-0.5 ${(activeQueueMatrix?.totalPnL || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {(activeQueueMatrix?.totalPnL || 0) >= 0 ? '+' : ''}${(activeQueueMatrix?.totalPnL || 0).toFixed(2)}
+                  {(activeQueueMatrix?.totalPnL || 0) >= 0 ? '+' : ''}${(activeQueueMatrix?.totalPnL || 0)?.toFixed(2)}
                 </span>
-                <span className="text-[9px] text-zinc-400">Realized: ${(activeQueueMatrix?.totalRealizedPnL || 0).toFixed(2)}</span>
+                <span className="text-[9px] text-zinc-400">Realized: ${(activeQueueMatrix?.totalRealizedPnL || 0)?.toFixed(2)}</span>
               </div>
 
               <div className="bg-zinc-950/70 border border-zinc-850 p-2.5 rounded">
@@ -447,7 +447,7 @@ export default function MetricsPanel({
               <div className="bg-zinc-950/70 border border-zinc-850 p-2.5 rounded">
                 <span className="text-[10px] text-zinc-400 block uppercase">Profit Factor</span>
                 <span className="font-bold text-sm text-amber-400 block mt-0.5">
-                  {(activeQueueMatrix?.profitFactor || 0).toFixed(2)}
+                  {(activeQueueMatrix?.profitFactor || 0)?.toFixed(2)}
                 </span>
                 <span className="text-[9px] text-zinc-400">Max DD: -{activeQueueMatrix?.maxDrawdownPercent || 0}%</span>
               </div>
@@ -455,7 +455,7 @@ export default function MetricsPanel({
               <div className="bg-zinc-950/70 border border-zinc-850 p-2.5 rounded">
                 <span className="text-[10px] text-zinc-400 block uppercase">Traded Volume</span>
                 <span className="font-bold text-sm text-zinc-200 block mt-0.5">
-                  ${activeQueueMatrix.volumeTradedUSD.toLocaleString()}
+                  ${activeQueueMatrix.volumeTradedUSD?.toLocaleString()}
                 </span>
                 <span className="text-[9px] text-zinc-400">{activeQueueMatrix.totalAllTrades} orders</span>
               </div>
@@ -511,7 +511,7 @@ export default function MetricsPanel({
 
                       <div className="text-right shrink-0">
                         <span className={`font-bold text-xs block ${isStratPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {isStratPositive ? '+' : ''}${strat.totalPnL.toFixed(0)}
+                          {isStratPositive ? '+' : ''}${strat.totalPnL?.toFixed(0)}
                         </span>
                         <span className="text-[10px] text-zinc-400 block">
                           {strat.winRate}% win ({strat.totalTrades} cl.)
@@ -555,7 +555,7 @@ export default function MetricsPanel({
                   ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400' 
                   : 'bg-rose-950/60 border-rose-800/60 text-rose-400'
               }`}>
-                {isStratProfit ? '+' : ''}${historyStats.current.toFixed(2)}
+                {isStratProfit ? '+' : ''}${historyStats.current?.toFixed(2)}
               </span>
               <div className="text-[9px] font-mono text-zinc-400 mt-0.5 uppercase">
                 Current Net
@@ -572,13 +572,13 @@ export default function MetricsPanel({
                 <div className="flex justify-between">
                   <span className="text-zinc-400">1H High:</span>
                   <span className={`font-semibold ${historyStats.high >= 0 ? 'text-emerald-400' : 'text-zinc-300'}`}>
-                    {historyStats.high >= 0 ? '+' : ''}${historyStats.high.toFixed(2)}
+                    {historyStats.high >= 0 ? '+' : ''}${historyStats.high?.toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-400">1H Low:</span>
                   <span className={`font-semibold ${historyStats.low < 0 ? 'text-rose-400' : 'text-zinc-300'}`}>
-                    {historyStats.low >= 0 ? '+' : ''}${historyStats.low.toFixed(2)}
+                    {historyStats.low >= 0 ? '+' : ''}${historyStats.low?.toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -591,7 +591,7 @@ export default function MetricsPanel({
                   <Activity className="w-4 h-4 animate-spin text-emerald-400 mr-2" />
                   Loading 1h trajectory...
                 </div>
-              ) : historyData.length > 0 ? (
+              ) : historyData?.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={historyData} margin={{ top: 5, right: 6, left: -24, bottom: 0 }}>
                     <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
@@ -606,12 +606,12 @@ export default function MetricsPanel({
                       tick={{ fontSize: 9, fill: "#71717a", fontFamily: "monospace" }}
                       axisLine={false}
                       tickLine={false}
-                      tickFormatter={(val) => `$${Number(val).toFixed(0)}`}
+                      tickFormatter={(val) => `$${Number(val)?.toFixed(0)}`}
                       domain={['auto', 'auto']}
                     />
                     <Tooltip 
                       content={({ active, payload, label }) => {
-                        if (active && payload && payload.length) {
+                        if (active && payload && payload?.length) {
                           const dataPoint = payload[0].payload as PnLHistoryPoint;
                           const val = Number(payload[0].value || 0);
                           const isPos = val >= 0;
@@ -624,14 +624,14 @@ export default function MetricsPanel({
                               <div className="flex justify-between items-center gap-3 font-semibold">
                                 <span className="text-zinc-300">Cum. P&amp;L:</span>
                                 <span className={isPos ? 'text-emerald-400' : 'text-rose-400'}>
-                                  {isPos ? '+' : ''}${val.toFixed(2)} USD
+                                  {isPos ? '+' : ''}${val?.toFixed(2)} USD
                                 </span>
                               </div>
                               {dataPoint.realized !== undefined && (
                                 <div className="text-[9px] text-zinc-400 flex justify-between gap-3">
-                                  <span>Realized: ${dataPoint.realized.toFixed(2)}</span>
+                                  <span>Realized: ${dataPoint.realized?.toFixed(2)}</span>
                                   {dataPoint.unrealized !== undefined && (
-                                    <span>Unrealized: ${dataPoint.unrealized.toFixed(2)}</span>
+                                    <span>Unrealized: ${dataPoint.unrealized?.toFixed(2)}</span>
                                   )}
                                 </div>
                               )}
@@ -768,7 +768,7 @@ export default function MetricsPanel({
         {/* Tab 1: Spot Ledger View */}
         {walletTab === 'spot' && (
           <div className="space-y-2 max-h-52 overflow-y-auto pr-1 font-mono">
-            {displayBalances && Object.keys(displayBalances).length > 0 ? (
+            {displayBalances && Object.keys(displayBalances)?.length > 0 ? (
               (() => {
                 // Bolt Optimization: Added O(1) map lookup for UI cross-referencing to eliminate O(N*M) .find() on each render loop
                 const tickerMap = new Map(tickers.map(t => [t.pair, t]));
@@ -785,7 +785,7 @@ export default function MetricsPanel({
                 <div className="flex justify-between items-center text-xs font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/50 p-2 rounded mb-2">
                   <span>Total Spot USD:</span>
                   <span>
-                    ${totalSpotUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${totalSpotUsd?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
                 {Object.keys(displayBalances)
@@ -807,7 +807,7 @@ export default function MetricsPanel({
                         <div className="flex flex-col items-end shrink-0 ml-2">
                           <span className="text-white font-medium">
                             {symbol}
-                            {val.toLocaleString(undefined, { 
+                            {val?.toLocaleString(undefined, { 
                               minimumFractionDigits: isFiat ? 2 : 4,
                               maximumFractionDigits: isFiat ? 2 : 6 
                             })}
@@ -815,7 +815,7 @@ export default function MetricsPanel({
                           </span>
                           {!isFiat && usdValue !== undefined && (
                             <span className="text-[10px] text-emerald-400/80 mt-0.5">
-                              (${usdValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                              (${usdValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                             </span>
                           )}
                         </div>
@@ -845,7 +845,7 @@ export default function MetricsPanel({
                 <span className="text-purple-300 font-bold">
                   {proData?.totalCollateralUSD == null
                     ? "—"
-                    : `$${proData.totalCollateralUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    : `$${proData.totalCollateralUSD?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </span>
               </div>
               <div className="flex justify-between text-zinc-400">
@@ -853,19 +853,19 @@ export default function MetricsPanel({
                 <span className="text-emerald-400 font-bold">
                   {proData?.freeMarginUSD == null
                     ? "—"
-                    : `$${proData.freeMarginUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    : `$${proData.freeMarginUSD?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </span>
               </div>
               <div className="flex justify-between text-zinc-400">
                 <span>Total Unrealized P&amp;L:</span>
                 <span className={`font-bold ${(proData?.totalUnrealizedPnL || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {(proData?.totalUnrealizedPnL || 0) >= 0 ? '+' : ''}${(proData?.totalUnrealizedPnL || 0).toFixed(2)} USD
+                  {(proData?.totalUnrealizedPnL || 0) >= 0 ? '+' : ''}${(proData?.totalUnrealizedPnL || 0)?.toFixed(2)} USD
                 </span>
               </div>
             </div>
 
             {/* Pro Active Positions List */}
-            {proData?.positions && proData.positions.length > 0 ? (
+            {proData?.positions && proData.positions?.length > 0 ? (
               proData.positions.map((p: any) => {
                 const isPos = p.unrealizedPnLUSD >= 0;
                 return (
@@ -877,12 +877,12 @@ export default function MetricsPanel({
                         <span className="text-[9px] px-1 rounded bg-zinc-800 text-zinc-300">{p.leverage}x</span>
                       </div>
                       <span className={`font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isPos ? '+' : ''}${p.unrealizedPnLUSD.toFixed(2)}
+                        {isPos ? '+' : ''}${p.unrealizedPnLUSD?.toFixed(2)}
                       </span>
                     </div>
                     <div className="flex justify-between text-[10px] text-zinc-400">
                       <span>Size: {p.size} ({p.type.toUpperCase()})</span>
-                      <span>Mark: ${p.markPrice.toLocaleString()}</span>
+                      <span>Mark: ${p.markPrice?.toLocaleString()}</span>
                     </div>
                   </div>
                 );

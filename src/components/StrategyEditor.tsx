@@ -714,7 +714,7 @@ if (diff > parameters.threshold) {
                   title="Open full searchable Kraken & Kraken Pro symbols directory"
                 >
                   <Globe className="w-3 h-3" />
-                  <span className="hidden sm:inline">All ({krakenSymbols.length > 0 ? `${krakenSymbols.length.toLocaleString()}` : '1,400+'})</span>
+                  <span className="hidden sm:inline">All ({krakenSymbols.length > 0 ? `${krakenSymbols.length?.toLocaleString()}` : '1,400+'})</span>
                 </button>
               </div>
               <select
@@ -915,7 +915,7 @@ if (diff > parameters.threshold) {
                 <div className="flex items-center justify-between text-[11px] font-mono">
                   <span className="text-zinc-400">Hard Stop Threshold:</span>
                   <span className="font-bold text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-900/60">
-                    -{hardStopPercent.toFixed(1)}% Max Loss
+                    -{hardStopPercent?.toFixed(1)}% Max Loss
                   </span>
                 </div>
 

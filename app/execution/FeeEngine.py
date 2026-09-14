@@ -40,3 +40,8 @@ class FeeEngine:
             total_fees_usd=round(total_fees, 4), gross_pnl_usd=round(gross_pnl_usd, 4),
             net_pnl_usd=round(net_pnl, 4)
         )
+
+    def apply_rates(self, maker: float, taker: float, source: str = "") -> None:
+        self.maker_fee_rate = maker
+        self.taker_fee_rate = taker
+        self.rate_source = source

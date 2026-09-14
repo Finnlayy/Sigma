@@ -97,8 +97,8 @@ export function StrategyCard({ state, name, symbol, onPromote, onQuarantine }: S
             Budget
           </span>
           <span>
-            <span className="text-slate-100 font-bold">${state.current_budget_usd.toFixed(2)}</span>
-            <span className="text-slate-500"> / ${state.base_budget_usd.toFixed(2)} Base</span>
+            <span className="text-slate-100 font-bold">${state.current_budget_usd?.toFixed(2)}</span>
+            <span className="text-slate-500"> / ${state.base_budget_usd?.toFixed(2)} Base</span>
             <span className={`ml-1.5 ${state.budget_multiplier >= 1 ? "text-emerald-400" : state.budget_multiplier > 0 ? "text-amber-400" : "text-red-400"}`}>
               ×{state.budget_multiplier}
             </span>

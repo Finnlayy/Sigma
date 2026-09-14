@@ -228,7 +228,7 @@ export function ExecutionRiskPanel() {
                   USD-Vault (100% Profit Sweep)
                 </span>
                 <span className="text-lg font-mono font-bold text-emerald-400">
-                  ${(vault?.balance_usd ?? 0).toFixed(2)}
+                  ${(vault?.balance_usd ?? 0)?.toFixed(2)}
                 </span>
               </div>
               <div className="text-[10px] font-mono text-slate-500 mb-2">
@@ -347,7 +347,7 @@ export function ExecutionRiskPanel() {
           <div>
             <div className="flex justify-between text-[11px] text-slate-400 mb-1">
               <span>Historical Win Rate:</span>
-              <span className="font-mono text-cyan-400">{(winRate * 100).toFixed(0)}%</span>
+              <span className="font-mono text-cyan-400">{(winRate * 100)?.toFixed(0)}%</span>
             </div>
             <input
               type="range"
@@ -363,7 +363,7 @@ export function ExecutionRiskPanel() {
           <div>
             <div className="flex justify-between text-[11px] text-slate-400 mb-1">
               <span>Target Volatility (Annual):</span>
-              <span className="font-mono text-amber-400">{(targetVol * 100).toFixed(0)}%</span>
+              <span className="font-mono text-amber-400">{(targetVol * 100)?.toFixed(0)}%</span>
             </div>
             <input
               type="range"
@@ -380,7 +380,7 @@ export function ExecutionRiskPanel() {
             <span className="text-[10px] uppercase tracking-wider text-slate-400">Optimal Kelly Sizing</span>
             <p className="text-lg font-bold font-mono text-emerald-400 mt-0.5">
               {judgeResult?.kelly_sizing?.recommended_fraction 
-                ? `${(judgeResult.kelly_sizing.recommended_fraction * 100).toFixed(1)}% Equity` 
+                ? `${(judgeResult.kelly_sizing.recommended_fraction * 100)?.toFixed(1)}% Equity` 
                 : "14.2% Equity"}
             </p>
             <span className="text-[10px] text-slate-400">Half-Kelly (f* / 2) Vol-Targeted</span>
@@ -536,7 +536,7 @@ export function ExecutionRiskPanel() {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Inference Latency:</span>
                   <span className="font-mono text-emerald-400">
-                    {rlInference?.inference_time_ms != null ? `${rlInference.inference_time_ms.toFixed(2)} ms` : "—"}
+                    {rlInference?.inference_time_ms != null ? `${rlInference.inference_time_ms?.toFixed(2)} ms` : "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -548,14 +548,14 @@ export function ExecutionRiskPanel() {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Critic Value Q(s, a):</span>
                   <span className="font-mono text-cyan-300">
-                    {rlInference?.q_value != null ? `+${rlInference.q_value.toFixed(4)}` : "—"}
+                    {rlInference?.q_value != null ? `+${rlInference.q_value?.toFixed(4)}` : "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Fast vs Safe Routing:</span>
                     <span className="font-mono text-purple-300">
                       {rlInference?.fast_path_share != null
-                        ? `${(rlInference.fast_path_share * 100).toFixed(1)}% / ${((rlInference.safe_path_share || 0) * 100).toFixed(1)}%`
+                        ? `${(rlInference.fast_path_share * 100)?.toFixed(1)}% / ${((rlInference.safe_path_share || 0) * 100)?.toFixed(1)}%`
                         : "—"}
                     </span>
                 </div>

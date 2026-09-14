@@ -726,12 +726,17 @@ EXCHANGE_SPOT: Mapping[str, Any] = MappingProxyType({
 })
 EXCHANGE_FUTURES: Mapping[str, Any] = MappingProxyType({
     "enabled": True,
-    "allowed_symbols": ("PI_XBTUSD", "PI_ETHUSD"),
+    "allowed_symbols": ("PF_XBTUSD", "PF_ETHUSD", "PI_XBTUSD", "PI_ETHUSD", "BTC/USD", "ETH/USD"),
     "allowed_order_types": ("limit", "market", "stop", "take-profit"),
     "max_leverage": 5,
     "max_order_notional_usd": 1000,
     "max_daily_notional_usd": 5000,
-    "symbol_mappings": MappingProxyType({"PI_XBTUSD": "KRAKEN:XBTUSD.P", "PI_ETHUSD": "KRAKEN:ETHUSD.P"}),
+    "symbol_mappings": MappingProxyType({
+        "PF_XBTUSD": "KRAKEN:XBTUSD.P",
+        "PF_ETHUSD": "KRAKEN:ETHUSD.P",
+        "PI_XBTUSD": "KRAKEN:XBTUSD.P",
+        "PI_ETHUSD": "KRAKEN:ETHUSD.P"
+    }),
 })
 HALT_ACTION = "cancel_all"
 

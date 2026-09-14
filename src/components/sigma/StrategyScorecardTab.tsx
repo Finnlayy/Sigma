@@ -94,9 +94,9 @@ export function StrategyScorecardTab({
     <div className="space-y-3 p-3 text-[11px]">
       <div className="grid grid-cols-4 gap-2">
         <Kpi label="N" value={String(kpis?.trade_count ?? 0)} />
-        <Kpi label="Winrate" value={`${((kpis?.win_rate ?? 0) * 100).toFixed(0)}%`} />
-        <Kpi label="PF (fees)" value={(kpis?.profit_factor ?? 0).toFixed(2)} />
-        <Kpi label="Net PnL" value={(kpis?.net_pnl ?? 0).toFixed(1)} />
+        <Kpi label="Winrate" value={`${((kpis?.win_rate ?? 0) * 100)?.toFixed(0)}%`} />
+        <Kpi label="PF (fees)" value={(kpis?.profit_factor ?? 0)?.toFixed(2)} />
+        <Kpi label="Net PnL" value={(kpis?.net_pnl ?? 0)?.toFixed(1)} />
       </div>
       <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-zinc-500">
         <AmpelDot lamp={lamp} glow /> Ampel {lamp.replace('_', ' ')}
@@ -110,7 +110,7 @@ export function StrategyScorecardTab({
               {b.badge}
             </span>
           ))}
-          {!badges.length && <span className="text-zinc-600">Noch keine Verhaltensbadges.</span>}
+          {!badges?.length && <span className="text-zinc-600">Noch keine Verhaltensbadges.</span>}
         </div>
       </div>
       <div>
@@ -130,7 +130,7 @@ export function StrategyScorecardTab({
               </button>
             </div>
           ))}
-          {!slots.length && <div className="text-zinc-600">Keine Slots — Akademie oder User eintragen.</div>}
+          {!slots?.length && <div className="text-zinc-600">Keine Slots — Akademie oder User eintragen.</div>}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Input className="h-7 w-28 text-[11px]" value={symbol} onChange={(e) => setSymbol(e.target.value)} />

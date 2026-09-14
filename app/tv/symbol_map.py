@@ -105,7 +105,7 @@ def is_allowed(symbol: str, *, futures: bool = False) -> bool:
 
 def market_type(symbol: str) -> str:
     raw = symbol.upper()
-    return "FUTURES" if raw.endswith(".P") or raw.startswith("PI_") else "SPOT"
+    return "FUTURES" if raw.endswith(".P") or raw.startswith("PI_") or raw.startswith("PF_") else "SPOT"
 
 
 def notional_limits(symbol: str) -> Dict[str, float]:

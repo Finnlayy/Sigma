@@ -76,12 +76,12 @@ export default function KrakenLedgersPanel({
     }
   };
 
-  const filteredSpotAssets = ledgers?.spot.assets.filter(a => 
+  const filteredSpotAssets = ledgers?.spot?.assets?.filter(a => 
     a.asset.toLowerCase().includes(searchQuery.toLowerCase()) ||
     a.name.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
-  const filteredProPositions = ledgers?.pro.positions.filter(p =>
+  const filteredProPositions = ledgers?.pro?.positions?.filter(p =>
     p.pair.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.contractType.toLowerCase().includes(searchQuery.toLowerCase())
@@ -180,7 +180,7 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className="text-xl font-bold text-white tracking-tight">
-                  ${(ledgers?.spot.totalValueUSD || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${(ledgers?.spot?.totalValueUSD || 0)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs text-zinc-500">USD</span>
               </div>
@@ -195,7 +195,7 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className="text-xl font-bold text-emerald-400 tracking-tight">
-                  ${(ledgers?.spot.freeCashUSD || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${(ledgers?.spot?.freeCashUSD || 0)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs text-zinc-500">USD</span>
               </div>
@@ -210,7 +210,7 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className="text-xl font-bold text-amber-300 tracking-tight">
-                  ${(ledgers?.spot.cryptoValueUSD || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${(ledgers?.spot?.cryptoValueUSD || 0)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs text-zinc-500">USD</span>
               </div>
@@ -225,7 +225,7 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className="text-xl font-bold text-white tracking-tight">
-                  {ledgers?.spot.assets.length || 0}
+                  {ledgers?.spot?.assets?.length || 0}
                 </span>
                 <span className="text-xs text-zinc-500">Assets</span>
               </div>
@@ -270,7 +270,7 @@ export default function KrakenLedgersPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60">
-                  {filteredSpotAssets.length > 0 ? (
+                  {filteredSpotAssets?.length > 0 ? (
                     filteredSpotAssets.map((asset, idx) => {
                       const isFiat = asset.type === 'fiat';
                       return (
@@ -302,7 +302,7 @@ export default function KrakenLedgersPanel({
                           {/* Total Holdings */}
                           <td className="py-3 px-4 text-right">
                             <span className="font-bold text-zinc-200">
-                              {asset.amount.toLocaleString(undefined, { 
+                              {asset.amount?.toLocaleString(undefined, { 
                                 minimumFractionDigits: isFiat ? 2 : 4,
                                 maximumFractionDigits: isFiat ? 2 : 6 
                               })}
@@ -313,11 +313,11 @@ export default function KrakenLedgersPanel({
                           {/* Available vs In Order */}
                           <td className="py-3 px-4 text-right text-[11px]">
                             <div className="text-zinc-300">
-                              Avail: {asset.available.toLocaleString(undefined, { minimumFractionDigits: isFiat ? 2 : 4, maximumFractionDigits: isFiat ? 2 : 4 })}
+                              Avail: {asset.available?.toLocaleString(undefined, { minimumFractionDigits: isFiat ? 2 : 4, maximumFractionDigits: isFiat ? 2 : 4 })}
                             </div>
                             {asset.inOrders > 0 && (
                               <div className="text-[10px] text-amber-400">
-                                Locked: {asset.inOrders.toLocaleString()}
+                                Locked: {asset.inOrders?.toLocaleString()}
                               </div>
                             )}
                           </td>
@@ -325,7 +325,7 @@ export default function KrakenLedgersPanel({
                           {/* Unit Price */}
                           <td className="py-3 px-4 text-right">
                             <div className="font-semibold text-zinc-200">
-                              ${asset.unitPriceUSD.toLocaleString(undefined, { minimumFractionDigits: isFiat ? 2 : 2, maximumFractionDigits: 2 })}
+                              ${asset.unitPriceUSD?.toLocaleString(undefined, { minimumFractionDigits: isFiat ? 2 : 2, maximumFractionDigits: 2 })}
                             </div>
                             {asset.change24h !== 0 && (
                               <div className={`text-[9px] flex items-center justify-end space-x-0.5 ${asset.change24h >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -338,7 +338,7 @@ export default function KrakenLedgersPanel({
                           {/* Total USD Value */}
                           <td className="py-3 px-4 text-right">
                             <span className="font-bold text-white text-sm">
-                              ${asset.totalValueUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ${asset.totalValueUSD?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                           </td>
 
@@ -387,7 +387,7 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className="text-xl font-bold text-purple-300 tracking-tight">
-                  ${(ledgers?.pro.totalCollateralUSD || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${(ledgers?.pro?.totalCollateralUSD || 0)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs text-zinc-500">USD</span>
               </div>
@@ -402,7 +402,7 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className="text-xl font-bold text-emerald-400 tracking-tight">
-                  ${(ledgers?.pro.freeMarginUSD || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${(ledgers?.pro?.freeMarginUSD || 0)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs text-zinc-500">USD</span>
               </div>
@@ -417,12 +417,12 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className="text-xl font-bold text-white tracking-tight">
-                  {ledgers?.pro.marginLevelPercent || 100}%
+                  {ledgers?.pro?.marginLevelPercent || 100}%
                 </span>
                 <span className="text-xs text-emerald-400 font-semibold">(Safe)</span>
               </div>
               <span className="text-[10px] text-zinc-400 mt-1 block">
-                Used margin: ${(ledgers?.pro.usedMarginUSD || 0).toLocaleString()} USD
+                Used margin: ${(ledgers?.pro?.usedMarginUSD || 0)?.toLocaleString()} USD
               </span>
             </div>
 
@@ -432,16 +432,16 @@ export default function KrakenLedgersPanel({
               </span>
               <div className="flex items-baseline space-x-1.5 mt-1">
                 <span className={`text-xl font-bold tracking-tight ${
-                  (ledgers?.pro.totalUnrealizedPnL || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  (ledgers?.pro?.totalUnrealizedPnL || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
                 }`}>
-                  {(ledgers?.pro.totalUnrealizedPnL || 0) >= 0 ? '+' : ''}${(ledgers?.pro.totalUnrealizedPnL || 0).toFixed(2)}
+                  {(ledgers?.pro?.totalUnrealizedPnL || 0) >= 0 ? '+' : ''}${(ledgers?.pro?.totalUnrealizedPnL || 0)?.toFixed(2)}
                 </span>
                 <span className="text-xs text-zinc-500">USD</span>
               </div>
               <span className={`text-[10px] font-semibold mt-1 block ${
-                (ledgers?.pro.unrealizedPnLPercent || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                (ledgers?.pro?.unrealizedPnLPercent || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
               }`}>
-                {(ledgers?.pro.unrealizedPnLPercent || 0) >= 0 ? '+' : ''}{ledgers?.pro.unrealizedPnLPercent || 0}% on margin
+                {(ledgers?.pro?.unrealizedPnLPercent || 0) >= 0 ? '+' : ''}{ledgers?.pro?.unrealizedPnLPercent || 0}% on margin
               </span>
             </div>
           </div>
@@ -482,7 +482,7 @@ export default function KrakenLedgersPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60">
-                  {filteredProPositions.length > 0 ? (
+                  {filteredProPositions?.length > 0 ? (
                     filteredProPositions.map((pos, idx) => {
                       const isLong = pos.type === 'long';
                       const isProfit = pos.unrealizedPnLUSD >= 0;
@@ -519,24 +519,24 @@ export default function KrakenLedgersPanel({
                           <td className="py-3 px-4 text-right">
                             <div className="font-bold text-zinc-200">{pos.size} Contracts</div>
                             <div className="text-[10px] text-zinc-400">
-                              ${pos.notionalValueUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ${pos.notionalValueUSD?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                           </td>
 
                           {/* Entry Price */}
                           <td className="py-3 px-4 text-right font-medium text-zinc-300">
-                            ${pos.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${pos.entryPrice?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
 
                           {/* Mark Price */}
                           <td className="py-3 px-4 text-right font-bold text-white">
-                            ${pos.markPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${pos.markPrice?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
 
                           {/* Liquidation Price */}
                           <td className="py-3 px-4 text-right">
                             <div className="font-semibold text-rose-400">
-                              ${pos.liquidationPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ${pos.liquidationPrice?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                             <span className="text-[9px] text-zinc-500">Liq Distance: Safe</span>
                           </td>
@@ -544,17 +544,17 @@ export default function KrakenLedgersPanel({
                           {/* Collateral / Margin */}
                           <td className="py-3 px-4 text-right text-[11px]">
                             <div className="font-semibold text-zinc-200">
-                              ${pos.collateralUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ${pos.collateralUSD?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                             <div className="text-[9px] text-zinc-500">
-                              Req: ${pos.marginRequirementUSD.toLocaleString()}
+                              Req: ${pos.marginRequirementUSD?.toLocaleString()}
                             </div>
                           </td>
 
                           {/* Unrealized P&L */}
                           <td className="py-3 px-4 text-right">
                             <div className={`font-bold text-sm ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {isProfit ? '+' : ''}${pos.unrealizedPnLUSD.toFixed(2)}
+                              {isProfit ? '+' : ''}${pos.unrealizedPnLUSD?.toFixed(2)}
                             </div>
                             <div className={`text-[10px] font-semibold ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
                               {isProfit ? '+' : ''}{pos.unrealizedPnLPercent}%

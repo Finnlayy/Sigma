@@ -43,7 +43,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
       handleSubmit();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (commandHistory.length > 0 && historyIndex < commandHistory.length - 1) {
+      if (commandHistory?.length > 0 && historyIndex < commandHistory?.length - 1) {
         const nextIdx = historyIndex + 1;
         setHistoryIndex(nextIdx);
         setInputValue(commandHistory[nextIdx]);
@@ -113,7 +113,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
                   : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              <span>All ({logs.length})</span>
+              <span>All ({logs?.length})</span>
             </button>
           </div>
 
@@ -148,10 +148,10 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
       {/* Quick Help Header */}
       <div className="bg-zinc-950/70 border-b border-zinc-900 px-4 py-1.5 text-[11px] font-mono text-zinc-500 flex justify-between items-center">
         <span className="flex items-center space-x-2">
-          <span>Displaying {viewLimit === '3' ? 'latest 3 messages' : `all ${logs.length} messages`}</span>
-          {viewLimit === '3' && logs.length > 3 && (
+          <span>Displaying {viewLimit === '3' ? 'latest 3 messages' : `all ${logs?.length} messages`}</span>
+          {viewLimit === '3' && logs?.length > 3 && (
             <span className="text-[10px] text-zinc-500 bg-zinc-900 border border-zinc-800 px-1.5 py-0.2 rounded">
-              +{logs.length - 3} older buffered
+              +{logs?.length - 3} older buffered
             </span>
           )}
         </span>
@@ -162,7 +162,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
 
       {/* Log Output Buffer */}
       <div ref={logContainerRef} className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-2 terminal-scroll bg-black/95">
-        {displayedLogs.length === 0 ? (
+        {!displayedLogs?.length ? (
           <div className="text-zinc-600 text-xs py-4 text-center select-none flex flex-col items-center justify-center space-y-1">
             <span className="text-zinc-500 font-medium">Ready. Awaiting runner executions or manual CLI commands...</span>
             <span className="text-[11px] text-zinc-600">Type <code className="text-zinc-400">help</code> or trigger a strategy to generate output.</span>
