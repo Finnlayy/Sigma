@@ -10,7 +10,7 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, BarChart3, Brain, Eye, EyeOff, FlaskConical,
   Gauge, Layers, Lock, Radar, ShieldCheck, Sparkles, Target, Wand2,
@@ -18,10 +18,23 @@ import {
 import {
   PanelShell, Stat, FeedBadge, usePoll,
 } from './panels';
-import { sigmaResearchApi, blindedSymbol, type SigmaPanelBase } from '../../lib/sigmaApi';
+import {
+  sigmaResearchApi, blindedSymbol, type SigmaPanelBase, type ResearchDashboard,
+} from '../../lib/sigmaApi';
 import { sanitizeUrl } from '../../lib/security';
+import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
+import {
+  OperatorConfirmModal, requestFocusPanel,
+} from './OperatorConfirmModal';
 
 /* ------------------------------------------------------- shared helpers */
+
+const OPERATOR_EMAIL = 'master@alpha.local';
+const BLOCKED_403 = '403 / Operator-Token fehlt — Schreibzugriff blockiert';
+
+async function acquireOperatorToken(): Promise<string | null> {
+  return PasskeyWebAuthnClient.authenticatePasskeyForSettings(OPERATOR_EMAIL);
+}
 
 function EmptyState({ text }: { text: string }) {
   return <div className="py-6 text-center text-[11px] text-zinc-500">{text}</div>;
@@ -80,6 +93,12 @@ export function QuantumRegimePanel() {
 
 export function MarketGeometryPanel() {
   const [data] = usePoll(sigmaResearchApi.zones, 8000);
+  const showOverlays = () => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('sigma:chart-overlays', {
+      detail: { fvg: true, ce50: true, envelope: true, thrust: true },
+    }));
+  };
   return (
     <PanelShell title="Market Geometry" icon={<Layers size={13} />}>
       <PanelHeader data={data} text={`MP-03 · ${data?.interval_min ?? 15}m / 1h`} />
@@ -110,6 +129,14 @@ export function MarketGeometryPanel() {
           00:00-Envelope {String(Number(data.envelope.slope ?? 0) >= 0 ? '↑' : '↓')}
         </div>
       )}
+      <button
+        type="button"
+        onClick={showOverlays}
+        className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-sky-400 hover:border-sky-500"
+        title="Zonen im Chart einblenden (FVG / CE50 / Envelope / Thrust)"
+      >
+        Zonen im Chart einblenden
+      </button>
     </PanelShell>
   );
 }
@@ -153,9 +180,49 @@ export function PowerPhysicsPanel() {
 /* ------------------------------------------------------------- 4 Scout */
 
 export function SymbolScoutPanel() {
-  const [data] = usePoll(sigmaResearchApi.scout, 9000);
+  const [data, refresh] = usePoll(sigmaResearchApi.scout, 9000);
   const [blinded, setBlinded] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [blocked, setBlocked] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
   const rows = [...(data?.long_rank ?? []), ...(data?.short_rank ?? [])];
+  const phaseOk = !!data?.phase_ok;
+
+  const runScan = async () => {
+    setBusy(true);
+    setBlocked(null);
+    const token = await acquireOperatorToken();
+    if (!token) {
+      setBlocked(BLOCKED_403);
+      setBusy(false);
+      return;
+    }
+    const out = await sigmaResearchApi.scan(token);
+    setBusy(false);
+    if (!out) {
+      setBlocked(BLOCKED_403);
+      return;
+    }
+    setConfirmOpen(false);
+    setStatus(out.ok ? `scan ok${out.job_id ? ` · ${out.job_id}` : ''}` : (out.reason || 'scan fail-closed'));
+    refresh();
+  };
+
+  const provisionRow = (row: Record<string, unknown>) => {
+    const rec = String(row.recommendation ?? '');
+    const panelId = rec.startsWith('sniper') || rec.includes('fractal')
+      ? 'FractalTradePanel_'
+      : 'LadderArchitectPanel_';
+    requestFocusPanel({
+      panelId,
+      symbol: String(row.symbol ?? ''),
+      recommendation: rec,
+      side: String(row.side ?? ''),
+    });
+    setStatus(`Provisionieren → ${panelId.replace(/Panel_$/, '')} (${String(row.symbol ?? '')})`);
+  };
+
   return (
     <PanelShell title="Symbol Scout" icon={<Sparkles size={13} />}
       actions={
@@ -171,8 +238,8 @@ export function SymbolScoutPanel() {
         <>
           <div className="mb-1.5 flex items-center gap-2 text-[10px] text-zinc-500">
             <span>last scan: {data?.last_scan_ts ? new Date((data.last_scan_ts ?? 0) * 1000).toISOString() : '—'}</span>
-            <span className={data?.phase_ok ? 'text-emerald-400' : 'text-amber-400'}>
-              {data?.phase_ok ? 'SCAN&DEPLOY' : 'Scan nur in Phase SCAN&DEPLOY'}
+            <span className={phaseOk ? 'text-emerald-400' : 'text-amber-400'}>
+              {phaseOk ? 'SCAN&DEPLOY' : 'Scan nur in Phase SCAN&DEPLOY'}
             </span>
           </div>
           {!rows?.length ? (
@@ -181,7 +248,7 @@ export function SymbolScoutPanel() {
             <table className="w-full text-[10px]">
               <thead>
                 <tr className="text-left text-zinc-500">
-                  <th>Symbol</th><th>Side</th><th>β</th><th>r</th><th>RVOL</th><th>pos_EQ</th><th>Empfehlung</th>
+                  <th>Symbol</th><th>Side</th><th>β</th><th>r</th><th>RVOL</th><th>pos_EQ</th><th>Empfehlung</th><th />
                 </tr>
               </thead>
               <tbody>
@@ -199,18 +266,47 @@ export function SymbolScoutPanel() {
                         {Number(row.pos_eq ?? 0.5)?.toFixed(2)}
                       </td>
                       <td className={rec.startsWith('sniper') ? 'text-emerald-400' : 'text-zinc-300'}>{rec}</td>
+                      <td>
+                        <button
+                          type="button"
+                          onClick={() => provisionRow(row)}
+                          title="Provisionieren öffnet Fractal-/Ladder-Panel (Confirm im Zielpanel)"
+                          aria-label="Provisionieren"
+                          className="rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-sky-400 hover:border-sky-500"
+                        >
+                          Provisionieren
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           )}
-          <button disabled title="Scan-Trigger: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)" aria-label="Scan-Trigger: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
-            className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-500 disabled:cursor-not-allowed">
+          <button
+            type="button"
+            disabled={!phaseOk}
+            onClick={() => { setBlocked(null); setConfirmOpen(true); }}
+            title={phaseOk
+              ? 'Scan-Trigger: Operator-Token + Bestätigungs-Modal'
+              : 'Scan nur in Phase SCAN&DEPLOY aktiv'}
+            aria-label="Scan anstoßen (Operator + Modal)"
+            className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-500 hover:text-amber-300 disabled:cursor-not-allowed disabled:text-zinc-600"
+          >
             Scan anstoßen (Operator + Modal)
           </button>
+          {status && <div className="mt-1 font-mono text-[10px] text-zinc-500">{status}</div>}
         </>
       )}
+      <OperatorConfirmModal
+        open={confirmOpen}
+        title="Scan anstoßen"
+        detail="1 Scan je geschlossener 1h-Bar · kraken_paper only · kein Auto-Deploy aus der Tabelle"
+        busy={busy}
+        blockedReason={blocked}
+        onCancel={() => { if (!busy) setConfirmOpen(false); }}
+        onConfirm={() => { void runScan(); }}
+      />
     </PanelShell>
   );
 }
@@ -280,11 +376,27 @@ export function LadderArchitectPanel() {
 
 export function FractalTradePanel() {
   const [data] = usePoll(sigmaResearchApi.fractalPreview, 8000);
+  const [hint, setHint] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('sigma:provision-hint');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { symbol?: string; recommendation?: string; panelId?: string };
+      if (parsed.panelId?.includes('Fractal') || parsed.recommendation?.includes('sniper')) {
+        setHint(`${parsed.symbol ?? ''} · ${parsed.recommendation ?? ''} · kraken_paper`);
+      }
+    } catch { /* ignore */ }
+  }, []);
   const ks = data?.kill_switch ?? {};
   const triggered = ks.exhausted || ks.swept || Number(ks.minute ?? 0) >= 55;
   return (
     <PanelShell title="Fractal Trade" icon={<Target size={13} />}>
       <PanelHeader data={data} text="MP-15 · 40/30/20/10 Staffel" />
+      {hint && (
+        <div className="mb-1.5 rounded border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] text-sky-300">
+          Scout-Prefill: {hint}
+        </div>
+      )}
       {!data?.ok && !data?.available ? (
         <EmptyState text="kein Fraktal-Plan ohne Backend (Preview read-only)" />
       ) : (
@@ -323,7 +435,39 @@ export function FractalTradePanel() {
 /* ------------------------------------------------------- 8 Provisioner */
 
 export function ProvisionerPanel() {
-  const [data] = usePoll(sigmaResearchApi.provisions, 8000);
+  const [data, refresh] = usePoll(sigmaResearchApi.provisions, 8000);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [hardenOpen, setHardenOpen] = useState(false);
+  const [pineCode, setPineCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [blocked, setBlocked] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
+  const [hardenResult, setHardenResult] = useState<Record<string, unknown> | null>(null);
+
+  const runHarden = async () => {
+    setBusy(true);
+    setBlocked(null);
+    const token = await acquireOperatorToken();
+    if (!token) {
+      setBlocked(BLOCKED_403);
+      setBusy(false);
+      return;
+    }
+    const out = await sigmaResearchApi.hardenPine(token, {
+      code: pineCode,
+      execution_mode: 'kraken_paper',
+    });
+    setBusy(false);
+    if (!out) {
+      setBlocked(BLOCKED_403);
+      return;
+    }
+    setHardenResult((out.detail as Record<string, unknown>) ?? { reason: out.reason, ok: out.ok });
+    setConfirmOpen(false);
+    setStatus(out.ok ? 'harden ok — Provisionieren nur über Modal' : (out.reason || 'harden fail-closed'));
+    refresh();
+  };
+
   return (
     <PanelShell title="Provisioner" icon={<Wand2 size={13} />}>
       <PanelHeader data={data} text="MP-09 · ephemere Pine-Agenten" />
@@ -352,12 +496,68 @@ export function ProvisionerPanel() {
             Wächter: lookahead_off · bar-close-Alert · Schema-A-Payload · initial_capital=10000 ·
             pyramiding=1 · 0,04 % · calc_on_every_tick=false · idempotency_key je Alert
           </div>
-          <button disabled title="Externes Pine härten: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)" aria-label="Externes Pine härten: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
-            className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-500 disabled:cursor-not-allowed">
-            Externes Pine härten (Operator + Modal)
-          </button>
         </>
       )}
+      <button
+        type="button"
+        onClick={() => { setHardenOpen(true); setBlocked(null); setHardenResult(null); }}
+        title="Externes Pine härten: Operator-Token + Bestätigungs-Modal"
+        aria-label="Externes Pine härten (Operator + Modal)"
+        className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-500 hover:text-amber-300"
+      >
+        Externes Pine härten (Operator + Modal)
+      </button>
+      {status && <div className="mt-1 font-mono text-[10px] text-zinc-500">{status}</div>}
+      {hardenResult && (
+        <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[10px] text-zinc-400">
+          hardening_ok={String(hardenResult.hardening_ok ?? hardenResult.ok ?? '—')}
+          {Array.isArray(hardenResult.transformations) && (
+            <ul className="mt-1 list-inside list-disc text-zinc-500">
+              {(hardenResult.transformations as string[]).slice(0, 6).map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {hardenOpen && (
+        <div className="mt-2 space-y-1 rounded border border-zinc-800 bg-zinc-950/60 p-2">
+          <div className="text-[10px] uppercase text-zinc-500">Fremd-Pine einfügen</div>
+          <textarea
+            value={pineCode}
+            onChange={(e) => setPineCode(e.target.value)}
+            rows={5}
+            spellCheck={false}
+            placeholder="//@version=6 …"
+            className="w-full resize-y rounded border border-zinc-800 bg-black/50 p-2 font-mono text-[10px] text-emerald-300"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setHardenOpen(false)}
+              className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-400"
+            >
+              Schließen
+            </button>
+            <button
+              type="button"
+              onClick={() => { setBlocked(null); setConfirmOpen(true); }}
+              className="rounded border border-amber-600/50 px-2 py-1 text-[10px] text-amber-300"
+            >
+              Härten bestätigen…
+            </button>
+          </div>
+        </div>
+      )}
+      <OperatorConfirmModal
+        open={confirmOpen}
+        title="Externes Pine härten"
+        detail="harden_pine_code · kraken_paper · kein Direkt-Upload — Deploy nur über Provisionieren-Modal"
+        busy={busy}
+        blockedReason={blocked}
+        onCancel={() => { if (!busy) setConfirmOpen(false); }}
+        onConfirm={() => { void runHarden(); }}
+      />
     </PanelShell>
   );
 }
@@ -500,8 +700,104 @@ export function UnwindPanel() {
 
 /* --------------------------------------------------------- 12 Research */
 
+function ResearchPaneSvg({
+  title,
+  points,
+  yLines,
+  emptyText,
+}: {
+  title: string;
+  points: Array<{ x: number; y: number }>;
+  yLines?: Array<{ y: number; color: string; label: string }>;
+  emptyText: string;
+}) {
+  const w = 320;
+  const h = 72;
+  if (!points.length) {
+    return (
+      <div className="rounded border border-zinc-800 bg-zinc-950/50 px-2 py-3 text-center text-[10px] text-zinc-600">
+        {title}: {emptyText}
+      </div>
+    );
+  }
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys, ...(yLines?.map((l) => l.y) ?? []));
+  const maxY = Math.max(...ys, ...(yLines?.map((l) => l.y) ?? []));
+  const dx = maxX - minX || 1;
+  const dy = maxY - minY || 1;
+  const path = points
+    .map((p, i) => {
+      const x = ((p.x - minX) / dx) * (w - 8) + 4;
+      const y = h - 4 - ((p.y - minY) / dy) * (h - 8);
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-950/50 px-1 py-1">
+      <div className="mb-0.5 px-1 text-[9px] uppercase tracking-wide text-zinc-500">{title}</div>
+      <svg viewBox={`0 0 ${w} ${h}`} className="h-16 w-full" role="img" aria-label={title}>
+        {yLines?.map((l) => {
+          const y = h - 4 - ((l.y - minY) / dy) * (h - 8);
+          return (
+            <g key={l.label}>
+              <line x1={0} x2={w} y1={y} y2={y} stroke={l.color} strokeDasharray="3 3" strokeWidth={1} />
+            </g>
+          );
+        })}
+        <path d={path} fill="none" stroke="#a78bfa" strokeWidth={1.5} />
+      </svg>
+    </div>
+  );
+}
+
 export function ResearchLabPanel() {
-  const [data] = usePoll(sigmaResearchApi.researchDashboard, 10000);
+  const [data, refresh] = usePoll(sigmaResearchApi.researchDashboard, 10000);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [hypothesis, setHypothesis] = useState('H1');
+  const [busy, setBusy] = useState(false);
+  const [blocked, setBlocked] = useState<string | null>(null);
+  const [status, setStatus] = useState('');
+
+  const dash = data as ResearchDashboard | null;
+  const cosPts = useMemo(() => {
+    const raw = dash?.cos_phi ?? [];
+    return raw.map((p) => ({ x: Number(p.time ?? 0), y: Number(p.value ?? 0) }));
+  }, [dash]);
+  const eqPts = useMemo(() => {
+    const raw = dash?.equity ?? [];
+    return raw.map((p) => ({ x: Number(p.time ?? 0), y: Number(p.value ?? 0) }));
+  }, [dash]);
+  const candlePts = useMemo(() => {
+    const raw = dash?.candles ?? [];
+    return raw.map((c) => ({ x: Number(c.time ?? 0), y: Number(c.close ?? 0) }));
+  }, [dash]);
+  const entry = Number(dash?.thresholds?.long ?? 0.4);
+  const exit = Number(dash?.thresholds?.exit ?? 0.15);
+  const hasPanes = candlePts.length > 0 || cosPts.length > 0 || eqPts.length > 0;
+
+  const runHypothesis = async () => {
+    setBusy(true);
+    setBlocked(null);
+    const token = await acquireOperatorToken();
+    if (!token) {
+      setBlocked(BLOCKED_403);
+      setBusy(false);
+      return;
+    }
+    const out = await sigmaResearchApi.researchRun(token, { hypothesis });
+    setBusy(false);
+    if (!out) {
+      setBlocked(BLOCKED_403);
+      return;
+    }
+    setConfirmOpen(false);
+    setStatus(out.ok ? `run ${hypothesis}${out.job_id ? ` · ${out.job_id}` : ''}` : (out.reason || 'run fail-closed'));
+    refresh();
+  };
+
   return (
     <PanelShell title="Research Lab" icon={<FlaskConical size={13} />}>
       <PanelHeader data={data} text="MP-12/16 · Hypothesen H1–H7 (Walk-Forward)" />
@@ -518,6 +814,30 @@ export function ResearchLabPanel() {
               </span>
             </div>
           ))}
+          <div className="mt-2 space-y-1.5">
+            <div className="text-[9px] uppercase tracking-wide text-zinc-500">
+              cos-φ Strategie-View · 3 Panes (Kerzen / ±0,40±0,15 / Equity)
+            </div>
+            {!hasPanes ? (
+              <EmptyState text="keine Research-Pane-Daten — fail-closed (kein Feed / kein Export)" />
+            ) : (
+              <>
+                <ResearchPaneSvg title="Candles + Marker" points={candlePts} emptyText="keine Kerzen" />
+                <ResearchPaneSvg
+                  title="cos φ"
+                  points={cosPts}
+                  yLines={[
+                    { y: entry, color: '#34d399', label: '+0.40' },
+                    { y: -entry, color: '#f87171', label: '-0.40' },
+                    { y: exit, color: '#a1a1aa', label: '+0.15' },
+                    { y: -exit, color: '#a1a1aa', label: '-0.15' },
+                  ]}
+                  emptyText="kein cos-φ-Pfad"
+                />
+                <ResearchPaneSvg title="Equity vs Benchmark" points={eqPts} emptyText="keine Equity-Kurve" />
+              </>
+            )}
+          </div>
           {data.sweeps.map((s, i) => {
             const sharpe = Number(s.sharpe ?? 0);
             const dd = Number(s.max_dd ?? 1);
@@ -535,12 +855,39 @@ export function ResearchLabPanel() {
               HTML-Dashboard exportieren (MP-16)
             </a>
           )}
-          <button disabled title="Hypothesen-Run: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)" aria-label="Hypothesen-Run: Operator-Token + Bestätigungs-Modal (Backend noch nicht verfügbar)"
-            className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-500 disabled:cursor-not-allowed">
-            Run (Operator + Modal)
-          </button>
+          <div className="mt-2 flex items-center gap-2">
+            <select
+              value={hypothesis}
+              onChange={(e) => setHypothesis(e.target.value)}
+              className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 font-mono text-[10px]"
+              aria-label="Hypothese"
+            >
+              {['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7'].map((h) => (
+                <option key={h} value={h}>{h}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => { setBlocked(null); setConfirmOpen(true); }}
+              title="Hypothesen-Run: Operator-Token + Bestätigungs-Modal"
+              aria-label="Run (Operator + Modal)"
+              className="flex-1 rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-500 hover:text-amber-300"
+            >
+              Run (Operator + Modal)
+            </button>
+          </div>
+          {status && <div className="mt-1 font-mono text-[10px] text-zinc-500">{status}</div>}
         </>
       )}
+      <OperatorConfirmModal
+        open={confirmOpen}
+        title={`Research Run ${hypothesis}`}
+        detail={`Async-Job wie TV-Jobs · Walk-Forward · paper only · Hypothese ${hypothesis}`}
+        busy={busy}
+        blockedReason={blocked}
+        onCancel={() => { if (!busy) setConfirmOpen(false); }}
+        onConfirm={() => { void runHypothesis(); }}
+      />
     </PanelShell>
   );
 }

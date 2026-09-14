@@ -534,8 +534,13 @@ class ResearchJobResult(ResearchJob):
 
 
 class ResearchDashboard(SigmaEmptyMixin):
-    """H1-H7-Status + Sweep-Tabelle + Export-Link."""
+    """H1-H7-Status + Sweep-Tabelle + Export-Link + optionale 3-Pane-Daten."""
 
     hypotheses: List[Dict[str, Any]] = Field(default_factory=list)
     sweeps: List[Dict[str, Any]] = Field(default_factory=list)
     export_html_path: Optional[str] = None
+    candles: List[Dict[str, Any]] = Field(default_factory=list)
+    cos_phi: List[Dict[str, Any]] = Field(default_factory=list)
+    equity: List[Dict[str, Any]] = Field(default_factory=list)
+    markers: List[Dict[str, Any]] = Field(default_factory=list)
+    thresholds: Optional[Dict[str, Any]] = None

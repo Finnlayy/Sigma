@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KeyRound, RefreshCw, Save, Shield } from "lucide-react";
+import { KeyRound, Lock, RefreshCw, Save, Shield } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type SettingRow = {
@@ -334,6 +334,64 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
           </div>
         </section>
       ))}
+
+      {/* MP-17 §3.13 — KB-Parametergruppen (Defaults); Safety locked */}
+      <section className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 space-y-3">
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300 flex items-center gap-2">
+            <Shield className="w-3.5 h-3.5 text-amber-400" />
+            Sigma Parameter (§3.13 KB-Defaults)
+          </h3>
+          <p className="text-[11px] text-zinc-500 mt-1">
+            Verstellbare Gruppen aus der Wissensdatenbank. Hard-Stop / Grid-Tiefe ≥ 6 % /
+            Fee-Covered-BE sind sichtbar, aber nicht abschaltbar.
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {[
+            { g: "Screening-Phasen", d: "00–05 SCAN&DEPLOY · 05–48 ACTIVE · 48–55 PRE-CLOSE · 55–60 IDLE" },
+            { g: "Ranker-Schwellen", d: "r ≥ 0,75 · β ≥ 1,5 · RVOL ≥ 1,5 · Spread-Cap aktiv" },
+            { g: "Polymarket-Gate", d: "P_cal Gate 0,60–0,65 · Platt-Kalibrierung" },
+            { g: "Throttle-ATR", d: "<0,70 SLEEP · 0,70–1,40 NORMAL(3) · >1,40 AGGRESSIVE(8)" },
+            { g: "Ladder-Defaults", d: "Step 0,2 % · Vol-Faktor 1,15 · Tiefe ≥ 6 % · TTL 2 h" },
+            { g: "Fraktal-TP / Fee", d: "40/30/20/10 · fee_covered_be_offset 0,0005" },
+            { g: "Cooldown", d: "30 min Post-Trade-Pause (1800 s)" },
+            { g: "ONNX-Fallback", d: "TTL_norm < 0,15 / 21:00 → FLAT · Entropie > 0,65 → FLAT" },
+            { g: "Blinded-Modus", d: "Ticker → ASSET_### (Ranker/Tensor)" },
+            { g: "Weekend / Paper", d: "reduzierte Größe · kraken_paper only" },
+          ].map((row) => (
+            <div key={row.g} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+              <div className="text-[11px] font-medium text-zinc-300">{row.g}</div>
+              <div className="mt-0.5 font-mono text-[10px] text-zinc-500">{row.d}</div>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-1.5 rounded-lg border border-amber-700/40 bg-amber-950/20 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-amber-400/90">
+            Sicherheitsregeln (locked — nicht abschaltbar)
+          </div>
+          {[
+            { id: "hard_stop", label: "Hard-Stop-Pflicht aktiv (0,5 % über Liq)" },
+            { id: "grid_depth", label: "Grid-Tiefe ≥ 6 % erzwungen" },
+            { id: "fee_be", label: "Fee-Covered Break-Even nach TP1 (0,0005)" },
+          ].map((rule) => (
+            <label key={rule.id} className="flex items-center justify-between gap-2 text-[11px] text-zinc-300">
+              <span className="flex items-center gap-1.5">
+                <Lock className="w-3 h-3 text-amber-400" />
+                {rule.label}
+              </span>
+              <input
+                type="checkbox"
+                checked
+                disabled
+                readOnly
+                aria-label={`${rule.label} (locked)`}
+                className="accent-amber-500 disabled:cursor-not-allowed"
+              />
+            </label>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

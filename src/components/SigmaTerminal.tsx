@@ -20,6 +20,9 @@ import {
   SigmaDock, addPanelToActive, collectPanels, fromFlexLayout, type DockNode,
 } from './sigma/dock';
 import { sigmaApi, type HealthResponse } from '../lib/sigmaApi';
+import {
+  SIGMA_FOCUS_PANEL_EVENT, type SigmaFocusPanelDetail,
+} from './sigma/OperatorConfirmModal';
 
 const STORAGE_KEY = 'sigma.terminal.layout.v2';
 const PRESET_KEY = 'sigma.terminal.preset.v1';
@@ -251,6 +254,24 @@ export default function SigmaTerminal() {
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
+
+  // Scout „Provisionieren“ → Fractal/Ladder Panel fokussieren/öffnen
+  useEffect(() => {
+    const onFocus = (ev: Event) => {
+      const detail = (ev as CustomEvent<SigmaFocusPanelDetail>).detail;
+      if (!detail?.panelId || !(detail.panelId in PANEL_REGISTRY)) return;
+      setTree((prev) => {
+        const target = activeTabset || collectFirstTabset(prev);
+        const next = addPanelToActive(prev, target, detail.panelId);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ preset, tree: next }));
+        } catch { /* ignore */ }
+        return next;
+      });
+    };
+    window.addEventListener(SIGMA_FOCUS_PANEL_EVENT, onFocus);
+    return () => window.removeEventListener(SIGMA_FOCUS_PANEL_EVENT, onFocus);
+  }, [activeTabset, preset]);
 
   const persist = useCallback((next: DockNode, p = preset) => {
     setTree(next);

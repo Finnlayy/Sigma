@@ -1,10 +1,10 @@
 # Jules Execute State
 
-<!-- jules-loop:ACTIVE -->
-<!-- jules-next:MP-17 -->
+<!-- jules-loop:DONE -->
+<!-- jules-next:STOP -->
 
-**Loop:** ACTIVE
-**Next:** MP-17
+**Loop:** DONE
+**Next:** STOP
 **Branch:** `jules/mp-execute`
 **PR:** one accumulating PR from that branch — do not open a new PR per phase
 **Human:** not available. Do not wait. Do not ask. Continue until **Next** is `STOP`.
@@ -27,8 +27,8 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 | MP-15 | DONE | DONE | `9989ca0` · fractal directional complete · `tests/test_fractal_directional.py` |
 | MP-11 | DONE | DONE | `c1a6b7a` · onnx idle/unwind ctx + p99 latency; drop type:ignore · `tests/test_onnx_tensor.py` |
 | MP-12 | DONE | DONE | `7e67c9e` · H5 DFA-Hurst, H7 hysteresis, verdicts · `tests/backtest/` |
-| MP-16 | DONE | DONE | power-factor backtest + TV panes · `tests/backtest/test_power_factor_dashboard.py` |
-| MP-17 | PENDING | PENDING | |
+| MP-16 | DONE | DONE | `2bac23c` · power-factor backtest + TV panes · `tests/backtest/test_power_factor_dashboard.py` |
+| MP-17 | DONE | DONE | 12 panels + operator modal + presets/overlays/settings · `tests/test_frontend_terminal.py` |
 | MP-10 | SKIP | SKIP | optional — do not implement |
 | MP-13 | SKIP | SKIP | optional — do not implement |
 | MP-14 | SKIP | SKIP | optional — do not implement |

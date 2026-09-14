@@ -230,6 +230,7 @@ export function PineStudio() {
   const [strategyId, setStrategyId] = useState('cisd_momentum');
   const [symbol, setSymbol] = useState('BTC/USD');
   const [status, setStatus] = useState('');
+  const [tab, setTab] = useState<'editor' | 'provisioner'>('editor');
 
   const push = async () => {
     setStatus('pushing…');
@@ -244,23 +245,51 @@ export function PineStudio() {
   return (
     <PanelShell title="Pine Studio (v6)" icon={<Code2 size={13} />}
       actions={<>
-        <button onClick={pull} className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] hover:border-sky-500">Pull Params</button>
-        <button onClick={push} className="rounded bg-sky-600/80 px-2 py-0.5 text-[10px] font-semibold hover:bg-sky-500">Push to TV</button>
+        <button type="button" onClick={() => setTab('editor')}
+          className={`rounded border px-2 py-0.5 text-[10px] ${tab === 'editor' ? 'border-sky-500 text-sky-300' : 'border-zinc-700 text-zinc-400'}`}>
+          Editor
+        </button>
+        <button type="button" onClick={() => setTab('provisioner')}
+          className={`rounded border px-2 py-0.5 text-[10px] ${tab === 'provisioner' ? 'border-sky-500 text-sky-300' : 'border-zinc-700 text-zinc-400'}`}>
+          Provisioner
+        </button>
+        {tab === 'editor' && (
+          <>
+            <button onClick={pull} className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] hover:border-sky-500">Pull Params</button>
+            <button onClick={push} className="rounded bg-sky-600/80 px-2 py-0.5 text-[10px] font-semibold hover:bg-sky-500">Push to TV</button>
+          </>
+        )}
       </>}>
-      <div className="mb-2 flex gap-1">
-        <input value={strategyId} onChange={(e) => setStrategyId(e.target.value)}
-          className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px]" />
-        <input value={symbol} onChange={(e) => setSymbol(e.target.value)}
-          className="w-24 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px]" />
-      </div>
-      <textarea value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false}
-        className="h-[calc(100%-4rem)] min-h-40 w-full resize-none rounded border border-zinc-800 bg-black/60 p-2 font-mono text-[11px] leading-relaxed text-emerald-300" />
-      <div className="mt-1 text-[10px] text-zinc-500">{status || 'Strategy ≡ TradingView — code lives in Pine, Sigma only orchestrates.'}</div>
+      {tab === 'provisioner' ? (
+        <ProvisionerPanel />
+      ) : (
+        <>
+          <div className="mb-2 flex gap-1">
+            <input value={strategyId} onChange={(e) => setStrategyId(e.target.value)}
+              className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px]" />
+            <input value={symbol} onChange={(e) => setSymbol(e.target.value)}
+              className="w-24 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px]" />
+          </div>
+          <textarea value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false}
+            className="h-[calc(100%-4rem)] min-h-40 w-full resize-none rounded border border-zinc-800 bg-black/60 p-2 font-mono text-[11px] leading-relaxed text-emerald-300" />
+          <div className="mt-1 text-[10px] text-zinc-500">{status || 'Strategy ≡ TradingView — code lives in Pine, Sigma only orchestrates.'}</div>
+        </>
+      )}
     </PanelShell>
   );
 }
 
 /* ------------------------------------------------------------ 3 MarketChart */
+
+type OverlayFlags = {
+  fvg: boolean;
+  ce50: boolean;
+  envelope: boolean;
+  thrust: boolean;
+  cosPhi: boolean;
+};
+
+const SIGMA_OVERLAY_EVENT = 'sigma:chart-overlays';
 
 export function MarketChart() {
   const [symbol, setSymbol] = useState('BTC/USD');
@@ -268,6 +297,13 @@ export function MarketChart() {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [markers, setMarkers] = useState<ChartMarker[]>([]);
   const [priceLines, setPriceLines] = useState<ChartPriceLine[]>([]);
+  const [overlayMarkers, setOverlayMarkers] = useState<ChartMarker[]>([]);
+  const [overlayLines, setOverlayLines] = useState<ChartPriceLine[]>([]);
+  const [cosPath, setCosPath] = useState<Array<{ ts: number; value: number }>>([]);
+  const [overlayFeedOk, setOverlayFeedOk] = useState(false);
+  const [overlays, setOverlays] = useState<OverlayFlags>({
+    fvg: false, ce50: false, envelope: false, thrust: false, cosPhi: false,
+  });
   const [feed, setFeed] = useState<FeedMeta | null>(null);
   const [error, setError] = useState('');
   const [streamStatus, setStreamStatus] = useState<'off' | 'live' | 'err'>('off');
@@ -281,6 +317,114 @@ export function MarketChart() {
   }, [symbol, interval]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // External hint from MarketGeometry „Zonen im Chart einblenden“
+  useEffect(() => {
+    const onHint = (ev: Event) => {
+      const detail = (ev as CustomEvent<Partial<OverlayFlags>>).detail ?? {};
+      setOverlays((prev) => ({ ...prev, ...detail }));
+    };
+    window.addEventListener(SIGMA_OVERLAY_EVENT, onHint);
+    return () => window.removeEventListener(SIGMA_OVERLAY_EVENT, onHint);
+  }, []);
+
+  // Overlay feeds (fail-closed: no invented zones/markers)
+  useEffect(() => {
+    let cancelled = false;
+    const anyOn = overlays.fvg || overlays.ce50 || overlays.envelope || overlays.thrust || overlays.cosPhi;
+    if (!anyOn) {
+      setOverlayMarkers([]);
+      setOverlayLines([]);
+      setCosPath([]);
+      setOverlayFeedOk(false);
+      return;
+    }
+    const tick = async () => {
+      const { sigmaResearchApi } = await import('../../lib/sigmaApi');
+      const [zones, power] = await Promise.all([
+        sigmaResearchApi.zones(),
+        overlays.cosPhi ? sigmaResearchApi.power() : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      const lines: ChartPriceLine[] = [];
+      const marks: ChartMarker[] = [];
+      const feedOk = !!(zones?.available || zones?.ok);
+      setOverlayFeedOk(feedOk);
+      if (feedOk && zones) {
+        if (overlays.ce50 || overlays.fvg) {
+          for (const z of zones.zones ?? []) {
+            if (overlays.ce50 && z.ce50 != null) {
+              lines.push({
+                id: `ce50-${String(z.symbol ?? lines.length)}`,
+                price: Number(z.ce50),
+                color: '#38bdf8',
+                title: 'CE50',
+                lineStyle: 2,
+              });
+            }
+            if (overlays.fvg && z.eq != null) {
+              lines.push({
+                id: `eq-${String(z.symbol ?? lines.length)}`,
+                price: Number(z.eq),
+                color: '#a78bfa',
+                title: 'EQ',
+                lineStyle: 2,
+              });
+            }
+            if (overlays.fvg && z.low != null && z.high != null) {
+              lines.push({
+                id: `fvg-lo-${lines.length}`,
+                price: Number(z.low),
+                color: '#34d39955',
+                title: 'FVG-lo',
+                lineStyle: 1,
+              });
+              lines.push({
+                id: `fvg-hi-${lines.length}`,
+                price: Number(z.high),
+                color: '#34d39955',
+                title: 'FVG-hi',
+                lineStyle: 1,
+              });
+            }
+          }
+        }
+        if (overlays.envelope && zones.envelope) {
+          const up = zones.envelope.upper ?? zones.envelope.high;
+          const lo = zones.envelope.lower ?? zones.envelope.low;
+          if (up != null) {
+            lines.push({ id: 'env-up', price: Number(up), color: '#fbbf24', title: 'Env↑', lineStyle: 2 });
+          }
+          if (lo != null) {
+            lines.push({ id: 'env-lo', price: Number(lo), color: '#fbbf24', title: 'Env↓', lineStyle: 2 });
+          }
+        }
+        if (overlays.thrust) {
+          for (const ev of zones.events ?? []) {
+            const ts = Number(ev.time ?? ev.ts ?? 0);
+            if (!ts) continue;
+            marks.push({
+              time: ts,
+              position: String(ev.kind ?? '').toLowerCase().includes('outside') ? 'aboveBar' : 'belowBar',
+              color: '#f59e0b',
+              shape: 'circle',
+              text: String(ev.kind ?? 'thrust'),
+            });
+          }
+        }
+      }
+      setOverlayLines(lines);
+      setOverlayMarkers(marks);
+      if (overlays.cosPhi && power?.ok && power.cos_path?.length) {
+        setCosPath(power.cos_path.map((p) => ({ ts: p.time, value: p.value })));
+      } else if (overlays.cosPhi) {
+        setCosPath([]);
+      }
+    };
+    void tick();
+    const id = setInterval(() => { void tick(); }, 8000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [overlays]);
 
   // Guide §6 — visualization-plane WS; rAF-batched last-bar updates
   useEffect(() => {
@@ -342,6 +486,14 @@ export function MarketChart() {
     };
   }, [symbol, interval]);
 
+  const toggle = (key: keyof OverlayFlags) => {
+    setOverlays((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const mergedMarkers = [...markers, ...overlayMarkers];
+  const mergedLines = [...priceLines, ...overlayLines];
+  const anyOverlay = overlays.fvg || overlays.ce50 || overlays.envelope || overlays.thrust || overlays.cosPhi;
+
   return (
     <PanelShell title="Market Chart" icon={<Activity size={13} />}
       actions={<>
@@ -356,15 +508,56 @@ export function MarketChart() {
         </select>
         <IconBtn onClick={load} title="Reload"><RefreshCw size={12} /></IconBtn>
       </>}>
+      <div className="mb-1.5 flex flex-wrap gap-1">
+        {([
+          ['fvg', 'FVG'],
+          ['ce50', 'CE50/EQ'],
+          ['envelope', 'Envelope'],
+          ['thrust', 'Thrust/OI'],
+          ['cosPhi', 'cos-φ'],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => toggle(key)}
+            aria-pressed={overlays[key]}
+            title={`Overlay ${label} (fail-closed ohne Feed)`}
+            className={`rounded border px-1.5 py-0.5 text-[9px] ${
+              overlays[key]
+                ? 'border-sky-500/60 bg-sky-500/10 text-sky-300'
+                : 'border-zinc-700 text-zinc-500 hover:border-zinc-500'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       {candles?.length ? (
         <TvLightweightChart
           candles={candles}
-          markers={markers}
-          priceLines={priceLines}
-          seriesKey={`${symbol}:${interval}`}
+          markers={mergedMarkers}
+          priceLines={mergedLines}
+          seriesKey={`${symbol}:${interval}:${Object.values(overlays).join('')}`}
           height={240}
         />
       ) : <div className="text-zinc-600">{error || 'loading…'}</div>}
+      {overlays.cosPhi && (
+        <div className="mt-1 rounded border border-zinc-800 bg-zinc-950/40 px-2 py-1">
+          <div className="mb-0.5 text-[9px] uppercase text-zinc-500">cos-φ Subpane (±0,40 / ±0,15)</div>
+          {cosPath.length ? (
+            <div className="font-mono text-[10px] text-zinc-400">
+              n={cosPath.length} · last {cosPath[cosPath.length - 1]?.value?.toFixed(3) ?? '—'}
+            </div>
+          ) : (
+            <div className="text-[10px] text-zinc-600">kein cos-φ-Feed — fail-closed</div>
+          )}
+        </div>
+      )}
+      {anyOverlay && !overlayFeedOk && (
+        <div className="mt-1 text-[10px] text-zinc-600">
+          Overlay-Feeds absent — keine erfundenen Zonen (fail-closed)
+        </div>
+      )}
       <div className="mt-2 text-[10px] text-zinc-500">
         Lightweight Charts · Loop C sidecar (:8001) · WS {streamStatus} · {candles?.length} candles
         {feed?.source === 'synthetic' && ' · deterministic offline feed — not for live decisions'}
@@ -718,27 +911,42 @@ export function MemoryWatchdogPanel() {
 
 export function TvJobsPanel() {
   const [data, refresh] = usePoll(sigmaApi.jobs, 5000);
+  const [tab, setTab] = useState<'jobs' | 'provisioner'>('jobs');
   const jobs: TvJob[] = data?.jobs ?? [];
   return (
     <PanelShell title="TV Job Queue" icon={<Cpu size={13} />}
-      actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
-      <div className="space-y-1 font-mono text-[11px]">
-        {jobs.slice(0, 20).map((j) => (
-          <div key={j.job_id} className="flex items-center gap-2 border-b border-zinc-800/60 py-1">
-            <span className="w-28 truncate text-zinc-400">{j.job_id}</span>
-            <span className="w-20 text-zinc-500">{j.kind}</span>
-            <span className="flex-1 truncate">{j.strategy_id || j.symbol}</span>
-            <span className={j.status === 'failed' ? 'text-red-400' : j.status === 'done' ? 'text-emerald-400' : 'text-amber-400'}>
-              {j.status}{j.error_code ? ` (${j.error_code})` : ''}
-            </span>
-            {j.status === 'queued' && (
-              <button onClick={() => sigmaApi.cancelJob(j.job_id).then(refresh)}
-                className="text-[10px] text-zinc-500 hover:text-red-400">cancel</button>
-            )}
-          </div>
-        ))}
-        {!jobs?.length && <div className="text-zinc-600">No TV jobs — concurrency stays at 1 by spec.</div>}
-      </div>
+      actions={<>
+        <button type="button" onClick={() => setTab('jobs')}
+          className={`rounded border px-2 py-0.5 text-[10px] ${tab === 'jobs' ? 'border-sky-500 text-sky-300' : 'border-zinc-700 text-zinc-400'}`}>
+          Jobs
+        </button>
+        <button type="button" onClick={() => setTab('provisioner')}
+          className={`rounded border px-2 py-0.5 text-[10px] ${tab === 'provisioner' ? 'border-sky-500 text-sky-300' : 'border-zinc-700 text-zinc-400'}`}>
+          Provisioner
+        </button>
+        <IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>
+      </>}>
+      {tab === 'provisioner' ? (
+        <ProvisionerPanel />
+      ) : (
+        <div className="space-y-1 font-mono text-[11px]">
+          {jobs.slice(0, 20).map((j) => (
+            <div key={j.job_id} className="flex items-center gap-2 border-b border-zinc-800/60 py-1">
+              <span className="w-28 truncate text-zinc-400">{j.job_id}</span>
+              <span className="w-20 text-zinc-500">{j.kind}</span>
+              <span className="flex-1 truncate">{j.strategy_id || j.symbol}</span>
+              <span className={j.status === 'failed' ? 'text-red-400' : j.status === 'done' ? 'text-emerald-400' : 'text-amber-400'}>
+                {j.status}{j.error_code ? ` (${j.error_code})` : ''}
+              </span>
+              {j.status === 'queued' && (
+                <button onClick={() => sigmaApi.cancelJob(j.job_id).then(refresh)}
+                  className="text-[10px] text-zinc-500 hover:text-red-400">cancel</button>
+              )}
+            </div>
+          ))}
+          {!jobs?.length && <div className="text-zinc-600">No TV jobs — concurrency stays at 1 by spec.</div>}
+        </div>
+      )}
     </PanelShell>
   );
 }
