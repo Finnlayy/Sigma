@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 EPS = 1e-9
+ATR_PERIOD = 14
 
 # Klassifikations-Schwellen (KB §9.2/§9.5) als Benennungskonstanten
 ETA_SOLID = 0.85      # eta >= 0.85 -> SOLID_TREND_EXPANSION
@@ -72,7 +73,7 @@ def _atr_series(trs: Sequence[float], period: int) -> List[float]:
 
 def price_action_physics(
     candles: Sequence[Mapping[str, Any]],
-    atr_period: int = 14,
+    atr_period: int = ATR_PERIOD,
 ) -> List[PhysicsBar]:
     """Berechnet pro geschlossener Kerze die §9.5-Features. Alle Nenner mit
     EPS-Schutz; flache Bars (H==L) liefern endliche 0-Werte, nie NaN."""
@@ -89,7 +90,8 @@ def price_action_physics(
         if prev_close is not None:
             trs.append(max(h - l, abs(h - prev_close), abs(l - prev_close)))
         else:
-            trs.append(0.0)
+            # First bar: no C_prev — TR = H−L
+            trs.append(max(0.0, h - l))
         prev_close = close
     atrs = _atr_series(trs, atr_period)
 
@@ -192,7 +194,7 @@ def _c(c: Mapping[str, Any]) -> float:
 
 
 __all__ = [
-    "EPS", "ETA_SOLID", "ETA_WICK", "EXPLOSIVE_EXPANSION", "P_EXPLOSIVE",
+    "ATR_PERIOD", "EPS", "ETA_SOLID", "ETA_WICK", "EXPLOSIVE_EXPANSION", "P_EXPLOSIVE",
     "PhysicsBar", "S_CLIMAX", "SOLID_TREND_EXPANSION", "VOLATILITY_CLIMAX",
     "WICK_REJECTION", "classify_bar", "cos_phi_bar", "cos_phi_path",
     "price_action_physics",
