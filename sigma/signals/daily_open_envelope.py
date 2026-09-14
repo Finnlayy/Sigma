@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from sigma.signals.closed_bars import closed_only
+
 DAY_SECONDS = 86400
 DEFAULT_MIN_BARS = 6
 DEFAULT_TOP_N = 2
@@ -49,7 +51,7 @@ def evaluate(
     aus. Alle Berechnungen sind prefix-only: Ergebnis bis Bar k aendert sich
     nicht durch spaetere Bars. Outside-Inside-Reversal: Bar k-1 schliesst
     ausserhalb, Bar k schliesst gruen und wieder innerhalb."""
-    closed = _closed_bars(candles)
+    closed = closed_only(candles)
     if len(closed) < min_bars:
         return _fail(closed, reason="insufficient_bars")
     if top_n < 1:
@@ -154,13 +156,6 @@ def _fail(closed: Sequence[Mapping[str, Any]], *, reason: str) -> DailyEnvelopeS
         slope_pct=None, outside_inside_reversal=False, outside_side="",
         bars_used=len(closed), reason=reason,
     )
-
-
-def _closed_bars(candles: Sequence[Mapping[str, Any]]) -> list:
-    rows = list(candles)
-    if rows and rows[-1].get("is_closed", rows[-1].get("closed")) is False:
-        return rows[:-1]
-    return rows
 
 
 def _ts(c: Mapping[str, Any]) -> float:

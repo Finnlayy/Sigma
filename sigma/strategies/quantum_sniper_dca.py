@@ -132,7 +132,7 @@ def retest_confirmed(ltf_bars: Sequence[Mapping[str, Any]], ce50: Optional[float
         and ce50 >= fvg.gap_low * (1.0 - RETEST_TOLERANCE)
         and ce50 <= fvg.gap_high * (1.0 + RETEST_TOLERANCE)
     )
-    thrust_ok = bool(thrust.signal and thrust.support_confluence)
+    thrust_ok = bool(thrust.detected and thrust.support_confluence)
     confirmed = touched and dipped and (thrust_ok or fvg_ok)
     reason = "retest_confirmed" if confirmed else "no_retest_confirmation"
     return RetestVerdict(
