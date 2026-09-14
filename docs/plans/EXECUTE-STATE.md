@@ -1,10 +1,10 @@
 # Jules Execute State
 
 <!-- jules-loop:ACTIVE -->
-<!-- jules-next:MP-02 -->
+<!-- jules-next:MP-03 -->
 
 **Loop:** ACTIVE
-**Next:** MP-02
+**Next:** MP-03
 **Branch:** `jules/mp-execute`
 **PR:** one accumulating PR from that branch — do not open a new PR per phase
 **Human:** not available. Do not wait. Do not ask. Continue until **Next** is `STOP`.
@@ -15,8 +15,8 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 
 | MP | Code | Tests | Notes |
 |---|---|---|---|
-| MP-01 | DONE | DONE | `122f7bf` + named constants on HEAD · `sigma/execution/risk_guards.py` · `tests/test_risk_guards.py` |
-| MP-02 | PENDING | PENDING | |
+| MP-01 | DONE | DONE | `122f7bf` + named constants · `sigma/execution/risk_guards.py` · `tests/test_risk_guards.py` |
+| MP-02 | DONE | DONE | Micro-DCA ladder contract + named constants · `sigma/strategies/dca_ladder.py` · `tests/test_dca_ladder.py` |
 | MP-03 | PENDING | PENDING | |
 | MP-04 | PENDING | PENDING | |
 | MP-05 | PENDING | PENDING | |

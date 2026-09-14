@@ -12,7 +12,7 @@ Knoten:     Jaune (Execution-Contract) / Noir (Look-ahead)
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 # Named constants (JULES MP-01 / KB §8) — decimal percents, not magic numbers.
