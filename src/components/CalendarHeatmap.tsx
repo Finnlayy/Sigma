@@ -211,14 +211,14 @@ export default function CalendarHeatmap({
       const dayOfWeek = d.getDay();
       const formattedDate = `${monthLabel} ${String(dNum).padStart(2, '0')}, ${selectedYear}`;
 
-      const pnl = isToday ? Number(todayPnL.toFixed(2)) : 0;
-      const realizedPnL = isToday ? Number(aggregateActivePnL.realizedPnL.toFixed(2)) : 0;
-      const unrealizedPnL = isToday ? Number(aggregateActivePnL.unrealizedPnL.toFixed(2)) : 0;
+      const pnl = isToday ? Number(todayPnL?.toFixed(2)) : 0;
+      const realizedPnL = isToday ? Number(aggregateActivePnL.realizedPnL?.toFixed(2)) : 0;
+      const unrealizedPnL = isToday ? Number(aggregateActivePnL.unrealizedPnL?.toFixed(2)) : 0;
       const tradesCount = isToday ? todayTrades : 0;
       const wins = isToday ? todayWins : 0;
       const losses = isToday ? todayLosses : 0;
-      const volumeUSD = isToday ? Number(todayVolume.toFixed(2)) : 0;
-      const winRate = tradesCount > 0 ? Number(((wins / tradesCount) * 100).toFixed(1)) : 0;
+      const volumeUSD = isToday ? Number(todayVolume?.toFixed(2)) : 0;
+      const winRate = tradesCount > 0 ? Number(((wins / tradesCount) * 100)?.toFixed(1)) : 0;
 
       days.push({
         date: dateStr,
@@ -309,8 +309,8 @@ export default function CalendarHeatmap({
       flatDays,
       bestDay,
       worstDay,
-      winRatePercent: activeDayCount > 0 ? Number(((greenDays / activeDayCount) * 100).toFixed(1)) : 0,
-      avgDailyPnL: Number((total30DPnL / Math.max(1, activeDayCount || 1)).toFixed(2)),
+      winRatePercent: activeDayCount > 0 ? Number(((greenDays / activeDayCount) * 100)?.toFixed(1)) : 0,
+      avgDailyPnL: Number((total30DPnL / Math.max(1, activeDayCount || 1))?.toFixed(2)),
       profitFactor: todayPnL >= 0 ? 99.0 : 0.0
     };
 
@@ -336,7 +336,7 @@ export default function CalendarHeatmap({
 
         const updatedDays = [...prev.days];
         const today = updatedDays[todayIdx];
-        const newPnL = Number((today.realizedPnL + aggregateActivePnL.unrealizedPnL).toFixed(2));
+        const newPnL = Number((today.realizedPnL + aggregateActivePnL.unrealizedPnL)?.toFixed(2));
         updatedDays[todayIdx] = {
           ...today,
           pnl: newPnL,
@@ -350,8 +350,8 @@ export default function CalendarHeatmap({
         return {
           ...prev,
           days: updatedDays,
-          total30DPnL: Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0).toFixed(2)),
-          totalMonthPnL: Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0).toFixed(2))
+          total30DPnL: Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0)?.toFixed(2)),
+          totalMonthPnL: Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0)?.toFixed(2))
         };
       });
     }
@@ -643,7 +643,7 @@ export default function CalendarHeatmap({
               <span>Strategies: <strong className="text-zinc-300">{activeStrategies.length}</strong></span>
               <span>•</span>
               <span>Live Unrealized: <strong className={aggregateActivePnL.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                {aggregateActivePnL.unrealizedPnL >= 0 ? '+' : ''}${aggregateActivePnL.unrealizedPnL.toFixed(2)}
+                {aggregateActivePnL.unrealizedPnL >= 0 ? '+' : ''}${aggregateActivePnL.unrealizedPnL?.toFixed(2)}
               </strong></span>
             </div>
           </div>
@@ -654,11 +654,11 @@ export default function CalendarHeatmap({
               <span className="text-[9px] text-zinc-500 block uppercase font-medium">Month Net P&amp;L</span>
               <div className="flex items-baseline space-x-1 mt-0.5">
                 <span className={`text-sm font-bold ${heatmapData.total30DPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {heatmapData.total30DPnL >= 0 ? '+' : ''}${heatmapData.total30DPnL.toFixed(2)}
+                  {heatmapData.total30DPnL >= 0 ? '+' : ''}${heatmapData.total30DPnL?.toFixed(2)}
                 </span>
                 <span className="text-[9px] text-zinc-500">USD</span>
               </div>
-              <span className="text-[9px] text-zinc-400">Avg: ${heatmapData.avgDailyPnL.toFixed(2)}/active d</span>
+              <span className="text-[9px] text-zinc-400">Avg: ${heatmapData.avgDailyPnL?.toFixed(2)}/active d</span>
             </div>
 
             <div className="bg-zinc-950/80 border border-zinc-850 p-2.5 rounded">
@@ -678,7 +678,7 @@ export default function CalendarHeatmap({
               <span className="text-[9px] text-zinc-500 block uppercase font-medium">Best Day</span>
               <div className="flex items-baseline space-x-1 mt-0.5">
                 <span className="text-sm font-bold text-emerald-400">
-                  {heatmapData.bestDay.pnl > 0 ? '+' : ''}${heatmapData.bestDay.pnl.toFixed(2)}
+                  {heatmapData.bestDay.pnl > 0 ? '+' : ''}${heatmapData.bestDay.pnl?.toFixed(2)}
                 </span>
               </div>
               <span className="text-[9px] text-zinc-400 truncate block">
@@ -690,7 +690,7 @@ export default function CalendarHeatmap({
               <span className="text-[9px] text-zinc-500 block uppercase font-medium">Worst Day</span>
               <div className="flex items-baseline space-x-1 mt-0.5">
                 <span className={`text-sm font-bold ${heatmapData.worstDay.pnl < 0 ? 'text-rose-400' : 'text-zinc-300'}`}>
-                  {heatmapData.worstDay.pnl >= 0 ? '+' : ''}${heatmapData.worstDay.pnl.toFixed(2)}
+                  {heatmapData.worstDay.pnl >= 0 ? '+' : ''}${heatmapData.worstDay.pnl?.toFixed(2)}
                 </span>
               </div>
               <span className="text-[9px] text-zinc-400 truncate block">
@@ -808,7 +808,7 @@ export default function CalendarHeatmap({
                           <span className="opacity-40">{day.isToday || day.tradesCount > 0 ? "$0" : "—"}</span>
                         ) : (
                           <span>
-                            {day.pnl > 0 ? '+' : ''}${Math.abs(day.pnl) >= 100 ? day.pnl.toFixed(0) : day.pnl.toFixed(0)}
+                            {day.pnl > 0 ? '+' : ''}${Math.abs(day.pnl) >= 100 ? day.pnl?.toFixed(0) : day.pnl?.toFixed(0)}
                           </span>
                         )}
                       </div>
@@ -877,7 +877,7 @@ export default function CalendarHeatmap({
                       ? 'bg-rose-950/60 border-rose-800/60 text-rose-400'
                       : 'bg-zinc-900 border-zinc-800 text-zinc-400'
                   }`}>
-                    {activeDay.pnl > 0 ? '+' : ''}${activeDay.pnl.toFixed(2)} USD
+                    {activeDay.pnl > 0 ? '+' : ''}${activeDay.pnl?.toFixed(2)} USD
                   </span>
                 </div>
               </div>
@@ -918,12 +918,12 @@ export default function CalendarHeatmap({
                 </div>
                 <div className="flex justify-between border-r border-zinc-850/60 pr-2">
                   <span className="text-zinc-500">Volume Traded:</span>
-                  <span className="font-semibold text-zinc-200">${activeDay.volumeUSD.toLocaleString()}</span>
+                  <span className="font-semibold text-zinc-200">${activeDay.volumeUSD?.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Realized P&amp;L:</span>
                   <span className={`font-semibold ${activeDay.realizedPnL > 0 ? 'text-emerald-400' : activeDay.realizedPnL < 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
-                    {activeDay.realizedPnL > 0 ? '+' : ''}${activeDay.realizedPnL.toFixed(2)}
+                    {activeDay.realizedPnL > 0 ? '+' : ''}${activeDay.realizedPnL?.toFixed(2)}
                   </span>
                 </div>
               </div>

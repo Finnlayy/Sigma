@@ -1,0 +1,29 @@
+[Unit]
+# =========================================================
+# Datei:      deploy/systemd/sigma-scraper.service
+# Zweck:      §10 — Loop-C-Sidecar (:8001). sigma-core startet danach.
+# System:     Manas: Ciel Core Matrix — Projekt:Sigma
+# =========================================================
+Description=Sigma Loop C — TradingView scraper sidecar (:8001)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sigma
+Group=sigma
+WorkingDirectory=/opt/sigma
+Environment=PYTHONUNBUFFERED=1
+Environment=SIGMA_SCRAPER_HOST=127.0.0.1
+Environment=SIGMA_SCRAPER_PORT=8001
+Environment=SIGMA_SCRAPER_RATE_PER_MIN=60
+Environment=SIGMA_SCRAPER_SYNTHETIC_FALLBACK=0
+ExecStart=/opt/sigma/.venv/bin/python /opt/sigma/bin/sigma-scraper
+Restart=always
+RestartSec=3
+MemoryMax=1G
+StandardOutput=append:/opt/sigma/data/logs/sigma_scraper.log
+StandardError=append:/opt/sigma/data/logs/sigma_scraper.log
+
+[Install]
+WantedBy=multi-user.target

@@ -94,7 +94,7 @@ export default function KrakenSymbolModal({
                   Kraken & Kraken Pro Symbol Directory
                 </span>
                 <span className="bg-emerald-950 border border-emerald-800 text-emerald-400 text-[10px] font-mono px-2 py-0.5 rounded font-semibold">
-                  {symbols.length > 0 ? `${symbols.length.toLocaleString()} Pairs` : 'Live API'}
+                  {symbols.length > 0 ? `${symbols.length?.toLocaleString()} Pairs` : 'Live API'}
                 </span>
               </div>
               <span className="text-[11px] font-mono text-zinc-400">
@@ -229,9 +229,9 @@ export default function KrakenSymbolModal({
         <div className="bg-zinc-950 px-5 py-2 border-b border-zinc-800/80 flex items-center justify-between text-[11px] font-mono text-zinc-400">
           <div>
             <span>Showing </span>
-            <span className="text-emerald-400 font-bold">{filteredSymbols.length.toLocaleString()}</span>
+            <span className="text-emerald-400 font-bold">{filteredSymbols.length?.toLocaleString()}</span>
             <span> of </span>
-            <span className="text-zinc-300 font-semibold">{symbols.length.toLocaleString()}</span>
+            <span className="text-zinc-300 font-semibold">{symbols.length?.toLocaleString()}</span>
             <span> Kraken & Kraken Pro market symbols</span>
           </div>
 

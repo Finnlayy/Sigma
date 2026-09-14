@@ -1,0 +1,83 @@
+//@version=6
+// =========================================================
+// Datei:      prompts/pine_sigma_l4_emitter_v6.pine
+// Zweck:      §33.4 — Sigma L4 Master Emitter (Boilerplate)
+// System:     Manas: Ciel Core Matrix — Projekt:Sigma
+// =========================================================
+// Jede Bibliotheks-Strategie bindet diesen Emitter ein. Er erzeugt exakt das
+// Schema A JSON aus §33.1 (Pydantic: SigmaL4AlertPayload).
+//
+// Webhook-URL:  http://<host>:8000/api/v1/signal/ingest
+// Alert-Freq:   Once Per Bar Close
+// =========================================================
+
+strategy("Sigma L4 Emitter v6", overlay = true, pyramiding = 0,
+     default_qty_type = strategy.percent_of_equity, default_qty_value = 100)
+
+// ---------------------------------------------------------------- Konstanten
+SIGMA_SECRET   = input.string("sigma_prod_secure_token_8849", "Sigma Secret", group = "Sigma L4")
+STRATEGY_ID    = input.string("cisd_sniper_breakout_v6",      "Strategy ID",  group = "Sigma L4")
+BOT_ID         = input.string("bot_xbt_01",                   "Bot ID",       group = "Sigma L4")
+FIXED_LEVERAGE = input.int(5, "Fester Hebel (1-5)", minval = 1, maxval = 5, group = "Sigma L4")
+EXEC_MODE      = input.string("live", "Execution Mode", options = ["live", "kraken_paper"], group = "Sigma L4")
+
+// ------------------------------------------------------------------ Features
+rsiValue = ta.rsi(close, 14)
+atrValue = ta.atr(14)
+bbBasis  = ta.sma(close, 20)
+bbDev    = 2.0 * ta.stdev(close, 20)
+bbBand   = bbBasis == 0 ? 0.0 : (2 * bbDev) / bbBasis
+cisd     = math.min(1.0, math.max(0.0, (close - bbBasis) / (bbDev == 0 ? 1 : bbDev) * 0.5 + 0.5))
+
+// ------------------------------------------------------------- Bracket-Level
+slDistance = atrValue * input.float(1.5, "SL = ATR x", group = "Risk")
+tpDistance = atrValue * input.float(3.0, "TP = ATR x", group = "Risk")
+
+longStop   = close - slDistance
+longTarget = close + tpDistance
+shortStop  = close + slDistance
+shortTarget= close - tpDistance
+
+// --------------------------------------------------------------- JSON-Emitter
+// idempotency_key = sig_{strategy_id}_{ticker}_{time_close}
+emit(actionStr, priceValue, stopValue, targetValue) =>
+    key = "sig_" + STRATEGY_ID + "_" + syminfo.ticker + "_" + str.tostring(time_close / 1000, "#")
+    '{"secret":"'          + SIGMA_SECRET                          + '",' +
+     '"idempotency_key":"' + key                                   + '",' +
+     '"strategy_id":"'     + STRATEGY_ID                           + '",' +
+     '"bot_id":"'          + BOT_ID                                + '",' +
+     '"symbol":"'          + syminfo.prefix + ":" + syminfo.ticker + '",' +
+     '"action":"'          + actionStr                             + '",' +
+     '"order_type":"MARKET",' +
+     '"price":'            + str.tostring(priceValue,  "#.########") + ',' +
+     '"stop_loss":'        + str.tostring(stopValue,   "#.########") + ',' +
+     '"take_profit":'      + str.tostring(targetValue, "#.########") + ',' +
+     '"fixed_leverage":'   + str.tostring(FIXED_LEVERAGE)            + ',' +
+     '"timestamp":'        + str.tostring(time_close / 1000, "#")    + ',' +
+     '"interval":"'        + timeframe.period                        + '",' +
+     '"execution_mode":"'  + EXEC_MODE                               + '",' +
+     '"features":{'        +
+        '"rsi":'          + str.tostring(rsiValue, "#.##")   + ',' +
+        '"atr":'          + str.tostring(atrValue, "#.########") + ',' +
+        '"cisd_score":'   + str.tostring(cisd,     "#.####") + ',' +
+        '"bb_bandwidth":' + str.tostring(bbBand,   "#.####") +
+     '}}'
+
+// ------------------------------------------------------------------ Beispiel
+// Ersetze die beiden Bedingungen durch die Logik der jeweiligen Strategie.
+longCondition  = ta.crossover(ta.ema(close, 9),  ta.ema(close, 21))
+shortCondition = ta.crossunder(ta.ema(close, 9), ta.ema(close, 21))
+
+if longCondition
+    msg = emit("BUY", close, longStop, longTarget)
+    strategy.entry("L", strategy.long, alert_message = msg)
+    alert(msg, alert.freq_once_per_bar_close)
+
+if shortCondition
+    msg = emit("SELL", close, shortStop, shortTarget)
+    strategy.entry("S", strategy.short, alert_message = msg)
+    alert(msg, alert.freq_once_per_bar_close)
+
+// Native Bracket-Exits (spiegeln die SL/TP im Webhook, §20)
+strategy.exit("L-exit", from_entry = "L", stop = longStop,  limit = longTarget)
+strategy.exit("S-exit", from_entry = "S", stop = shortStop, limit = shortTarget)

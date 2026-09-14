@@ -171,7 +171,7 @@ export default function StrategyMatrixModal({
             >
               <span>All-Time Queue Trades</span>
               <span className="bg-zinc-800 text-zinc-300 text-[10px] px-1.5 py-0.2 rounded-full">
-                {strategyMatrix.trades.length}
+                {strategyMatrix.trades?.length}
               </span>
             </button>
             <button
@@ -195,10 +195,10 @@ export default function StrategyMatrixModal({
                   <div className="bg-zinc-950/60 border border-zinc-800 p-3 rounded-lg">
                     <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Net Total P&amp;L</span>
                     <div className={`text-lg font-bold mt-1 ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {isProfit ? '+' : ''}${strategyMatrix.totalPnL.toFixed(2)}
+                      {isProfit ? '+' : ''}${strategyMatrix.totalPnL?.toFixed(2)}
                     </div>
                     <span className="text-[10px] text-zinc-500">
-                      Realized: ${strategyMatrix.realizedPnL.toFixed(2)}
+                      Realized: ${strategyMatrix.realizedPnL?.toFixed(2)}
                     </span>
                   </div>
 
@@ -215,7 +215,7 @@ export default function StrategyMatrixModal({
                   <div className="bg-zinc-950/60 border border-zinc-800 p-3 rounded-lg">
                     <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Profit Factor</span>
                     <div className="text-lg font-bold text-amber-400 mt-1">
-                      {strategyMatrix.profitFactor.toFixed(2)}
+                      {strategyMatrix.profitFactor?.toFixed(2)}
                     </div>
                     <span className="text-[10px] text-zinc-500">
                       Max DD: {strategyMatrix.maxDrawdown}%
@@ -225,10 +225,10 @@ export default function StrategyMatrixModal({
                   <div className="bg-zinc-950/60 border border-zinc-800 p-3 rounded-lg">
                     <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Traded Volume</span>
                     <div className="text-lg font-bold text-zinc-200 mt-1">
-                      ${strategyMatrix.volumeTradedUSD.toLocaleString()}
+                      ${strategyMatrix.volumeTradedUSD?.toLocaleString()}
                     </div>
                     <span className="text-[10px] text-zinc-500">
-                      Avg Trade: ${strategyMatrix.avgTradeReturn.toFixed(2)}
+                      Avg Trade: ${strategyMatrix.avgTradeReturn?.toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -242,11 +242,11 @@ export default function StrategyMatrixModal({
                         <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
                         Cumulative P&amp;L Trajectory ($ USD)
                       </h4>
-                      <span className="text-[10px] font-mono text-zinc-500">{chartData.length} closed trades</span>
+                      <span className="text-[10px] font-mono text-zinc-500">{chartData?.length} closed trades</span>
                     </div>
 
                     <div className="h-44 w-full pt-2">
-                      {chartData.length > 0 ? (
+                      {chartData?.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                             <defs>
@@ -267,17 +267,17 @@ export default function StrategyMatrixModal({
                               tick={{ fontSize: 9, fill: "#71717a", fontFamily: "monospace" }}
                               tickLine={false}
                               axisLine={false}
-                              tickFormatter={(val) => `$${Number(val).toFixed(0)}`}
+                              tickFormatter={(val) => `$${Number(val)?.toFixed(0)}`}
                             />
                             <Tooltip
                               content={({ active, payload }) => {
-                                if (active && payload && payload.length) {
+                                if (active && payload && payload?.length) {
                                   const data = payload[0].payload;
                                   return (
                                     <div className="bg-zinc-950 border border-zinc-800 p-2 rounded shadow-xl font-mono text-[11px] space-y-1">
                                       <div className="text-zinc-400 text-[10px]">Trade #{data.tradeNum} ({data.time})</div>
-                                      <div className="text-zinc-200">Trade P&amp;L: <strong className={data.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{data.pnl >= 0 ? '+' : ''}${data.pnl.toFixed(2)}</strong></div>
-                                      <div className="text-zinc-200">Cum. P&amp;L: <strong className={data.cumPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${data.cumPnL.toFixed(2)}</strong></div>
+                                      <div className="text-zinc-200">Trade P&amp;L: <strong className={data.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{data.pnl >= 0 ? '+' : ''}${data.pnl?.toFixed(2)}</strong></div>
+                                      <div className="text-zinc-200">Cum. P&amp;L: <strong className={data.cumPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${data.cumPnL?.toFixed(2)}</strong></div>
                                     </div>
                                   );
                                 }
@@ -310,12 +310,12 @@ export default function StrategyMatrixModal({
                         Individual Trade P&amp;L Distribution
                       </h4>
                       <span className="text-[10px] font-mono text-zinc-500">
-                        Best: +${strategyMatrix.bestTrade.toFixed(2)} | Worst: ${strategyMatrix.worstTrade.toFixed(2)}
+                        Best: +${strategyMatrix.bestTrade?.toFixed(2)} | Worst: ${strategyMatrix.worstTrade?.toFixed(2)}
                       </span>
                     </div>
 
                     <div className="h-44 w-full pt-2">
-                      {chartData.length > 0 ? (
+                      {chartData?.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                             <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
@@ -330,17 +330,17 @@ export default function StrategyMatrixModal({
                               tick={{ fontSize: 9, fill: "#71717a", fontFamily: "monospace" }}
                               tickLine={false}
                               axisLine={false}
-                              tickFormatter={(val) => `$${Number(val).toFixed(0)}`}
+                              tickFormatter={(val) => `$${Number(val)?.toFixed(0)}`}
                             />
                             <Tooltip
                               content={({ active, payload }) => {
-                                if (active && payload && payload.length) {
+                                if (active && payload && payload?.length) {
                                   const data = payload[0].payload;
                                   return (
                                     <div className="bg-zinc-950 border border-zinc-800 p-2 rounded shadow-xl font-mono text-[11px] space-y-1">
                                       <div className="text-zinc-400 text-[10px]">Trade #{data.tradeNum}</div>
                                       <div className={data.pnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                                        {data.pnl >= 0 ? '+' : ''}${data.pnl.toFixed(2)} USD
+                                        {data.pnl >= 0 ? '+' : ''}${data.pnl?.toFixed(2)} USD
                                       </div>
                                     </div>
                                   );
@@ -384,21 +384,21 @@ export default function StrategyMatrixModal({
                     <div className="flex justify-between border-b border-zinc-800/60 pb-1.5">
                       <span className="text-zinc-500">Win / Loss Ratio:</span>
                       <span className="text-zinc-200 font-semibold">
-                        {strategyMatrix.losingTrades > 0 ? (strategyMatrix.winningTrades / strategyMatrix.losingTrades).toFixed(2) : strategyMatrix.winningTrades}
+                        {strategyMatrix.losingTrades > 0 ? (strategyMatrix.winningTrades / strategyMatrix.losingTrades)?.toFixed(2) : strategyMatrix.winningTrades}
                       </span>
                     </div>
                     <div className="flex justify-between border-b border-zinc-800/60 pb-1.5">
                       <span className="text-zinc-500">Max Trade Peak:</span>
-                      <span className="text-emerald-400 font-semibold">+${strategyMatrix.bestTrade.toFixed(2)}</span>
+                      <span className="text-emerald-400 font-semibold">+${strategyMatrix.bestTrade?.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between border-b border-zinc-800/60 pb-1.5">
                       <span className="text-zinc-500">Max Trade Trough:</span>
-                      <span className="text-rose-400 font-semibold">${strategyMatrix.worstTrade.toFixed(2)}</span>
+                      <span className="text-rose-400 font-semibold">${strategyMatrix.worstTrade?.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between border-b border-zinc-800/60 pb-1.5">
                       <span className="text-zinc-500">Current Floating Unrealized:</span>
                       <span className={`font-semibold ${strategyMatrix.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {strategyMatrix.unrealizedPnL >= 0 ? '+' : ''}${strategyMatrix.unrealizedPnL.toFixed(2)}
+                        {strategyMatrix.unrealizedPnL >= 0 ? '+' : ''}${strategyMatrix.unrealizedPnL?.toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -427,7 +427,7 @@ export default function StrategyMatrixModal({
                       </button>
                     ))}
                   </div>
-                  <span className="text-[11px] text-zinc-500">{filteredTrades.length} trades listed</span>
+                  <span className="text-[11px] text-zinc-500">{filteredTrades?.length} trades listed</span>
                 </div>
 
                 {/* Trades Table */}
@@ -446,7 +446,7 @@ export default function StrategyMatrixModal({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-850">
-                        {filteredTrades.length > 0 ? (
+                        {filteredTrades?.length > 0 ? (
                           filteredTrades.map((t, idx) => {
                             const isBuy = t.type === 'buy';
                             const hasPnl = t.pnl !== undefined;
@@ -464,9 +464,9 @@ export default function StrategyMatrixModal({
                                     {t.type}
                                   </span>
                                 </td>
-                                <td className="py-2 px-3 text-zinc-200">${t.price.toLocaleString()}</td>
+                                <td className="py-2 px-3 text-zinc-200">${t.price?.toLocaleString()}</td>
                                 <td className="py-2 px-3 text-zinc-300">{t.amount}</td>
-                                <td className="py-2 px-3 text-zinc-300">${t.total.toLocaleString()}</td>
+                                <td className="py-2 px-3 text-zinc-300">${t.total?.toLocaleString()}</td>
                                 <td className="py-2 px-3 text-right">
                                   {hasPnl ? (
                                     <span className={`font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -499,7 +499,7 @@ export default function StrategyMatrixModal({
                   <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider mb-3">
                     Active Parameter Matrix
                   </h4>
-                  {strategyMatrix.parameters && Object.keys(strategyMatrix.parameters).length > 0 ? (
+                  {strategyMatrix.parameters && Object.keys(strategyMatrix.parameters)?.length > 0 ? (
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                       {Object.entries(strategyMatrix.parameters).map(([key, val]) => (
                         <div key={key} className="bg-zinc-900 border border-zinc-800/80 p-2.5 rounded">

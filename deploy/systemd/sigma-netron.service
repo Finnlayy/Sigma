@@ -1,0 +1,26 @@
+[Unit]
+# =========================================================
+# Datei:      deploy/systemd/sigma-netron.service
+# Zweck:      §38.6 — Netron ONNX Inspector (:8082), 100 % offline.
+# System:     Manas: Ciel Core Matrix — Projekt:Sigma
+# =========================================================
+Description=Sigma Netron — ONNX visualization & inspection stack (:8082)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sigma
+Group=sigma
+WorkingDirectory=/opt/sigma
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/sigma
+ExecStart=/opt/sigma/.venv/bin/python /opt/sigma/app/services/netron_server.py
+Restart=always
+RestartSec=3
+MemoryMax=1G
+StandardOutput=append:/opt/sigma/data/logs/ai_layer.log
+StandardError=append:/opt/sigma/data/logs/ai_layer.log
+
+[Install]
+WantedBy=multi-user.target

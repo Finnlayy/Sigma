@@ -134,7 +134,7 @@ export function StrategyLibraryPanel() {
 
   const importTv = async (ids?: string[]) => {
     const scriptIds = ids ?? Object.entries(tvPicked).filter(([, on]) => on).map(([id]) => id);
-    if (!scriptIds.length) {
+    if (!scriptIds?.length) {
       setStatus('select at least one TV script');
       return;
     }
@@ -148,7 +148,7 @@ export function StrategyLibraryPanel() {
     }
     setStatus(
       `imported ${out.imported_count}, skipped ${out.skipped_count}`
-      + (out.missing?.length ? `, missing ${out.missing.length}` : '')
+      + (out.missing?.length ? `, missing ${out.missing?.length}` : '')
       + ' — paper/inactive',
     );
     await ws.reload();
@@ -204,12 +204,12 @@ export function StrategyLibraryPanel() {
               {tvCatalog?.reason || tvCatalog?.source || (tvBusy ? 'loading…' : '')}
             </span>
             <Button size="sm" variant="outline" className="ml-auto h-6 text-[10px]"
-              onClick={() => void importTv()} disabled={tvBusy || !tvRows.length}>
+              onClick={() => void importTv()} disabled={tvBusy || !tvRows?.length}>
               Import selected
             </Button>
             <Button size="sm" variant="outline" className="h-6 text-[10px]"
               onClick={() => void importTv(tvRows.map((r) => r.tv_script_id))}
-              disabled={tvBusy || !tvRows.length}>
+              disabled={tvBusy || !tvRows?.length}>
               Import all
             </Button>
             <Button size="sm" variant="ghost" className="h-6 text-[10px]"
@@ -217,14 +217,14 @@ export function StrategyLibraryPanel() {
               Hide
             </Button>
           </div>
-          {!tvRows.length && !tvBusy && (
+          {!tvRows?.length && !tvBusy && (
             <div className="text-[11px] text-muted-foreground">
               {tvCatalog?.session_present
                 ? 'No saved or published scripts on this TradingView session.'
                 : 'Log in with bin/sigma-tv-login so Sigma can read your TV library. Imports always start paper/inactive.'}
             </div>
           )}
-          {!!tvRows.length && (
+          {!!tvRows?.length && (
             <div className="max-h-36 space-y-1 overflow-auto">
               {tvRows.map((row) => (
                 <label key={row.tv_script_id}
@@ -274,7 +274,7 @@ export function StrategyLibraryPanel() {
               </button>
               );
             })}
-            {!visible.length && <div className="text-[11px] text-muted-foreground">No strategies</div>}
+            {!visible?.length && <div className="text-[11px] text-muted-foreground">No strategies</div>}
           </div>
         </ScrollArea>
         <Tabs defaultValue="Code" className="flex min-h-0 flex-col gap-0">

@@ -1,0 +1,2174 @@
+{
+  "schema_version": 1,
+  "cli_version": "0.4.1",
+  "cli_package": "krakenfx/kraken-cli",
+  "leaf_count": 181,
+  "notes": "Machine-readable Kraken CLI leaf registry for Sigma Single-Book. adapter=KrakenCliBridge.run_leaf is the generic registry argv runner; specialized methods keep named adapters. FEED_OTHER = Sigma market feed still uses scraper/CCXT but leaf remains CLI-callable. KrakenMCPBridge 149 fake tools are QUARANTINED \u2014 not this registry.",
+  "commands": [
+    {
+      "name": "assets",
+      "argv": [
+        "kraken",
+        "assets"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "auth/reset",
+      "argv": [
+        "kraken",
+        "auth",
+        "reset"
+      ],
+      "book": "meta",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "auth/set",
+      "argv": [
+        "kraken",
+        "auth",
+        "set"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "auth/show",
+      "argv": [
+        "kraken",
+        "auth",
+        "show"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "auth/test",
+      "argv": [
+        "kraken",
+        "auth",
+        "test"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "balance",
+      "argv": [
+        "kraken",
+        "balance"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.balance"
+    },
+    {
+      "name": "closed-orders",
+      "argv": [
+        "kraken",
+        "closed-orders"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "credit-lines",
+      "argv": [
+        "kraken",
+        "credit-lines"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "deposit/addresses",
+      "argv": [
+        "kraken",
+        "deposit",
+        "addresses"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "deposit/methods",
+      "argv": [
+        "kraken",
+        "deposit",
+        "methods"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "deposit/status",
+      "argv": [
+        "kraken",
+        "deposit",
+        "status"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "earn/allocate",
+      "argv": [
+        "kraken",
+        "earn",
+        "allocate"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "earn/allocate-status",
+      "argv": [
+        "kraken",
+        "earn",
+        "allocate-status"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "earn/allocations",
+      "argv": [
+        "kraken",
+        "earn",
+        "allocations"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "earn/deallocate",
+      "argv": [
+        "kraken",
+        "earn",
+        "deallocate"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "earn/deallocate-status",
+      "argv": [
+        "kraken",
+        "earn",
+        "deallocate-status"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "earn/strategies",
+      "argv": [
+        "kraken",
+        "earn",
+        "strategies"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "explain/pnl",
+      "argv": [
+        "kraken",
+        "explain",
+        "pnl"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "export-delete",
+      "argv": [
+        "kraken",
+        "export-delete"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "export-report",
+      "argv": [
+        "kraken",
+        "export-report"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "export-retrieve",
+      "argv": [
+        "kraken",
+        "export-retrieve"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "export-status",
+      "argv": [
+        "kraken",
+        "export-status"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "extended-balance",
+      "argv": [
+        "kraken",
+        "extended-balance"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "feedback",
+      "argv": [
+        "kraken",
+        "feedback"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/accounts",
+      "argv": [
+        "kraken",
+        "futures",
+        "accounts"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/assignment-programs",
+      "argv": [
+        "kraken",
+        "futures",
+        "assignment-programs"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/batch-order",
+      "argv": [
+        "kraken",
+        "futures",
+        "batch-order"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/cancel",
+      "argv": [
+        "kraken",
+        "futures",
+        "cancel"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/cancel-after",
+      "argv": [
+        "kraken",
+        "futures",
+        "cancel-after"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/cancel-all",
+      "argv": [
+        "kraken",
+        "futures",
+        "cancel-all"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/edit-order",
+      "argv": [
+        "kraken",
+        "futures",
+        "edit-order"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/fee-schedule-volumes",
+      "argv": [
+        "kraken",
+        "futures",
+        "fee-schedule-volumes"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/feeschedules",
+      "argv": [
+        "kraken",
+        "futures",
+        "feeschedules"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/fills",
+      "argv": [
+        "kraken",
+        "futures",
+        "fills"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.futures_fills"
+    },
+    {
+      "name": "futures/historical-funding-rates",
+      "argv": [
+        "kraken",
+        "futures",
+        "historical-funding-rates"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/history",
+      "argv": [
+        "kraken",
+        "futures",
+        "history"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/history-account-log-csv",
+      "argv": [
+        "kraken",
+        "futures",
+        "history-account-log-csv"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/history-executions",
+      "argv": [
+        "kraken",
+        "futures",
+        "history-executions"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/history-orders",
+      "argv": [
+        "kraken",
+        "futures",
+        "history-orders"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/history-triggers",
+      "argv": [
+        "kraken",
+        "futures",
+        "history-triggers"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/instrument-status",
+      "argv": [
+        "kraken",
+        "futures",
+        "instrument-status"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/instruments",
+      "argv": [
+        "kraken",
+        "futures",
+        "instruments"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/leverage",
+      "argv": [
+        "kraken",
+        "futures",
+        "leverage"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/notifications",
+      "argv": [
+        "kraken",
+        "futures",
+        "notifications"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/open-orders",
+      "argv": [
+        "kraken",
+        "futures",
+        "open-orders"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/order-status",
+      "argv": [
+        "kraken",
+        "futures",
+        "order-status"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/order/buy",
+      "argv": [
+        "kraken",
+        "futures",
+        "order",
+        "buy"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "futures/order/sell",
+      "argv": [
+        "kraken",
+        "futures",
+        "order",
+        "sell"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "futures/orderbook",
+      "argv": [
+        "kraken",
+        "futures",
+        "orderbook"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/balance",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "balance"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/batch-order",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "batch-order"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/buy",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "buy"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "futures/paper/cancel",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "cancel"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/cancel-all",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "cancel-all"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/edit-order",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "edit-order"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/fills",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "fills"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/history",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "history"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/init",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "init"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/leverage",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "leverage"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/order-status",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "order-status"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/orders",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "orders"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/positions",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "positions"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/reset",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "reset"
+      ],
+      "book": "paper",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/sell",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "sell"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "futures/paper/set-leverage",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "set-leverage"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/paper/status",
+      "argv": [
+        "kraken",
+        "futures",
+        "paper",
+        "status"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/pnl-preferences",
+      "argv": [
+        "kraken",
+        "futures",
+        "pnl-preferences"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/positions",
+      "argv": [
+        "kraken",
+        "futures",
+        "positions"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/set-leverage",
+      "argv": [
+        "kraken",
+        "futures",
+        "set-leverage"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/set-pnl-preference",
+      "argv": [
+        "kraken",
+        "futures",
+        "set-pnl-preference"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/set-subaccount-status",
+      "argv": [
+        "kraken",
+        "futures",
+        "set-subaccount-status"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/subaccount-status",
+      "argv": [
+        "kraken",
+        "futures",
+        "subaccount-status"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/subaccounts",
+      "argv": [
+        "kraken",
+        "futures",
+        "subaccounts"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ticker",
+      "argv": [
+        "kraken",
+        "futures",
+        "ticker"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/tickers",
+      "argv": [
+        "kraken",
+        "futures",
+        "tickers"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/trading-instruments",
+      "argv": [
+        "kraken",
+        "futures",
+        "trading-instruments"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/transfer",
+      "argv": [
+        "kraken",
+        "futures",
+        "transfer"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/transfers",
+      "argv": [
+        "kraken",
+        "futures",
+        "transfers"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/unwind-queue",
+      "argv": [
+        "kraken",
+        "futures",
+        "unwind-queue"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/wallet-transfer",
+      "argv": [
+        "kraken",
+        "futures",
+        "wallet-transfer"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/account-log",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "account-log"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/balances",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "balances"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/book",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "book"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/fills",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "fills"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/notifications",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "notifications"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/open-orders",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "open-orders"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/open-positions",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "open-positions"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/ticker",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "ticker"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "futures/ws/trades",
+      "argv": [
+        "kraken",
+        "futures",
+        "ws",
+        "trades"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "lab/compare",
+      "argv": [
+        "kraken",
+        "lab",
+        "compare"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "lab/new",
+      "argv": [
+        "kraken",
+        "lab",
+        "new"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "lab/next",
+      "argv": [
+        "kraken",
+        "lab",
+        "next"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "lab/score",
+      "argv": [
+        "kraken",
+        "lab",
+        "score"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "lab/show",
+      "argv": [
+        "kraken",
+        "lab",
+        "show"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ledgers",
+      "argv": [
+        "kraken",
+        "ledgers"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "mcp",
+      "argv": [
+        "kraken",
+        "mcp"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ohlc",
+      "argv": [
+        "kraken",
+        "ohlc"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "open-orders",
+      "argv": [
+        "kraken",
+        "open-orders"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "order/amend",
+      "argv": [
+        "kraken",
+        "order",
+        "amend"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "order/batch",
+      "argv": [
+        "kraken",
+        "order",
+        "batch"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "order/buy",
+      "argv": [
+        "kraken",
+        "order",
+        "buy"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "order/cancel",
+      "argv": [
+        "kraken",
+        "order",
+        "cancel"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "order/cancel-after",
+      "argv": [
+        "kraken",
+        "order",
+        "cancel-after"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "order/cancel-all",
+      "argv": [
+        "kraken",
+        "order",
+        "cancel-all"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.cancel_all"
+    },
+    {
+      "name": "order/cancel-batch",
+      "argv": [
+        "kraken",
+        "order",
+        "cancel-batch"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "order/edit",
+      "argv": [
+        "kraken",
+        "order",
+        "edit"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "order/sell",
+      "argv": [
+        "kraken",
+        "order",
+        "sell"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "orderbook",
+      "argv": [
+        "kraken",
+        "orderbook"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "orderbook-grouped",
+      "argv": [
+        "kraken",
+        "orderbook-grouped"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "orderbook-l3",
+      "argv": [
+        "kraken",
+        "orderbook-l3"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "pairs",
+      "argv": [
+        "kraken",
+        "pairs"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "paper/balance",
+      "argv": [
+        "kraken",
+        "paper",
+        "balance"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.paper_balance"
+    },
+    {
+      "name": "paper/buy",
+      "argv": [
+        "kraken",
+        "paper",
+        "buy"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "paper/cancel",
+      "argv": [
+        "kraken",
+        "paper",
+        "cancel"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "paper/cancel-all",
+      "argv": [
+        "kraken",
+        "paper",
+        "cancel-all"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.cancel_all"
+    },
+    {
+      "name": "paper/history",
+      "argv": [
+        "kraken",
+        "paper",
+        "history"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.paper_history"
+    },
+    {
+      "name": "paper/init",
+      "argv": [
+        "kraken",
+        "paper",
+        "init"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "paper/orders",
+      "argv": [
+        "kraken",
+        "paper",
+        "orders"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "paper/reset",
+      "argv": [
+        "kraken",
+        "paper",
+        "reset"
+      ],
+      "book": "paper",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "paper/sell",
+      "argv": [
+        "kraken",
+        "paper",
+        "sell"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.add_order"
+    },
+    {
+      "name": "paper/status",
+      "argv": [
+        "kraken",
+        "paper",
+        "status"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.paper_status"
+    },
+    {
+      "name": "playground",
+      "argv": [
+        "kraken",
+        "playground"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "positions",
+      "argv": [
+        "kraken",
+        "positions"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "query-ledgers",
+      "argv": [
+        "kraken",
+        "query-ledgers"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "query-orders",
+      "argv": [
+        "kraken",
+        "query-orders"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "query-trades",
+      "argv": [
+        "kraken",
+        "query-trades"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "record",
+      "argv": [
+        "kraken",
+        "record"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "replay",
+      "argv": [
+        "kraken",
+        "replay"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "server-time",
+      "argv": [
+        "kraken",
+        "server-time"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/decisions",
+      "argv": [
+        "kraken",
+        "session",
+        "decisions"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/list",
+      "argv": [
+        "kraken",
+        "session",
+        "list"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/note",
+      "argv": [
+        "kraken",
+        "session",
+        "note"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/show",
+      "argv": [
+        "kraken",
+        "session",
+        "show"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/start",
+      "argv": [
+        "kraken",
+        "session",
+        "start"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/state/get",
+      "argv": [
+        "kraken",
+        "session",
+        "state",
+        "get"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/state/set",
+      "argv": [
+        "kraken",
+        "session",
+        "state",
+        "set"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "session/stop",
+      "argv": [
+        "kraken",
+        "session",
+        "stop"
+      ],
+      "book": "meta",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "setup",
+      "argv": [
+        "kraken",
+        "setup"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "shell",
+      "argv": [
+        "kraken",
+        "shell"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "spreads",
+      "argv": [
+        "kraken",
+        "spreads"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "status",
+      "argv": [
+        "kraken",
+        "status"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "streamd/start",
+      "argv": [
+        "kraken",
+        "streamd",
+        "start"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "subaccount/create",
+      "argv": [
+        "kraken",
+        "subaccount",
+        "create"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "subaccount/transfer",
+      "argv": [
+        "kraken",
+        "subaccount",
+        "transfer"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "tape/list",
+      "argv": [
+        "kraken",
+        "tape",
+        "list"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ticker",
+      "argv": [
+        "kraken",
+        "ticker"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "trade-balance",
+      "argv": [
+        "kraken",
+        "trade-balance"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "trades",
+      "argv": [
+        "kraken",
+        "trades"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "trades-history",
+      "argv": [
+        "kraken",
+        "trades-history"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "FEED_OTHER",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "volume",
+      "argv": [
+        "kraken",
+        "volume"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "wallet-transfer",
+      "argv": [
+        "kraken",
+        "wallet-transfer"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "withdraw",
+      "argv": [
+        "kraken",
+        "withdraw"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "withdrawal/addresses",
+      "argv": [
+        "kraken",
+        "withdrawal",
+        "addresses"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "withdrawal/cancel",
+      "argv": [
+        "kraken",
+        "withdrawal",
+        "cancel"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "withdrawal/info",
+      "argv": [
+        "kraken",
+        "withdrawal",
+        "info"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "withdrawal/methods",
+      "argv": [
+        "kraken",
+        "withdrawal",
+        "methods"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "withdrawal/status",
+      "argv": [
+        "kraken",
+        "withdrawal",
+        "status"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/balance",
+      "argv": [
+        "kraken",
+        "workspace",
+        "balance"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/create",
+      "argv": [
+        "kraken",
+        "workspace",
+        "create"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/list",
+      "argv": [
+        "kraken",
+        "workspace",
+        "list"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/promote",
+      "argv": [
+        "kraken",
+        "workspace",
+        "promote"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/report",
+      "argv": [
+        "kraken",
+        "workspace",
+        "report"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/reset",
+      "argv": [
+        "kraken",
+        "workspace",
+        "reset"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/show",
+      "argv": [
+        "kraken",
+        "workspace",
+        "show"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "workspace/status",
+      "argv": [
+        "kraken",
+        "workspace",
+        "status"
+      ],
+      "book": "paper",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/add-order",
+      "argv": [
+        "kraken",
+        "ws",
+        "add-order"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/amend-order",
+      "argv": [
+        "kraken",
+        "ws",
+        "amend-order"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/balances",
+      "argv": [
+        "kraken",
+        "ws",
+        "balances"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/batch-add",
+      "argv": [
+        "kraken",
+        "ws",
+        "batch-add"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/batch-cancel",
+      "argv": [
+        "kraken",
+        "ws",
+        "batch-cancel"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/book",
+      "argv": [
+        "kraken",
+        "ws",
+        "book"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/cancel-after",
+      "argv": [
+        "kraken",
+        "ws",
+        "cancel-after"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/cancel-all",
+      "argv": [
+        "kraken",
+        "ws",
+        "cancel-all"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/cancel-order",
+      "argv": [
+        "kraken",
+        "ws",
+        "cancel-order"
+      ],
+      "book": "live",
+      "dangerous": true,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/executions",
+      "argv": [
+        "kraken",
+        "ws",
+        "executions"
+      ],
+      "book": "live",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/instrument",
+      "argv": [
+        "kraken",
+        "ws",
+        "instrument"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/level3",
+      "argv": [
+        "kraken",
+        "ws",
+        "level3"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/ohlc",
+      "argv": [
+        "kraken",
+        "ws",
+        "ohlc"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/ping",
+      "argv": [
+        "kraken",
+        "ws",
+        "ping"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/ticker",
+      "argv": [
+        "kraken",
+        "ws",
+        "ticker"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    },
+    {
+      "name": "ws/trades",
+      "argv": [
+        "kraken",
+        "ws",
+        "trades"
+      ],
+      "book": "public",
+      "dangerous": false,
+      "sigma_status": "CLI_CALL",
+      "adapter": "KrakenCliBridge.run_leaf"
+    }
+  ]
+}

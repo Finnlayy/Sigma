@@ -270,7 +270,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
             <Database className="w-3.5 h-3.5 text-emerald-400" />
           </span>
           <span className="text-xl font-bold font-mono text-white block mt-1">
-            {summary?.total_rows ? summary.total_rows.toLocaleString() : "10,081"}
+            {summary?.total_rows ? summary.total_rows?.toLocaleString() : "10,081"}
           </span>
           <span className="text-[10px] font-mono text-emerald-400 mt-1 block">
             Schema: timestamp_ns (UTC)
@@ -409,7 +409,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
                         <div className="flex items-center space-x-2">
                           <span className="font-bold text-emerald-300">{sym.symbol}</span>
                           <span className="text-[10px] px-1.5 py-0.2 bg-zinc-800 text-zinc-300 rounded">
-                            {sym.rows.toLocaleString()} candles
+                            {sym.rows?.toLocaleString()} candles
                           </span>
                         </div>
                         <div className="text-[10px] text-zinc-500">
@@ -616,7 +616,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
                       <td className="p-2 font-bold text-white">{r.close?.toFixed(2)}</td>
                       <td className="p-2 text-zinc-400">{r.volume?.toFixed(2)}</td>
                       <td className="p-2 text-zinc-500">{r.trades_count || "-"}</td>
-                      <td className="p-2 text-purple-300">{r.vwap ? r.vwap.toFixed(2) : "-"}</td>
+                      <td className="p-2 text-purple-300">{r.vwap ? r.vwap?.toFixed(2) : "-"}</td>
                     </tr>
                   ))
                 ) : (
@@ -751,7 +751,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
               </div>
               <div className="p-2.5 bg-zinc-950 border border-zinc-800 rounded-lg">
                 <span className="text-[10px] text-zinc-500 block uppercase">Total Aggregated Bars</span>
-                <span className="font-bold text-emerald-400 text-sm">{(resampleResult.total_bars ?? resampleResult.records?.length ?? 0).toLocaleString()}</span>
+                <span className="font-bold text-emerald-400 text-sm">{(resampleResult.total_bars ?? resampleResult.records?.length ?? 0)?.toLocaleString()}</span>
               </div>
               <div className="p-2.5 bg-zinc-950 border border-zinc-800 rounded-lg">
                 <span className="text-[10px] text-zinc-500 block uppercase">Returned Window</span>
@@ -800,15 +800,15 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
                             {r.timeframe || resampleInterval}
                           </span>
                         </td>
-                        <td className="p-2.5 text-right text-zinc-300">${typeof r.open === 'number' ? r.open.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.open}</td>
-                        <td className="p-2.5 text-right text-emerald-400 font-medium">${typeof r.high === 'number' ? r.high.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.high}</td>
-                        <td className="p-2.5 text-right text-rose-400 font-medium">${typeof r.low === 'number' ? r.low.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.low}</td>
+                        <td className="p-2.5 text-right text-zinc-300">${typeof r.open === 'number' ? r.open?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.open}</td>
+                        <td className="p-2.5 text-right text-emerald-400 font-medium">${typeof r.high === 'number' ? r.high?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.high}</td>
+                        <td className="p-2.5 text-right text-rose-400 font-medium">${typeof r.low === 'number' ? r.low?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.low}</td>
                         <td className={`p-2.5 text-right font-bold ${isGreen ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          ${typeof r.close === 'number' ? r.close.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.close}
+                          ${typeof r.close === 'number' ? r.close?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : r.close}
                         </td>
-                        <td className="p-2.5 text-right text-zinc-300">{typeof r.volume === 'number' ? r.volume.toLocaleString(undefined, { maximumFractionDigits: 2 }) : r.volume}</td>
-                        <td className="p-2.5 text-right text-zinc-500">{r.trades_count ? Number(r.trades_count).toLocaleString() : "-"}</td>
-                        <td className="p-2.5 text-right text-purple-300 font-medium">{r.vwap ? `$${Number(r.vwap).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-"}</td>
+                        <td className="p-2.5 text-right text-zinc-300">{typeof r.volume === 'number' ? r.volume?.toLocaleString(undefined, { maximumFractionDigits: 2 }) : r.volume}</td>
+                        <td className="p-2.5 text-right text-zinc-500">{r.trades_count ? Number(r.trades_count)?.toLocaleString() : "-"}</td>
+                        <td className="p-2.5 text-right text-purple-300 font-medium">{r.vwap ? `$${Number(r.vwap)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-"}</td>
                       </tr>
                     );
                   })}

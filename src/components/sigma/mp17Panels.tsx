@@ -96,8 +96,8 @@ export function MarketGeometryPanel() {
             {data.zones.map((z, i) => (
               <tr key={i} className="border-t border-zinc-800/60 font-mono">
                 <td className="py-0.5">{String(z.symbol ?? '—')}</td>
-                <td>{`${Number(z.low ?? 0).toFixed(4)}–${Number(z.high ?? 0).toFixed(4)}`}</td>
-                <td>{Number(z.ce50 ?? 0).toFixed(4)}</td>
+                <td>{`${Number(z.low ?? 0)?.toFixed(4)}–${Number(z.high ?? 0)?.toFixed(4)}`}</td>
+                <td>{Number(z.ce50 ?? 0)?.toFixed(4)}</td>
                 <td>{String(z.age_bars ?? '—')}b</td>
                 <td className={z.bias === 'aligned' ? 'text-emerald-400' : 'text-amber-400'}>{String(z.bias ?? '—')}</td>
               </tr>
@@ -127,7 +127,7 @@ export function PowerPhysicsPanel() {
         <EmptyState text="keine geschlossene Kerze / kein Feed (fail-closed)" />
       ) : (
         <div className="space-y-2">
-          <Stat label="cos φ" value={cos.toFixed(3)} tone={cos >= 0.85 ? 'text-emerald-400' : cos < 0.3 ? 'text-red-400' : 'text-zinc-100'} />
+          <Stat label="cos φ" value={cos?.toFixed(3)} tone={cos >= 0.85 ? 'text-emerald-400' : cos < 0.3 ? 'text-red-400' : 'text-zinc-100'} />
           <Stat label="Cluster" value={cluster} />
           <div className="grid grid-cols-3 gap-1.5">
             <Stat label="S_norm" value={data?.s_norm?.toFixed(3) ?? '—'} />
@@ -175,7 +175,7 @@ export function SymbolScoutPanel() {
               {data?.phase_ok ? 'SCAN&DEPLOY' : 'Scan nur in Phase SCAN&DEPLOY'}
             </span>
           </div>
-          {!rows.length ? (
+          {!rows?.length ? (
             <EmptyState text="kein Coin erfüllt die Hard-Filter (r≥0,75, β≥1,5, RVOL≥1,5)" />
           ) : (
             <table className="w-full text-[10px]">
@@ -192,11 +192,11 @@ export function SymbolScoutPanel() {
                     <tr key={i} className="border-t border-zinc-800/60 font-mono">
                       <td className="py-0.5">{blindedSymbol(String(row.symbol ?? ''), blinded)}</td>
                       <td className={isLong ? 'text-emerald-400' : 'text-red-400'}>{String(row.side ?? '—')}</td>
-                      <td>{Number(row.beta ?? 0).toFixed(2)}</td>
-                      <td>{Number(row.r ?? 0).toFixed(2)}</td>
-                      <td>{Number(row.rvol ?? 0).toFixed(1)}</td>
+                      <td>{Number(row.beta ?? 0)?.toFixed(2)}</td>
+                      <td>{Number(row.r ?? 0)?.toFixed(2)}</td>
+                      <td>{Number(row.rvol ?? 0)?.toFixed(1)}</td>
                       <td className={(Number(row.pos_eq ?? 0.5) >= 0.9) ? 'text-red-400' : 'text-emerald-400'}>
-                        {Number(row.pos_eq ?? 0.5).toFixed(2)}
+                        {Number(row.pos_eq ?? 0.5)?.toFixed(2)}
                       </td>
                       <td className={rec.startsWith('sniper') ? 'text-emerald-400' : 'text-zinc-300'}>{rec}</td>
                     </tr>
@@ -234,7 +234,7 @@ export function PolymarketPanel() {
           <Stat label="P_cal vs Gate 0,60–0,65" value={data?.p_cal?.toFixed(3) ?? '—'}
             tone={(data?.gate_open ?? false) ? 'text-emerald-400' : 'text-red-400'} />
           <Stat label="Brier" value={data?.brier?.toFixed(4) ?? '—'} />
-          <Stat label="Platt" value={data?.platt_a != null && data?.platt_b != null ? `a=${data.platt_a.toFixed(3)} b=${data.platt_b.toFixed(3)}` : '—'} />
+          <Stat label="Platt" value={data?.platt_a != null && data?.platt_b != null ? `a=${data.platt_a?.toFixed(3)} b=${data.platt_b?.toFixed(3)}` : '—'} />
         </div>
       )}
     </PanelShell>
@@ -255,8 +255,8 @@ export function LadderArchitectPanel() {
           {data.rungs.map((r, i) => (
             <div key={i} className="mb-1 flex items-center justify-between font-mono text-[10px]">
               <span className="text-zinc-400">Stufe {String(r.step ?? i + 1)}</span>
-              <span>{Number(r.price ?? 0).toFixed(4)}</span>
-              <span className="text-zinc-500">{(Number(r.margin_pct ?? 0) * 100).toFixed(1)}%</span>
+              <span>{Number(r.price ?? 0)?.toFixed(4)}</span>
+              <span className="text-zinc-500">{(Number(r.margin_pct ?? 0) * 100)?.toFixed(1)}%</span>
             </div>
           ))}
           <div className="mt-2 space-y-1">
@@ -297,7 +297,7 @@ export function FractalTradePanel() {
           {data.tranches.map((t, i) => (
             <div key={i} className="mt-1 flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 font-mono text-[10px]">
               <span>{String(t.label ?? `TP${i + 1}`)}</span>
-              <span>{(Number(t.qty_pct ?? 0) * 100).toFixed(0)}% @ {Number(t.price ?? 0).toFixed(4)}</span>
+              <span>{(Number(t.qty_pct ?? 0) * 100)?.toFixed(0)}% @ {Number(t.price ?? 0)?.toFixed(4)}</span>
               <span className={t.filled ? 'text-emerald-400' : 'text-zinc-500'}>{t.filled ? 'gefüllt' : 'offen'}</span>
             </div>
           ))}
@@ -306,7 +306,7 @@ export function FractalTradePanel() {
           </div>
           {data?.fee_covered_be != null && (
             <div className="mt-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-400">
-              +0,05 % fee-covered Break-Even nach TP1 — Pflicht-Auto-Move (nicht abschaltbar) @ {data.fee_covered_be.toFixed(4)}
+              +0,05 % fee-covered Break-Even nach TP1 — Pflicht-Auto-Move (nicht abschaltbar) @ {data.fee_covered_be?.toFixed(4)}
             </div>
           )}
           {triggered && (
@@ -387,20 +387,20 @@ export function OnnxBrainPanel() {
               <div key={i} className="flex items-center gap-2 text-[10px] font-mono" title={`${f.name} in [-1,1]/[0,1]; fehlende Quelle = 0 (fail-closed)`}>
                 <span className="w-24 text-zinc-500">{f.name}</span>
                 <div className="flex-1"><Bar value={f.value} tone={f.value >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'} /></div>
-                <span className="w-10 text-right text-zinc-300">{f.value.toFixed(2)}</span>
+                <span className="w-10 text-right text-zinc-300">{f.value?.toFixed(2)}</span>
               </div>
             ))}
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
-            <Stat label="LONG" value={`${((data.action_probs?.long ?? 0) * 100).toFixed(0)}%`} tone="text-emerald-400" />
-            <Stat label="FLAT" value={`${((data.action_probs?.flat ?? 0) * 100).toFixed(0)}%`} />
-            <Stat label="SHORT" value={`${((data.action_probs?.short ?? 0) * 100).toFixed(0)}%`} tone="text-red-400" />
+            <Stat label="LONG" value={`${((data.action_probs?.long ?? 0) * 100)?.toFixed(0)}%`} tone="text-emerald-400" />
+            <Stat label="FLAT" value={`${((data.action_probs?.flat ?? 0) * 100)?.toFixed(0)}%`} />
+            <Stat label="SHORT" value={`${((data.action_probs?.short ?? 0) * 100)?.toFixed(0)}%`} tone="text-red-400" />
           </div>
           <div className="mt-1.5 flex items-center gap-2 text-[10px] font-mono text-zinc-400">
             <span>Hebel {data?.leverage ?? '—'}x</span>
             <span>Entropie {data?.entropy?.toFixed(3) ?? '—'}</span>
             <span className={data?.bar_lock === 'BLOCKED_BY_BAR_LOCK' ? 'text-red-400' : ''}>{data?.bar_lock ?? '—'}</span>
-            <span>{data?.latency_ms != null ? `${data.latency_ms.toFixed(2)}ms` : ''}</span>
+            <span>{data?.latency_ms != null ? `${data.latency_ms?.toFixed(2)}ms` : ''}</span>
           </div>
           <div className="mt-1.5 text-[10px] text-zinc-600">
             Tensor klassifiziert nur das BTC-Makro — Symbolwahl erfolgt im Scout (Stufe 2)
@@ -422,17 +422,17 @@ export function RiskGuardPanel() {
         <EmptyState text="keine Positionen / kein Feed (fail-closed)" />
       ) : (
         <>
-          {data.positions.length === 0 && <EmptyState text="keine aktiven Positionen" />}
+          {!data.positions?.length && <EmptyState text="keine aktiven Positionen" />}
           {data.positions.map((p, i) => (
             <div key={i} className="mb-1.5 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 font-mono text-[10px]">
               <div className="flex justify-between">
                 <span>{String(p.symbol ?? '—')}</span>
                 <span className={p.liq_distance_pct != null && Number(p.liq_distance_pct) < 0.05 ? 'text-red-400' : 'text-zinc-300'}>
-                  Liq {p.liq_distance_pct != null ? `${(Number(p.liq_distance_pct) * 100).toFixed(1)}%` : '—'}
+                  Liq {p.liq_distance_pct != null ? `${(Number(p.liq_distance_pct) * 100)?.toFixed(1)}%` : '—'}
                 </span>
               </div>
               <div className="flex justify-between text-zinc-500">
-                <span>Hard-Stop {Number(p.hard_stop ?? 0).toFixed(4)}</span>
+                <span>Hard-Stop {Number(p.hard_stop ?? 0)?.toFixed(4)}</span>
                 <span>Fee-BE {p.fee_covered ? 'ja' : 'nein'}</span>
                 <span>Cooldown {String(p.cooldown_s ?? '—')}s</span>
               </div>
@@ -466,7 +466,7 @@ export function UnwindPanel() {
       ) : (
         <>
           <div className="mb-1 flex items-center justify-between text-[10px] font-mono">
-            <span>Score</span><span className={data?.exhausted ? 'text-red-400' : 'text-zinc-300'}>{score.toFixed(2)}</span>
+            <span>Score</span><span className={data?.exhausted ? 'text-red-400' : 'text-zinc-300'}>{score?.toFixed(2)}</span>
           </div>
           <Bar value={score} max={1} tone={data?.exhausted ? 'bg-red-500/70' : 'bg-emerald-500/70'} />
           <div className="mt-2 space-y-0.5 text-[10px] font-mono">
@@ -476,12 +476,12 @@ export function UnwindPanel() {
                 <div key={k} className="flex items-center gap-1.5 text-zinc-400">
                   {c.available ? <span className="text-emerald-400">✓</span> : <span className="text-zinc-600">✗</span>}
                   <span className="uppercase">{k}</span>
-                  {c.available ? <span>{Number(c.value ?? 0).toFixed(2)}</span> : <span className="text-zinc-600">kein Feed</span>}
+                  {c.available ? <span>{Number(c.value ?? 0)?.toFixed(2)}</span> : <span className="text-zinc-600">kein Feed</span>}
                 </div>
               );
             })}
           </div>
-          {data.unwind.length > 0 && (
+          {data.unwind?.length > 0 && (
             <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[10px]">
               {data.unwind.map((u, i) => (
                 <div key={i} className="flex justify-between font-mono">
@@ -514,7 +514,7 @@ export function ResearchLabPanel() {
               <span className="font-mono">{String(h.id ?? '—')}</span>
               <span className="text-zinc-400">{String(h.status ?? '—')}</span>
               <span className="font-mono text-zinc-500">
-                {h.effect_size != null ? `ES ${Number(h.effect_size).toFixed(3)} · n=${String(h.trades ?? '—')}` : ''}
+                {h.effect_size != null ? `ES ${Number(h.effect_size)?.toFixed(3)} · n=${String(h.trades ?? '—')}` : ''}
               </span>
             </div>
           ))}
@@ -525,7 +525,7 @@ export function ResearchLabPanel() {
             return (
               <div key={i} className="mb-1 flex items-center justify-between font-mono text-[10px]">
                 <span>{String(s.name ?? '—')}</span>
-                <span className="text-zinc-400">R {Number(s.return_pct ?? 0).toFixed(1)}% · DD {dd.toFixed(1)}%</span>
+                <span className="text-zinc-400">R {Number(s.return_pct ?? 0)?.toFixed(1)}% · DD {dd?.toFixed(1)}%</span>
                 {flag && <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[9px] text-amber-400">Overfitting-Flag</span>}
               </div>
             );

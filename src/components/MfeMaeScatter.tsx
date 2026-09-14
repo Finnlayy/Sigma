@@ -88,7 +88,7 @@ export function MfeMaeScatter({ events }: { events: AutopsyEvent[] }) {
               background: "#020617", border: "1px solid #1e293b",
               borderRadius: 8, fontSize: 11, fontFamily: "monospace",
             }}
-            formatter={(value: any, name: any) => [Number(value).toFixed(3), name]}
+            formatter={(value: any, name: any) => [Number(value)?.toFixed(3), name]}
             labelFormatter={() => ""}
           />
           <Legend

@@ -20,7 +20,7 @@ import {
   type MlSnapshot, type RegimeVector, type RewardRow, type SafetySnapshot,
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
-import TvLightweightChart from '../TvLightweightChart';
+import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -136,9 +136,9 @@ export function VirtualBotDeck() {
     <PanelShell title="Virtual Bot Deck" icon={<Bot size={13} />}
       actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
       <div className="mb-3 grid grid-cols-3 gap-2">
-        <Stat label="Bots" value={data?.bots.length ?? 0} />
-        <Stat label="Budget EUR" value={(data?.total_budget_eur ?? 0).toFixed(0)} />
-        <Stat label="Equity EUR" value={(data?.total_equity_eur ?? 0).toFixed(2)} tone="text-emerald-400" />
+        <Stat label="Bots" value={data?.bots?.length ?? 0} />
+        <Stat label="Budget EUR" value={(data?.total_budget_eur ?? 0)?.toFixed(0)} />
+        <Stat label="Equity EUR" value={(data?.total_equity_eur ?? 0)?.toFixed(2)} tone="text-emerald-400" />
       </div>
 
       <div className="mb-3 flex gap-1">
@@ -179,9 +179,9 @@ export function VirtualBotDeck() {
             </div>
             <div className="mt-2 grid grid-cols-4 gap-1 font-mono text-[11px]">
               <div><span className="text-zinc-500">cap </span>{bot.capital_eur}€</div>
-              <div><span className="text-zinc-500">eq </span>{bot.equity_eur.toFixed(2)}€</div>
+              <div><span className="text-zinc-500">eq </span>{bot.equity_eur?.toFixed(2)}€</div>
               <div className={bot.bot_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                <span className="text-zinc-500">pnl </span>{bot.bot_pnl.toFixed(2)}€
+                <span className="text-zinc-500">pnl </span>{bot.bot_pnl?.toFixed(2)}€
               </div>
               <div><span className="text-zinc-500">maxL </span>{bot.max_loss}€</div>
             </div>
@@ -194,7 +194,7 @@ export function VirtualBotDeck() {
             </div>
           </div>
         ))}
-        {!data?.bots.length && <div className="text-zinc-600">No virtual bots yet — Pionex-style cards appear here.</div>}
+        {!data?.bots?.length && <div className="text-zinc-600">No virtual bots yet — Pionex-style cards appear here.</div>}
       </div>
     </PanelShell>
   );
@@ -266,8 +266,11 @@ export function MarketChart() {
   const [symbol, setSymbol] = useState('BTC/USD');
   const [interval, setIntervalMin] = useState(15);
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [markers, setMarkers] = useState<ChartMarker[]>([]);
+  const [priceLines, setPriceLines] = useState<ChartPriceLine[]>([]);
   const [feed, setFeed] = useState<FeedMeta | null>(null);
   const [error, setError] = useState('');
+  const [streamStatus, setStreamStatus] = useState<'off' | 'live' | 'err'>('off');
 
   const load = useCallback(async () => {
     const primary = await sigmaApi.ohlc(symbol, interval, 300);
@@ -278,6 +281,66 @@ export function MarketChart() {
   }, [symbol, interval]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Guide §6 — visualization-plane WS; rAF-batched last-bar updates
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let raf = 0;
+    let pending: Candle | null = null;
+    let closed = false;
+
+    const flush = () => {
+      raf = 0;
+      if (!pending) return;
+      const tick = pending;
+      pending = null;
+      setCandles((prev) => {
+        if (!prev?.length) return prev;
+        const next = prev.slice();
+        const last = next[next?.length - 1];
+        if (tick.ts === last.ts) {
+          next[next?.length - 1] = tick;
+          return next;
+        }
+        if (tick.ts > last.ts) return [...next, tick];
+        return prev;
+      });
+    };
+
+    try {
+      ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
+      ws.onopen = () => setStreamStatus('live');
+      ws.onerror = () => setStreamStatus('err');
+      ws.onclose = () => { if (!closed) setStreamStatus('off'); };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data as string) as {
+            channel?: string;
+            data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
+          };
+          if (msg.channel === 'alpha:executions:live' && msg.data) {
+            if (msg.data.markers) setMarkers(msg.data.markers);
+            if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
+            return;
+          }
+          const c = msg.data?.candle;
+          if (!c || typeof c.ts !== 'number') return;
+          pending = c;
+          if (!raf) raf = requestAnimationFrame(flush);
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
+    } catch {
+      setStreamStatus('err');
+    }
+
+    return () => {
+      closed = true;
+      if (raf) cancelAnimationFrame(raf);
+      try { ws?.close(); } catch { /* ignore */ }
+    };
+  }, [symbol, interval]);
 
   return (
     <PanelShell title="Market Chart" icon={<Activity size={13} />}
@@ -293,10 +356,17 @@ export function MarketChart() {
         </select>
         <IconBtn onClick={load} title="Reload"><RefreshCw size={12} /></IconBtn>
       </>}>
-      {candles.length ? <TvLightweightChart candles={candles} height={240} />
-        : <div className="text-zinc-600">{error || 'loading…'}</div>}
+      {candles?.length ? (
+        <TvLightweightChart
+          candles={candles}
+          markers={markers}
+          priceLines={priceLines}
+          seriesKey={`${symbol}:${interval}`}
+          height={240}
+        />
+      ) : <div className="text-zinc-600">{error || 'loading…'}</div>}
       <div className="mt-2 text-[10px] text-zinc-500">
-        Lightweight Charts · Loop C sidecar (:8001) · {candles.length} candles
+        Lightweight Charts · Loop C sidecar (:8001) · WS {streamStatus} · {candles?.length} candles
         {feed?.source === 'synthetic' && ' · deterministic offline feed — not for live decisions'}
       </div>
     </PanelShell>
@@ -375,7 +445,7 @@ export function LLMConsole() {
         Offline {sigmaApi.llmStreamUrl()} · tools: update_risk_settings, control_bot, edit_pine_strategy_code, query_kausal_autopsy
       </div>
       <div className="mb-2 h-[calc(100%-6rem)] min-h-24 overflow-auto rounded border border-border bg-black/60 p-2 font-mono text-[11px] text-emerald-300">
-        {lines.length ? lines.map((l, i) => <div key={i}>{l}</div>) : <span className="text-zinc-600">Prompt or tool name — not Telegram</span>}
+        {lines?.length ? lines.map((l, i) => <div key={i}>{l}</div>) : <span className="text-zinc-600">Prompt or tool name — not Telegram</span>}
       </div>
       {error && <div className="mb-1 text-[10px] text-red-400">{error}</div>}
       <div className="flex gap-1">
@@ -413,14 +483,14 @@ export function AcademyBadgeMatrix() {
               <td>{r.symbol}</td><td>{r.timeframe}</td>
               <td className="pr-2 text-zinc-500">{r.regime}</td>
               <td>{r.trade_count}</td>
-              <td>{(r.win_rate * 100).toFixed(0)}%</td>
-              <td>{r.profit_factor.toFixed(2)}</td>
+              <td>{(r.win_rate * 100)?.toFixed(0)}%</td>
+              <td>{r.profit_factor?.toFixed(2)}</td>
               <td><span className={`rounded border px-1 ${ratingColor(r.rating)}`}>{r.badge}</span></td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!rows.length && <div className="text-zinc-600">No profiles yet — Loop D scout & live autopsies feed this matrix.</div>}
+      {!rows?.length && <div className="text-zinc-600">No profiles yet — Loop D scout & live autopsies feed this matrix.</div>}
     </PanelShell>
   );
 }
@@ -448,7 +518,7 @@ export function RiskGauges() {
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Kill Switch" value={s?.kill_switch ? 'ENGAGED' : 'clear'} tone={s?.kill_switch ? 'text-red-400' : 'text-emerald-400'} />
         <Stat label="Pause" value={s?.pause ? 'ACTIVE' : 'clear'} tone={s?.pause ? 'text-amber-400' : 'text-emerald-400'} />
-        <Stat label="Daily PnL / Limit" value={`${(s?.daily_pnl_usd ?? 0).toFixed(2)} / -${s?.max_daily_loss_usd ?? 600}`} />
+        <Stat label="Daily PnL / Limit" value={`${(s?.daily_pnl_usd ?? 0)?.toFixed(2)} / -${s?.max_daily_loss_usd ?? 600}`} />
         <Stat label="Errors" value={`${s?.consecutive_errors ?? 0} / ${s?.max_consecutive_errors ?? 3}`} />
         <Stat label="Live Trading" value={s?.live_trading ? 'LIVE' : 'SHADOW'} tone={s?.live_trading ? 'text-red-400' : 'text-sky-400'} />
         <Stat label="Halt Action" value={s?.halt_action ?? 'cancel_all'} />
@@ -458,9 +528,9 @@ export function RiskGauges() {
         {regime ? (
           <div className="grid grid-cols-2 gap-1 font-mono text-[11px]">
             <div className={regime.crisis ? 'text-red-400' : 'text-emerald-400'}>{regime.regime}</div>
-            <div>ATR pctl {regime.atr_percentile.toFixed(1)}</div>
-            <div>EMAΔ {regime.ema_delta_pct.toFixed(2)}%</div>
-            <div>H {regime.hurst.toFixed(2)} · {regime.hurst_class}</div>
+            <div>ATR pctl {regime.atr_percentile?.toFixed(1)}</div>
+            <div>EMAΔ {regime.ema_delta_pct?.toFixed(2)}%</div>
+            <div>H {regime.hurst?.toFixed(2)} · {regime.hurst_class}</div>
           </div>
         ) : <div className="text-zinc-600">scraper offline — regime unavailable</div>}
       </div>
@@ -480,10 +550,10 @@ export function SelfOptimizingMLPanel() {
     <PanelShell title="Self-Optimizing ML" icon={<Sparkles size={13} />}
       actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
       <div className="grid grid-cols-2 gap-2">
-        <Stat label="Brier Score" value={(m?.brier ?? 0).toFixed(4)}
+        <Stat label="Brier Score" value={(m?.brier ?? 0)?.toFixed(4)}
           tone={(m?.brier ?? 0) > (m?.brier_threshold ?? 0.28) ? 'text-red-400' : 'text-emerald-400'} />
         <Stat label="Threshold" value={m?.brier_threshold ?? 0.28} />
-        <Stat label="Temperature" value={(m?.temperature ?? 1).toFixed(2)} />
+        <Stat label="Temperature" value={(m?.temperature ?? 1)?.toFixed(2)} />
         <Stat label="Samples" value={`${m?.samples ?? 0} / ${m?.min_samples ?? 30}`} />
         <Stat label="Drift" value={m?.drift ? 'YES' : 'no'} tone={m?.drift ? 'text-red-400' : 'text-emerald-400'} />
         <Stat label="ONNX Model" value={m?.model_available ? 'loaded' : 'heuristic'} />
@@ -518,7 +588,7 @@ export function TelegramOperatorPanel() {
               {m.direction}
             </span>
             <span className="flex-1 truncate text-zinc-300">{m.text}</span>
-            {m.latency_ms > 0 && <span className="text-zinc-600">{m.latency_ms.toFixed(1)}ms</span>}
+            {m.latency_ms > 0 && <span className="text-zinc-600">{m.latency_ms?.toFixed(1)}ms</span>}
           </div>
         ))}
         {!t?.log?.length && <div className="text-zinc-600">No traffic yet.</div>}
@@ -551,7 +621,7 @@ export function DeadmanSwitchPanel() {
           style={{ transform: `scaleX(${pct / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <Stat label="Heartbeat Age" value={`${(d?.age_s ?? 0).toFixed(1)}s`}
+        <Stat label="Heartbeat Age" value={`${(d?.age_s ?? 0)?.toFixed(1)}s`}
           tone={d?.expired ? 'text-red-400' : 'text-emerald-400'} />
         <Stat label="Timeout" value={`${timeoutMin} min`} />
         <Stat label="Kraken RTT" value={d?.kraken_rtt_ms != null ? `${d.kraken_rtt_ms}ms` : '—'}
@@ -592,14 +662,14 @@ export function RewardXPMatrixPanel() {
               <td className="text-emerald-400">{r.xp}</td>
               <td className={r.strikes >= 3 ? 'text-red-400' : 'text-amber-400'}>{r.strikes}</td>
               <td>{r.trades}</td>
-              <td>{r.avg_reward.toFixed(2)}</td>
+              <td>{r.avg_reward?.toFixed(2)}</td>
               <td className={r.quarantined ? 'text-red-400' : ''}>{r.budget_multiplier}</td>
               <td className="text-zinc-500">{r.recent_grades.slice(-6).join('')}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!rows.length && <div className="text-zinc-600">No scored trades yet.</div>}
+      {!rows?.length && <div className="text-zinc-600">No scored trades yet.</div>}
     </PanelShell>
   );
 }
@@ -624,11 +694,11 @@ export function MemoryWatchdogPanel() {
           style={{ transform: `scaleX(${Math.min(100, m?.percent ?? 0) / 100})`, transformOrigin: 'left' }} />
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <Stat label="RAM" value={`${(m?.percent ?? 0).toFixed(1)}%`} />
+        <Stat label="RAM" value={`${(m?.percent ?? 0)?.toFixed(1)}%`} />
         <Stat label="Stage" value={`${m?.stage ?? 0} / 4`} tone={(m?.stage ?? 0) >= 3 ? 'text-red-400' : undefined} />
         <Stat label="RSS / Budget" value={
           m?.budget_bytes
-            ? `${((m.rss_bytes ?? 0) / (1024 ** 3)).toFixed(2)} / ${((m.budget_bytes) / (1024 ** 3)).toFixed(1)}G`
+            ? `${((m.rss_bytes ?? 0) / (1024 ** 3))?.toFixed(2)} / ${((m.budget_bytes) / (1024 ** 3))?.toFixed(1)}G`
             : (m?.cgroup_memory_max ?? '4G')
         } />
         <Stat label="Chromium reaped" value={m?.chromium_zombies_reaped ?? 0} />
@@ -667,7 +737,7 @@ export function TvJobsPanel() {
             )}
           </div>
         ))}
-        {!jobs.length && <div className="text-zinc-600">No TV jobs — concurrency stays at 1 by spec.</div>}
+        {!jobs?.length && <div className="text-zinc-600">No TV jobs — concurrency stays at 1 by spec.</div>}
       </div>
     </PanelShell>
   );
@@ -719,16 +789,16 @@ export function MarketRadarPanel() {
           {rows.map((r, i) => (
             <tr key={`${r.name}-${i}`} className="border-t border-zinc-800/60">
               <td className="py-1 text-zinc-300">{r.name}</td>
-              <td>{Number(r.close).toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+              <td>{Number(r.close)?.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
               <td className={r.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                {r.change >= 0 ? '+' : ''}{Number(r.change).toFixed(2)}%
+                {r.change >= 0 ? '+' : ''}{Number(r.change)?.toFixed(2)}%
               </td>
-              <td className="text-zinc-500">{Number(r.volume).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+              <td className="text-zinc-500">{Number(r.volume)?.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!rows.length && <div className="text-zinc-600">No movers — is bin/sigma-scraper running on :8001?</div>}
+      {!rows?.length && <div className="text-zinc-600">No movers — is bin/sigma-scraper running on :8001?</div>}
       <div className="mt-2 text-[10px] text-zinc-500">
         {health?.base_url ?? 'http://127.0.0.1:8001'} · rate {health?.rate_limit?.rate_per_min ?? 60}/min
         {health?.rate_limit?.rejected ? ` · ${health.rate_limit.rejected} throttled` : ''}
@@ -761,9 +831,9 @@ export function OrderbookConfluencePanel() {
             <tr key={i} className="border-t border-zinc-800/60">
               <td>{a.symbol}</td><td>{a.direction}</td>
               <td className={a.depth_imbalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                {Number(a.depth_imbalance).toFixed(2)}
+                {Number(a.depth_imbalance)?.toFixed(2)}
               </td>
-              <td>{Number(a.spread_bps).toFixed(1)}</td>
+              <td>{Number(a.spread_bps)?.toFixed(1)}</td>
               <td className={a.verdict === 'LIQUIDITY_TRAP_VETO' ? 'text-rose-400'
                 : a.verdict === 'CONFLUENCE_CONFIRMED' ? 'text-emerald-400' : 'text-zinc-400'}>
                 {a.verdict}
@@ -772,7 +842,7 @@ export function OrderbookConfluencePanel() {
           ))}
         </tbody>
       </table>
-      {!audits.length && <div className="mt-2 text-zinc-600">Noch kein JIT-Audit ausgeführt.</div>}
+      {!audits?.length && <div className="mt-2 text-zinc-600">Noch kein JIT-Audit ausgeführt.</div>}
     </PanelShell>
   );
 }
@@ -829,7 +899,7 @@ export function OrderReceiptsPanel() {
       <div className="grid grid-cols-3 gap-2">
         <Stat label="Max Retries" value={data?.max_retries ?? 2} />
         <Stat label="Ghost-Check" value={`${data?.ghost_fill_timeout_ms ?? 200} ms`} />
-        <Stat label="Receipts" value={rows.length} />
+        <Stat label="Receipts" value={rows?.length} />
       </div>
       <table className="mt-2 w-full text-left font-mono text-[11px]">
         <thead className="text-zinc-500"><tr><th>Pair</th><th>Side</th><th>ACK</th><th>Try</th><th>Order</th></tr></thead>
@@ -844,7 +914,7 @@ export function OrderReceiptsPanel() {
           ))}
         </tbody>
       </table>
-      {!rows.length && <div className="mt-2 text-zinc-600">Keine Orders im Closed Loop.</div>}
+      {!rows?.length && <div className="mt-2 text-zinc-600">Keine Orders im Closed Loop.</div>}
     </PanelShell>
   );
 }
@@ -871,8 +941,8 @@ export function RateLimiterPanel() {
         Soft-Cap bei {Math.round((kraken?.soft_cap_pct ?? 0.8) * 100)}% · Backoff {(data?.backoff_ladder_s ?? []).join('s / ')}s
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Stat label={`TV Tier (${tv?.tier ?? '-'})`} value={`${Object.keys(tv?.active ?? {}).length} / ${tv?.max_active_alerts ?? 0}`} />
-        <Stat label="Rotation Queue" value={(tv?.rotation_queue ?? []).length} />
+        <Stat label={`TV Tier (${tv?.tier ?? '-'})`} value={`${Object.keys(tv?.active ?? {})?.length} / ${tv?.max_active_alerts ?? 0}`} />
+        <Stat label="Rotation Queue" value={(tv?.rotation_queue ?? [])?.length} />
       </div>
       <div className="mt-2 font-mono text-[10px] text-zinc-500">
         {Object.entries(tv?.active ?? {}).map(([sid, score]) => `${sid}:${score}`).join(' · ') || 'keine aktiven Alerts'}
@@ -964,9 +1034,16 @@ export function PaperLabPanel() {
     <PanelShell title="Kraken Paper Lab" icon={<Beaker size={13} className="text-sky-400" />}
       actions={<IconBtn onClick={refresh} title="Refresh"><RefreshCw size={12} /></IconBtn>}>
       <div className="grid grid-cols-3 gap-2">
-        <Stat label="Start-Balance" value={`${data?.initial_balance_usd ?? 10000} $`} />
-        <Stat label="Min Trades" value={grad?.min_paper_trades ?? 20} />
-        <Stat label="Gates" value={`PF ${grad?.min_paper_profit_factor ?? 1.6} · WR ${grad?.min_paper_win_rate_pct ?? 55}%`} />
+        <Stat
+          label={data?.cli_offline ? "CLI capital (offline)" : "CLI capital"}
+          value={
+            data?.balance_usd != null
+              ? `${Number(data.balance_usd)?.toFixed(2)} $`
+              : (data?.cli_offline ? "—" : `${data?.initial_balance_usd ?? "—"} $`)
+          }
+        />
+        <Stat label="Start (CLI)" value={`${data?.initial_balance_usd ?? "—"} $`} />
+        <Stat label="Gates" value={`PF ${grad?.min_paper_profit_factor ?? 1.6} · WR ${grad?.min_paper_win_rate_pct ?? 55}% · n≥${grad?.min_paper_trades ?? 20}`} />
       </div>
       <div className="mt-2 space-y-2">
         {strategies.map((row) => {
@@ -1002,7 +1079,7 @@ export function PaperLabPanel() {
             </div>
           );
         })}
-        {!strategies.length && <div className="text-zinc-600">Noch keine Paper-Trades — Scout Loop D füllt das Labor.</div>}
+        {!strategies?.length && <div className="text-zinc-600">Noch keine Paper-Trades — Scout Loop D füllt das Labor.</div>}
       </div>
       <div className="mt-2 font-mono text-[10px] text-zinc-500">
         {data?.commands?.futures_order ?? 'kraken futures paper order ...'}
@@ -1074,7 +1151,7 @@ export function DiagnosticsErrorPanel() {
             )}
           </div>
         ))}
-        {!errors.length && <div className="text-zinc-600">Keine Fehler im Puffer — sauber.</div>}
+        {!errors?.length && <div className="text-zinc-600">Keine Fehler im Puffer — sauber.</div>}
       </div>
     </PanelShell>
   );
@@ -1126,11 +1203,11 @@ export function NetronVisualizerPanel() {
         {models.map((m) => (
           <button key={m.version_tag} onClick={() => inspect(m.version_tag)}
             className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${m.active ? 'bg-fuchsia-600/80 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
-            title={`${m.path} · ${(m.size_bytes / 1024).toFixed(0)} KB`}>
+            title={`${m.path} · ${(m.size_bytes / 1024)?.toFixed(0)} KB`}>
             In Netron betrachten: {m.version_tag}
           </button>
         ))}
-        {!models.length && <span className="text-[10px] text-zinc-600">Keine .onnx Modelle in {data?.models_dir}</span>}
+        {!models?.length && <span className="text-[10px] text-zinc-600">Keine .onnx Modelle in {data?.models_dir}</span>}
       </div>
       {data?.running ? (
         <iframe key={nonce} src={url} title="Netron"

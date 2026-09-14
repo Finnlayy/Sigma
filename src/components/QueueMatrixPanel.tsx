@@ -57,7 +57,7 @@ export default function QueueMatrixPanel({
   };
 
   const exportTradesCSV = (trades: TradeOrder[], queueName: string) => {
-    if (!trades || trades.length === 0) return;
+    if (!trades || trades?.length === 0) return;
     const headers = ["Order ID", "Timestamp", "Strategy", "Symbol", "Type", "Price", "Amount", "Total USD", "Realized PnL", "Status", "Queue"];
     const rows = trades.map(t => [
       t.id,
@@ -171,7 +171,7 @@ export default function QueueMatrixPanel({
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Net Total P&amp;L</span>
             <div className={`text-xl font-bold mt-1 ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {isProfit ? '+' : ''}${matrix.totalPnL.toFixed(2)}
+              {isProfit ? '+' : ''}${matrix.totalPnL?.toFixed(2)}
             </div>
             <span className="text-[10px] text-zinc-400">
               Return: <strong className={matrix.cumulativeReturnPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
@@ -193,20 +193,20 @@ export default function QueueMatrixPanel({
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Profit Factor</span>
             <div className="text-xl font-bold text-amber-400 mt-1">
-              {matrix.profitFactor.toFixed(2)}
+              {matrix.profitFactor?.toFixed(2)}
             </div>
             <span className="text-[10px] text-zinc-500">
-              Realized: ${matrix.totalRealizedPnL.toFixed(2)}
+              Realized: ${matrix.totalRealizedPnL?.toFixed(2)}
             </span>
           </div>
 
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Sharpe Ratio</span>
             <div className="text-xl font-bold text-indigo-400 mt-1">
-              {matrix.sharpeRatio.toFixed(2)}
+              {matrix.sharpeRatio?.toFixed(2)}
             </div>
             <span className="text-[10px] text-zinc-500">
-              Sortino: {matrix.sortinoRatio.toFixed(2)}
+              Sortino: {matrix.sortinoRatio?.toFixed(2)}
             </span>
           </div>
 
@@ -216,14 +216,14 @@ export default function QueueMatrixPanel({
               -{matrix.maxDrawdownPercent}%
             </div>
             <span className="text-[10px] text-zinc-500">
-              Floating: ${matrix.totalUnrealizedPnL.toFixed(2)}
+              Floating: ${matrix.totalUnrealizedPnL?.toFixed(2)}
             </span>
           </div>
 
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Volume Traded</span>
             <div className="text-xl font-bold text-zinc-200 mt-1">
-              ${matrix.volumeTradedUSD.toLocaleString()}
+              ${matrix.volumeTradedUSD?.toLocaleString()}
             </div>
             <span className="text-[10px] text-zinc-500">
               {matrix.totalAllTrades} total orders
@@ -244,7 +244,7 @@ export default function QueueMatrixPanel({
               </p>
             </div>
             <span className="text-xs font-mono text-zinc-500">
-              {matrix.strategies.length} configured strategies
+              {matrix.strategies?.length} configured strategies
             </span>
           </div>
 
@@ -302,7 +302,7 @@ export default function QueueMatrixPanel({
                     <div>
                       <span className="text-[9px] text-zinc-500 block">Net P&amp;L</span>
                       <span className={`text-xs font-bold ${stratProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {stratProfit ? '+' : ''}${strat.totalPnL.toFixed(0)}
+                        {stratProfit ? '+' : ''}${strat.totalPnL?.toFixed(0)}
                       </span>
                     </div>
                     <div>
@@ -326,12 +326,12 @@ export default function QueueMatrixPanel({
                 All-Time Queue Cumulative Equity Curve ($ USD)
               </h4>
               <span className="text-[10px] font-mono text-zinc-400">
-                {matrix.pnlTrajectory.length} closed round-trips
+                {matrix.pnlTrajectory?.length} closed round-trips
               </span>
             </div>
 
             <div className="h-56 w-full pt-2">
-              {matrix.pnlTrajectory.length > 0 ? (
+              {matrix.pnlTrajectory?.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={matrix.pnlTrajectory} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
                     <defs>
@@ -352,19 +352,19 @@ export default function QueueMatrixPanel({
                       tick={{ fontSize: 10, fill: "#71717a", fontFamily: "monospace" }}
                       tickLine={false}
                       axisLine={false}
-                      tickFormatter={(val) => `$${Number(val).toFixed(0)}`}
+                      tickFormatter={(val) => `$${Number(val)?.toFixed(0)}`}
                     />
                     <Tooltip
                       content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
+                        if (active && payload && payload?.length) {
                           const data = payload[0].payload;
                           return (
                             <div className="bg-zinc-950 border border-zinc-800 p-2.5 rounded-lg shadow-xl font-mono text-xs space-y-1">
                               <div className="text-zinc-400 text-[10px] font-bold">Trade #{data.tradeIndex} ({data.time})</div>
                               <div className="text-zinc-300">Symbol: <strong className="text-white">{data.pair}</strong></div>
                               <div className="text-zinc-300">Strategy: <span className="text-zinc-400">{data.strategyName}</span></div>
-                              <div className="text-zinc-300">Trade P&amp;L: <strong className={data.tradePnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{data.tradePnL >= 0 ? '+' : ''}${data.tradePnL.toFixed(2)}</strong></div>
-                              <div className="text-zinc-300">Cum. Equity: <strong className={data.cumPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${data.cumPnL.toFixed(2)} USD</strong></div>
+                              <div className="text-zinc-300">Trade P&amp;L: <strong className={data.tradePnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{data.tradePnL >= 0 ? '+' : ''}${data.tradePnL?.toFixed(2)}</strong></div>
+                              <div className="text-zinc-300">Cum. Equity: <strong className={data.cumPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${data.cumPnL?.toFixed(2)} USD</strong></div>
                             </div>
                           );
                         }
@@ -402,20 +402,20 @@ export default function QueueMatrixPanel({
             </div>
 
             <div className="space-y-2.5 font-mono text-xs my-auto pt-2">
-              {matrix.assetBreakdown.length > 0 ? (
+              {matrix.assetBreakdown?.length > 0 ? (
                 matrix.assetBreakdown.map((asset, idx) => (
                   <div key={asset.pair} className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-800/80 space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-white flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }} />
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS?.length] }} />
                         {asset.pair}
                       </span>
                       <span className={`font-bold ${asset.netPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {asset.netPnL >= 0 ? '+' : ''}${asset.netPnL.toFixed(2)}
+                        {asset.netPnL >= 0 ? '+' : ''}${asset.netPnL?.toFixed(2)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-zinc-500">
-                      <span>Volume: ${asset.volumeUSD.toLocaleString()}</span>
+                      <span>Volume: ${asset.volumeUSD?.toLocaleString()}</span>
                       <span>Win: {asset.winRate}% ({asset.tradesCount} orders)</span>
                     </div>
                   </div>
@@ -430,7 +430,7 @@ export default function QueueMatrixPanel({
             <div className="pt-2 border-t border-zinc-800 text-[11px] font-mono text-zinc-400 flex justify-between">
               <span>Avg Trade Return:</span>
               <strong className={matrix.averageTradeReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                ${matrix.averageTradeReturn.toFixed(2)} USD
+                ${matrix.averageTradeReturn?.toFixed(2)} USD
               </strong>
             </div>
           </div>
@@ -493,7 +493,7 @@ export default function QueueMatrixPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-850">
-                  {filteredTrades.length > 0 ? (
+                  {filteredTrades?.length > 0 ? (
                     filteredTrades.map((t, idx) => {
                       const isBuy = t.type === 'buy';
                       const hasPnl = t.pnl !== undefined;
@@ -519,8 +519,8 @@ export default function QueueMatrixPanel({
                               {t.type}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-zinc-200">${t.price.toLocaleString()}</td>
-                          <td className="py-2 px-3 text-zinc-300">${t.total.toLocaleString()}</td>
+                          <td className="py-2 px-3 text-zinc-200">${t.price?.toLocaleString()}</td>
+                          <td className="py-2 px-3 text-zinc-300">${t.total?.toLocaleString()}</td>
                           <td className="py-2 px-3 text-right">
                             {hasPnl ? (
                               <span className={`font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>

@@ -1,0 +1,254 @@
+{
+  "version": "3.6",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "update_risk_settings",
+        "description": "Passt globale Risikoparameter an (Kelly, Tagesverlust, offene Positionen, maximaler Hebel 1-5).",
+        "parameters": {
+          "properties": {
+            "max_daily_loss_usd": {
+              "anyOf": [
+                {
+                  "maximum": 100000,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Daily Loss Usd"
+            },
+            "kelly_fraction": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Kelly Fraction"
+            },
+            "max_open_positions": {
+              "anyOf": [
+                {
+                  "maximum": 20,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Open Positions"
+            },
+            "global_max_leverage": {
+              "anyOf": [
+                {
+                  "maximum": 5,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Global Max Leverage"
+            }
+          },
+          "type": "object"
+        },
+        "x-sigma": {
+          "summary": "max_daily_loss_usd, kelly_fraction, max_open_positions, global_max_leverage",
+          "requires_confirmation": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "control_bot",
+        "description": "Startet, pausiert, stoppt oder quarantaeniert eine Strategie.",
+        "parameters": {
+          "properties": {
+            "strategy_id": {
+              "minLength": 1,
+              "title": "Strategy Id",
+              "type": "string"
+            },
+            "action": {
+              "enum": [
+                "START",
+                "PAUSE",
+                "STOP",
+                "QUARANTINE"
+              ],
+              "title": "Action",
+              "type": "string"
+            },
+            "adjusted_budget_eur": {
+              "anyOf": [
+                {
+                  "maximum": 1000000,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Adjusted Budget Eur"
+            },
+            "reason": {
+              "default": "llm",
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "required": [
+            "strategy_id",
+            "action"
+          ],
+          "type": "object"
+        },
+        "x-sigma": {
+          "summary": "START | PAUSE | STOP | QUARANTINE (+ adjusted_budget_eur)",
+          "requires_confirmation": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_pine_strategy_code",
+        "description": "Patcht den Pine-v6-Code einer Strategie und kompiliert ihn optional auf TradingView.",
+        "parameters": {
+          "properties": {
+            "strategy_id": {
+              "minLength": 1,
+              "title": "Strategy Id",
+              "type": "string"
+            },
+            "edit_mode": {
+              "enum": [
+                "FULL_REPLACE",
+                "DIFF_PATCH",
+                "INJECT_TIME_STOP",
+                "ADJUST_PARAMETERS"
+              ],
+              "title": "Edit Mode",
+              "type": "string"
+            },
+            "pine_source_code": {
+              "minLength": 20,
+              "title": "Pine Source Code",
+              "type": "string"
+            },
+            "commit_summary": {
+              "default": "llm patch",
+              "title": "Commit Summary",
+              "type": "string"
+            },
+            "push_to_tradingview": {
+              "default": true,
+              "title": "Push To Tradingview",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "strategy_id",
+            "edit_mode",
+            "pine_source_code"
+          ],
+          "type": "object"
+        },
+        "x-sigma": {
+          "summary": "FULL_REPLACE | DIFF_PATCH | INJECT_TIME_STOP | ADJUST_PARAMETERS",
+          "requires_confirmation": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "query_kausal_autopsy",
+        "description": "Liefert die kausale Autopsie (Verlustursachen) einer Strategie.",
+        "parameters": {
+          "properties": {
+            "strategy_id": {
+              "minLength": 1,
+              "title": "Strategy Id",
+              "type": "string"
+            },
+            "symbol": {
+              "default": "",
+              "title": "Symbol",
+              "type": "string"
+            },
+            "timeframe": {
+              "default": "",
+              "title": "Timeframe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "strategy_id"
+          ],
+          "type": "object"
+        },
+        "x-sigma": {
+          "summary": "strategy_id, symbol, timeframe",
+          "requires_confirmation": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "trigger_emergency_action",
+        "description": "Irreversible Notfallaktion — erfordert confirmation_confirmed=true.",
+        "parameters": {
+          "properties": {
+            "action": {
+              "enum": [
+                "KILL_SWITCH",
+                "CANCEL_ALL_ORDERS",
+                "FLIGHT_TO_CASH"
+              ],
+              "title": "Action",
+              "type": "string"
+            },
+            "confirmation_confirmed": {
+              "default": false,
+              "title": "Confirmation Confirmed",
+              "type": "boolean"
+            },
+            "reason": {
+              "default": "llm",
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        "x-sigma": {
+          "summary": "KILL_SWITCH | CANCEL_ALL_ORDERS | FLIGHT_TO_CASH",
+          "requires_confirmation": true
+        }
+      }
+    }
+  ]
+}

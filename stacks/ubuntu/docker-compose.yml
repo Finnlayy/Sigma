@@ -1,0 +1,63 @@
+# =========================================================
+# Projekt:Sigma — Ubuntu Core-Stack (Hybrid Blueprint)
+# Host: Ubuntu only (Windows TS portal removed)
+#
+#   Ingestion: OmniStream / Glint / CCXT WS
+#   M8 Judge · Shadow Execution
+#   Redis :6379 AOF · DuckDB / Parquet
+#   Backtest: TradingView MCP (CSV seam)
+# =========================================================
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: sigma-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec",
+              "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-aof:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  sigma-core:
+    build:
+      context: ../..
+      dockerfile: stacks/ubuntu/Dockerfile
+    image: sigma-core:1.0.0
+    container_name: sigma-core
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      SIGMA_REDIS_URL: redis://redis:6379/0
+      ALPHA_REDIS_URL: redis://redis:6379/0
+      SIGMA_MARKET_SOURCE: ${SIGMA_MARKET_SOURCE:-synthetic}
+      SIGMA_BASE_BUDGET_USD: ${SIGMA_BASE_BUDGET_USD:-50}
+      SIGMA_VAULT_SWEEP: "true"
+      SIGMA_AUTOPSY_ORDER: v1.2.0
+      SIGMA_LOG_LEVEL: ${SIGMA_LOG_LEVEL:-INFO}
+      SIGMA_TV_MCP_URL: ${SIGMA_TV_MCP_URL:-fake}
+      SIGMA_TV_MCP_TIMEOUT_S: ${SIGMA_TV_MCP_TIMEOUT_S:-120}
+      SIGMA_TV_MCP_CONCURRENCY: ${SIGMA_TV_MCP_CONCURRENCY:-4}
+      SIGMA_DATA_DIR: /data
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/dashboard/init',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis-aof:

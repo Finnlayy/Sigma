@@ -33,9 +33,11 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       return (
         <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-6 font-mono">
           <div className="max-w-lg w-full bg-zinc-900 border border-red-500/40 rounded-xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center space-x-3 text-red-400 font-semibold text-sm">
-              <span className="w-3 h-3 rounded-full bg-red-500 animate-ping" />
-              <span>Kraken Strategy Engine — Interface Interruption</span>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-4 h-4 rounded-full bg-rose-600 animate-pulse" />
+              <h1 className="text-xl font-bold text-rose-500 font-mono tracking-tight">
+                Projekt:Sigma — Interface Interruption
+              </h1>
             </div>
             <p className="text-xs text-zinc-400">
               The front-end client encountered an unexpected view error. You can reload the interface or clear transient state below.

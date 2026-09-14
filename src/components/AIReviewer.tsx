@@ -249,7 +249,7 @@ export default function AIReviewer({
         <div className="flex items-center space-x-1.5 text-zinc-400">
           <Layers className="w-3 h-3 text-emerald-400" />
           <span>Manifest Knowledge Base:</span>
-          <span className="text-emerald-400 font-semibold">{strategies.length} active scripts ingested</span>
+          <span className="text-emerald-400 font-semibold">{strategies?.length} active scripts ingested</span>
         </div>
         <span className="text-zinc-500">Gemini 3.7-Flash</span>
       </div>
@@ -333,7 +333,7 @@ export default function AIReviewer({
                 <div className="space-y-1">
                   <p className="text-xs font-mono text-white font-medium">Gemini is synthesizing algorithmic code...</p>
                   <p className="text-[10px] font-mono text-zinc-500">
-                    Applying paradigms learned from {strategies.length} manifest scripts
+                    Applying paradigms learned from {strategies?.length} manifest scripts
                   </p>
                 </div>
               </div>
@@ -435,7 +435,7 @@ export default function AIReviewer({
                 <p className="text-xs font-mono text-zinc-400 leading-relaxed">{debugResult.summary}</p>
 
                 {/* Identified Issues */}
-                {debugResult.issues && debugResult.issues.length > 0 && (
+                {debugResult.issues && debugResult.issues?.length > 0 && (
                   <div className="space-y-1.5">
                     <span className="block text-[9px] font-mono text-zinc-500 uppercase flex items-center">
                       <AlertTriangle className="w-3 h-3 text-amber-500 mr-1 shrink-0" />
@@ -610,7 +610,7 @@ export default function AIReviewer({
                   Manifest Knowledge Base
                 </span>
                 <span className="text-[10px] text-zinc-500">
-                  Learned from {strategies.length} persistent algorithms & live P&L data
+                  Learned from {strategies?.length} persistent algorithms & live P&L data
                 </span>
               </div>
               <button
@@ -682,7 +682,7 @@ export default function AIReviewer({
               </div>
             ) : (
               <div className="p-4 bg-zinc-950 border border-zinc-800 rounded text-center text-zinc-500 text-xs">
-                Click "Refresh Insights" to evaluate all {strategies.length} manifest algorithms with Gemini.
+                Click "Refresh Insights" to evaluate all {strategies?.length} manifest algorithms with Gemini.
               </div>
             )}
           </div>

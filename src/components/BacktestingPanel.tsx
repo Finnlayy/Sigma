@@ -516,7 +516,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                 <div className={`text-xl font-mono font-bold ${
                   backtestResult.summary.totalReturnUSD >= 0 ? 'text-emerald-400' : 'text-rose-400'
                 }`}>
-                  {backtestResult.summary.totalReturnUSD >= 0 ? '+' : ''}${backtestResult.summary.totalReturnUSD.toLocaleString()}
+                  {backtestResult.summary.totalReturnUSD >= 0 ? '+' : ''}${backtestResult.summary.totalReturnUSD?.toLocaleString()}
                 </div>
                 <span className={`text-xs font-mono font-bold px-1.5 py-0.2 rounded ${
                   backtestResult.summary.totalReturnPercent >= 0 ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'
@@ -525,7 +525,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                 </span>
               </div>
               <div className="text-[10px] font-mono text-zinc-500 mt-1 flex justify-between">
-                <span>Final: ${backtestResult.summary.finalBalance.toLocaleString()}</span>
+                <span>Final: ${backtestResult.summary.finalBalance?.toLocaleString()}</span>
                 <span className={backtestResult.summary.alpha >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                   Alpha: {backtestResult.summary.alpha >= 0 ? '+' : ''}{backtestResult.summary.alpha}%
                 </span>
@@ -704,11 +704,11 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                       fontSize={10} 
                       tickLine={false} 
                       domain={['dataMin - 100', 'dataMax + 100']}
-                      tickFormatter={(v) => `$${v.toLocaleString()}`}
+                      tickFormatter={(v) => `$${v?.toLocaleString()}`}
                     />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '6px', fontSize: '11px', fontFamily: 'monospace' }}
-                      formatter={(val: any) => [`$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, '']}
+                      formatter={(val: any) => [`$${Number(val)?.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, '']}
                     />
                     <Area type="monotone" dataKey="equity" name="Strategy Equity" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#equityGrad)" />
                     <Area type="monotone" dataKey="benchmarkEquity" name="Buy & Hold" stroke="#71717a" strokeWidth={1.5} strokeDasharray="4 4" fillOpacity={1} fill="url(#benchGrad)" />
@@ -761,11 +761,11 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                       fontSize={10} 
                       tickLine={false} 
                       domain={['auto', 'auto']}
-                      tickFormatter={(v) => `$${v.toLocaleString()}`}
+                      tickFormatter={(v) => `$${v?.toLocaleString()}`}
                     />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#09090b', borderColor: '#27272a', borderRadius: '6px', fontSize: '11px', fontFamily: 'monospace' }}
-                      formatter={(val: any) => [`$${Number(val).toLocaleString()}`, 'Price']}
+                      formatter={(val: any) => [`$${Number(val)?.toLocaleString()}`, 'Price']}
                     />
                     <Line type="monotone" dataKey="price" name={`${backtestResult.assetPair} Price`} stroke="#38bdf8" strokeWidth={1.5} dot={false} />
                   </LineChart>
@@ -1035,12 +1035,12 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                           <td className="py-2.5 px-3 text-zinc-400 text-[11px]">
                             {t.exitTime ? new Date(t.exitTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' }) : '-'}
                           </td>
-                          <td className="py-2.5 px-3 text-zinc-300">${t.entryPrice.toLocaleString()}</td>
-                          <td className="py-2.5 px-3 text-zinc-300">{t.exitPrice ? `$${t.exitPrice.toLocaleString()}` : '-'}</td>
-                          <td className="py-2.5 px-3 text-zinc-400">${t.totalValue.toLocaleString()}</td>
+                          <td className="py-2.5 px-3 text-zinc-300">${t.entryPrice?.toLocaleString()}</td>
+                          <td className="py-2.5 px-3 text-zinc-300">{t.exitPrice ? `$${t.exitPrice?.toLocaleString()}` : '-'}</td>
+                          <td className="py-2.5 px-3 text-zinc-400">${t.totalValue?.toLocaleString()}</td>
                           <td className="py-2.5 px-3 text-zinc-500">${t.fee}</td>
                           <td className={`py-2.5 px-3 text-right font-bold ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isProfit ? '+' : ''}${(t.pnl ?? 0).toFixed(2)}
+                            {isProfit ? '+' : ''}${(t.pnl ?? 0)?.toFixed(2)}
                           </td>
                           <td className={`py-2.5 px-3 text-right font-bold ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {isProfit ? '+' : ''}{t.pnlPercent}%

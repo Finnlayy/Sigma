@@ -1,0 +1,1966 @@
+
+> project-sigma@1.0.0 dev
+> vite
+
+
+  VITE v6.4.3  ready in 307 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://192.168.178.40:3000/
+  ➜  Network: http://172.17.0.1:3000/
+  ➜  Network: http://172.19.0.1:3000/
+  ➜  Network: http://10.42.0.1:3000/
+2:46:36 PM [vite] http proxy error: /api/v1/deadman
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:38 PM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:38 PM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:39 PM [vite] http proxy error: /api/v1/deadman
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:39 PM [vite] http proxy error: /api/v1/safety
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:39 PM [vite] http proxy error: /api/tv/jobs
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:42 PM [vite] http proxy error: /api/v1/deadman
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:43 PM [vite] http proxy error: /api/v1/safety
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:43 PM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:43 PM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:45 PM [vite] http proxy error: /api/v1/deadman
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:45 PM [vite] http proxy error: /api/tv/jobs
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:47 PM [vite] http proxy error: /api/v1/safety
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:48 PM [vite] http proxy error: /api/v1/deadman
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:48 PM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:46:48 PM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+2:59:18 PM [vite] (client) page reload docs/plans/INDEX.md
+4:10:46 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+4:10:47 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+4:10:47 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+5:09:22 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+7:19:44 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:34:52 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+7:34:55 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:41:39 PM [vite] (client) page reload bin/sigma-up
+7:41:42 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:41:48 PM [vite] (client) page reload bin/sigma-up
+7:41:50 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:42:06 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+7:42:06 PM [vite] (client) page reload docs/plans/INDEX.md
+7:42:09 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:42:24 PM [vite] (client) page reload bin/sigma-up
+7:42:27 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:42:36 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+7:42:39 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:45:37 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+7:45:39 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:46:00 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+7:46:00 PM [vite] (client) page reload app/execution/kraken_paper_sot.py
+7:46:02 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:46:35 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+7:46:37 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:46:45 PM [vite] (client) page reload tests/conftest.py
+7:46:45 PM [vite] (client) page reload app/server/main.py
+7:46:48 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:47:02 PM [vite] (client) page reload app/server/main.py
+7:47:02 PM [vite] (client) page reload app/server/main.py
+7:47:04 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:47:32 PM [vite] (client) page reload app/server/main.py
+7:47:32 PM [vite] (client) page reload app/core/config.py
+7:47:34 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:47:52 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+7:47:54 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:48:18 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+7:48:21 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:48:23 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+7:48:26 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:48:44 PM [vite] (client) page reload tests/test_kraken_paper_lab.py
+7:48:46 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:48:51 PM [vite] (client) page reload tests/test_kraken_paper_lab.py
+7:48:53 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:48:53 PM [vite] (client) page reload tests/test_loop_a_execution.py
+7:48:56 PM [vite] (client) page reload tests/test_loop_a_execution.py
+7:48:56 PM [vite] (client) page reload tests/test_api_contract.py
+7:48:56 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:48:59 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:49:30 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+7:49:33 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:49:38 PM [vite] (client) page reload app/execution/kraken_cli_registry.json
+7:49:40 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:49:41 PM [vite] (client) page reload tests/test_kraken_single_book.py
+7:49:43 PM [vite] (client) page reload tests/test_kraken_single_book.py
+7:49:44 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:49:48 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:50:05 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+7:50:07 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:51:08 PM [vite] (client) page reload tests/test_loop_a_execution.py
+7:51:10 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:51:16 PM [vite] (client) page reload tests/test_api_contract.py
+7:51:18 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:51:37 PM [vite] (client) page reload tests/test_loop_a_execution.py
+7:51:39 PM [vite] (client) page reload tests/test_kraken_single_book.py
+7:51:40 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:51:42 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:52:43 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+7:52:44 PM [vite] (client) page reload tests/test_api_contract.py
+7:52:47 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+7:53:25 PM [vite] (client) page reload tests/test_kraken_single_book.py
+7:53:27 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:09:17 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+8:09:20 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:10:12 PM [vite] (client) page reload app/execution/kraken_cli_registry.json
+8:10:14 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:10:35 PM [vite] (client) page reload app/mcp/KrakenMCPBridge.py
+8:10:37 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:10:46 PM [vite] (client) page reload app/execution/kraken_paper_engine.py
+8:10:48 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:11:00 PM [vite] (client) page reload app/server/main.py
+8:11:01 PM [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:218:20)
+8:11:01 PM [vite] (client) page reload app/server/main.py
+8:11:03 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:11:11 PM [vite] (client) page reload app/execution/kraken_cli_registry.py
+8:11:14 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:11:18 PM [vite] (client) hmr update /src/components/sigma/panels.tsx, /src/index.css
+8:11:18 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:18 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:11:19 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:19 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:11:19 PM [vite] (client) hmr invalidate /src/components/sigma/dock.tsx Could not Fast Refresh ("addPanelToActive" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:19 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css
+8:11:19 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:19 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:11:19 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:19 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:11:19 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:19 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:11:19 PM [vite] (client) hmr invalidate /src/components/sigma/dock.tsx Could not Fast Refresh ("addPanelToActive" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:19 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css
+8:11:19 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:11:19 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:11:54 PM [vite] (client) page reload tests/test_kraken_single_book.py
+8:11:56 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:12:17 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+8:12:18 PM [vite] (client) page reload docs/plans/INDEX.md
+8:12:19 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:13:14 PM [vite] (client) page reload app/execution/kraken_paper_sot.py
+8:13:15 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:13:21 PM [vite] (client) page reload app/execution/kraken_paper_sot.py
+8:13:23 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:18:38 PM [vite] (client) page reload app/server/main.py
+8:18:38 PM [vite] (client) page reload app/server/main.py
+8:18:40 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:18:44 PM [vite] (client) page reload app/server/main.py
+8:18:45 PM [vite] (client) page reload app/server/main.py
+8:18:47 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:18:54 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+8:18:54 PM [vite] (client) page reload app/core/blueprint.py
+8:18:56 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:19:07 PM [vite] (client) page reload app/server/main.py
+8:19:08 PM [vite] (client) page reload app/server/routes_sigma.py
+8:19:11 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:19:45 PM [vite] (client) page reload app/server/routes_sigma.py
+8:19:48 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:20:11 PM [vite] (client) hmr update /src/components/TvLightweightChart.tsx, /src/index.css
+8:20:20 PM [vite] (client) hmr update /src/components/TvLightweightChart.tsx, /src/index.css
+8:20:34 PM [vite] (client) hmr update /src/components/sigma/panels.tsx, /src/index.css
+8:20:35 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:35 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:35 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:35 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:35 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:35 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:35 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:35 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:20:35 PM [vite] (client) hmr invalidate /src/components/sigma/dock.tsx Could not Fast Refresh ("addPanelToActive" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:35 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css
+8:20:35 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:35 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:20:38 PM [vite] (client) hmr update /src/components/sigma/panels.tsx, /src/index.css
+8:20:38 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:38 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:38 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:38 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:38 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:38 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:38 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:38 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:20:38 PM [vite] (client) hmr invalidate /src/components/sigma/dock.tsx Could not Fast Refresh ("addPanelToActive" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:38 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css
+8:20:38 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:38 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:20:39 PM [vite] (client) hmr update /src/pages/ProcessLogView.tsx, /src/index.css, /src/components/SigmaTerminal.tsx, /src/components/sigma/panels.tsx, /src/components/sigma/mp17Panels.tsx, /src/components/sigma/StrategyLibraryPanel.tsx, /src/components/sigma/StrategyScorecardTab.tsx
+8:20:39 PM [vite] (client) hmr invalidate /src/pages/ProcessLogView.tsx Could not Fast Refresh ("LEVEL_COLOR" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:39 PM [vite] (client) hmr update /src/main.tsx, /src/index.css, /src/components/sigma/panels.tsx
+8:20:39 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:39 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:20:39 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:39 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:39 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:39 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:20:39 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:39 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:39 PM [vite] (client) hmr invalidate /src/components/SigmaTerminal.tsx Could not Fast Refresh ("PRESETS" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:39 PM [vite] (client) hmr update /src/App.tsx, /src/index.css
+8:20:39 PM [vite] (client) hmr invalidate /src/components/sigma/panels.tsx Could not Fast Refresh ("PANEL_TITLES" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:39 PM [vite] (client) hmr update /src/components/SigmaTerminal.tsx, /src/index.css, /src/components/sigma/dock.tsx, /src/components/sigma/mp17Panels.tsx
+8:20:40 PM [vite] (client) hmr invalidate /src/main.tsx Could not Fast Refresh ("true" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:40 PM [vite] (client) hmr update /src/index.css
+8:20:40 PM [vite] (client) hmr invalidate /src/main.tsx Could not Fast Refresh ("true" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:40 PM [vite] (client) hmr update /src/index.css
+8:20:40 PM [vite] (client) hmr invalidate /src/main.tsx Could not Fast Refresh ("true" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+8:20:40 PM [vite] (client) hmr update /src/index.css
+8:21:06 PM [vite] (client) page reload docs/plans/INDEX.md
+8:21:10 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+8:21:11 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:21:13 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+8:21:13 PM [vite] (client) page reload tests/test_frontend_terminal.py
+8:21:15 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:14:01 PM [vite] (client) page reload app/execution/kraken_paper_sot.py
+9:14:03 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:14:07 PM [vite] (client) page reload app/execution/kraken_paper_sot.py
+9:14:09 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:14:20 PM [vite] (client) page reload app/execution/kraken_paper_sot.py
+9:14:23 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:14:31 PM [vite] (client) page reload app/execution/kraken_paper_history_mirror.py
+9:14:31 PM [vite] (client) page reload app/execution/kraken_paper_history_mirror.py
+9:14:33 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:14:37 PM [vite] (client) page reload app/execution/kraken_paper_history_mirror.py
+9:14:37 PM [vite] (client) page reload app/execution/kraken_paper_history_mirror.py
+9:14:40 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:15:12 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+9:15:14 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:15:23 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+9:15:24 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+9:15:25 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:15:27 PM [vite] (client) page reload app/core/autonomy_levels.py
+9:15:27 PM [vite] (client) page reload app/core/autonomy_levels.py
+9:15:27 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:15:30 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:15:31 PM [vite] (client) page reload app/core/autonomy_levels.py
+9:15:34 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:05 PM [vite] (client) page reload app/execution/FeeEngine.py
+9:16:06 PM [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:218:20)
+9:16:08 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:21 PM [vite] (client) page reload app/execution/TradeChurnGuard.py
+9:16:21 PM [vite] (client) page reload app/execution/TradeChurnGuard.py
+9:16:22 PM [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:218:20)
+9:16:23 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:31 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+9:16:33 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+9:16:33 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:34 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+9:16:36 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+9:16:39 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:39 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:39 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:39 PM [vite] (client) page reload app/tv/symbol_map.py
+9:16:41 PM [vite] (client) page reload app/core/blueprint.py
+9:16:41 PM [vite] (client) page reload config/autonomy-level-4.yaml
+9:16:42 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:42 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:44 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:49 PM [vite] (client) page reload docs/BLUEPRINT-SIGMA.md
+9:16:51 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:16:56 PM [vite] (client) page reload app/server/main.py
+9:16:58 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:17:08 PM [vite] (client) page reload app/server/main.py
+9:17:10 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:17:12 PM [vite] (client) page reload app/server/main.py
+9:17:14 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:17:59 PM [vite] (client) page reload app/server/main.py
+9:18:01 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:21:01 PM [vite] (client) page reload app/execution/kraken_paper_sot.py
+9:21:04 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:21:04 PM [vite] (client) page reload app/server/main.py
+9:21:05 PM [vite] (client) page reload tests/test_kraken_single_book.py
+9:21:07 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:21:29 PM [vite] (client) page reload docs/plans/INDEX.md
+9:21:31 PM [vite] (client) page reload docs/plans/KRAKEN-CLI-SINGLE-BOOK.md
+9:21:32 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+9:21:35 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+11:27:58 PM [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:218:20)
+11:31:44 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+11:31:44 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+11:31:44 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+11:31:44 PM [vite] ws proxy socket error:
+Error: write EPIPE
+    at afterWriteDispatched (node:internal/stream_base_commons:161:15)
+    at writeGeneric (node:internal/stream_base_commons:152:3)
+    at Socket._writeGeneric (node:net:958:11)
+    at Socket._write (node:net:970:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at Socket.ondata (node:internal/streams/readable:1009:22)
+    at Socket.emit (node:events:524:28)
+    at Readable.read (node:internal/streams/readable:782:10)
+    at Socket.read (node:net:777:39)
+    at flow (node:internal/streams/readable:1283:53)
+    at emitReadable_ (node:internal/streams/readable:847:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:81:21)
+4:08:35 PM [vite] (client) page reload app/core/blueprint.py
+4:08:35 PM [vite] (client) page reload app/core/config.py
+4:08:35 PM [vite] (client) page reload app/execution/FeeEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+4:08:35 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+4:08:35 PM [vite] (client) page reload app/execution/TradeChurnGuard.py
+4:08:35 PM [vite] (client) page reload app/execution/kraken_paper_engine.py
+4:08:35 PM [vite] (client) page reload app/mcp/KrakenMCPBridge.py
+4:08:35 PM [vite] (client) page reload app/server/main.py
+4:08:35 PM [vite] (client) page reload app/server/routes_sigma.py
+4:08:35 PM [vite] (client) page reload app/tv/symbol_map.py
+4:08:35 PM [vite] (client) page reload bin/sigma-up
+4:08:35 PM [vite] (client) page reload config/autonomy-level-4.yaml
+4:08:35 PM [vite] (client) page reload docs/BLUEPRINT-SIGMA.md
+4:08:35 PM [vite] (client) page reload docs/plans/INDEX.md
+4:08:35 PM [vite] (client) hmr update /src/components/TvLightweightChart.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/sigma/panels.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/pages/ProcessLogView.tsx, /src/index.css, /src/components/SigmaTerminal.tsx, /src/components/sigma/panels.tsx, /src/components/sigma/mp17Panels.tsx, /src/components/sigma/StrategyLibraryPanel.tsx, /src/components/sigma/StrategyScorecardTab.tsx
+4:08:35 PM [vite] (client) page reload tests/conftest.py
+4:08:35 PM [vite] (client) page reload tests/test_api_contract.py
+4:08:35 PM [vite] (client) page reload tests/test_frontend_terminal.py
+4:08:35 PM [vite] (client) page reload tests/test_kraken_paper_lab.py
+4:08:35 PM [vite] (client) page reload tests/test_loop_a_execution.py
+4:08:35 PM [vite] (client) page reload .jules/bolt.md
+4:08:35 PM [vite] (client) page reload package.json
+4:08:35 PM [vite] (client) hmr update /src/components/BacktestingPanel.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/CalendarHeatmap.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/DataLakePanel.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/GeneticOptimizerPanel.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/KrakenLedgersPanel.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/KrakenSymbolModal.tsx, /src/index.css
+4:08:35 PM [vite] (client) page reload src/components/MarketPanel.tsx
+4:08:35 PM [vite] (client) hmr update /src/components/MetricsPanel.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/StrategyCard.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/StrategyEditor.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/StrategyMatrixModal.tsx, /src/index.css
+4:08:35 PM [vite] (client) page reload src/components/TerminalPanel.tsx
+4:08:35 PM [vite] (client) hmr update /src/components/quant/SystemHealthPanel.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/sigma/mp17Panels.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/pages/ProcessLogView.tsx, /src/index.css
+4:08:35 PM [vite] vite.config.ts changed, restarting server...
+4:08:35 PM [vite] (client) page reload app/mcp/KrakenMCPBridge.py
+4:08:35 PM [vite] (client) page reload app/mcp/TradingViewMCPClient.py
+4:08:35 PM [vite] (client) page reload app/server/__init__.py
+4:08:35 PM [vite] (client) page reload app/server/main.py
+4:08:35 PM [vite] (client) page reload app/server/routes_logs.py
+4:08:35 PM [vite] (client) page reload app/server/routes_quant.py
+4:08:35 PM [vite] (client) page reload app/server/routes_sigma.py
+4:08:35 PM [vite] (client) page reload app/server/schemas.py
+4:08:35 PM [vite] (client) page reload app/tv/__init__.py
+4:08:35 PM [vite] (client) page reload app/tv/alert_provisioner.py
+4:08:35 PM [vite] (client) page reload app/tv/chrome_login.py
+4:08:35 PM [vite] (client) page reload app/tv/interval_map.py
+4:08:35 PM [vite] (client) page reload app/tv/scraper_client.py
+4:08:35 PM [vite] (client) page reload app/tv/script_catalog.py
+4:08:35 PM [vite] (client) page reload app/tv/selector_manager.py
+4:08:35 PM [vite] (client) page reload app/tv/selectors.yaml
+4:08:35 PM [vite] (client) page reload app/tv/strategy_tester_driver.py
+4:08:35 PM [vite] (client) page reload app/tv/symbol_map.py
+4:08:35 PM [vite] (client) page reload app/tv/tv_driver.py
+4:08:35 PM [vite] (client) page reload app/tv/worker.py
+4:08:35 PM [vite] (client) page reload config/autonomy-level-4.yaml
+4:08:35 PM [vite] (client) page reload docs/ALPHA-BLUEPRINT-v1.2.0.md
+4:08:35 PM [vite] (client) page reload docs/BLUEPRINT-SIGMA.md
+4:08:35 PM [vite] (client) page reload docs/MASTERPROMPT.md
+4:08:35 PM [vite] (client) page reload docs/SIGMA-ROADMAP.md
+4:08:35 PM [vite] (client) page reload docs/SIGMA-UI-SPEZIFIKATION.md
+4:08:35 PM [vite] (client) page reload docs/SIGMA-WISSENSDATENBANK.md
+4:08:35 PM [vite] (client) page reload docs/wave-execution-screen.md
+4:08:35 PM [vite] (client) page reload docs/prompts/JULES-MASTER-EXECUTE.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-01-hard-risk-guards.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-02-micro-dca-ladder.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-03-candle-regime-signals.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-04-power-phasor-features.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-05-hourly-gate-symbol-ranker.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-06-polymarket-density.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-07-sniper-strategy-phase2.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-08-exhaustion-unwind.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-09-dynamic-pine-provisioner.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-10-orderflow-validator.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-11-onnx-tensor.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-12-backtest-hypotheses.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-13-multi-asset.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-14-event-straddle.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-15-fractal-directional.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-16-research-dashboard.md
+4:08:35 PM [vite] (client) page reload docs/prompts/MP-17-frontend-panels.md
+4:08:35 PM [vite] (client) page reload docs/prompts/README.md
+4:08:35 PM [vite] (client) page reload docs/plans/EXECUTE-STATE.md
+4:08:35 PM [vite] (client) page reload docs/plans/GLINT-POLYMARKET-WIRING.md
+4:08:35 PM [vite] (client) page reload docs/plans/INDEX.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-01.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-02.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-03.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-04.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-05.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-06.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-07.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-08.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-09.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-11.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-12.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-15.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-16.md
+4:08:35 PM [vite] (client) page reload docs/plans/MP-17.md
+4:08:35 PM [vite] (client) page reload tests/conftest.py
+4:08:35 PM [vite] (client) page reload tests/test_api_contract.py
+4:08:35 PM [vite] (client) page reload tests/test_autopsy_zones_30.py
+4:08:35 PM [vite] (client) page reload tests/test_blueprint_spec.py
+4:08:35 PM [vite] (client) page reload tests/test_candle_signals.py
+4:08:35 PM [vite] (client) page reload tests/test_dca_ladder.py
+4:08:35 PM [vite] (client) page reload tests/test_dynamic_pine.py
+4:08:35 PM [vite] (client) page reload tests/test_error_taxonomy.py
+4:08:35 PM [vite] (client) page reload tests/test_exact_csv_roundtrip.py
+4:08:35 PM [vite] (client) page reload tests/test_execution_plane.py
+4:08:35 PM [vite] (client) page reload tests/test_exhaustion_unwind.py
+4:08:35 PM [vite] (client) page reload tests/test_five_module_runtime.py
+4:08:35 PM [vite] (client) page reload tests/test_fractal_directional.py
+4:08:35 PM [vite] (client) page reload tests/test_frontend_terminal.py
+4:08:35 PM [vite] (client) page reload tests/test_ga_shadow_gate.py
+4:08:35 PM [vite] (client) page reload tests/test_hourly_ranker.py
+4:08:35 PM [vite] (client) page reload tests/test_kraken_cli_security.py
+4:08:35 PM [vite] (client) page reload tests/test_kraken_paper_lab.py
+4:08:35 PM [vite] (client) page reload tests/test_lan_events_idempotency.py
+4:08:35 PM [vite] (client) page reload tests/test_lead_lag_matrix.py
+4:08:35 PM [vite] (client) page reload tests/test_llm_contracts.py
+4:08:35 PM [vite] (client) page reload tests/test_log_console.py
+4:08:35 PM [vite] (client) page reload tests/test_logs_sql_aggregates.py
+4:08:35 PM [vite] (client) page reload tests/test_loop_a_execution.py
+4:08:35 PM [vite] (client) page reload tests/test_loops_cde.py
+4:08:35 PM [vite] (client) page reload tests/test_m8_capital_and_margin_pipeline.py
+4:08:35 PM [vite] (client) page reload tests/test_m8_eod_vault.py
+4:08:35 PM [vite] (client) page reload tests/test_m8_signal_pipeline.py
+4:08:35 PM [vite] (client) page reload tests/test_mp17_live_panels.py
+4:08:35 PM [vite] (client) page reload tests/test_mp17_sigma_panels.py
+4:08:35 PM [vite] (client) page reload tests/test_netron_stack.py
+4:08:35 PM [vite] (client) page reload tests/test_onnx_tensor.py
+4:08:35 PM [vite] (client) page reload tests/test_polymarket_layer0.py
+4:08:35 PM [vite] (client) page reload tests/test_power_phasor.py
+4:08:35 PM [vite] (client) page reload tests/test_quantum_sniper.py
+4:08:35 PM [vite] (client) page reload tests/test_quantum_wave_regime.py
+4:08:35 PM [vite] (client) page reload tests/test_queue_matrices_grouping.py
+4:08:35 PM [vite] (client) page reload tests/test_risk_guards.py
+4:08:35 PM [vite] (client) page reload tests/test_scraper_client.py
+4:08:35 PM [vite] (client) page reload tests/test_scraper_sidecar.py
+4:08:35 PM [vite] (client) page reload tests/test_sigma_live_adapters.py
+4:08:35 PM [vite] (client) page reload tests/test_settings_env.py
+4:08:35 PM [vite] (client) page reload tests/test_strategy_lifecycle.py
+4:08:35 PM [vite] (client) page reload tests/test_strategy_scorecard.py
+4:08:35 PM [vite] (client) page reload tests/test_tv_csv_mcp.py
+4:08:35 PM [vite] (client) page reload tests/test_tv_library.py
+4:08:35 PM [vite] (client) page reload tests/test_tv_seam.py
+4:08:35 PM [vite] (client) page reload tests/test_wave_screen_execution.py
+4:08:35 PM [vite] (client) page reload tests/test_webhook_schemas.py
+4:08:35 PM [vite] (client) page reload .github/workflows/auto-merge-bolt.yml
+4:08:35 PM [vite] (client) page reload .github/workflows/jules-mp-execute.yml
+4:08:35 PM [vite] (client) page reload .jules/setup.sh
+4:08:35 PM [vite] (client) page reload agents/blanche_system_prompt.md
+4:08:35 PM [vite] (client) page reload agents/jaune_system_prompt.md
+4:08:35 PM [vite] (client) page reload agents/noir_system_prompt.md
+4:08:35 PM [vite] (client) page reload agents/rouge_system_prompt.md
+4:08:35 PM [vite] (client) page reload app/__init__.py
+4:08:35 PM [vite] (client) page reload app/backtest/BacktestEngine.py
+4:08:35 PM [vite] (client) page reload app/backtest/TvMcpBacktest.py
+4:08:35 PM [vite] (client) page reload app/backtest/__init__.py
+4:08:35 PM [vite] (client) page reload app/backtest/tv_csv.py
+4:08:35 PM [vite] (client) page reload app/core/__init__.py
+4:08:35 PM [vite] (client) page reload app/core/blueprint.py
+4:08:35 PM [vite] (client) page reload app/core/config.py
+4:08:35 PM [vite] (client) page reload app/core/duckdb_store.py
+4:08:35 PM [vite] (client) page reload app/core/error_engine.py
+4:08:35 PM [vite] (client) page reload app/core/event_bus.py
+4:08:35 PM [vite] (client) page reload app/core/exchange_clock.py
+4:08:35 PM [vite] (client) page reload app/core/l4_config.py
+4:08:35 PM [vite] (client) page reload app/core/memory_watchdog.py
+4:08:35 PM [vite] (client) page reload app/core/rate_limiter.py
+4:08:35 PM [vite] (client) page reload app/core/redis_client.py
+4:08:35 PM [vite] (client) page reload app/core/scheduler_matrix.py
+4:08:35 PM [vite] (client) page reload app/core/telemetry.py
+4:08:35 PM [vite] (client) page reload app/dashboard/tv_lightweight_export.py
+4:08:35 PM [vite] (client) page reload app/execution/AutopsyProcessor.py
+4:08:35 PM [vite] (client) page reload app/execution/EodProfitFactorEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/FeeEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/JudgeEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+4:08:35 PM [vite] (client) page reload app/execution/LeverageEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+4:08:35 PM [vite] (client) page reload app/execution/M8StateEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/PaperExecutionEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/SafetyGuard.py
+4:08:35 PM [vite] (client) page reload app/execution/StorageUtils.py
+4:08:35 PM [vite] (client) page reload app/execution/StrategyInterpreter.py
+4:08:35 PM [vite] (client) page reload app/execution/TradeChurnGuard.py
+4:08:35 PM [vite] (client) page reload app/execution/TransientOrderBuffer.py
+4:08:35 PM [vite] (client) page reload app/execution/VaultEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/VirtualBotEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/capital_flywheel_engine.py
+4:08:35 PM [vite] (client) page reload app/execution/capital_vault_executor.py
+4:08:35 PM [vite] (client) page reload app/execution/deadman_switch_daemon.py
+4:08:35 PM [vite] (client) page reload app/execution/fixed_leverage.py
+4:08:35 PM [vite] (client) page reload app/execution/kraken_fill_reconciler.py
+4:08:35 PM [vite] (client) page reload app/execution/kraken_paper_engine.py
+4:08:35 PM [vite] (client) page reload app/execution/reliable_order_dispatcher.py
+4:08:35 PM [vite] (client) page reload app/ingestion/OmniStreamIngestor.py
+4:08:35 PM [vite] (client) page reload app/ingestion/__init__.py
+4:08:35 PM [vite] (client) page reload app/ingestion/kraken_depth_adapter.py
+4:08:35 PM [vite] (client) page reload app/ingestion/macro_contagion_feed.py
+4:08:35 PM [vite] (client) page reload app/llm/__init__.py
+4:08:35 PM [vite] (client) page reload app/llm/schemas_llm.py
+4:08:35 PM [vite] (client) page reload app/llm/tool_executor.py
+4:08:35 PM [vite] (client) page reload app/llm/tools_registry.json
+4:08:35 PM [vite] (client) page reload app/optimizer/AcademyRegistry.py
+4:08:35 PM [vite] (client) page reload app/optimizer/GeneticOptimizer.py
+4:08:35 PM [vite] (client) page reload app/optimizer/StrategyAllocator.py
+4:08:35 PM [vite] (client) page reload app/optimizer/__init__.py
+4:08:35 PM [vite] (client) page reload app/optimizer/exact_csv_serializer.py
+4:08:35 PM [vite] (client) page reload app/optimizer/gene_schema.py
+4:08:35 PM [vite] (client) page reload app/optimizer/reward_shaping.py
+4:08:35 PM [vite] (client) page reload app/optimizer/strategy_scorecard.py
+4:08:35 PM [vite] (client) page reload app/panels/__init__.py
+4:08:35 PM [vite] (client) page reload app/panels/panel_engine.py
+4:08:35 PM [vite] (client) page reload app/quant/RegimeEngine.py
+4:08:35 PM [vite] (client) page reload app/quant/__init__.py
+4:08:35 PM [vite] (client) page reload app/quant/epidemic_contagion_engine.py
+4:08:35 PM [vite] (client) page reload app/quant/glint_orderbook_verifier.py
+4:08:35 PM [vite] (client) page reload app/quant/onnx_kelly.py
+4:08:35 PM [vite] (client) page reload app/quant/regime_detector.py
+4:08:35 PM [vite] (client) page reload app/quant/self_optimizing_onnx.py
+4:08:35 PM [vite] (client) page reload app/scout/ScoutDaemon.py
+4:08:35 PM [vite] (client) page reload app/scout/__init__.py
+4:08:35 PM [vite] (client) page reload app/scraper/__init__.py
+4:08:35 PM [vite] (client) page reload app/scraper/cache.py
+4:08:35 PM [vite] (client) page reload app/scraper/main.py
+4:08:35 PM [vite] (client) page reload app/scraper/settings.py
+4:08:35 PM [vite] (client) page reload app/scraper/synthetic.py
+4:08:35 PM [vite] (client) page reload app/scraper/vendor_bridge.py
+4:08:35 PM [vite] (client) page reload app/security/PasskeyAuthEngine.py
+4:08:35 PM [vite] (client) page reload app/security/SettingsEnvManager.py
+4:08:35 PM [vite] (client) page reload app/services/__init__.py
+4:08:35 PM [vite] (client) page reload app/services/netron_server.py
+4:08:35 PM [vite] (client) page reload app/services/strategy_lifecycle_service.py
+4:08:35 PM [vite] (client) page reload app/services/telegram_bot_operator.py
+4:08:35 PM [vite] (client) page reload app/services/tv_library_service.py
+4:08:35 PM [vite] (client) page reload app/telegram/TelegramBotEngine.py
+4:08:35 PM [vite] (client) page reload deploy/systemd/sigma-core.service
+4:08:35 PM [vite] (client) page reload deploy/systemd/sigma-netron.service
+4:08:35 PM [vite] (client) page reload deploy/systemd/sigma-scraper.service
+4:08:35 PM [vite] (client) page reload evals/test_scenarios.md
+4:08:35 PM [vite] (client) page reload models/README.md
+4:08:35 PM [vite] (client) page reload prompts/ciel_system_prompt.md
+4:08:35 PM [vite] (client) page reload prompts/pine_sigma_l4_emitter_v6.pine
+4:08:35 PM [vite] (client) page reload pytest.ini
+4:08:35 PM [vite] (client) page reload requirements.txt
+4:08:35 PM [vite] (client) page reload setup_alpha.py
+4:08:35 PM [vite] (client) page reload sigma/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/backtest/lookahead_pipeline_check.py
+4:08:35 PM [vite] (client) page reload sigma/backtest/power_factor_backtest.py
+4:08:35 PM [vite] (client) page reload sigma/backtest/report.py
+4:08:35 PM [vite] (client) page reload sigma/core/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/core/fractal_scaling.py
+4:08:35 PM [vite] (client) page reload sigma/core/math_engine.py
+4:08:35 PM [vite] (client) page reload sigma/core/onnx_quantum_tensor.py
+4:08:35 PM [vite] (client) page reload sigma/execution/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/execution/base_bridge.py
+4:08:35 PM [vite] (client) page reload sigma/execution/quantum_sniper_pipeline.py
+4:08:35 PM [vite] (client) page reload sigma/execution/risk_guards.py
+4:08:35 PM [vite] (client) page reload sigma/execution/universe.py
+4:08:35 PM [vite] (client) page reload sigma/loops/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/loops/loop_a.py
+4:08:35 PM [vite] (client) page reload sigma/loops/loop_b.py
+4:08:35 PM [vite] (client) page reload sigma/loops/loop_c.py
+4:08:35 PM [vite] (client) page reload sigma/loops/loop_d.py
+4:08:35 PM [vite] (client) page reload sigma/loops/loop_e.py
+4:08:35 PM [vite] (client) page reload sigma/orchestration/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/orchestration/hourly_screening_gate.py
+4:08:35 PM [vite] (client) page reload sigma/orchestration/master_orchestrator.py
+4:08:35 PM [vite] (client) page reload sigma/orchestration/multi_asset_router.py
+4:08:35 PM [vite] (client) page reload sigma/orchestration/shadow_plan.py
+4:08:35 PM [vite] (client) page reload sigma/ports/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/ports/polymarket_gamma_feeder.py
+4:08:35 PM [vite] (client) page reload sigma/ports/polymarket_port.py
+4:08:35 PM [vite] (client) page reload sigma/signals/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/signals/base_alpha.py
+4:08:35 PM [vite] (client) page reload sigma/signals/correlation_scout.py
+4:08:35 PM [vite] (client) page reload sigma/signals/daily_open_envelope.py
+4:08:35 PM [vite] (client) page reload sigma/signals/dual_hurst.py
+4:08:35 PM [vite] (client) page reload sigma/signals/high_beta_ranker.py
+4:08:35 PM [vite] (client) page reload sigma/signals/hilbert_phasor.py
+4:08:35 PM [vite] (client) page reload sigma/signals/htf_features.py
+4:08:35 PM [vite] (client) page reload sigma/signals/lead_lag_detector.py
+4:08:35 PM [vite] (client) page reload sigma/signals/marubozu_fvg.py
+4:08:35 PM [vite] (client) page reload sigma/signals/mtf_resonance.py
+4:08:35 PM [vite] (client) page reload sigma/signals/polymarket_density.py
+4:08:35 PM [vite] (client) page reload sigma/signals/polymarket_layer0.py
+4:08:35 PM [vite] (client) page reload sigma/signals/polymarket_trajectory.py
+4:08:35 PM [vite] (client) page reload sigma/signals/power_triangle.py
+4:08:35 PM [vite] (client) page reload sigma/signals/quantum_wave_collider.py
+4:08:35 PM [vite] (client) page reload sigma/signals/scale_features.py
+4:08:35 PM [vite] (client) page reload sigma/signals/session_clock.py
+4:08:35 PM [vite] (client) page reload sigma/signals/timeframe_ladder.py
+4:08:35 PM [vite] (client) page reload sigma/signals/two_bar_thrust.py
+4:08:35 PM [vite] (client) page reload sigma/signals/volatility_exhaustion.py
+4:08:35 PM [vite] (client) page reload sigma/signals/volatility_throttle.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/__init__.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/async_unwind.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/base_strategy.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/dca_ladder.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/dual_hedge_grid.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/dynamic_channel_dca.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/dynamic_pine_provisioner.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/fractal_directional.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/h_tests.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/htf_trend_ltf_reversion.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/pine_v6_generator.py
+4:08:35 PM [vite] (client) page reload sigma/strategies/quantum_sniper_dca.py
+4:08:35 PM [vite] (client) page reload stacks/ubuntu/Dockerfile
+4:08:35 PM [vite] (client) page reload stacks/ubuntu/README.md
+4:08:35 PM [vite] (client) page reload stacks/ubuntu/docker-compose.yml
+4:08:35 PM [vite] (client) page reload stacks/ubuntu/setup_ubuntu.sh
+4:08:35 PM [vite] (client) page reload stacks/ubuntu/systemd/alpha-core.service
+4:08:35 PM [vite] (client) page reload stacks/ubuntu/systemd/alpha-redis.service
+4:08:35 PM [vite] (client) page reload tests/backtest/test_hypotheses_h1_h7.py
+4:08:35 PM [vite] (client) page reload tests/backtest/test_power_factor_dashboard.py
+4:08:35 PM [vite] (client) page reload vendor/README.md
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/.github/workflows/docs.yml
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/.github/workflows/pylint.yml
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/.github/workflows/python-app.yml
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/.github/workflows/release-demo.yml
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/.github/workflows/stale.yml
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/.pylintrc
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/MANIFEST
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/README.md
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/api/main.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/api/requirements.txt
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/Makefile
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/conf.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/index.rst
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/make.bat
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/modules.rst
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/stream.rst
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/symbols.rst
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/tests.rst
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/docs/utils.rst
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/frontend/index.html
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/frontend/script.js
+4:08:35 PM [vite] (client) hmr update /src/index.css
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/requirements.txt
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/setup.cfg
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/setup.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/__init__.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_cal.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_fundamental_graphs.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_ideas.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_indicators.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_market_movers.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_markets.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_minds.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_news.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_overview.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_realtime_price.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_screener.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_streamer.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tests/test_symbol_markets.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/__init__.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/__init__.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/cal.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/exceptions.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/fundamental_graphs.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/ideas.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/market_movers.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/markets.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/minds.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/news.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/overview.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/screener.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/stream/__init__.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/stream/price.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/stream/stream_handler.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/stream/streamer.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/stream/utils.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/symbol_markets.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/technicals.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/symbols/utils.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/tradingview_scraper.py
+4:08:35 PM [vite] (client) page reload vendor/tradingview-scraper/tradingview_scraper/utils/__init__.py
+4:08:35 PM [vite] (client) page reload bin/sigma-up
+4:08:35 PM [vite] (client) hmr update /src/components/TvLightweightChart.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/components/sigma/panels.tsx, /src/index.css
+4:08:35 PM [vite] (client) hmr update /src/pages/ProcessLogView.tsx, /src/index.css, /src/components/SigmaTerminal.tsx, /src/components/sigma/panels.tsx, /src/components/sigma/mp17Panels.tsx, /src/components/sigma/StrategyLibraryPanel.tsx, /src/components/sigma/StrategyScorecardTab.tsx
+4:08:35 PM [vite] (client) page reload app/core/blueprint.py
+4:08:35 PM [vite] (client) page reload app/core/config.py
+4:08:35 PM [vite] (client) page reload app/execution/FeeEngine.py
+4:08:35 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+4:08:35 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+4:08:35 PM [vite] (client) page reload app/execution/TradeChurnGuard.py
+4:08:35 PM [vite] (client) page reload app/execution/kraken_paper_engine.py
+4:08:35 PM [vite] (client) page reload app/mcp/KrakenMCPBridge.py
+4:08:35 PM [vite] (client) page reload app/server/main.py
+4:08:35 PM [vite] (client) page reload app/server/routes_sigma.py
+4:08:35 PM [vite] (client) page reload app/tv/symbol_map.py
+4:08:35 PM [vite] (client) page reload docs/BLUEPRINT-SIGMA.md
+4:08:35 PM [vite] (client) page reload docs/plans/INDEX.md
+4:08:35 PM [vite] (client) page reload tests/conftest.py
+4:08:35 PM [vite] (client) page reload tests/test_api_contract.py
+4:08:35 PM [vite] (client) page reload tests/test_frontend_terminal.py
+4:08:35 PM [vite] (client) page reload tests/test_kraken_paper_lab.py
+4:08:35 PM [vite] (client) page reload tests/test_loop_a_execution.py
+4:08:35 PM [vite] (client) page reload config/autonomy-level-4.yaml
+4:08:36 PM [vite] server restarted.
+4:08:40 PM [vite] (client) ✨ new dependencies optimized: zod
+4:08:40 PM [vite] (client) ✨ optimized dependencies changed. reloading
+4:08:54 PM [vite] (client) page reload app/core/blueprint.py
+4:08:54 PM [vite] (client) page reload app/core/config.py
+4:08:54 PM [vite] (client) page reload app/execution/FeeEngine.py
+4:08:54 PM [vite] (client) page reload app/execution/KrakenCliBridge.py
+4:08:54 PM [vite] (client) page reload app/execution/LoopAPipeline.py
+4:08:54 PM [vite] (client) page reload app/execution/TradeChurnGuard.py
+4:08:54 PM [vite] (client) page reload app/execution/kraken_paper_engine.py
+4:08:54 PM [vite] (client) page reload app/mcp/KrakenMCPBridge.py
+4:08:54 PM [vite] (client) page reload app/server/main.py
+4:08:54 PM [vite] (client) page reload app/server/routes_sigma.py
+4:08:54 PM [vite] (client) page reload app/tv/symbol_map.py
+4:08:54 PM [vite] (client) page reload config/autonomy-level-4.yaml
+4:08:54 PM [vite] (client) page reload docs/BLUEPRINT-SIGMA.md
+4:08:54 PM [vite] (client) page reload docs/plans/INDEX.md
+4:08:54 PM [vite] (client) page reload tests/conftest.py
+4:08:54 PM [vite] (client) page reload tests/test_api_contract.py
+4:08:54 PM [vite] (client) page reload tests/test_kraken_paper_lab.py
+4:08:54 PM [vite] (client) page reload tests/test_loop_a_execution.py
+4:08:54 PM [vite] (client) page reload tests/test_frontend_terminal.py
+4:09:07 PM [vite] (client) page reload bin/sigma-up
+4:09:10 PM [vite] (client) page reload bin/sigma-up
+4:09:42 PM [vite] (client) page reload bin/sigma-up

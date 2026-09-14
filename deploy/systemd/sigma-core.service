@@ -1,0 +1,27 @@
+[Unit]
+# =========================================================
+# Datei:      deploy/systemd/sigma-core.service
+# Zweck:      Sigma Core API mit cgroup-v2 Memory Guard.
+# =========================================================
+Description=Sigma Core API (:8000)
+After=network-online.target redis-server.service sigma-scraper.service
+Wants=network-online.target sigma-scraper.service
+
+[Service]
+Type=simple
+User=sigma
+Group=sigma
+WorkingDirectory=/opt/sigma
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/sigma
+EnvironmentFile=-/opt/sigma/.env
+ExecStart=/opt/sigma/.venv/bin/uvicorn app.server.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+MemoryHigh=3G
+MemoryMax=4G
+StandardOutput=append:/opt/sigma/data/logs/sigma_core.log
+StandardError=append:/opt/sigma/data/logs/sigma_core.log
+
+[Install]
+WantedBy=multi-user.target

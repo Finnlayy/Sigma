@@ -207,7 +207,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="text-slate-400">L1 Ringbuffer (RAM):</span>
                   <span className="font-mono text-purple-300">
-                    {(storageTiering.l1_shm_ringbuffer_bytes / 1024 / 1024).toFixed(1)} / {(storageTiering.l1_capacity_bytes / 1024 / 1024).toFixed(0)} MB
+                    {(storageTiering.l1_shm_ringbuffer_bytes / 1024 / 1024)?.toFixed(1)} / {(storageTiering.l1_capacity_bytes / 1024 / 1024)?.toFixed(0)} MB
                   </span>
                 </div>
                 <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">

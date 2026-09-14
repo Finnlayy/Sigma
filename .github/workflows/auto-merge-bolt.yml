@@ -1,0 +1,99 @@
+# Auto-merge Bolt PRs when GitHub says they are mergeable.
+# Cursor Bolt opens drafts; this marks them ready and merges (or enables
+# auto-merge if required checks are still running).
+name: Auto-merge Bolt PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to merge if it is a mergeable Bolt PR"
+        required: false
+
+concurrency:
+  group: auto-merge-bolt-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          INPUT_PR: ${{ github.event.inputs.pr_number }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NUM="${PR_NUM:-}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "${INPUT_PR:-}" ]; then
+            NUM="$INPUT_PR"
+          fi
+          if [ -z "${NUM:-}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No Bolt PR to merge."
+            exit 0
+          fi
+          echo "number=$NUM" >> "$GITHUB_OUTPUT"
+          TITLE="$(gh pr view "$NUM" --repo "$REPO" --json title,headRefName,author,isDraft,mergeable --jq .)"
+          echo "$TITLE"
+          HEAD="$(echo "$TITLE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headRefName"])')"
+          NAME="$(echo "$TITLE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["title"])')"
+          LOGIN="$(echo "$TITLE" | python3 -c 'import json,sys; a=json.load(sys.stdin).get("author") or {}; print(a.get("login",""))')"
+          if [[ "$HEAD" == cursor/application-performance-improvement* ]] \
+            || [[ "$NAME" == ⚡\ Bolt* ]] \
+            || [[ "$LOGIN" == *cursor* ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Not a Bolt PR (#$NUM)."
+          fi
+
+      - name: Ready and merge if possible
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUM: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          DRAFT="$(gh pr view "$NUM" --repo "$REPO" --json isDraft --jq .isDraft)"
+          if [ "$DRAFT" = "true" ]; then
+            gh pr ready "$NUM" --repo "$REPO"
+          fi
+          STATE="$(gh pr view "$NUM" --repo "$REPO" --json mergeable,mergeStateStatus,state --jq .)"
+          echo "$STATE"
+          MERGEABLE="$(echo "$STATE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["mergeable"])')"
+          STATUS="$(echo "$STATE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["mergeStateStatus"])')"
+          OPEN="$(echo "$STATE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
+          if [ "$OPEN" != "OPEN" ]; then
+            echo "PR #$NUM is $OPEN — nothing to merge."
+            exit 0
+          fi
+          if [ "$MERGEABLE" = "CONFLICTING" ] || [ "$STATUS" = "DIRTY" ]; then
+            echo "PR #$NUM is conflicting — leaving open."
+            gh pr comment "$NUM" --repo "$REPO" --body "Bolt auto-merge skipped: merge conflict with \`main\`. Resolve or wait for the next Bolt run."
+            exit 0
+          fi
+          # Immediate merge when GitHub allows it; otherwise enable auto-merge for checks.
+          if gh pr merge "$NUM" --repo "$REPO" --squash --delete-branch; then
+            echo "Merged #$NUM."
+            exit 0
+          fi
+          if gh pr merge "$NUM" --repo "$REPO" --squash --auto --delete-branch; then
+            echo "Auto-merge enabled for #$NUM."
+            exit 0
+          fi
+          echo "Could not merge #$NUM (branch protection or checks)."
+          exit 0
