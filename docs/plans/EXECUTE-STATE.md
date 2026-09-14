@@ -1,10 +1,10 @@
 # Jules Execute State
 
 <!-- jules-loop:ACTIVE -->
-<!-- jules-next:MP-11 -->
+<!-- jules-next:MP-12 -->
 
 **Loop:** ACTIVE
-**Next:** MP-11
+**Next:** MP-12
 **Branch:** `jules/mp-execute`
 **PR:** one accumulating PR from that branch — do not open a new PR per phase
 **Human:** not available. Do not wait. Do not ask. Continue until **Next** is `STOP`.
@@ -24,8 +24,8 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 | MP-07 | DONE | DONE | `cd0a5b7` · stricter Hard-SL (liq vs range) + minute-48 TTL · `tests/test_quantum_sniper.py` |
 | MP-08 | DONE | DONE | `bfd6cda` · exhaustion + async unwind · `tests/test_exhaustion_unwind.py` |
 | MP-09 | DONE | DONE | `a9a621d` · mirrored short fractal TP hits; drop type:ignore · `tests/test_dynamic_pine.py` |
-| MP-15 | DONE | DONE | fractal directional complete · `tests/test_fractal_directional.py` |
-| MP-11 | PENDING | PENDING | |
+| MP-15 | DONE | DONE | `9989ca0` · fractal directional complete · `tests/test_fractal_directional.py` |
+| MP-11 | DONE | DONE | onnx idle/unwind ctx + p99 latency; drop type:ignore · `tests/test_onnx_tensor.py` |
 | MP-12 | PENDING | PENDING | |
 | MP-16 | PENDING | PENDING | |
 | MP-17 | PENDING | PENDING | |
