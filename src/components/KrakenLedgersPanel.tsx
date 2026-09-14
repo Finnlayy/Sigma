@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Wallet, TrendingUp, TrendingDown, DollarSign, RefreshCw, 
@@ -76,16 +76,28 @@ export default function KrakenLedgersPanel({
     }
   };
 
-  const filteredSpotAssets = ledgers?.spot.assets.filter(a => 
-    a.asset.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.name.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  // Bolt Optimization: Memoize and hoist toLowerCase to prevent O(N) recalculations on render
+  const filteredSpotAssets = useMemo(() => {
+    if (!ledgers?.spot.assets) return [];
+    if (!searchQuery) return ledgers.spot.assets;
+    const searchLower = searchQuery.toLowerCase();
+    return ledgers.spot.assets.filter(a =>
+      a.asset.toLowerCase().includes(searchLower) ||
+      a.name.toLowerCase().includes(searchLower)
+    );
+  }, [ledgers?.spot.assets, searchQuery]);
 
-  const filteredProPositions = ledgers?.pro.positions.filter(p =>
-    p.pair.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.contractType.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  // Bolt Optimization: Memoize and hoist toLowerCase to prevent O(N) recalculations on render
+  const filteredProPositions = useMemo(() => {
+    if (!ledgers?.pro.positions) return [];
+    if (!searchQuery) return ledgers.pro.positions;
+    const searchLower = searchQuery.toLowerCase();
+    return ledgers.pro.positions.filter(p =>
+      p.pair.toLowerCase().includes(searchLower) ||
+      p.type.toLowerCase().includes(searchLower) ||
+      p.contractType.toLowerCase().includes(searchLower)
+    );
+  }, [ledgers?.pro.positions, searchQuery]);
 
   return (
     <div className="space-y-4 font-mono">
