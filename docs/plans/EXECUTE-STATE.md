@@ -28,7 +28,7 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 | MP-11 | DONE | DONE | `c1a6b7a` · onnx idle/unwind ctx + p99 latency; drop type:ignore · `tests/test_onnx_tensor.py` |
 | MP-12 | DONE | DONE | `7e67c9e` · H5 DFA-Hurst, H7 hysteresis, verdicts · `tests/backtest/` |
 | MP-16 | DONE | DONE | `2bac23c` · power-factor backtest + TV panes · `tests/backtest/test_power_factor_dashboard.py` |
-| MP-17 | DONE | DONE | 12 panels + operator modal + presets/overlays/settings · `tests/test_frontend_terminal.py` |
+| MP-17 | DONE | DONE | `ea6313d` · 12 panels + operator modal + presets/overlays/settings · `tests/test_frontend_terminal.py` |
 | MP-10 | SKIP | SKIP | optional — do not implement |
 | MP-13 | SKIP | SKIP | optional — do not implement |
 | MP-14 | SKIP | SKIP | optional — do not implement |
