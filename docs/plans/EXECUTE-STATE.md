@@ -1,10 +1,10 @@
 # Jules Execute State
 
 <!-- jules-loop:ACTIVE -->
-<!-- jules-next:MP-05 -->
+<!-- jules-next:MP-06 -->
 
 **Loop:** ACTIVE
-**Next:** MP-05
+**Next:** MP-06
 **Branch:** `jules/mp-execute`
 **PR:** one accumulating PR from that branch — do not open a new PR per phase
 **Human:** not available. Do not wait. Do not ask. Continue until **Next** is `STOP`.
@@ -18,8 +18,8 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 | MP-01 | DONE | DONE | `122f7bf` + named constants · `sigma/execution/risk_guards.py` · `tests/test_risk_guards.py` |
 | MP-02 | DONE | DONE | Micro-DCA ladder contract · `ebd6591` · `sigma/strategies/dca_ladder.py` |
 | MP-03 | DONE | DONE | Candle/regime · `cbd3c3b` · `closed_only` + thrust field contract |
-| MP-04 | DONE | DONE | Power/phasor · `ATR_PERIOD` + physics/hilbert/mtf · `tests/test_power_phasor.py` |
-| MP-05 | PENDING | PENDING | |
+| MP-04 | DONE | DONE | Power/phasor · `19f2df3` · `ATR_PERIOD` + physics/hilbert/mtf |
+| MP-05 | DONE | DONE | Hourly gate wall-clock + JULES constants/`from_dict`/`binding` · `tests/test_hourly_ranker.py` |
 | MP-06 | PENDING | PENDING | |
 | MP-07 | PENDING | PENDING | |
 | MP-08 | PENDING | PENDING | |

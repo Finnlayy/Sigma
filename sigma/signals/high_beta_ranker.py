@@ -19,21 +19,29 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from sigma.execution.risk_guards import liquidation_proximity_pct
 from sigma.signals.correlation_scout import _closes, _corr_beta, _returns
 
-# Hard-Filter-Schwellen (KB §6, Defaults als Benennungskonstanten)
-R_THRESHOLD = 0.75        # |r| >= 0.75 (signiert)
-BETA_THRESHOLD = 1.5      # |beta| >= 1.5
-RVOL_THRESHOLD = 1.5      # Volumen-Ratio >= 1.5
-SPREAD_CAP = 0.0008       # 0,08 % Spread-Cap
-DECOUPLED_THRESHOLD = 0.30  # |r| < 0.30 -> decoupled (fail-closed)
-SNIPER_BETA = 2.8         # Empfehlung sniper_hedge
-SNIPER_RVOL = 2.5
+# Hard-Filter-Schwellen (KB §6 / JULES MP-05 named constants)
+R_MIN = 0.75
+BETA_ABS_MIN = 1.5
+RVOL_MIN = 1.5
+SPREAD_CAP = 0.0008
+DECOUPLED_ABS_R = 0.30
+POS_EQ_CONSOL = (0.40, 0.65)
+BETA_SNIPER = 2.8
+RVOL_SNIPER = 2.5
 SNIPER_MAX_LIQ_DISTANCE = 0.10  # "Liq-Puffer klein" fuer Sniper-Modus
+# Aliases (pre-JULES names) — keep imports working
+R_THRESHOLD = R_MIN
+BETA_THRESHOLD = BETA_ABS_MIN
+RVOL_THRESHOLD = RVOL_MIN
+DECOUPLED_THRESHOLD = DECOUPLED_ABS_R
+SNIPER_BETA = BETA_SNIPER
+SNIPER_RVOL = RVOL_SNIPER
+POS_EQ_CONSOLIDATION_MIN = POS_EQ_CONSOL[0]
+POS_EQ_CONSOLIDATION_MAX = POS_EQ_CONSOL[1]
 # MP-15: extreme beta/RVOL -> fraktaler Einzeltrade (KB §5.5, 20-50x);
 # moderat -> Sniper/DCA-Pfade.
 FRACTAL_BETA = 3.5
 FRACTAL_RVOL = 3.0
-POS_EQ_CONSOLIDATION_MIN = 0.40
-POS_EQ_CONSOLIDATION_MAX = 0.65
 POS_EQ_CHASING = 0.90
 WINDOW = 48
 EQ_WINDOW = 20
@@ -94,9 +102,9 @@ class HighBetaRanker:
     def __init__(
         self,
         *,
-        r_threshold: float = R_THRESHOLD,
-        beta_threshold: float = BETA_THRESHOLD,
-        rvol_threshold: float = RVOL_THRESHOLD,
+        r_threshold: float = R_MIN,
+        beta_threshold: float = BETA_ABS_MIN,
+        rvol_threshold: float = RVOL_MIN,
         spread_cap: float = SPREAD_CAP,
         window: int = WINDOW,
     ) -> None:
@@ -165,13 +173,13 @@ class HighBetaRanker:
                 reasons.append("thin_book")
             if symbol in unlock:
                 reasons.append("unlock_window")
-            if abs(r) < DECOUPLED_THRESHOLD:
+            if abs(r) < DECOUPLED_ABS_R:
                 reasons.append("decoupled")
             perf = _perf_24h(closes)
             pos_eq = _pos_eq(closed, window=EQ_WINDOW)
             consolidation = (
                 pos_eq is not None
-                and POS_EQ_CONSOLIDATION_MIN <= pos_eq <= POS_EQ_CONSOLIDATION_MAX
+                and POS_EQ_CONSOL[0] <= pos_eq <= POS_EQ_CONSOL[1]
             )
             chasing = pos_eq is not None and pos_eq > POS_EQ_CHASING
             if chasing:
@@ -193,7 +201,12 @@ class HighBetaRanker:
             # Ein legitimer Short-Kandidat (|r| >= 0.75, beta <= -1.5) ist
             # davon unbenommen — das Label blockt nur die Long-Seite.
             is_short_candidate = (
-                abs(r) >= self.r_threshold and beta <= -self.beta_threshold
+                (r >= self.r_threshold and beta <= -self.beta_threshold)
+                or (
+                    r < 0
+                    and abs(r) >= self.r_threshold
+                    and beta <= -self.beta_threshold
+                )
             )
             if r < 0 and not is_short_candidate:
                 reasons.append("inverse_long_blocked")
@@ -255,12 +268,12 @@ class HighBetaRanker:
         spread: float,
         liq_distance: float,
     ) -> tuple:
-        """Richtung signiert (KB §6):
-        - LONG: r >= 0.75 UND beta >= 1.5 (beide positiv, BTC-Rueckenwind).
-        - SHORT: |r| >= 0.75 UND beta <= -1.5 (starke gegenlaeufige Kopplung;
-          Karte MP-05 §5 „positiv r mit negativem beta“ ist mit Same-Window-
-          Schaetzern nicht konstruierbar, da sign(r) == sign(beta) — KB §6
-          Bucket 2 „r negativ -> Short-Kandidat“ ist die kanonische Lesart).
+        """Richtung signiert (KB §6 / JULES MP-05):
+        - LONG: r >= R_MIN UND beta >= BETA_ABS_MIN.
+        - SHORT (JULES): r >= R_MIN UND beta <= -BETA_ABS_MIN (r>0, β<0).
+        - SHORT (KB §6 Bucket 2): |r| >= R_MIN UND beta <= -BETA_ABS_MIN
+          when r < 0 (negative coupling) — same-window corr/beta usually
+          share sign, so the prompt r>0 & β<0 path is rare; both accepted.
         - r < 0 wird NIEMALS gelongt (inverse_long_blocked, Caller).
         Score je Richtung getrennt, Spread als Penalty."""
         spread_penalty = spread * 10.0
@@ -271,11 +284,25 @@ class HighBetaRanker:
             score = beta * rvol * r * rs - spread_penalty
             rec = _recommendation(beta, rvol, liq_distance)
             return max(0.0, score), "LONG", rec
-        if abs(r) >= self.r_threshold and beta <= -self.beta_threshold:
-            if perf_24h is None or perf_24h >= 0:
-                return 0.0, "FLAT", "dca"
-            rs = 1.0 + max(0.0, min(abs(perf_24h), 0.5))
-            score = abs(beta) * rvol * abs(r) * rs - spread_penalty
+        # JULES short: r >= R_MIN and beta <= -BETA_ABS_MIN
+        jules_short = r >= self.r_threshold and beta <= -self.beta_threshold
+        # KB negative-coupling short: |r| high, beta negative, r < 0
+        kb_short = (
+            r < 0
+            and abs(r) >= self.r_threshold
+            and beta <= -self.beta_threshold
+        )
+        if jules_short or kb_short:
+            if jules_short:
+                if perf_24h is None:
+                    return 0.0, "FLAT", "dca"
+                rs = 1.0 + max(0.0, min(abs(perf_24h), 0.5))
+                score = abs(beta) * rvol * r * rs - spread_penalty
+            else:
+                if perf_24h is None or perf_24h >= 0:
+                    return 0.0, "FLAT", "dca"
+                rs = 1.0 + max(0.0, min(abs(perf_24h), 0.5))
+                score = abs(beta) * rvol * abs(r) * rs - spread_penalty
             rec = _recommendation(abs(beta), rvol, liq_distance)
             return max(0.0, score), "SHORT", rec
         return 0.0, "FLAT", "dca"
@@ -288,7 +315,7 @@ def _recommendation(beta: float, rvol: float, liq_distance: float) -> str:
     if beta >= FRACTAL_BETA and rvol >= FRACTAL_RVOL:
         if liq_distance <= 0 or liq_distance <= SNIPER_MAX_LIQ_DISTANCE:
             return "fractal_directional"
-    if beta >= SNIPER_BETA and rvol >= SNIPER_RVOL:
+    if beta >= BETA_SNIPER and rvol >= RVOL_SNIPER:
         if liq_distance <= 0 or liq_distance <= SNIPER_MAX_LIQ_DISTANCE:
             return "sniper_hedge"
     return "dca"
@@ -348,8 +375,10 @@ def _flat_row(symbol: str, reasons: Sequence[str]) -> RankedSymbol:
 
 
 __all__ = [
-    "BETA_THRESHOLD", "DECOUPLED_THRESHOLD", "HighBetaRanker", "POS_EQ_CHASING",
-    "POS_EQ_CONSOLIDATION_MAX", "POS_EQ_CONSOLIDATION_MIN", "R_THRESHOLD",
-    "RVOL_THRESHOLD", "RankedSymbol", "RankerResult", "SNIPER_BETA",
-    "SNIPER_MAX_LIQ_DISTANCE", "SNIPER_RVOL", "SPREAD_CAP",
+    "BETA_ABS_MIN", "BETA_SNIPER", "BETA_THRESHOLD", "DECOUPLED_ABS_R",
+    "DECOUPLED_THRESHOLD", "HighBetaRanker", "POS_EQ_CHASING", "POS_EQ_CONSOL",
+    "POS_EQ_CONSOLIDATION_MAX", "POS_EQ_CONSOLIDATION_MIN", "R_MIN",
+    "R_THRESHOLD", "RVOL_MIN", "RVOL_SNIPER", "RVOL_THRESHOLD", "RankedSymbol",
+    "RankerResult", "SNIPER_BETA", "SNIPER_MAX_LIQ_DISTANCE", "SNIPER_RVOL",
+    "SPREAD_CAP",
 ]

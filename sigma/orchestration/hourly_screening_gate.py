@@ -2,10 +2,10 @@
 =========================================================
 Datei:      sigma/orchestration/hourly_screening_gate.py
 Zweck:      1h-Screening-Zustandsautomat (KB §6): exakt ein Scan pro
-            geschlossener 1h-BTC-Bar; Minutenphasen 00-05 SCAN_AND_DEPLOY,
-            05-48 ACTIVE_EXECUTION, 48-55 PRE_CLOSE_UNWIND, 55-60 IDLE_WAIT.
-            Idempotent (letzter Scan persistiert, to_dict/Restore).
-            UTC-Basis, nur closed bars. Keine Orders, kein Deploy.
+            geschlossener 1h-BTC-Bar; Minutenphasen 0<=m<5 SCAN_AND_DEPLOY,
+            5<=m<48 ACTIVE_EXECUTION, 48<=m<55 PRE_CLOSE_UNWIND,
+            55<=m<60 IDLE_WAIT. Phase aus wall-clock now_ts (bar_ts nur
+            fuer Scan-Idempotenz). UTC-Basis, nur closed bars.
 System:     Manas: Ciel Core Matrix — Projekt:Sigma
 Knoten:     Rouge (Orchestrierung) / Noir (Fail-Closed)
 =========================================================
@@ -13,16 +13,18 @@ Knoten:     Rouge (Orchestrierung) / Noir (Fail-Closed)
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 SCAN_AND_DEPLOY = "SCAN_AND_DEPLOY"
 ACTIVE_EXECUTION = "ACTIVE_EXECUTION"
 PRE_CLOSE_UNWIND = "PRE_CLOSE_UNWIND"
 IDLE_WAIT = "IDLE_WAIT"
 
-PHASE_SCAN_MAX_MINUTE = 5
-PHASE_ACTIVE_MAX_MINUTE = 48
-PHASE_UNWIND_MAX_MINUTE = 55
+# Half-open UTC minute windows (JULES MP-05).
+PHASE_SCAN_END_MINUTE = 5          # 0 <= m < 5
+PHASE_ACTIVE_END_MINUTE = 48       # 5 <= m < 48
+PHASE_UNWIND_END_MINUTE = 55       # 48 <= m < 55
+# 55 <= m < 60 → IDLE_WAIT
 
 
 @dataclass(frozen=True)
@@ -47,13 +49,16 @@ class HourlyScreeningGate:
     def __init__(self, last_scan_bar_ts: Optional[int] = None) -> None:
         self.last_scan_bar_ts: Optional[int] = last_scan_bar_ts
 
-    # ------------------------------------------------------------------ API
-
     def evaluate(self, bar_ts: int, now_ts: Optional[float] = None) -> HourlyGateResult:
-        """Phase aus der UTC-Minute der geschlossenen Bar; scan_allowed nur in
-        SCAN_AND_DEPLOY UND wenn diese Bar noch nicht gescannt wurde."""
+        """Phase from wall-clock ``now_ts`` (UTC minute). ``bar_ts`` is the
+        closed 1h bar id for scan idempotency only.
+
+        When ``now_ts`` is omitted, phase falls back to the minute embedded in
+        ``bar_ts`` (test fixtures that encode minute-of-hour in bar_ts).
+        """
         bar_ts = int(bar_ts)
-        minute = _utc_minute(bar_ts)
+        clock_ts = float(now_ts) if now_ts is not None else float(bar_ts)
+        minute = _utc_minute(clock_ts)
         phase = phase_for_minute(minute)
         already_scanned = self.last_scan_bar_ts == bar_ts
         scan_allowed = phase == SCAN_AND_DEPLOY and not already_scanned
@@ -80,25 +85,30 @@ class HourlyScreeningGate:
         return {"last_scan_bar_ts": self.last_scan_bar_ts}
 
     @classmethod
-    def restore(cls, state: Mapping[str, Any]) -> "HourlyScreeningGate":
+    def from_dict(cls, state: Mapping[str, Any]) -> "HourlyScreeningGate":
+        """JULES contract: restore gate state from ``to_dict()`` payload."""
         last = state.get("last_scan_bar_ts")
         return cls(last_scan_bar_ts=int(last) if last is not None else None)
 
+    # Alias kept for older call-sites / tests.
+    restore = from_dict
+
 
 def phase_for_minute(minute_utc: int) -> str:
-    """Minutenphase (UTC): 00-05 SCAN, 05-48 ACTIVE, 48-55 UNWIND, 55-60 IDLE."""
+    """Minutenphase (UTC, half-open):
+    0<=m<5 SCAN, 5<=m<48 ACTIVE, 48<=m<55 UNWIND, 55<=m<60 IDLE."""
     minute = int(minute_utc) % 60
-    if minute <= PHASE_SCAN_MAX_MINUTE:
+    if minute < PHASE_SCAN_END_MINUTE:
         return SCAN_AND_DEPLOY
-    if minute < PHASE_ACTIVE_MAX_MINUTE:
+    if minute < PHASE_ACTIVE_END_MINUTE:
         return ACTIVE_EXECUTION
-    if minute < PHASE_UNWIND_MAX_MINUTE:
+    if minute < PHASE_UNWIND_END_MINUTE:
         return PRE_CLOSE_UNWIND
     return IDLE_WAIT
 
 
-def _utc_minute(ts: int) -> int:
-    """UTC-Minute einer Bar-Zeit. Millisekunden-Zeitstempel werden normiert."""
+def _utc_minute(ts: float) -> int:
+    """UTC-Minute einer Zeit. Millisekunden-Zeitstempel werden normiert."""
     t = int(ts)
     if t >= 1e12:
         t //= 1000
@@ -106,6 +116,14 @@ def _utc_minute(ts: int) -> int:
 
 
 __all__ = [
-    "ACTIVE_EXECUTION", "HourlyGateResult", "HourlyScreeningGate", "IDLE_WAIT",
-    "PRE_CLOSE_UNWIND", "SCAN_AND_DEPLOY", "phase_for_minute",
+    "ACTIVE_EXECUTION",
+    "HourlyGateResult",
+    "HourlyScreeningGate",
+    "IDLE_WAIT",
+    "PHASE_ACTIVE_END_MINUTE",
+    "PHASE_SCAN_END_MINUTE",
+    "PHASE_UNWIND_END_MINUTE",
+    "PRE_CLOSE_UNWIND",
+    "SCAN_AND_DEPLOY",
+    "phase_for_minute",
 ]
