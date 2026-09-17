@@ -720,12 +720,24 @@ function ResearchPaneSvg({
       </div>
     );
   }
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys, ...(yLines?.map((l) => l.y) ?? []));
-  const maxY = Math.max(...ys, ...(yLines?.map((l) => l.y) ?? []));
+  // ⚡ Bolt: Prevent Call Stack Limit & Memory Bloat
+  // Replaced `.map()` and `Math.min/max(...arrays)` with a single O(N) iteration
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+
+  if (yLines) {
+    for (const l of yLines) {
+      if (l.y < minY) minY = l.y;
+      if (l.y > maxY) maxY = l.y;
+    }
+  }
   const dx = maxX - minX || 1;
   const dy = maxY - minY || 1;
   const path = points
