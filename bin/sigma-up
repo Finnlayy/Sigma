@@ -59,7 +59,7 @@ raise SystemExit(0 if code == 0 else 1)' "$1"
 }
 
 wait_http() {
-  local url="$1" tries="${2:-40}" i
+  local url="$1" tries="${2:-120}" i
   for i in $(seq 1 "$tries"); do
     if "$PYTHON" -c 'import sys, urllib.request
 urllib.request.urlopen(sys.argv[1], timeout=2)' "$url" >/dev/null 2>&1

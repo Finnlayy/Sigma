@@ -199,3 +199,76 @@ def test_settings_save_feedback_tones():
     assert "FLASH_MS" in src
     assert "Erlaubt:" in src
     assert "Format:" in src
+
+
+# ------------------------------------------------------------- MP-17 (JULES Step 6)
+
+MP17_PANEL_IDS = [
+    "QuantumRegimePanel", "MarketGeometryPanel", "PowerPhysicsPanel",
+    "SymbolScoutPanel", "PolymarketPanel", "LadderArchitectPanel",
+    "FractalTradePanel", "ProvisionerPanel", "OnnxBrainPanel",
+    "RiskGuardPanel", "UnwindPanel", "ResearchLabPanel",
+]
+
+MP17_PRESETS = ["QUANTUM_OPS", "POSITION_DESK", "RESEARCH_LAB"]
+
+
+def test_mp17_twelve_panel_ids_registered():
+    """JULES Step 6 — 12 IDs in PANEL_REGISTRY."""
+    src = _read(PANELS_TSX)
+    registry = src.split("PANEL_REGISTRY", 1)[1].split("};", 1)[0]
+    for panel in MP17_PANEL_IDS:
+        assert f"  {panel}_,\n" in registry, f"{panel} fehlt in Registry"
+
+
+def test_mp17_three_presets():
+    src = _read(TERMINAL_TSX)
+    listed = src.split("export const PRESETS = [", 1)[1].split("]", 1)[0]
+    names = [p.strip().strip("'\"") for p in listed.split(",") if p.strip()]
+    for preset in MP17_PRESETS:
+        assert preset in names
+        assert f"  {preset}: {{" in src
+
+
+def test_mp17_fail_closed_and_feedbadge():
+    panels = _read(os.path.join(ROOT, "src", "components", "sigma", "mp17Panels.tsx"))
+    assert "fail-closed" in panels
+    assert "FeedBadge" in panels
+    assert "Polymarket feed unavailable — gate inaktiv" in panels
+    assert "SYNTHETIC" in _read(PANELS_TSX)
+
+
+def test_mp17_write_without_token_rejected():
+    """Schreibaktionen nur via operatorPost + Modal; ohne Token → 403/blocked UI."""
+    panels = _read(os.path.join(ROOT, "src", "components", "sigma", "mp17Panels.tsx"))
+    assert "OperatorConfirmModal" in panels
+    assert "operatorPost" in _read(API_TS) or "sigmaResearchApi.scan" in panels
+    assert "403 / Operator-Token fehlt" in panels
+    assert "sigmaResearchApi.scan" in panels
+    assert "hardenPine" in panels or "sigmaResearchApi.hardenPine" in panels
+    assert "researchRun" in panels
+    # Keine Order-Buttons in MP-17-Panels
+    assert "add_order" not in panels
+    assert "paper_buy" not in panels.lower()
+
+
+def test_mp17_blinded_mode():
+    api = _read(API_TS)
+    assert "ASSET_" in api
+    assert "blindedSymbol" in api
+    panels = _read(os.path.join(ROOT, "src", "components", "sigma", "mp17Panels.tsx"))
+    assert "blindedSymbol" in panels
+    assert "Blinded-Modus" in panels
+
+
+def test_mp17_settings_locked_safety_and_overlays():
+    settings = _read(os.path.join(ROOT, "src", "components", "SettingsPage.tsx"))
+    assert "Hard-Stop-Pflicht" in settings or "Hard-Stop" in settings
+    assert "6 %" in settings or "6%" in settings
+    assert "Fee-Covered" in settings or "fee_covered" in settings.lower()
+    assert "disabled" in settings  # locked checkboxes
+    market = _read(PANELS_TSX)
+    assert "FVG" in market
+    assert "CE50/EQ" in market
+    assert "cos-φ" in market or "cosPhi" in market
+    assert "Provisioner" in market  # TvJobs/PineStudio tab

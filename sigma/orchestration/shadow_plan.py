@@ -61,6 +61,7 @@ class ShadowPlan:
     path_alpha: str = ""   # proaktiv (Sniper, MP-07) — nur Beschreibung
     path_beta: str = ""    # reaktiv (Bestätigung nach geschlossenem Breakout)
     reason: str = ""
+    binding: bool = False  # JULES: never binding — watchlist only
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -71,6 +72,7 @@ class ShadowPlan:
             "path_alpha": self.path_alpha,
             "path_beta": self.path_beta,
             "reason": self.reason,
+            "binding": self.binding,
         }
 
 

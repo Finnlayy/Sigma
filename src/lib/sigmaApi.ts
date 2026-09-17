@@ -756,6 +756,12 @@ export interface ResearchDashboard extends SigmaPanelBase {
   hypotheses: Array<Record<string, unknown>>;
   sweeps: Array<Record<string, unknown>>;
   export_html_path?: string | null;
+  /** MP-16 pane payload (fail-closed empty when absent). */
+  candles?: Array<{ time: number; open: number; high: number; low: number; close: number }>;
+  cos_phi?: Array<{ time: number; value: number }>;
+  equity?: Array<{ time: number; value: number }>;
+  markers?: Array<Record<string, unknown>>;
+  thresholds?: { long?: number; short?: number; exit?: number } | null;
 }
 
 const sigmaGet = <T,>(path: string) => request<T>(path);

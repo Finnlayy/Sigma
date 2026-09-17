@@ -233,12 +233,15 @@ def test_wrapper_bar_lock():
 def test_wrapper_latency_tolerant():
     w = OnnxQuantumTensor()
     ctx = _ctx()
-    t0 = time.perf_counter()
+    samples: list[float] = []
     for _ in range(100):
+        t0 = time.perf_counter()
         w.evaluate(ctx)
-    elapsed = time.perf_counter() - t0
-    # tolerante CI-Schwelle: 100 Aufrufe deutlich unter 2 s
-    assert elapsed < 2.0
+        samples.append(time.perf_counter() - t0)
+    samples.sort()
+    p99 = samples[98]  # 99th of 100 (0-indexed)
+    # Prompt: Builder+Fallback p99 < 2 ms (tolerante CI-Schwelle).
+    assert p99 < 0.002, f"p99={p99 * 1000:.3f} ms"
 
 
 def test_wrapper_model_path_unavailable_falls_back():
@@ -251,7 +254,24 @@ def test_wrapper_model_path_unavailable_falls_back():
 
 # ------------------------------------------------------------- orchestrator
 
-def test_orchestrator_onnx_key_only_with_port():
+def test_orchestrator_onnx_survives_idle_and_unwind():
+    from types import SimpleNamespace
+    from sigma.orchestration import MasterOrchestrator
+
+    class FakeOnnxPort:
+        def evaluate(self, material):
+            return {"action": ACTION_LONG, "leverage": 10, "reason": "fake"}
+
+    # Sparse HTF → early idle/unwind path; onnx key must still attach.
+    snap = SimpleNamespace(
+        series={"BTC/USD": _bars(n=5)},
+        htf_series={"BTC/USD": _bars(n=3)},
+        degraded=False,
+    )
+    orch = MasterOrchestrator(ports={"onnx": FakeOnnxPort()})
+    out = orch.tick(snap, now=datetime(2026, 8, 28, 15, 30, tzinfo=timezone.utc).timestamp())
+    assert out["status"] in ("htf_not_ready", "unwind_only")
+    assert out["onnx"]["action"] == ACTION_LONG
     from types import SimpleNamespace
     from sigma.orchestration import MasterOrchestrator
 

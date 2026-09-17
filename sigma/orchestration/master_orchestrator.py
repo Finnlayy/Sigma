@@ -93,7 +93,7 @@ class MasterOrchestrator:
         if _poly_port is not None and hasattr(_poly_port, "fetch_event_odds"):
             # MP-06: echter Port -> validierte Dichte/Term-Struktur als
             # Telemetrie-Kontext; ohne Feed bleibt valid=False wie bisher.
-            poly = layer0_from_port(_poly_port, "btc-macro")
+            poly = layer0_from_port(_poly_port, "btc-macro", now_ts=now)
         else:
             poly = layer0_pre_regime(_poly_port)
         wave = self.collider.evaluate(
@@ -113,11 +113,11 @@ class MasterOrchestrator:
         # begrenzter Hebel). Ohne Port fehlt der Key (wie screening).
         onnx_result = self._onnx_ctx(htf, ltf, session, now)
         if not dual.htf_ready:
-            return self._idle("htf_not_ready", session, throttle, dual, pair, poly, wave, screen, screening)
+            return self._idle("htf_not_ready", session, throttle, dual, pair, poly, wave, screen, screening, onnx_result)
         if throttle.mode == "SLEEP" or session.liquidity_gap:
-            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen, screening)
+            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen, screening, onnx_result)
         if wave.status == STATUS_INVALIDATED:
-            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen, screening)
+            return self._unwind_only(session, throttle, dual, pair, poly, wave, screen, screening, onnx_result)
         routes = self.router.route(series, session=session, now=now, use_ict_ladder=False, leader=leader)
         cap = int(throttle.allowed_concurrent_bots)
         deployed: List[Dict[str, Any]] = []
@@ -281,7 +281,8 @@ class MasterOrchestrator:
 
     def _idle(self, reason, session, throttle, dual, pair, poly, wave=None,
               screen: Optional[WaveScreen] = None,
-              screening: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+              screening: Optional[Dict[str, Any]] = None,
+              onnx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         out = {
             "ok": True,
             "status": reason,
@@ -299,13 +300,16 @@ class MasterOrchestrator:
         }
         if screening:
             out["screening"] = screening
+        if onnx is not None:
+            out["onnx"] = onnx
         return out
 
     def _unwind_only(self, session, throttle, dual, pair, poly, wave=None,
                      screen: Optional[WaveScreen] = None,
-                     screening: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                     screening: Optional[Dict[str, Any]] = None,
+                     onnx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         out = self._idle("unwind_only", session, throttle, dual, pair, poly, wave,
-                         screen, screening)
+                         screen, screening, onnx)
         out["status"] = "unwind_only"
         return out
 

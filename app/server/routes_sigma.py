@@ -1872,4 +1872,8 @@ async def research_job(job_id: str):
 @router.get("/api/v1/research/dashboard", response_model=schemas.ResearchDashboard)
 async def research_dashboard():
     """MP-12/16 — H1-H7-Status + Sweeps; ohne Backend leer."""
-    return _sigma_empty(hypotheses=[], sweeps=[], export_html_path=None)
+    return _sigma_empty(
+        hypotheses=[], sweeps=[], export_html_path=None,
+        candles=[], cos_phi=[], equity=[], markers=[],
+        thresholds={"long": 0.40, "short": -0.40, "exit": 0.15},
+    )

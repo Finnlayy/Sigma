@@ -12,8 +12,17 @@ Knoten:     Jaune (Execution-Contract) / Noir (Look-ahead)
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+
+# Named constants (JULES MP-01 / KB §8) — decimal percents, not magic numbers.
+HARD_STOP_BUFFER_PCT = 0.005
+MIN_MEME_GRID_DEPTH = 0.06
+HITL_LIQ_PROXIMITY = 0.05
+COOLDOWN_SECONDS = 1800
+FEE_COVER_OFFSET_PCT = 0.0005
+WICK_EXTRA_PCT = 0.01
+EPS = 1e-12
 
 # ---------------------------------------------------------------------------
 # Verträge (Dataclasses mit to_dict, volle Typannotationen)
@@ -118,7 +127,7 @@ def hard_stop_distance(
     entry_price: float,
     liquidation_price: float,
     side: str,
-    buffer_pct: float = 0.005,
+    buffer_pct: float = HARD_STOP_BUFFER_PCT,
 ) -> HardStopResult:
     """Hard-Stop im Markt (Order, kein Panic-Close): gepuffert 0,5 % ueber dem
     Liq-Preis (long) bzw. 0,5 % unter ihm (short). Long: Stop < Entry und
@@ -245,7 +254,7 @@ def _is_meme_perp(symbol_spec: Optional[Any]) -> bool:
 def assert_grid_depth(
     depth_pct: float,
     symbol_spec: Optional[Any],
-    min_meme_depth: float = 0.06,
+    min_meme_depth: float = MIN_MEME_GRID_DEPTH,
 ) -> GridDepthVerdict:
     """Lehnt Meme-Perp-Raster mit < min_meme_depth (Default 6 %) Gesamt-Tiefe
     ab. Festes 0,15 %-Raster ueber 8 Stufen (~1,1 % Tiefe) ist unzulaessig."""
@@ -279,7 +288,7 @@ def liquidation_proximity_pct(
     mark_price: float,
     liq_price: float,
     side: str,
-    threshold_pct: float = 0.05,
+    threshold_pct: float = HITL_LIQ_PROXIMITY,
 ) -> LiquidationProximity:
     """Abstand zur Liquidation in % (Dezimal). < 0.05 (5 %) -> needs_hitl=True
     (HITL-Eskalation; Entscheidung zu Gunsten des Stops, wenn kein Puffer)."""
@@ -306,7 +315,7 @@ def liquidation_proximity_pct(
 def cooldown_active(
     last_exit_ts: float,
     now_ts: float,
-    min_seconds: float = 1800.0,
+    min_seconds: float = float(COOLDOWN_SECONDS),
 ) -> bool:
     """True, wenn der Post-Exit-Cooldown (Default 30 min) noch laeuft."""
     return (now_ts - last_exit_ts) < min_seconds
@@ -315,7 +324,7 @@ def cooldown_active(
 def fee_covered_stop(
     entry_price: float,
     side: str,
-    offset_pct: float = 0.0005,
+    offset_pct: float = FEE_COVER_OFFSET_PCT,
 ) -> float:
     """Fee-Covered Break-Even (KB §8 Regel 6): SL nach TP1 auf
     entry * 1,0005 (long) bzw. entry * 0,9995 (short) — deckt die
@@ -333,7 +342,7 @@ def fee_covered_stop(
 def wick_buffer_pct(
     beta: float,
     expected_btc_wick_pct: float,
-    extra_pct: float = 0.01,
+    extra_pct: float = WICK_EXTRA_PCT,
 ) -> float:
     """Erwarteter Alt-Wick-Puffer in %: beta * BTC-Wick + extra_pct
     (KB §8 Regel 10: Liq-Abstand >= Rastertiefe + beta*BTC-Wick + Puffer)."""
@@ -374,7 +383,7 @@ def assert_leverage_for_depth(
     grid_depth_pct: float,
     leverage: float,
     expected_btc_wick_pct: float,
-    extra_pct: float = 0.01,
+    extra_pct: float = WICK_EXTRA_PCT,
 ) -> LeverageDepthVerdict:
     """Lehnt Hebel ab, bei denen der Liq-Preis in der Docht-Zone laege.
     Faustregel KB §8 R10: Liq-Abstand (bei voller Margin ~= 1/Hebel)
@@ -398,6 +407,13 @@ def assert_leverage_for_depth(
 
 
 __all__ = [
+    "COOLDOWN_SECONDS",
+    "EPS",
+    "FEE_COVER_OFFSET_PCT",
+    "HARD_STOP_BUFFER_PCT",
+    "HITL_LIQ_PROXIMITY",
+    "MIN_MEME_GRID_DEPTH",
+    "WICK_EXTRA_PCT",
     "GridDepthVerdict",
     "HardStopResult",
     "LeverageDepthVerdict",

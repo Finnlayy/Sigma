@@ -5,7 +5,7 @@ Datei:      bin/sigma-tv-login
 Zweck:      Einmaliger Login-Bootstrap für die TradingView-
             Session (Blueprint §11 "Login Bootstrap").
             Öffnet einen sichtbaren Chromium, der Operator
-            meldet sich inkl. 2FA an, danach wird der
+            meldet sich an, danach wird der
             Playwright storage_state atomar nach
             ./data/secrets/tv_storage_state.json geschrieben
             (chmod 0600).
@@ -135,7 +135,7 @@ def login(path: str, timeout_s: int) -> int:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = f"{path}.tmp"
 
-    print("[sigma-tv-login] Launching Chromium (headful). Log in incl. 2FA, then keep the window open.", flush=True)
+    print("[sigma-tv-login] Launching Chromium (headful). Log in then keep the window open.", flush=True)
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=False, args=["--disable-blink-features=AutomationControlled"])
         context = browser.new_context(viewport={"width": 1600, "height": 950})

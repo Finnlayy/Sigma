@@ -43,20 +43,19 @@ def test_bridge_rejects_unknown_mode():
 def test_paper_prefix_spot_and_futures():
     assert _bridge()._prefix() == [bp.KRAKEN_CLI_BINARY, "paper"]
     assert _bridge(futures=True)._prefix() == [bp.KRAKEN_CLI_BINARY, "futures", "paper"]
-    assert KrakenCliBridge()._prefix() == [bp.KRAKEN_CLI_BINARY, "trade"]
+    assert KrakenCliBridge()._prefix() == [bp.KRAKEN_CLI_BINARY, "order"]
 
 
-def test_paper_order_argv_and_simulated_fill(monkeypatch):
+def test_paper_order_argv_fail_closed_without_cli(monkeypatch):
     bridge = _bridge(futures=True)
     monkeypatch.setattr(bridge, "_cli_available", lambda: False)
     res = bridge.add_order(
         pair="PF_XBTUSD", side="buy", volume=1.0, ordertype="limit",
         price=68000.0, stop_price=67000.0, strategy_id="s1")
-    assert res.ok and res.mode == "paper"
-    assert res.txid.startswith("PAPER-")
+    assert res.ok is False
+    assert res.error_code == "ERR_KRAKEN_CLI_NOT_FOUND"
     assert res.argv[:4] == [bp.KRAKEN_CLI_BINARY, "futures", "paper", "buy"]
-    assert "--price=68000.0" in res.argv and "--stop-price=67000.0" in res.argv
-    assert res.has_native_stop_loss is True
+    assert "--price=68000.0" in res.argv
 
 
 def test_paper_order_uses_runner_when_cli_present(monkeypatch):
@@ -80,17 +79,18 @@ def test_paper_order_error_is_flagged(monkeypatch):
     assert res.ok is False and res.error_code
 
 
-def test_paper_balance_simulated(monkeypatch):
+def test_paper_balance_fail_closed_without_cli(monkeypatch):
     bridge = _bridge()
     monkeypatch.setattr(bridge, "_cli_available", lambda: False)
     res = bridge.balance()
-    assert res.ok and "10000" in res.stdout
+    assert res.ok is False and res.error_code == "ERR_KRAKEN_CLI_NOT_FOUND"
 
 
-def test_live_mode_argv_unchanged():
+def test_live_mode_argv_order_namespace():
     argv = KrakenCliBridge().add_order(pair="XBTUSD", side="buy", volume=0.01,
                                        leverage=5, strategy_id="s").argv
-    assert argv[:3] == [bp.KRAKEN_CLI_BINARY, "trade", "add-order"]
+    assert argv[:3] == [bp.KRAKEN_CLI_BINARY, "order", "buy"]
+    assert "XBTUSD" in argv and "0.01" in argv
 
 
 # ------------------------------------------------------------------ engine --
@@ -182,11 +182,11 @@ def test_academy_hook_is_non_fatal():
     assert eng.stats("s1")["trades"] == 1
 
 
-def test_submit_order_returns_paper_receipt(monkeypatch):
+def test_submit_order_fail_closed_without_cli(monkeypatch):
     eng = _engine()
     monkeypatch.setattr(eng.bridge, "_cli_available", lambda: False)
     out = eng.submit_order("s1", "PF_XBTUSD", "buy", 1.0)
-    assert out["ok"] and out["mode"] == "paper" and out["order_id"].startswith("PAPER-")
+    assert out["ok"] is False
 
 
 def test_panel_state_shape():

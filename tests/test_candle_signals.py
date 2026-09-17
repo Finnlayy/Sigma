@@ -15,6 +15,7 @@ import pytest
 
 from sigma.signals.daily_open_envelope import evaluate as envelope_evaluate
 from sigma.signals.marubozu_fvg import evaluate as marubozu_evaluate
+from sigma.signals.closed_bars import closed_only
 from sigma.signals.two_bar_thrust import evaluate as thrust_evaluate
 
 DAY0 = 1_704_067_200  # 2024-01-01T00:00:00Z
@@ -27,6 +28,13 @@ def bar(o, h, l, c, *, v=100.0, ts=DAY0, closed=True):
 
 # -------------------------------------------------------- two-bar thrust ---
 
+def test_closed_only_drops_trailing_open_bar():
+    closed = [{"c": 1, "is_closed": True}, {"c": 2, "is_closed": True}]
+    with_open = closed + [{"c": 3, "is_closed": False}]
+    assert closed_only(with_open) == closed
+    assert closed_only(closed) == closed
+
+
 def test_two_bar_thrust_pattern_detected():
     candles = [
         bar(101.0, 101.2, 100.8, 100.9, ts=DAY0),       # neutral
@@ -35,7 +43,7 @@ def test_two_bar_thrust_pattern_detected():
         bar(100.4, 102.0, 100.3, 101.9, ts=DAY0 + 10800),  # Bar[0] bullisch
     ]
     sig = thrust_evaluate(candles)
-    assert sig.signal is True
+    assert sig.detected is True
     assert sig.direction == "bullish"
     assert sig.close_above_bear_high is True
     # Stop = tiefstes Tief der beiden Bullenkerzen
@@ -51,7 +59,7 @@ def test_two_bar_thrust_single_green_or_bear_without_followup_rejected():
         bar(99.2, 100.0, 99.1, 99.8, ts=DAY0 + 3600),  # nur 1 gruene Kerze
     ]
     # nur 2 geschlossene Bars -> kein Signal
-    assert thrust_evaluate(single).signal is False
+    assert thrust_evaluate(single).detected is False
     # Baer ohne bullische Folge -> kein Signal
     no_follow = [
         bar(101.0, 101.1, 99.0, 99.2, ts=DAY0),
@@ -59,14 +67,14 @@ def test_two_bar_thrust_single_green_or_bear_without_followup_rejected():
         bar(98.9, 99.2, 98.7, 98.8, ts=DAY0 + 7200),
     ]
     sig = thrust_evaluate(no_follow)
-    assert sig.signal is False
+    assert sig.detected is False
     # Close NICHT ueber High[2] -> kein Signal
     low_close = [
         bar(101.0, 101.1, 99.0, 99.2, ts=DAY0),
         bar(99.2, 100.5, 99.1, 100.4, ts=DAY0 + 3600),
         bar(100.4, 100.9, 100.3, 100.8, ts=DAY0 + 7200),  # close < 101.0
     ]
-    assert thrust_evaluate(low_close).signal is False
+    assert thrust_evaluate(low_close).detected is False
 
 
 def test_two_bar_thrust_context_flags_are_evidence_only():
@@ -76,12 +84,12 @@ def test_two_bar_thrust_context_flags_are_evidence_only():
         bar(100.4, 102.0, 100.3, 101.9, ts=DAY0 + 7200),
     ]
     sig = thrust_evaluate(candles, support_price=100.3, ema20=100.0, sweep=True)
-    assert sig.signal is True  # Kontext togglet das Muster nicht
+    assert sig.detected is True  # Kontext togglet das Muster nicht
     assert sig.support_confluence is True
-    assert sig.ema_aligned is True
+    assert sig.ema_distance_ok is True
     assert sig.session_sweep is True
     # Ohne Kontext bleibt das Muster Signal
-    assert thrust_evaluate(candles).signal is True
+    assert thrust_evaluate(candles).detected is True
 
 
 # --------------------------------------------------------- marubozu + fvg ---

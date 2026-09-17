@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional
 
 from sigma.signals.polymarket_density import density_from_ladder
-from sigma.signals.polymarket_trajectory import trajectory_from_quotes
+from sigma.signals.polymarket_trajectory import optimal_entry_window, trajectory_from_quotes
 
 # KB §7 Punkt 5: reservierte Gate-Schwelle. NICHT aktiv — der Orchestrator
 # darf damit erst gaten, wenn ein echter Feed + Tests vorliegen (Nutzerregel:
@@ -74,10 +74,12 @@ def layer0_from_port(
     event_slug: str,
     *,
     payload: Optional[Mapping[str, Any]] = None,
+    now_ts: Optional[float] = None,
 ) -> PolymarketLayer0:
     """MP-06: echte Port-Injektion. Ohne Port/Feed -> valid=False wie bisher.
-    Mit validiertem liquiden Payload: Dichte (Strikes/Yes-Preise) und
-    Term-Struktur (1h/2h/4h/EOD) als details/Bias-Kontext. Kein Gate."""
+    Mit validiertem liquiden Payload: Dichte (Strikes/Yes-Preise),
+    Term-Struktur (1h/2h/4h/EOD) und T×0.75 Entry-Fenster als
+    details/Bias-Kontext. Kein Gate."""
     if port is None or not getattr(port, "available", False):
         return PolymarketLayer0(False, "no_feed")
     try:
@@ -98,9 +100,29 @@ def layer0_from_port(
         return PolymarketLayer0(False, f"density:{density.reason}", event_id=event_id)
     quotes = payload.get("quotes") or {}
     traj = trajectory_from_quotes(quotes) if quotes else None
+    clock = float(now_ts) if now_ts is not None else float(payload.get("ts") or 0.0)
+    expiry_raw = payload.get("expiry", payload.get("expiry_ts"))
+    window = None
+    if expiry_raw is not None and clock > 0:
+        try:
+            expiry_f = float(expiry_raw)
+            start_raw = payload.get("event_start", payload.get("listed_at"))
+            if start_raw is not None:
+                start_f = float(start_raw)
+            else:
+                # Unix feed times: treat payload ts as market origin when it
+                # precedes expiry so remaining_frac uses event duration, not
+                # absolute epoch (0-origin unit tests keep start=0).
+                ts_f = float(payload.get("ts") or 0.0)
+                start_f = ts_f if 0.0 < ts_f < expiry_f else 0.0
+            window = optimal_entry_window(expiry_f, clock, start_ts=start_f)
+        except (TypeError, ValueError):
+            window = None
     details: Dict[str, Any] = {
         "density": density.to_dict(),
         "trajectory": traj.to_dict() if traj is not None else None,
+        "expiry": float(expiry_raw) if expiry_raw is not None else None,
+        "entry_window": window.to_dict() if window is not None else None,
         "gate_threshold_reserved": POLYMARKET_GATE_THRESHOLD,
         "gate_active": False,
     }
@@ -116,6 +138,8 @@ def layer0_from_port(
         implied_prob = float(curve.get("EOD") or list(curve.values())[-1])
     if implied_prob is None and density.bins:
         implied_prob = max(b.prob for b in density.bins)
+    if implied_prob is not None:
+        implied_prob = max(0.0, min(1.0, float(implied_prob)))
     return PolymarketLayer0(
         valid=True,
         reason="ok",

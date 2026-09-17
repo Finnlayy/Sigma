@@ -14,6 +14,7 @@ Knoten:     Jaune (Tensor) / Noir (Fallback fail-closed)
 """
 from __future__ import annotations
 
+import importlib
 import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -329,8 +330,10 @@ class OnnxQuantumTensor:
         self._bar_lock_ts: Optional[float] = None
         if model_path:
             try:
-                import onnxruntime as ort  # type: ignore
-                self._session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+                ort = importlib.import_module("onnxruntime")
+                self._session = ort.InferenceSession(
+                    model_path, providers=["CPUExecutionProvider"]
+                )
             except Exception:
                 self._session = None  # fail-closed: Fallback bleibt aktiv
 

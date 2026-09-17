@@ -110,9 +110,7 @@ class SigmaConfig:
 
     # --- Paper portfolio ----------------------------------------------------------
     paper_baseline_usd: float = 190412.50
-    paper_seeds: tuple = (
-        "USD:50000", "BTC:1.5", "ETH:10", "SOL:100", "XRP:5000"
-    )
+    paper_seeds: tuple = ()
     paper_symbol_prices: tuple = (
         "BTC/USD:97000", "ETH/USD:3400", "SOL/USD:180", "XRP/USD:2.20"
     )

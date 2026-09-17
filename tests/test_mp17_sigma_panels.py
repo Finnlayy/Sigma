@@ -65,7 +65,11 @@ def test_mp17_panels_render_fail_closed_empty_states():
 def test_write_buttons_require_operator_and_modal():
     src = _read("src/components/sigma/mp17Panels.tsx")
     assert "Operator-Token + Bestätigungs-Modal" in src
-    assert "disabled" in src  # Buttons ohne Backend deaktiviert
+    assert "OperatorConfirmModal" in src
+    assert "403 / Operator-Token fehlt" in src
+    assert "sigmaResearchApi.scan" in src
+    assert "hardenPine" in src or "sigmaResearchApi.hardenPine" in src
+    assert "researchRun" in src
     api = _read("src/lib/sigmaApi.ts")
     assert "operatorPost" in api
     for route in ("/api/v1/sigma/scan", "/api/v1/sigma/provisions",

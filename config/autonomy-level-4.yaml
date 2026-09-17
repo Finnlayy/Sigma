@@ -23,12 +23,15 @@ exchange:
       ETHUSD: KRAKEN:ETHUSD
   futures:
     enabled: true
-    allowed_symbols: [PI_XBTUSD, PI_ETHUSD]
+    # PF_* = CLI execution canonical; PI_* retained as TV/alias only
+    allowed_symbols: [PF_XBTUSD, PF_ETHUSD, PI_XBTUSD, PI_ETHUSD]
     allowed_order_types: [limit, market, stop, take-profit]
     max_leverage: 5
     max_order_notional_usd: 1000
     max_daily_notional_usd: 5000
     symbol_mappings:
+      PF_XBTUSD: KRAKEN:XBTUSD.P
+      PF_ETHUSD: KRAKEN:ETHUSD.P
       PI_XBTUSD: KRAKEN:XBTUSD.P
       PI_ETHUSD: KRAKEN:ETHUSD.P
   pionex:

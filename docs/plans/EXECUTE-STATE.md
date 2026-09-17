@@ -1,10 +1,10 @@
 # Jules Execute State
 
-<!-- jules-loop:ACTIVE -->
-<!-- jules-next:MP-01 -->
+<!-- jules-loop:DONE -->
+<!-- jules-next:STOP -->
 
-**Loop:** ACTIVE
-**Next:** MP-01
+**Loop:** DONE
+**Next:** STOP
 **Branch:** `jules/mp-execute`
 **PR:** one accumulating PR from that branch — do not open a new PR per phase
 **Human:** not available. Do not wait. Do not ask. Continue until **Next** is `STOP`.
@@ -15,20 +15,20 @@ CHAIN (mandatory order, skip optional MP-10/13/14):
 
 | MP | Code | Tests | Notes |
 |---|---|---|---|
-| MP-01 | PENDING | PENDING | |
-| MP-02 | PENDING | PENDING | |
-| MP-03 | PENDING | PENDING | |
-| MP-04 | PENDING | PENDING | |
-| MP-05 | PENDING | PENDING | |
-| MP-06 | PENDING | PENDING | |
-| MP-07 | PENDING | PENDING | |
-| MP-08 | PENDING | PENDING | |
-| MP-09 | PENDING | PENDING | |
-| MP-15 | PENDING | PENDING | |
-| MP-11 | PENDING | PENDING | |
-| MP-12 | PENDING | PENDING | |
-| MP-16 | PENDING | PENDING | |
-| MP-17 | PENDING | PENDING | |
+| MP-01 | DONE | DONE | `122f7bf` + named constants · `sigma/execution/risk_guards.py` · `tests/test_risk_guards.py` |
+| MP-02 | DONE | DONE | Micro-DCA ladder contract · `ebd6591` · `sigma/strategies/dca_ladder.py` |
+| MP-03 | DONE | DONE | Candle/regime · `cbd3c3b` · `closed_only` + thrust field contract |
+| MP-04 | DONE | DONE | Power/phasor · `19f2df3` · `ATR_PERIOD` + physics/hilbert/mtf |
+| MP-05 | DONE | DONE | Hourly gate wall-clock + JULES constants/`from_dict`/`binding` · `tests/test_hourly_ranker.py` |
+| MP-06 | DONE | DONE | `3efc828` · expiry + T×0.75 entry window; Platt clip/renorm · `tests/test_polymarket_layer0.py` |
+| MP-07 | DONE | DONE | `cd0a5b7` · stricter Hard-SL (liq vs range) + minute-48 TTL · `tests/test_quantum_sniper.py` |
+| MP-08 | DONE | DONE | `bfd6cda` · exhaustion + async unwind · `tests/test_exhaustion_unwind.py` |
+| MP-09 | DONE | DONE | `a9a621d` · mirrored short fractal TP hits; drop type:ignore · `tests/test_dynamic_pine.py` |
+| MP-15 | DONE | DONE | `9989ca0` · fractal directional complete · `tests/test_fractal_directional.py` |
+| MP-11 | DONE | DONE | `c1a6b7a` · onnx idle/unwind ctx + p99 latency; drop type:ignore · `tests/test_onnx_tensor.py` |
+| MP-12 | DONE | DONE | `7e67c9e` · H5 DFA-Hurst, H7 hysteresis, verdicts · `tests/backtest/` |
+| MP-16 | DONE | DONE | `2bac23c` · power-factor backtest + TV panes · `tests/backtest/test_power_factor_dashboard.py` |
+| MP-17 | DONE | DONE | `ea6313d` · 12 panels + operator modal + presets/overlays/settings · `tests/test_frontend_terminal.py` |
 | MP-10 | SKIP | SKIP | optional — do not implement |
 | MP-13 | SKIP | SKIP | optional — do not implement |
 | MP-14 | SKIP | SKIP | optional — do not implement |

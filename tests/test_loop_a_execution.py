@@ -106,8 +106,8 @@ def test_signal_freshness(guard):
 def test_sim_mode_when_live_disabled(cfg):
     bridge = KrakenCliBridge(cfg)
     res = bridge.add_order(pair="XBTUSD", side="buy", volume=0.01, stop_price=95_000)
-    assert res.ok and res.mode == "sim" and res.txid.startswith("SIM-")
-    assert res.has_native_stop_loss
+    assert res.ok is False and res.mode == "sim"
+    assert res.error_code == "ERR_LIVE_NOT_APPROVED"
     assert "--close-ordertype=stop-loss" in res.argv
     assert os.path.exists(cfg.orders_log_path)
 
@@ -128,7 +128,7 @@ def test_live_requires_flag_and_telemetry(cfg):
     assert bridge.live_enabled
     res = bridge.add_order(pair="XBTUSD", side="buy", volume=0.5, stop_price=90_000)
     assert res.ok and res.mode == "live" and res.txid == "OQCLML-BW3P3-BUCMWZ"
-    assert calls and calls[0][:3] == ["kraken", "trade", "add-order"]
+    assert calls and calls[0][:3] == ["kraken", "order", "buy"]
 
 
 def test_error_text_beats_exit_code(cfg):
@@ -362,7 +362,12 @@ def test_deadman_skips_beat_when_kraken_unreachable():
 
 @pytest.fixture()
 def pipeline(cfg):
-    return LoopAPipeline(cfg, safety=SafetyGuard(cfg), kraken=KrakenCliBridge(cfg),
+    # Default signal path is paper-CLI (not live). Live stays gated.
+    paper_bridge = KrakenCliBridge(
+        cfg, execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+        runner=lambda argv, t: ("txid=PAPER-TEST", "", 0),
+    )
+    return LoopAPipeline(cfg, safety=SafetyGuard(cfg), kraken=paper_bridge,
                          equity_provider=lambda: 10_000.0)
 
 
@@ -374,7 +379,8 @@ def _signal(**kw):
     return SignalRequest(**base)
 
 
-def test_pipeline_happy_path_is_paper_or_sim(pipeline):
+def test_pipeline_happy_path_is_paper_or_sim(pipeline, monkeypatch):
+    monkeypatch.setattr(pipeline.kraken, "_cli_available", lambda: True)
     res = pipeline.handle_signal(_signal())
     assert res.accepted
     assert res.mode in ("sim", "paper", "dry_run")
@@ -407,9 +413,14 @@ def test_pipeline_blocks_quarantined_and_crisis(pipeline):
     assert not res2.accepted and res2.code == "HIGH_VOL_CRISIS"
 
 
-def test_pipeline_throttled_halves_size(cfg):
+def test_pipeline_throttled_halves_size(cfg, monkeypatch):
     # kleine Equity, damit der Notional-Cap nicht beide Groessen gleichmacht
-    pipeline = LoopAPipeline(cfg, safety=SafetyGuard(cfg), kraken=KrakenCliBridge(cfg),
+    paper_bridge = KrakenCliBridge(
+        cfg, execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+        runner=lambda argv, t: ("txid=PAPER-TEST", "", 0),
+    )
+    monkeypatch.setattr(paper_bridge, "_cli_available", lambda: True)
+    pipeline = LoopAPipeline(cfg, safety=SafetyGuard(cfg), kraken=paper_bridge,
                              equity_provider=lambda: 1_000.0)
     full = pipeline.handle_signal(_signal(), m8_state="ACTIVE")
     half = pipeline.handle_signal(_signal(), m8_state="THROTTLED")

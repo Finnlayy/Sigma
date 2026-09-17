@@ -132,14 +132,20 @@ def _platt_mid(
     bins: Sequence[PriceBin], platt_a: float, platt_b: float
 ) -> float:
     """Kalibrierte mu: Platt-Scaling je Bin-Wahrscheinlichkeit (nur
-    verschieben, nie erfinden). Default a=1, b=0 -> Identitaet."""
-    mu = 0.0
+    verschieben, nie erfinden). Default a=1, b=0 -> Identitaet.
+    Scaled probs are clipped to [0,1] and renormalized so mu stays finite."""
+    weights: List[float] = []
     for b in bins:
         p = b.prob
         if platt_a != 1.0 or platt_b != 0.0:
             logit = math.log(max(p, 1e-12) / max(1.0 - p, 1e-12))
             p = 1.0 / (1.0 + math.exp(-(platt_a * logit + platt_b)))
-        mu += b.mid * p
+        p = max(0.0, min(1.0, float(p)))
+        weights.append(p)
+    total = sum(weights)
+    if total <= 0:
+        return 0.0
+    mu = sum(b.mid * (w / total) for b, w in zip(bins, weights))
     return mu
 
 

@@ -126,10 +126,27 @@ def consolidation_alt(btc, *, factor=2.7, seed=1, vol=2.5):
 
 def test_minute_phases_classified():
     assert phase_for_minute(2) == SCAN_AND_DEPLOY
+    assert phase_for_minute(4) == SCAN_AND_DEPLOY
+    assert phase_for_minute(5) == ACTIVE_EXECUTION  # half-open: m < 5 only
     assert phase_for_minute(20) == ACTIVE_EXECUTION
     assert phase_for_minute(50) == PRE_CLOSE_UNWIND
     assert phase_for_minute(57) == IDLE_WAIT
     assert phase_for_minute(59) == IDLE_WAIT
+
+
+def test_phase_uses_wall_clock_now_ts_not_bar_minute():
+    """Closed 1h bars are usually hour-aligned (minute 0); phase must follow now_ts."""
+    gate = HourlyScreeningGate()
+    bar_ts = T0 + 10 * HOUR  # minute 0 on the bar
+    # Wall clock at minute 20 → ACTIVE, no scan
+    r = gate.evaluate(bar_ts, now_ts=bar_ts + 20 * 60)
+    assert r.phase == ACTIVE_EXECUTION
+    assert r.scan_allowed is False
+    assert r.reason == "outside_scan_window"
+    # Wall clock at minute 2 → SCAN allowed
+    r2 = gate.evaluate(bar_ts, now_ts=bar_ts + 2 * 60)
+    assert r2.phase == SCAN_AND_DEPLOY
+    assert r2.scan_allowed is True
 
 
 def test_second_scan_same_hour_blocked_next_hour_allowed():
@@ -157,9 +174,11 @@ def test_gate_persist_restore():
     gate = HourlyScreeningGate()
     gate.mark_scanned(T0 + HOUR + 120)
     d = gate.to_dict()
-    restored = HourlyScreeningGate.restore(d)
+    restored = HourlyScreeningGate.from_dict(d)
     assert restored.last_scan_bar_ts == T0 + HOUR + 120
     assert restored.evaluate(T0 + HOUR + 120).scan_allowed is False
+    # restore alias still works
+    assert HourlyScreeningGate.restore(d).last_scan_bar_ts == T0 + HOUR + 120
 
 
 # ------------------------------------------------------------- ranker ----
@@ -334,6 +353,8 @@ def test_shadow_plan_phases_and_content():
     assert d["scenarios"][0]["sweep_zone"] == 98.5
     assert d["path_alpha"].startswith("proactive")
     assert d["path_beta"].startswith("reactive")
+    assert d["binding"] is False
+    assert plan.binding is False
     # Plan loest keinen Scan aus: kein Timeout-/Scan-Feld, nur Planung
     assert "scan" not in d
 

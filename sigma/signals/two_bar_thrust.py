@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+from sigma.signals.closed_bars import closed_only
 from sigma.signals.htf_features import sweep_mss_flags
 
 SUPPORT_TOLERANCE_PCT = 0.005  # 0,5 % Toleranz fuer Support-Konfluenz
@@ -21,9 +22,9 @@ SUPPORT_TOLERANCE_PCT = 0.005  # 0,5 % Toleranz fuer Support-Konfluenz
 
 @dataclass(frozen=True)
 class TwoBarThrustSignal:
-    """Signal + Evidenzfelder. signal=True nur bei erfuelltem Muster."""
+    """Signal + Evidenzfelder. detected=True nur bei erfuelltem Muster."""
 
-    signal: bool
+    detected: bool
     direction: str
     bear_body: float
     bull_body_sum: float
@@ -31,12 +32,25 @@ class TwoBarThrustSignal:
     stop_price: Optional[float]
     # Evidenz-Kontext (KEINE harten Bedingungen):
     support_confluence: bool
-    ema_aligned: bool
+    ema_distance_ok: bool
     session_sweep: bool
     closed_bars_used: int
 
+    @property
+    def signal(self) -> bool:
+        """Alias — aeltere Call-Sites (Quantum-Sniper) nutzen .signal."""
+        return self.detected
+
+    @property
+    def ema_aligned(self) -> bool:
+        """Alias fuer ema_distance_ok."""
+        return self.ema_distance_ok
+
     def to_dict(self) -> Dict[str, Any]:
-        return dict(self.__dict__)
+        d = dict(self.__dict__)
+        d["signal"] = self.detected
+        d["ema_aligned"] = self.ema_distance_ok
+        return d
 
 
 def evaluate(
@@ -49,12 +63,12 @@ def evaluate(
     """Wertet das Drei-Bar-Muster auf der letzten geschlossenen Kerze aus.
     Eine als offen markierte letzte Bar wird ignoriert. Kontextfelder werden
     separat berechnet und togglen das Signal nicht."""
-    closed = _closed_bars(candles)
+    closed = closed_only(candles)
     if len(closed) < 3:
         return TwoBarThrustSignal(
-            signal=False, direction="", bear_body=0.0, bull_body_sum=0.0,
+            detected=False, direction="", bear_body=0.0, bull_body_sum=0.0,
             close_above_bear_high=False, stop_price=None,
-            support_confluence=False, ema_aligned=False, session_sweep=False,
+            support_confluence=False, ema_distance_ok=False, session_sweep=False,
             closed_bars_used=len(closed),
         )
     a, b, c = closed[-3], closed[-2], closed[-1]  # a=Bar[2] (alt), c=Bar[0] (neu)
@@ -72,28 +86,21 @@ def evaluate(
     if support_price is not None and support_price > 0:
         low_c = _l(c)
         support_confluence = abs(low_c - support_price) / support_price <= SUPPORT_TOLERANCE_PCT
-    ema_aligned = ema20 is not None and _c(c) > ema20
+    ema_distance_ok = ema20 is not None and _c(c) > ema20
     if sweep is None:
         sweep = bool(sweep_mss_flags(closed).get("liquidity_sweep", False))
     return TwoBarThrustSignal(
-        signal=pattern,
+        detected=pattern,
         direction="bullish" if pattern else "",
         bear_body=bear_body,
         bull_body_sum=bull_body_sum,
         close_above_bear_high=close_above,
         stop_price=stop,
         support_confluence=support_confluence,
-        ema_aligned=ema_aligned,
+        ema_distance_ok=ema_distance_ok,
         session_sweep=bool(sweep),
         closed_bars_used=len(closed),
     )
-
-
-def _closed_bars(candles: Sequence[Mapping[str, Any]]) -> list:
-    rows = list(candles)
-    if rows and rows[-1].get("is_closed", rows[-1].get("closed")) is False:
-        return rows[:-1]
-    return rows
 
 
 def _o(c: Mapping[str, Any]) -> float:
@@ -112,4 +119,4 @@ def _c(c: Mapping[str, Any]) -> float:
     return float(c.get("c", c.get("close", 0.0)) or 0.0)
 
 
-__all__ = ["TwoBarThrustSignal", "evaluate"]
+__all__ = ["TwoBarThrustSignal", "closed_only", "evaluate"]

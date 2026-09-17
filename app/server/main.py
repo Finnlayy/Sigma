@@ -248,6 +248,9 @@ class AppState:
         self.tv_backtest: Optional[TvMcpBacktest] = None
         self.safety = None
         self.kraken_cli = None
+        self.futures_bridge = None
+        self.paper_futures_bridge = None
+        self.cancel_after = None
         self.deadman = None
         self.memory_watchdog = None
         self.scorecard = None
@@ -303,6 +306,7 @@ class AppState:
             cooldown_seconds=cfg.churn_cooldown_seconds,
             max_daily_trades=cfg.churn_max_daily_trades,
             min_fee_hurdle_multiple=cfg.churn_fee_hurdle_multiple,
+            round_trip_fee_pct=2.0 * float(cfg.taker_fee_rate),
         ))
         self.judge = JudgeEngine(cfg)
         self.paper = PaperExecutionEngine(self.fee, cfg)
@@ -408,7 +412,31 @@ class AppState:
         self.safety = SafetyGuard(cfg, redis_client=self.redis, store=self.store)
         set_safety_guard(self.safety)
         self.kraken_cli = KrakenCliBridge(cfg, telemetry=self.telemetry)
-        deadman_bridge = self.kraken_cli
+        # Futures bridges created early so Deadman can flatten the primary book.
+        paper_bridge = KrakenCliBridge(
+            cfg,
+            telemetry=self.telemetry,
+            execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+        )
+        futures_bridge = KrakenCliBridge(
+            cfg,
+            telemetry=self.telemetry,
+            futures=True,
+        )
+        paper_futures_bridge = KrakenCliBridge(
+            cfg,
+            telemetry=self.telemetry,
+            execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+            futures=True,
+        )
+        self.futures_bridge = futures_bridge
+        self.paper_futures_bridge = paper_futures_bridge
+
+        deadman_bridge = (
+            paper_futures_bridge
+            if not bool(getattr(cfg, "live_trading", False))
+            else futures_bridge
+        )
         if os.environ.get("PYTEST_CURRENT_TEST"):
             from app.execution.deadman_switch_daemon import TestDeadmanBridge
 
@@ -454,22 +482,6 @@ class AppState:
             ),
         )
         self.contagion_feed = MacroContagionFeed(depth=self.depth_adapter)
-        paper_bridge = KrakenCliBridge(
-            cfg,
-            telemetry=self.telemetry,
-            execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
-        )
-        futures_bridge = KrakenCliBridge(
-            cfg,
-            telemetry=self.telemetry,
-            futures=True,
-        )
-        paper_futures_bridge = KrakenCliBridge(
-            cfg,
-            telemetry=self.telemetry,
-            execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
-            futures=True,
-        )
         self.order_dispatcher = ReliableOrderDispatcher(
             self.kraken_cli,
             paper_bridge=paper_bridge,
@@ -477,12 +489,55 @@ class AppState:
             paper_futures_bridge=paper_futures_bridge,
             receipts_log=cfg.orders_log_path,
         )
-        self.fill_reconciler = KrakenFillReconciler(
+        self.fills_reconciler = KrakenFillReconciler(
             futures_bridge,
             self.store,
             self._on_realized_trade,
         )
         self.paper.realized_pnl_handler = self._on_realized_trade
+
+        # CLI fee schedule → FeeEngine / Churn (fail-open logged inside helper)
+        try:
+            from app.execution.kraken_fee_schedule import fetch_futures_fee_rates
+            rates = fetch_futures_fee_rates(
+                paper_futures_bridge,
+                fallback_maker=cfg.maker_fee_rate,
+                fallback_taker=cfg.taker_fee_rate,
+            )
+            if self.fee is not None:
+                self.fee.apply_rates(
+                    rates.maker_fee_rate, rates.taker_fee_rate, source=rates.source,
+                )
+            if self.churn is not None:
+                self.churn.config.round_trip_fee_pct = 2.0 * float(rates.taker_fee_rate)
+            from app.execution.kraken_paper_sot import fetch_paper_capital
+            cap = fetch_paper_capital(paper_futures_bridge, futures=True)
+            if cap.ok and cap.fee_rate is not None and self.fee is not None:
+                fr = float(cap.fee_rate)
+                self.fee.apply_rates(fr, fr, source="futures/paper/status")
+                if self.churn is not None:
+                    slip = float(cap.slippage_rate or 0.0)
+                    self.churn.config.round_trip_fee_pct = 2.0 * fr + slip
+        except Exception as exc:  # pragma: no cover
+            logger.warning("fee schedule refresh failed: %s", exc)
+
+        # L4 cancel-after session (paper = no-op path via bridge)
+        try:
+            from app.execution.kraken_cancel_after_session import (
+                get_cancel_after_session, set_cancel_after_session,
+            )
+            ca_bridge = (
+                paper_futures_bridge
+                if not bool(getattr(cfg, "live_trading", False))
+                else futures_bridge
+            )
+            self.cancel_after = get_cancel_after_session(ca_bridge)
+            set_cancel_after_session(self.cancel_after)
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                self.cancel_after.start(confirmed=True)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("cancel-after session init failed: %s", exc)
+
         quant = get_quant_engine(cfg)
         virtual_bots = get_virtual_bot_engine(
             alert_provisioner=get_alert_provisioner()
@@ -675,8 +730,9 @@ class AppState:
 
         entry = float(signal["entry_price"])
         tp = float(signal["take_profit_price"])
+        taker = float(getattr(self.fee, "taker_fee_rate", None) or cfg.taker_fee_rate)
         ok, reason = self.churn.validate_entry_signal(
-            inst, entry, tp, taker_fee_rate=cfg.taker_fee_rate)
+            inst, entry, tp, taker_fee_rate=taker)
         if not ok:
             bus.log("warn", f"{inst}: {reason}", category="RISK", strategy_id=inst)
             return
@@ -711,6 +767,20 @@ class AppState:
 
         closes = [c["close"] for c in candles_n]
         realized_vol = _realized_vol(closes[-96:]) if len(closes) >= 30 else 0.024
+        spread_bps = 3.0
+        try:
+            from app.execution.kraken_ticker_spread import fetch_spread_bps
+            from app.tv.symbol_map import market_type as _mt
+            fut = _mt(symbol) == "FUTURES"
+            pair = symbol.replace("/", "")
+            if fut and not pair.startswith(("PF_", "PI_")):
+                pair = f"PF_{pair}"
+            spread_bps = float(fetch_spread_bps(
+                getattr(self, "paper_futures_bridge", None) or self.kraken_cli,
+                pair, futures=fut, default_bps=3.0,
+            ))
+        except Exception:
+            spread_bps = 3.0
         verdict = self.judge.evaluate(
             symbol, sizing.quantity_contracts,
             "BUY" if signal["direction"] == "LONG" else "SELL",
@@ -719,7 +789,7 @@ class AppState:
             target_vol=0.15,
             context={
                 "realized_vol": realized_vol,
-                "spread_bps": 3.0,
+                "spread_bps": spread_bps,
                 "hurst_regime": (dfa_hurst(closes).get("regime") if len(closes) > 128
                                  else "RANDOM_WALK"),
                 "system_state": self.telemetry.system.state,
@@ -827,6 +897,11 @@ class AppState:
         logger.info("Scheduler matrix online (%d tasks)", len(sched.tasks))
         while True:
             try:
+                if self.cancel_after is not None:
+                    try:
+                        self.cancel_after.refresh(force=False, confirmed=True)
+                    except Exception as ca_exc:
+                        logger.debug("cancel-after refresh: %s", ca_exc)
                 self._scheduler_work = asyncio.create_task(
                     asyncio.to_thread(sched.run_due)
                 )
@@ -872,23 +947,20 @@ def _paper_balances(
     state: "AppState",
     closed_trades: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, float]:
+    """Kapital-SoT = CLI paper status/balance only. No seed / DuckDB fallback."""
     from app.execution.kraken_paper_sot import fetch_paper_capital
-    cap = fetch_paper_capital(state.kraken_cli, futures=False)
-    if cap.ok and getattr(cap, "available", True):
-        return cap.balances
-
-    balances: Dict[str, float] = {}
-    for seed in getattr(getattr(state, "config", None), "paper_seeds", []):
-        asset, amt = seed.split(":")
-        balances[asset] = float(amt)
-    if closed_trades is not None:
-        for t in closed_trades:
-            if (t.get("execution_mode") or "paper") == "paper":
-                balances["USD"] = balances.get("USD", 0.0) + float(t.get("net_pnl_usd") or 0.0)
+    # Futures-primary: prefer futures paper book when futures bridge is active.
+    fut = bool(getattr(getattr(state, "config", None), "futures_primary", True))
+    bridge = getattr(state, "kraken_cli", None)
+    if fut and getattr(state, "paper_futures_bridge", None) is not None:
+        bridge = state.paper_futures_bridge
+        cap = fetch_paper_capital(bridge, futures=True)
     else:
-        if hasattr(state, "store") and state.store:
-            balances["USD"] = balances.get("USD", 0.0) + state.store.sum_closed_pnl("paper")
-    return balances
+        cap = fetch_paper_capital(bridge, futures=False)
+    if cap.ok and getattr(cap, "available", True) and cap.balances:
+        return dict(cap.balances)
+    # Fail-closed: empty schema, never invent 50k seeds.
+    return {}
 
 
 def _portfolio_value(state: AppState, balances: Dict[str, float]) -> float:
@@ -1786,7 +1858,8 @@ async def kraken_ledgers():
     free_cash = balances.get("USD", 0.0)
     crypto_value = total - free_cash
     change_usd = sum(a["change24h"] / 100.0 * a["totalValueUSD"] for a in assets)
-    positions = [] if st.config.live_trading else [_pro_position(p) for p in st.paper.all_positions()]
+    # Pro book = CLI futures positions SoT (paper or live), not in-memory spot paper.
+    positions = _pro_positions_from_cli(st)
     collateral = sum(p["collateralUSD"] for p in positions)
     upnl = sum(p["unrealizedPnLUSD"] for p in positions)
     return {
@@ -1814,6 +1887,78 @@ async def kraken_ledgers():
     }
 
 
+def _enrich_funding_rates(bridge, positions: list) -> list:
+    """Attach CLI historical fundingRate when available; never invent 0.01."""
+    if not positions:
+        return positions
+    try:
+        from app.execution.kraken_funding_rates import fetch_latest_funding_rate
+    except Exception:
+        return positions
+    out = []
+    for pos in positions:
+        row = dict(pos)
+        pair = str(row.get("pair") or row.get("symbol") or "")
+        if pair and row.get("fundingRate") is None:
+            try:
+                snap = fetch_latest_funding_rate(bridge, pair)
+                if snap.ok and snap.funding_rate is not None:
+                    row["fundingRate"] = snap.funding_rate
+            except Exception:
+                pass
+        out.append(row)
+    return out
+
+
+def _pro_positions_from_cli(st: "AppState") -> list:
+    """Futures Pro positions from CLI SoT; empty on CLI failure (fail-closed)."""
+    from app.execution.kraken_futures_positions_sot import fetch_futures_positions
+    live = bool(getattr(st.config, "live_trading", False)) and bool(getattr(st, "has_credentials", False))
+    bridge = getattr(st, "futures_bridge", None) or getattr(st, "kraken_cli", None)
+    paper_bridge = getattr(st, "paper_futures_bridge", None) or bridge
+    if live:
+        snap = fetch_futures_positions(bridge, paper=False)
+    else:
+        snap = fetch_futures_positions(paper_bridge, paper=True)
+    ok = bool(getattr(snap, "ok", False) if not isinstance(snap, dict) else snap.get("ok"))
+    if not ok:
+        return []
+    positions = list(
+        getattr(snap, "positions", None)
+        if not isinstance(snap, dict)
+        else (snap.get("positions") or [])
+    )
+    # Drop invented 0.01 if a caller stuffed it into raw fixtures
+    cleaned = []
+    for pos in positions:
+        row = dict(pos)
+        if row.get("fundingRate") == 0.01 and "_raw" not in row:
+            # Only strip when it looks like the old UI fake (normalize leaves None)
+            pass
+        if row.get("fundingRate") == 0.01:
+            row["fundingRate"] = None
+        cleaned.append(row)
+    return _enrich_funding_rates(paper_bridge if not live else bridge, cleaned)
+
+
+def _positions_snap_fields(snap) -> dict:
+    if isinstance(snap, dict):
+        return {
+            "ok": bool(snap.get("ok")),
+            "positions": list(snap.get("positions") or []),
+            "error": str(snap.get("error") or ""),
+            "available": bool(snap.get("available", snap.get("ok"))),
+            "source": str(snap.get("source") or ""),
+        }
+    return {
+        "ok": bool(getattr(snap, "ok", False)),
+        "positions": list(getattr(snap, "positions", None) or []),
+        "error": str(getattr(snap, "error", "") or ""),
+        "available": bool(getattr(snap, "available", False)),
+        "source": str(getattr(snap, "source", "") or ""),
+    }
+
+
 def _pro_position(p: Dict[str, Any]) -> Dict[str, Any]:
     price = state.ingestor.last_price(p["symbol"])
     qty = float(p.get("quantity") or 0.0)
@@ -1834,7 +1979,7 @@ def _pro_position(p: Dict[str, Any]) -> Dict[str, Any]:
         "marginRequirementUSD": round(float(p.get("margin_usd") or 0.0), 2),
         "unrealizedPnLUSD": round(upnl, 4),
         "unrealizedPnLPercent": round(upnl / max(1e-9, float(p.get("margin_usd") or 1)) * 100.0, 2),
-        "fundingRate": 0.01,
+        "fundingRate": None,  # never invent; CLI funding via positions/pro
         "status": "open",
     }
 
@@ -1869,59 +2014,78 @@ async def kraken_positions_pro():
     from app.execution.kraken_futures_positions_sot import fetch_futures_positions
     from app.execution.kraken_paper_sot import fetch_paper_capital
 
-    if state.config.live_trading and getattr(state, "has_credentials", False):
-        res = fetch_futures_positions(state.kraken_cli, paper=False)
-        if not res.get("ok"):
+    live = bool(state.config.live_trading) and bool(getattr(state, "has_credentials", False))
+    bridge = getattr(state, "futures_bridge", None) or state.kraken_cli
+    paper_bridge = getattr(state, "paper_futures_bridge", None) or bridge
+
+    if live:
+        snap = fetch_futures_positions(bridge, paper=False)
+        fields = _positions_snap_fields(snap)
+        if not fields["ok"]:
+            err = fields["error"]
             return {
                 "ok": False,
                 "source": "unavailable",
                 "live": True,
-                "reason": "cli_offline" if "CLI_NOT_FOUND" in res.get("error", "") else res.get("error"),
+                "reason": "cli_offline" if ("CLI_NOT_FOUND" in err or not fields["available"]) else err,
                 "positions": [],
                 "totalCollateralUSD": None,
                 "freeMarginUSD": None,
                 "totalUnrealizedPnL": None,
             }
+        positions = _enrich_funding_rates(bridge, fields["positions"])
+        for row in positions:
+            if row.get("fundingRate") == 0.01:
+                row["fundingRate"] = None
+        collateral = sum(float(p.get("collateralUSD") or 0.0) for p in positions)
+        upnl = sum(float(p.get("unrealizedPnLUSD") or 0.0) for p in positions)
         return {
             "ok": True,
-            "source": "futures/live/positions",
+            "source": fields["source"] or "futures/live/positions",
             "live": True,
             "reason": None,
-            "positions": res.get("positions", []),
-            "totalCollateralUSD": res.get("total_collateral_usd"),
-            "freeMarginUSD": res.get("free_margin_usd"),
-            "totalUnrealizedPnL": res.get("unrealized_pnl_usd"),
+            "positions": positions,
+            "totalCollateralUSD": round(collateral, 2) if positions else None,
+            "freeMarginUSD": None,
+            "totalUnrealizedPnL": round(upnl, 2),
         }
-    else:
-        # Paper
-        cap = fetch_paper_capital(state.kraken_cli, futures=True)
-        is_offline = getattr(cap, "cli_offline", False)
-        if not is_offline and hasattr(cap, "available"):
-            is_offline = not cap.available
 
-        if is_offline:
-            return {
-                "ok": False,
-                "source": "unavailable",
-                "live": False,
-                "reason": "cli_offline",
-                "positions": [],
-                "totalCollateralUSD": None,
-                "freeMarginUSD": None,
-                "totalUnrealizedPnL": None,
-            }
-        res = fetch_futures_positions(state.kraken_cli, paper=True)
-        pos = res.get("positions", []) if isinstance(res, dict) else getattr(res, "positions", [])
+    cap = fetch_paper_capital(paper_bridge, futures=True)
+    is_offline = bool(getattr(cap, "cli_offline", False))
+    if not is_offline and hasattr(cap, "available"):
+        is_offline = not bool(cap.available)
+    if is_offline or not getattr(cap, "ok", False):
         return {
-            "ok": True,
-            "source": "futures/paper/positions",
+            "ok": False,
+            "source": "unavailable",
             "live": False,
-            "reason": None,
-            "positions": pos,
-            "totalCollateralUSD": cap.current_value,
-            "freeMarginUSD": cap.balances.get("USD", cap.current_value),
-            "totalUnrealizedPnL": cap.unrealized_pnl,
+            "reason": "cli_offline",
+            "positions": [],
+            "totalCollateralUSD": None,
+            "freeMarginUSD": None,
+            "totalUnrealizedPnL": None,
         }
+
+    snap = fetch_futures_positions(paper_bridge, paper=True)
+    fields = _positions_snap_fields(snap)
+    positions = _enrich_funding_rates(paper_bridge, fields["positions"] if fields["ok"] else [])
+    for row in positions:
+        if row.get("fundingRate") == 0.01:
+            row["fundingRate"] = None
+    free = None
+    if getattr(cap, "balances", None):
+        free = cap.balances.get("USD", cap.current_value)
+    return {
+        "ok": True,
+        "source": fields["source"] or "futures/paper/positions",
+        "live": False,
+        "reason": None,
+        "positions": positions,
+        "totalCollateralUSD": cap.current_value,
+        "freeMarginUSD": free,
+        "totalUnrealizedPnL": getattr(cap, "unrealized_pnl", None),
+    }
+
 
 @app.get("/api/kraken/symbols")
 async def kraken_symbols():

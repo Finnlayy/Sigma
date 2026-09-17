@@ -28,7 +28,6 @@ from sigma.signals.quantum_wave_collider import STATUS_COLLAPSED, STATUS_INVALID
 from sigma.signals.two_bar_thrust import evaluate as evaluate_thrust
 from sigma.strategies.base_strategy import BaseStrategy, StrategyIntent
 from sigma.strategies.dca_ladder import (
-    LADDER_TTL_SECONDS,
     average_fill_price,
     build_ladder,
     take_profit_price,
@@ -132,7 +131,7 @@ def retest_confirmed(ltf_bars: Sequence[Mapping[str, Any]], ce50: Optional[float
         and ce50 >= fvg.gap_low * (1.0 - RETEST_TOLERANCE)
         and ce50 <= fvg.gap_high * (1.0 + RETEST_TOLERANCE)
     )
-    thrust_ok = bool(thrust.signal and thrust.support_confluence)
+    thrust_ok = bool(thrust.detected and thrust.support_confluence)
     confirmed = touched and dipped and (thrust_ok or fvg_ok)
     reason = "retest_confirmed" if confirmed else "no_retest_confirmation"
     return RetestVerdict(
@@ -345,6 +344,13 @@ def plan_sniper(ctx: Optional[Mapping[str, Any]]) -> StrategyIntent:
     liq = ctx.get("liquidation_price")
     liq_f = float(liq) if liq is not None else None
     guard_notes: dict = {}
+    # Prompt: Hard SL = stricter of MP-01 liq buffer vs knapp unter/über Range.
+    range_sl = (
+        float(range_low) * (1.0 - RANGE_LOW_SL_BUFFER_PCT)
+        if side == "buy"
+        else float(range_high) * (1.0 + RANGE_LOW_SL_BUFFER_PCT)
+    )
+    candidates: list[tuple[str, float]] = [("range_low_high", range_sl)]
     if liq_f is not None and liq_f > 0:
         # MP-01: Liq nicht in der erwarteten Wick-Zone (Range-Low als Zone)
         wick_verdict = liq_outside_wick_zone(liq_f, float(range_low), side)
@@ -357,13 +363,14 @@ def plan_sniper(ctx: Optional[Mapping[str, Any]]) -> StrategyIntent:
             )
         stop_result = hard_stop_distance(entry_price, liq_f, side, buffer_pct=HARD_SL_BUFFER_PCT)
         guard_notes["hard_sl"] = stop_result.to_dict() if hasattr(stop_result, "to_dict") else dict(stop_result)
-        guard_notes["hard_sl_basis"] = "liquidation_price"
-        stop_loss = float(stop_result.stop_price)
+        candidates.append(("liquidation_price", float(stop_result.stop_price)))
+    # Long: higher stop is stricter; short: lower stop is stricter.
+    if side == "buy":
+        basis, stop_loss = max(candidates, key=lambda c: c[1])
     else:
-        # Fallback: knapp unter/ueber Range-Low/-High (Prompt: „bzw. knapp
-        # unter Range-Low“). Hard-Stop steht damit immer im Intent.
-        stop_loss = float(range_low) * (1.0 - RANGE_LOW_SL_BUFFER_PCT) if side == "buy" else float(range_high) * (1.0 + RANGE_LOW_SL_BUFFER_PCT)
-        guard_notes["hard_sl_basis"] = "range_low_high"
+        basis, stop_loss = min(candidates, key=lambda c: c[1])
+    guard_notes["hard_sl_basis"] = basis
+    guard_notes["hard_sl_candidates"] = {b: s for b, s in candidates}
     if stop_loss is None or stop_loss <= 0:
         return _flat(symbol, "missing_stop_reference", {"minute_utc": minute})
 
@@ -384,6 +391,8 @@ def plan_sniper(ctx: Optional[Mapping[str, Any]]) -> StrategyIntent:
     avg_price = average_fill_price(ladder.rungs)
     take_profit = take_profit_price(avg_price, side, tp_pct=TP_PCT)
     total_volume = sum(r.volume for r in ladder.rungs)
+    # TTL = remaining seconds until minute-48 flat (not ladder default 2h).
+    ttl_seconds = max(0, ENTRY_MINUTE_MAX - int(minute)) * 60
     intent = StrategyIntent(
         strategy_id=SNIPER_STRATEGY_ID,
         symbol=symbol,
@@ -399,7 +408,7 @@ def plan_sniper(ctx: Optional[Mapping[str, Any]]) -> StrategyIntent:
             "path": entry_path,
             "minute_utc": minute,
             "phase": phase,
-            "ttl_seconds": LADDER_TTL_SECONDS,
+            "ttl_seconds": ttl_seconds,
             "wave_status": status,
             "ce50": ce50,
             "range_low": range_low,

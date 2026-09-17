@@ -27,6 +27,7 @@ class PolymarketOdds:
     yes_prices: List[float]         # Yes-Preise je Strike (kum. Wahrscheinlichkeit)
     volume_usd: float
     ts: float
+    expiry: Optional[float] = None  # event expiry unix ts (T×0.75 window)
     synthetic: bool = False
     quotes: Optional[Dict[str, float]] = None  # Term-Struktur 1h/2h/4h/EOD
 
@@ -102,6 +103,15 @@ def validate_odds_payload(
     if volume < min_volume_usd:
         return {"available": False, "reason": "insufficient_liquidity"}
     ts = float(payload.get("ts", payload.get("timestamp", 0.0)) or 0.0)
+    expiry_raw = payload.get("expiry", payload.get("expiry_ts", payload.get("expires_at")))
+    expiry: Optional[float] = None
+    if expiry_raw is not None:
+        try:
+            expiry = float(expiry_raw)
+        except (TypeError, ValueError):
+            return {"available": False, "reason": "malformed_expiry"}
+        if expiry <= 0:
+            return {"available": False, "reason": "malformed_expiry"}
     raw_quotes = payload.get("quotes")
     quotes = None
     if isinstance(raw_quotes, dict):
@@ -117,6 +127,7 @@ def validate_odds_payload(
             yes_prices=yes_l,
             volume_usd=volume,
             ts=ts,
+            expiry=expiry,
             synthetic=False,
             quotes=quotes,
         ).to_dict(),

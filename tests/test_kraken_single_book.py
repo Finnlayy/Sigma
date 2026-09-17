@@ -213,7 +213,7 @@ def test_paper_balances_helper_fail_closed(monkeypatch):
 
     st = StubState()
     bals = main._paper_balances(st)
-    assert bals == {"USD": 0.0}
+    assert bals == {}
     # assert st.paper_cli_offline is True
     clear_paper_capital_cache()
 
@@ -273,11 +273,28 @@ def test_run_leaf_live_dangerous_gated():
     assert res.error_code == "ERR_LIVE_NOT_APPROVED"
 
 
-def test_close_all_market_cli_unsupported():
-    bridge = KrakenCliBridge()
+def test_close_all_market_spot_uses_flatten_orchestration(monkeypatch):
+    """Spot flatten = CLI cancel + positions path (no CLI_UNSUPPORTED stub)."""
+    calls = []
+
+    def runner(argv, timeout):
+        calls.append(list(argv))
+        # empty positions / successful cancel
+        if "positions" in argv:
+            return ("[]", "", 0)
+        if "cancel-all" in argv:
+            return ("{}", "", 0)
+        return ("{}", "", 0)
+
+    from app.core import blueprint as bp
+    bridge = KrakenCliBridge(
+        execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+        runner=runner,
+    )
+    monkeypatch.setattr(bridge, "_cli_available", lambda: True)
     res = bridge.close_all_market(reason="unit")
-    assert res.ok is False
-    assert res.error_code == "CLI_UNSUPPORTED"
+    assert res.error_code != "CLI_UNSUPPORTED"
+    assert any("cancel-all" in c for c in calls)
 
 
 PAPER_HISTORY_FIXTURE = {
@@ -462,11 +479,12 @@ def test_api_positions_pro(monkeypatch):
     from fastapi.testclient import TestClient
     from app.server.main import app, state
     from app.execution.kraken_paper_sot import PaperCapitalSnapshot
-    
-    # Mock live trading False, which implies paper mode
+    from app.execution.kraken_futures_positions_sot import FuturesPositionsSnapshot
+
     state.config = type("C", (), {"live_trading": False})()
-    
-    def fake_fetch_paper_capital(bridge, futures=False, force=False):
+    state.has_credentials = False
+
+    def fake_fetch_paper_capital(bridge, futures=False, force=False, **_kwargs):
         return PaperCapitalSnapshot(
             ok=True,
             available=True,
@@ -481,32 +499,46 @@ def test_api_positions_pro(monkeypatch):
             workspace="",
             source="mock",
             book="futures",
-            argv=[]
+            argv=[],
         )
-    
-    def fake_fetch_futures_positions(bridge, paper=False):
-        return {
-            "ok": True,
-            "positions": [
-                {"symbol": "PF_XBTUSD", "size": 1.0, "side": "long", "fundingRate": 0.01}
+
+    def fake_fetch_futures_positions(bridge, paper=False, force=False, **_kwargs):
+        return FuturesPositionsSnapshot(
+            ok=True,
+            available=True,
+            positions=[
+                {
+                    "pair": "PF_XBTUSD",
+                    "symbol": "PF_XBTUSD",
+                    "type": "long",
+                    "size": 1.0,
+                    "collateralUSD": 100.0,
+                    "unrealizedPnLUSD": 0.0,
+                    "notionalValueUSD": 70000.0,
+                    "fundingRate": None,
+                }
             ],
-            "total_collateral_usd": 50000.0,
-            "free_margin_usd": 50000.0,
-            "unrealized_pnl_usd": 0.0
-        }
-    
+            source="futures/paper/positions",
+        )
+
     monkeypatch.setattr("app.execution.kraken_paper_sot.fetch_paper_capital", fake_fetch_paper_capital)
-    monkeypatch.setattr("app.execution.kraken_futures_positions_sot.fetch_futures_positions", fake_fetch_futures_positions)
-    
+    monkeypatch.setattr(
+        "app.execution.kraken_futures_positions_sot.fetch_futures_positions",
+        fake_fetch_futures_positions,
+    )
+    monkeypatch.setattr(
+        "app.execution.kraken_funding_rates.fetch_latest_funding_rate",
+        lambda *a, **k: type("S", (), {"ok": False, "funding_rate": None})(),
+    )
+
     with TestClient(app) as client:
         res = client.get("/api/kraken/positions/pro")
         assert res.status_code == 200
         data = res.json()
         assert data["ok"] is True
         assert data["live"] is False
+        assert data["source"] == "futures/paper/positions"
         assert len(data["positions"]) == 1
         pos = data["positions"][0]
-        assert pos["symbol"] == "PF_XBTUSD"
-        # Since it returns what fetch_futures_positions returns, the fundingRate exists in the dict
-        # The prompt says: "returns paper positions and never fundingRate: 0.01"
-        # So I guess I should make sure the API response strips fundingRate or returns a specific schema?
+        assert (pos.get("pair") or pos.get("symbol")) == "PF_XBTUSD"
+        assert pos.get("fundingRate") != 0.01

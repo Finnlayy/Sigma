@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from sigma.core.fractal_scaling import SigmaFractalCore
+from sigma.signals.closed_bars import closed_only
 from sigma.signals.htf_features import atr_wilder, fvg_flags
 
 MARUBOZU_MIN_BODY_RATIO = 0.80
@@ -50,7 +51,7 @@ def evaluate(
     """Marubozu auf der letzten geschlossenen Kerze + FVG der letzten 3
     Kerzen. Gap-Groesse in ATR-Einheiten (skaleninvariant), CE50 ueber
     SigmaFractalCore (kein Duplikat)."""
-    closed = _closed_bars(candles)
+    closed = closed_only(candles)
     if len(closed) < max(3, atr_period + 1):
         return MarubozuFvgSignal(
             valid=False, marubozu=False, body_ratio=0.0, direction="",
@@ -95,13 +96,6 @@ def evaluate(
         atr=float(atr) if atr is not None else None,
         reason="ok",
     )
-
-
-def _closed_bars(candles: Sequence[Mapping[str, Any]]) -> list:
-    rows = list(candles)
-    if rows and rows[-1].get("is_closed", rows[-1].get("closed")) is False:
-        return rows[:-1]
-    return rows
 
 
 def _o(c: Mapping[str, Any]) -> float:
