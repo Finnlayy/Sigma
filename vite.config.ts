@@ -4,6 +4,9 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const coreProxy = process.env.SIGMA_CORE_PROXY ||
+    process.env.ALPHA_CORE_PROXY || 'http://127.0.0.1:8000';
+
   return {
     build: {
       outDir: 'dist',
@@ -26,11 +29,25 @@ export default defineConfig(() => {
       host: true,
       port: 3000,
       allowedHosts: true as const,
+      proxy: {
+        '/api': {
+          target: coreProxy,
+          changeOrigin: true,
+          ws: true,
+        },
+      },
     },
     preview: {
       host: true,
       port: 3000,
       allowedHosts: true as const,
+      proxy: {
+        '/api': {
+          target: coreProxy,
+          changeOrigin: true,
+          ws: true,
+        },
+      },
     },
   };
 });

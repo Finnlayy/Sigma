@@ -5,10 +5,9 @@
   "type": "module",
   "description": "Projekt:Sigma — M8 hybrid (Ubuntu + TradingView MCP CSV backtesting)",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "dev": "vite",
+    "build": "vite build",
     "preview": "vite preview",
-    "start": "node dist/server.cjs",
     "lint": "tsc --noEmit",
     "check:kraken": "tsx scripts/check-kraken.ts"
   },
