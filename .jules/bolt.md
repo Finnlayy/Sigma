@@ -53,3 +53,7 @@
 ## 2024-09-11 - [Optimize RegExp/Set within Array Filter loops]
 **Learning:** Avoid compiling `new RegExp()` or instantiating a `new Set()` inside a tight iteration loop such as `array.filter()` during React render phases, as it reallocates and recompiles for each item, and on every render cycle.
 **Action:** Memoize loop-invariant operations like building a `Set` or compiling a `RegExp` using `useMemo` outside of the `.filter()` / `.map()` blocks to prevent unnecessary reallocations and O(N) penalties.
+
+## 2026-09-12 - Avoid Spread Operator on large series
+**Learning:** Using `Math.min(...array)` and `Math.max(...array)` on large arrays (like time series in charts) can trigger "Maximum call stack size exceeded" errors and allocates intermediate arrays if `.map()` is used first.
+**Action:** Always use manual iterative loops or `.reduce()` to calculate min/max over large datasets in frontend visualizations to save memory and avoid stack overflows.
