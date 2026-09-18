@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,11 +38,13 @@ export function StrategyLibraryPanel() {
   const [snapRows, setSnapRows] = useState<Record<string, LibrarySnapshotRow>>({});
 
   const selected = ws.selected;
-  const visible = ws.strategies.filter((s) => {
+  const visible = useMemo(() => {
     const q = filter.toLowerCase();
-    if (q && !`${s.name} ${s.assetPair} ${s.id} ${s.tv_script_id || ''}`.toLowerCase().includes(q)) return false;
-    return true;
-  });
+    return ws.strategies.filter((s) => {
+      if (q && !`${s.name} ${s.assetPair} ${s.id} ${s.tv_script_id || ''}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [ws.strategies, filter]);
 
   useEffect(() => {
     setParamText(JSON.stringify(selected?.parameters ?? {}, null, 2));

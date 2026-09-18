@@ -57,3 +57,7 @@
 ## 2026-09-12 - Avoid Spread Operator on large series
 **Learning:** Using `Math.min(...array)` and `Math.max(...array)` on large arrays (like time series in charts) can trigger "Maximum call stack size exceeded" errors and allocates intermediate arrays if `.map()` is used first.
 **Action:** Always use manual iterative loops or `.reduce()` to calculate min/max over large datasets in frontend visualizations to save memory and avoid stack overflows.
+
+## 2026-09-13 - Memoize array filtering based on inputs in React
+**Learning:** Found `.filter()` chained with `.toLowerCase().includes()` inside the render logic of `StrategyLibraryPanel.tsx`, calculating the derived `visible` array directly in the render body. This unmemoized operation triggered expensive text search array filtering overhead (O(N) time with string matching inside) repeatedly on every re-render.
+**Action:** Always wrap `.filter()` operations on derived arrays bounded by state or props in `useMemo` hooks (e.g. `const visible = useMemo(() => ..., [ws.strategies, filter]);`). Cache string computations like `filter.toLowerCase()` outside of the inner loop to prevent repeating string manipulations for every element on every render cycle.
