@@ -20,3 +20,7 @@
 ## 2026-09-12 - [WebSocket Reconnection Architecture]
 **Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections, while missing cleanup in unmounts causes memory leaks and duplicate message streams.
 **Action:** Always wrap WebSocket logic with an exponential backoff loop, ensure state clearing within event handlers (to avoid concurrent reconnect timers on `error` + `close` sequential triggers), and always validate incoming IPC payloads explicitly.
+
+## 2026-09-19 - [API Integration Insight]
+**Learning:** The raw market-feed WebSocket in `MarketChart` (src/components/sigma/panels.tsx) lacked automatic reconnects and schema validation, which made the data feed brittle.
+**Action:** Replaced the raw WebSocket with a reconnect loop featuring exponential backoff, manual payload type checks, and explicitly caught malformed JSON frames while preserving the rAF queue rendering pattern.
