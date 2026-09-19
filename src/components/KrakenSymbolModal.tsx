@@ -55,12 +55,15 @@ export default function KrakenSymbolModal({
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.trim().toUpperCase();
+      // Bolt Optimization: Use case-insensitive RegExp test to prevent O(N) redundant .toUpperCase() and .includes() string allocations on every symbol property inside the filter loop.
+      // Must escape regex characters from user input to prevent SyntaxError on special characters like `+`, `?`, etc.
+      const escapedQuery = searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escapedQuery, 'i');
       list = list.filter(s => 
-        s.symbol.toUpperCase().includes(q) ||
-        s.altname.toUpperCase().includes(q) ||
-        s.base.toUpperCase().includes(q) ||
-        s.wsname.toUpperCase().includes(q)
+        searchRegex.test(s.symbol) ||
+        searchRegex.test(s.altname) ||
+        searchRegex.test(s.base) ||
+        searchRegex.test(s.wsname)
       );
     }
 

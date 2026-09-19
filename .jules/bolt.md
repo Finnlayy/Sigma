@@ -61,3 +61,7 @@
 ## 2026-09-13 - Memoize array filtering based on inputs in React
 **Learning:** Found `.filter()` chained with `.toLowerCase().includes()` inside the render logic of `StrategyLibraryPanel.tsx`, calculating the derived `visible` array directly in the render body. This unmemoized operation triggered expensive text search array filtering overhead (O(N) time with string matching inside) repeatedly on every re-render.
 **Action:** Always wrap `.filter()` operations on derived arrays bounded by state or props in `useMemo` hooks (e.g. `const visible = useMemo(() => ..., [ws.strategies, filter]);`). Cache string computations like `filter.toLowerCase()` outside of the inner loop to prevent repeating string manipulations for every element on every render cycle.
+
+## 2024-05-23 - [Regex String Allocation Optimization in Rendering Loops]
+**Learning:** Replacing chained string methods (like `s.symbol.toUpperCase().includes(q)`) inside tight filtering or rendering loops with a pre-compiled case-insensitive RegExp (`new RegExp(q, 'i')`) significantly reduces memory allocation and execution time. However, user input must always be escaped (`searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`) before passing it to `new RegExp` to avoid runtime `SyntaxError` crashes when users enter regex-reserved characters.
+**Action:** When refactoring O(N) string operations inside React render loops to use RegExp, verify that any dynamic variables passed to the RegExp constructor are safely escaped to prevent application crashes.
