@@ -7,6 +7,7 @@
  * =========================================================
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { z } from 'zod';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   Download, ExternalLink, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
@@ -426,12 +427,23 @@ export function MarketChart() {
     return () => { cancelled = true; clearInterval(id); };
   }, [overlays]);
 
+  const MarketFeedSchema = useMemo(() => z.object({
+    channel: z.string().optional(),
+    data: z.object({
+      candle: z.any().optional(),
+      markers: z.any().optional(),
+      price_lines: z.any().optional()
+    }).optional()
+  }), []);
+
   // Guide §6 — visualization-plane WS; rAF-batched last-bar updates
   useEffect(() => {
     let ws: WebSocket | null = null;
     let raf = 0;
     let pending: Candle | null = null;
     let closed = false;
+    let retryCount = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const flush = () => {
       raf = 0;
@@ -451,40 +463,73 @@ export function MarketChart() {
       });
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
-      ws.onopen = () => setStreamStatus('live');
-      ws.onerror = () => setStreamStatus('err');
-      ws.onclose = () => { if (!closed) setStreamStatus('off'); };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as {
-            channel?: string;
-            data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
-          };
-          if (msg.channel === 'alpha:executions:live' && msg.data) {
-            if (msg.data.markers) setMarkers(msg.data.markers);
-            if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
-            return;
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
+
+        ws.onopen = () => {
+          setStreamStatus('live');
+          retryCount = 0;
+        };
+
+        ws.onerror = (err) => {
+          console.error('[MarketChart] WS error:', err);
+          if (!closed) setStreamStatus('err');
+        };
+
+        ws.onclose = () => {
+          if (!closed) setStreamStatus('off');
+          if (closed || reconnectTimer) return;
+
+          const delay = Math.min(1000 * 2 ** retryCount, 30000);
+          retryCount++;
+          console.warn(`[MarketChart] WS closed — reconnecting in ${delay}ms (${retryCount})`);
+
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, delay);
+        };
+
+        ws.onmessage = (ev) => {
+          try {
+            const rawMsg = JSON.parse(ev.data as string);
+            const msg = MarketFeedSchema.parse(rawMsg);
+
+            if (msg.channel === 'alpha:executions:live' && msg.data) {
+              if (msg.data.markers) setMarkers(msg.data.markers as ChartMarker[]);
+              if (msg.data.price_lines) setPriceLines(msg.data.price_lines as ChartPriceLine[]);
+              return;
+            }
+
+            const c = msg.data?.candle as Candle | undefined;
+            if (!c || typeof c.ts !== 'number') return;
+
+            pending = c;
+            if (!raf) raf = requestAnimationFrame(flush);
+          } catch (err) {
+            console.error('[MarketChart] WS parse error:', err, ev.data);
           }
-          const c = msg.data?.candle;
-          if (!c || typeof c.ts !== 'number') return;
-          pending = c;
-          if (!raf) raf = requestAnimationFrame(flush);
-        } catch {
-          /* ignore malformed frames */
-        }
-      };
-    } catch {
-      setStreamStatus('err');
-    }
+        };
+      } catch (err) {
+        console.error('[MarketChart] WS setup error:', err);
+        setStreamStatus('err');
+      }
+    };
+
+    connect();
 
     return () => {
       closed = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (raf) cancelAnimationFrame(raf);
       try { ws?.close(); } catch { /* ignore */ }
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, MarketFeedSchema]);
 
   const toggle = (key: keyof OverlayFlags) => {
     setOverlays((prev) => ({ ...prev, [key]: !prev[key] }));
