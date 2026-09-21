@@ -65,3 +65,7 @@
 ## 2024-05-23 - [Regex String Allocation Optimization in Rendering Loops]
 **Learning:** Replacing chained string methods (like `s.symbol.toUpperCase().includes(q)`) inside tight filtering or rendering loops with a pre-compiled case-insensitive RegExp (`new RegExp(q, 'i')`) significantly reduces memory allocation and execution time. However, user input must always be escaped (`searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`) before passing it to `new RegExp` to avoid runtime `SyntaxError` crashes when users enter regex-reserved characters.
 **Action:** When refactoring O(N) string operations inside React render loops to use RegExp, verify that any dynamic variables passed to the RegExp constructor are safely escaped to prevent application crashes.
+
+## 2026-09-14 - Replace inline array filters calculating lengths in JSX
+**Learning:** Found multiple instances of `pairOrders.filter(o => o.type === 'buy').length` executing directly inside the JSX component render output in `MarketPanel.tsx`. Although the parent array (`pairOrders`) was memoized, these `.filter()` calls still executed on every re-render (which occurs frequently due to live market ticker updates). This creates duplicated O(N) penalties during the render cycle.
+**Action:** When calculating sub-group counts or simple metrics from an array for UI display, never compute them using inline `.filter().length` in the JSX. Instead, calculate the counts in a single O(N) iterative loop wrapped in a `useMemo` block, and reference the memoized counts in the JSX.
