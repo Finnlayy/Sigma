@@ -246,6 +246,18 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
     });
   }, [orders, selectedPair, queueFilter]);
 
+  // Bolt Optimization: Calculate buy/sell counts in a single O(N) pass and memoize it
+  // to avoid calling .filter().length twice on every render cycle.
+  const { buyCount, sellCount } = useMemo(() => {
+    let buy = 0;
+    let sell = 0;
+    for (const o of pairOrders) {
+      if (o.type === 'buy') buy++;
+      else if (o.type === 'sell') sell++;
+    }
+    return { buyCount: buy, sellCount: sell };
+  }, [pairOrders]);
+
   // Filtered orders to display as markers based on toggle controls
   const visibleOrderMarkers = useMemo(() => {
     return pairOrders.filter(o => {
@@ -517,7 +529,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   title="Toggle visual Buy execution triangles on chart"
                 >
                   <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-0.5" />
-                  <span>▲ Buy ({pairOrders.filter(o => o.type === 'buy').length})</span>
+                  <span>▲ Buy ({buyCount})</span>
                 </button>
 
                 {/* Toggle Sell Markers */}
@@ -532,7 +544,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   title="Toggle visual Sell execution triangles on chart"
                 >
                   <span className="inline-block w-2 h-2 rounded-full bg-rose-400 mr-0.5" />
-                  <span>▼ Sell ({pairOrders.filter(o => o.type === 'sell').length})</span>
+                  <span>▼ Sell ({sellCount})</span>
                 </button>
               </div>
 
