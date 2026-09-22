@@ -499,6 +499,7 @@ if (diff > parameters.threshold) {
               <button 
                 onClick={() => setIsManifestOpen(false)}
                 className="text-zinc-500 hover:text-white transition-colors"
+                title="Close manifest" aria-label="Close manifest"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1042,7 +1043,7 @@ if (diff > parameters.threshold) {
                     <button
                       onClick={() => onRestoreStrategy(selectedStrategy.id)}
                       className="bg-purple-950/60 border border-purple-800/80 hover:border-purple-600 hover:bg-purple-900/60 text-purple-300 px-3 rounded transition-all flex items-center space-x-1 text-xs font-mono font-semibold"
-                      title="Restore Strategy back to Active Orchestrator"
+                      title="Restore Strategy back to Active Orchestrator" aria-label="Restore Strategy back to Active Orchestrator"
                     >
                       <ArchiveRestore className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">Restore</span>
@@ -1057,7 +1058,7 @@ if (diff > parameters.threshold) {
                         }
                       }}
                       className="bg-zinc-950 border border-zinc-850 hover:border-amber-800/60 hover:bg-amber-950/20 text-zinc-500 hover:text-amber-400 px-3 rounded transition-all"
-                      title="Move to Archives"
+                      title="Move to Archives" aria-label="Move to Archives"
                     >
                       <Archive className="w-4 h-4" />
                     </button>
@@ -1071,7 +1072,7 @@ if (diff > parameters.threshold) {
                     }
                   }}
                   className="bg-zinc-950 border border-zinc-850 hover:border-rose-900/50 hover:bg-rose-950/20 text-zinc-500 hover:text-rose-400 px-3 rounded transition-all"
-                  title="Delete Strategy"
+                  title="Delete Strategy" aria-label="Delete Strategy"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
