@@ -451,37 +451,69 @@ export function MarketChart() {
       });
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
-      ws.onopen = () => setStreamStatus('live');
-      ws.onerror = () => setStreamStatus('err');
-      ws.onclose = () => { if (!closed) setStreamStatus('off'); };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as {
-            channel?: string;
-            data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
-          };
-          if (msg.channel === 'alpha:executions:live' && msg.data) {
-            if (msg.data.markers) setMarkers(msg.data.markers);
-            if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
-            return;
+    let reconnectTimer: any = null;
+    let retryCount = 0;
+    const maxRetries = 7;
+
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
+        ws.onopen = () => {
+          setStreamStatus('live');
+          retryCount = 0;
+        };
+        ws.onerror = (e) => {
+          console.error('[MarketChart] WebSocket error', e);
+          if (!closed) setStreamStatus('err');
+        };
+        ws.onclose = () => {
+          if (!closed) setStreamStatus('off');
+          if (closed || reconnectTimer) return;
+          if (retryCount < maxRetries) {
+            const delay = Math.min(1000 * 2 ** retryCount, 30000);
+            retryCount++;
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, delay);
+          } else {
+             console.error('[MarketChart] WebSocket retries exhausted.');
           }
-          const c = msg.data?.candle;
-          if (!c || typeof c.ts !== 'number') return;
-          pending = c;
-          if (!raf) raf = requestAnimationFrame(flush);
-        } catch {
-          /* ignore malformed frames */
-        }
-      };
-    } catch {
-      setStreamStatus('err');
-    }
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const parsed = JSON.parse(ev.data as string);
+            if (!parsed || typeof parsed !== 'object') throw new Error('Invalid payload');
+            const msg = parsed as {
+              channel?: string;
+              data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
+            };
+            if (msg.channel === 'alpha:executions:live' && msg.data) {
+              if (msg.data.markers) setMarkers(msg.data.markers);
+              if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
+              return;
+            }
+            const c = msg.data?.candle;
+            if (!c || typeof c.ts !== 'number') return;
+            pending = c;
+            if (!raf) raf = requestAnimationFrame(flush);
+          } catch (err) {
+            console.error('[MarketChart] WebSocket payload parse error:', err, ev.data);
+          }
+        };
+      } catch (e) {
+        console.error('[MarketChart] WebSocket setup error:', e);
+        if (!closed) setStreamStatus('err');
+      }
+    };
+
+    connect();
 
     return () => {
       closed = true;
       if (raf) cancelAnimationFrame(raf);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }
     };
   }, [symbol, interval]);
