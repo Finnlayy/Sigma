@@ -1017,6 +1017,103 @@ async def llm_pine_patch(body: Dict[str, Any]):
     return result.model_dump()
 
 
+@router.websocket(bp.MARKET_FEED_WS_ROUTE)
+async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
+    """LWC guide visualization plane - streams candles + live executions.
+
+    Redis channels:
+      - market:candles:{symbol} for candle updates
+      - alpha:executions:live for live fill events
+    Falls back to polling via fetch_ohlc_with_meta when Redis unavailable.
+    """
+    import json as _json
+
+    await websocket.accept()
+    loop = asyncio.get_running_loop()
+    _ = loop
+    client = get_scraper_client()
+    candle_channel = f"market:candles:{symbol}"
+    exec_channel = "alpha:executions:live"
+    try:
+        candles, meta = client.fetch_ohlc_with_meta(symbol, interval, 300)
+        await websocket.send_text(_json.dumps({
+            "type": "init",
+            "symbol": symbol,
+            "interval": interval,
+            "candles": candles,
+            "feed": meta,
+            "channels": [candle_channel, exec_channel],
+        }))
+    except Exception as exc:
+        await websocket.send_text(_json.dumps({
+            "type": "error",
+            "reason": str(exc),
+            "channels": [candle_channel, exec_channel],
+        }))
+
+    pubsub = None
+    try:
+        from app.core.redis_client import get_redis
+        redis = await get_redis()
+        if redis is not None:
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(candle_channel, exec_channel)
+    except Exception:
+        pubsub = None
+
+    try:
+        while True:
+            if pubsub is not None:
+                try:
+                    msg = await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0), timeout=2.0)
+                    if msg and msg.get("type") == "message":
+                        ch = msg.get("channel")
+                        if isinstance(ch, bytes):
+                            ch = ch.decode()
+                        data = msg.get("data")
+                        if isinstance(data, bytes):
+                            data = data.decode()
+                        try:
+                            payload = _json.loads(data) if isinstance(data, str) else data
+                        except Exception:
+                            payload = {"raw": str(data)}
+                        await websocket.send_text(_json.dumps({
+                            "type": "update",
+                            "channel": ch,
+                            "data": payload,
+                        }))
+                    else:
+                        await asyncio.sleep(0.5)
+                except asyncio.TimeoutError:
+                    await asyncio.sleep(0.5)
+            else:
+                await asyncio.sleep(5.0)
+                try:
+                    candles, meta = client.fetch_ohlc_with_meta(symbol, interval, 100)
+                    await websocket.send_text(_json.dumps({
+                        "type": "candles",
+                        "symbol": symbol,
+                        "candles": candles[-1:],
+                        "feed": meta,
+                    }))
+                except Exception:
+                    await asyncio.sleep(5.0)
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+    finally:
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe(candle_channel, exec_channel)
+                await pubsub.close()
+            except Exception:
+                pass
+
+
 @router.websocket(bp.LLM_STREAM_ROUTE)
 async def llm_stream(websocket: WebSocket):
     """§34.3 — ChatStreamMessage-Stream fuer die LLMConsole."""
