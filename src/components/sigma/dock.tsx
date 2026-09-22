@@ -31,7 +31,15 @@ export type DockNode = DockLeaf | DockSplit;
 type FlexChild = { type: string; weight?: number; children?: FlexChild[]; component?: string };
 
 let _seq = 0;
-const uid = (p = 'n') => `${p}-${++_seq}-${Math.random().toString(36).slice(2, 6)}`;
+const uid = (p = 'n') => {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const randomBytes = new Uint8Array(2);
+    window.crypto.getRandomValues(randomBytes);
+    const randomStr = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${p}-${++_seq}-${randomStr}`;
+  }
+  return `${p}-${++_seq}-${Math.random().toString(36).slice(2, 6)}`;
+};
 
 export function fromFlexLayout(node: FlexChild, depth = 0): DockNode {
   if (node.type === 'tabset') {
