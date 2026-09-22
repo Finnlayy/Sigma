@@ -120,7 +120,8 @@ export default function KrakenSymbolModal({
             )}
             <button
               onClick={onClose}
-              className="text-zinc-400 hover:text-white p-1 rounded hover:bg-zinc-800 transition-colors"
+              aria-label="Close directory"
+              className="text-zinc-400 hover:text-white p-1 rounded hover:bg-zinc-800 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
               <X className="w-5 h-5" />
             </button>
@@ -143,7 +144,8 @@ export default function KrakenSymbolModal({
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                  aria-label="Clear search query"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-sm"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -153,7 +155,8 @@ export default function KrakenSymbolModal({
             {/* Leverage Toggle Filter */}
             <button
               onClick={() => setLeverageOnly(!leverageOnly)}
-              className={`px-3 py-2 rounded-md text-xs font-mono border transition-all flex items-center space-x-1.5 shrink-0 ${
+              aria-pressed={leverageOnly}
+              className={`px-3 py-2 rounded-md text-xs font-mono border transition-all flex items-center space-x-1.5 shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
                 leverageOnly 
                   ? 'bg-amber-950/80 border-amber-700 text-amber-300' 
                   : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
