@@ -107,8 +107,17 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 );
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
-export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
-  if (!feed) return null;
+export function FeedBadge({ feed, status, labelOverride }: { feed?: FeedMeta | SigmaFeedMeta | null; status?: 'CONNECTED' | 'DISCONNECTED'; labelOverride?: string }) {
+  if (status) {
+    const tone = status === 'CONNECTED' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-red-500/40 bg-red-500/10 text-red-400';
+    return (
+      <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}>
+        {labelOverride || status}
+      </span>
+    );
+  }
+  if (!feed) return <span className="rounded border border-zinc-600/40 bg-zinc-700/20 px-1 py-0.5 text-[9px] font-bold tracking-wide text-zinc-400">DISCONNECTED</span>;
+
   const tone = feed.source === 'tv_scraper'
     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
     : feed.source === 'cache_stale'
@@ -119,7 +128,7 @@ export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) 
   return (
     <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}
       title={feed.upstream_error || `source=${feed.source}`}>
-      {label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
+      {labelOverride || label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
     </span>
   );
 }
@@ -1395,9 +1404,7 @@ export function NetronVisualizerPanel() {
           className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><ExternalLink size={12} /></a>
       </>}>
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">
-        <span className={`rounded px-1 font-bold ${data?.running ? 'bg-emerald-600/70' : 'bg-zinc-700'}`}>
-          {data?.running ? `LIVE :${data?.port}` : 'OFFLINE'}
-        </span>
+        <FeedBadge status={data?.running ? 'CONNECTED' : 'DISCONNECTED'} labelOverride={data?.running ? `LIVE :${data?.port}` : 'OFFLINE'} />
         <span className="font-mono text-zinc-400">{data?.version_tag || 'kein Modell'}</span>
         {!data?.available && <span className="text-amber-400">pip install netron</span>}
         {!data?.running && (
@@ -1410,7 +1417,7 @@ export function NetronVisualizerPanel() {
       <div className="mb-2 flex flex-wrap gap-1">
         {models.map((m) => (
           <button key={m.version_tag} onClick={() => inspect(m.version_tag)}
-            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${m.active ? 'bg-fuchsia-600/80 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold font-mono tabular-nums ${m.active ? 'bg-fuchsia-600/80 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}
             title={`${m.path} · ${(m.size_bytes / 1024)?.toFixed(0)} KB`}>
             In Netron betrachten: {m.version_tag}
           </button>
@@ -1419,9 +1426,9 @@ export function NetronVisualizerPanel() {
       </div>
       {data?.running ? (
         <iframe key={nonce} src={url} title="Netron"
-          className="h-[420px] w-full rounded border border-zinc-800 bg-[#0e1117]" />
+          className="h-[420px] w-full rounded border border-zinc-800 bg-[#0a0a0c]/80 backdrop-blur-md" />
       ) : (
-        <div className="flex h-[200px] items-center justify-center rounded border border-dashed border-zinc-800 bg-[#0e1117] text-[11px] text-zinc-600">
+        <div className="flex h-[200px] items-center justify-center rounded border border-white/5 bg-[#0a0a0c]/80 backdrop-blur-md text-[11px] text-zinc-600">
           Netron offline — {data?.last_error || 'Server starten, um den ONNX-Graph zu inspizieren.'}
         </div>
       )}
