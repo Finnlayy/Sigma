@@ -277,6 +277,9 @@ WEBHOOK_SECRET_HEADER = "X-Sigma-Webhook-Secret"
 WEBHOOK_UNAUTHORIZED_STATUS = 401
 WEBHOOK_BLOCKED_STATUS = 503  # KILL_SWITCH / PAUSE
 
+# Market feed WebSocket (LWC guide visualization plane)
+MARKET_FEED_WS_ROUTE = "/ws/market-feed/{symbol}"
+
 PINE_ALERT_ACTIONS: Tuple[str, ...] = ("BUY", "SELL", "CLOSE")
 PINE_ALERT_FIELDS: Tuple[str, ...] = (
     "symbol", "action", "price", "rsi", "atr", "cisd_score", "timestamp", "strategy_id", "secret",

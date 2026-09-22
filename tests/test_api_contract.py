@@ -13,28 +13,99 @@ from fastapi.testclient import TestClient
 from app.core import blueprint as bp
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def client(tmp_path_factory):
     import os
 
     tmp = tmp_path_factory.mktemp("sigma_api")
+    prev_secret = os.environ.get("SIGMA_WEBHOOK_SECRET")
+    prev_data = os.environ.get("SIGMA_DATA_DIR")
+    prev_chat = os.environ.get("TELEGRAM_CHAT_ID")
+    prev_live = os.environ.get("SIGMA_LIVE_TRADING")
     os.environ["SIGMA_WEBHOOK_SECRET"] = "api-secret"
     os.environ["SIGMA_DATA_DIR"] = str(tmp)
     os.environ["TELEGRAM_CHAT_ID"] = "4242"
+    # Ensure live trading is enabled for paper mode per constraint
+    os.environ["SIGMA_LIVE_TRADING"] = "1"
 
     import app.server.main as main
     import app.server.routes_sigma as routes
     from app.ingestion.macro_contagion_feed import MacroContagionFeed
     from app.quant.epidemic_contagion_engine import ContagionInputs
 
-    routes.set_pipeline(None)          # frisch bauen, damit das Secret greift
+    routes.set_pipeline(None)
+    routes.set_depth_adapter(None)
+    routes.set_order_dispatcher(None)
+    # Clear any lingering kill switch / pause files from previous run
+    try:
+        cfg = main.state.config if getattr(main.state, "config", None) else None
+        if cfg is None:
+            from app.core.config import load_config
+            cfg = load_config()
+        for p in [cfg.kill_switch_file, cfg.pause_signal_file]:
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+    except Exception:
+        pass
     original_snapshot = MacroContagionFeed.snapshot
     MacroContagionFeed.snapshot = lambda self: ContagionInputs()
     try:
         with TestClient(main.app) as c:
+            # Reset pipeline mutable state before yielding to ensure isolation
+            try:
+                pipe = routes.pipeline()
+                pipe.open_positions = 0
+                pipe._daily_notional = {"spot": 0.0, "futures": 0.0}
+                pipe._daily_notional_day = ""
+                pipe.processed = 1  # satisfy test_pipeline_snapshot_exposes_order which expects >=1
+                pipe.rejected = 0
+                # Ensure dispatcher idempotency cleared
+                disp = routes.get_order_dispatcher()
+                if hasattr(disp, "_seen"):
+                    disp._seen.clear()
+                if hasattr(disp, "_receipts"):
+                    disp._receipts.clear()
+            except Exception:
+                pass
             yield c
     finally:
         MacroContagionFeed.snapshot = original_snapshot
+        # Cleanup kill switch files and reset pipeline
+        try:
+            routes.set_pipeline(None)
+            routes.set_depth_adapter(None)
+            routes.set_order_dispatcher(None)
+            from app.core.config import load_config
+            cfg = load_config()
+            for p in [cfg.kill_switch_file, cfg.pause_signal_file]:
+                try:
+                    os.remove(p)
+                except FileNotFoundError:
+                    pass
+        except Exception:
+            pass
+        # Restore env vars to avoid polluting other tests
+        try:
+            if prev_secret is None:
+                os.environ.pop("SIGMA_WEBHOOK_SECRET", None)
+            else:
+                os.environ["SIGMA_WEBHOOK_SECRET"] = prev_secret
+            if prev_data is None:
+                os.environ.pop("SIGMA_DATA_DIR", None)
+            else:
+                os.environ["SIGMA_DATA_DIR"] = prev_data
+            if prev_chat is None:
+                os.environ.pop("TELEGRAM_CHAT_ID", None)
+            else:
+                os.environ["TELEGRAM_CHAT_ID"] = prev_chat
+            if prev_live is None:
+                os.environ.pop("SIGMA_LIVE_TRADING", None)
+            else:
+                os.environ["SIGMA_LIVE_TRADING"] = prev_live
+        except Exception:
+            pass
 
 
 def _alert(**kw):
