@@ -21,6 +21,7 @@ import {
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
+import { z } from 'zod';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -432,6 +433,18 @@ export function MarketChart() {
     let raf = 0;
     let pending: Candle | null = null;
     let closed = false;
+    let retryCount = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    const MarketFeedSchema = z.object({
+      channel: z.string().optional(),
+      data: z.object({
+        candle: z.any().optional(),
+        markers: z.any().optional(),
+        price_lines: z.any().optional()
+      }).optional()
+    }).passthrough();
 
     const flush = () => {
       raf = 0;
@@ -451,37 +464,78 @@ export function MarketChart() {
       });
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
-      ws.onopen = () => setStreamStatus('live');
-      ws.onerror = () => setStreamStatus('err');
-      ws.onclose = () => { if (!closed) setStreamStatus('off'); };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as {
-            channel?: string;
-            data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
-          };
-          if (msg.channel === 'alpha:executions:live' && msg.data) {
-            if (msg.data.markers) setMarkers(msg.data.markers);
-            if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
-            return;
-          }
-          const c = msg.data?.candle;
-          if (!c || typeof c.ts !== 'number') return;
-          pending = c;
-          if (!raf) raf = requestAnimationFrame(flush);
-        } catch {
-          /* ignore malformed frames */
-        }
-      };
-    } catch {
+    const startPolling = () => {
+      if (poll) return;
       setStreamStatus('err');
-    }
+      const fetch = () => void sigmaApi.ohlcFallback(symbol, interval, 1).then((r) => {
+        if (r?.candles?.length && !closed) {
+          pending = r.candles[0];
+          if (!raf) raf = requestAnimationFrame(flush);
+        }
+      });
+      fetch();
+      poll = setInterval(fetch, 15000);
+    };
+
+    const stopPolling = () => {
+      if (poll) { clearInterval(poll); poll = null; }
+    };
+
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
+        ws.onopen = () => {
+          setStreamStatus('live');
+          retryCount = 0;
+          stopPolling();
+        };
+        ws.onerror = () => {
+          if (!closed) setStreamStatus('err');
+        };
+        ws.onclose = () => {
+          if (!closed) setStreamStatus('off');
+          if (closed || reconnectTimer) return;
+          if (retryCount < 5) {
+            const delay = Math.min(1000 * 2 ** retryCount, 30000);
+            retryCount++;
+            console.warn(`[MarketChart] WS disconnected — reconnect in ${delay}ms (${retryCount}/5)`);
+            reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, delay);
+          } else {
+            console.error('[MarketChart] WS retries exhausted — starting HTTP poll fallback');
+            startPolling();
+          }
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const parsed = JSON.parse(ev.data as string);
+            const msg = MarketFeedSchema.parse(parsed) as any;
+            if (msg.channel === 'alpha:executions:live' && msg.data) {
+              if (msg.data.markers) setMarkers(msg.data.markers);
+              if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
+              return;
+            }
+            const c = msg.data?.candle;
+            if (!c || typeof c.ts !== 'number') return;
+            pending = c;
+            if (!raf) raf = requestAnimationFrame(flush);
+          } catch (err) {
+            console.error('[MarketChart] Failed to parse stream payload:', err, ev.data);
+          }
+        };
+      } catch (err) {
+        console.error('[MarketChart] WS connection failed:', err);
+        startPolling();
+      }
+    };
+
+    connect();
 
     return () => {
       closed = true;
       if (raf) cancelAnimationFrame(raf);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      stopPolling();
       try { ws?.close(); } catch { /* ignore */ }
     };
   }, [symbol, interval]);
