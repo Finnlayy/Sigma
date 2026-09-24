@@ -20,3 +20,7 @@
 ## 2026-09-12 - [WebSocket Reconnection Architecture]
 **Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections, while missing cleanup in unmounts causes memory leaks and duplicate message streams.
 **Action:** Always wrap WebSocket logic with an exponential backoff loop, ensure state clearing within event handlers (to avoid concurrent reconnect timers on `error` + `close` sequential triggers), and always validate incoming IPC payloads explicitly.
+
+## 2026-10-24 - [WebSocket Reconnection Architecture]
+**Learning:** Silent payload parsing failures on raw WebSocket listeners in `MarketChart` panels can mask corrupted or desynced event payloads, and missing robust reconnect loops with exponential backoff on active UI subscriptions causes silent stream deaths.
+**Action:** Implemented a robust reconnect loop with exponential backoff and explicit `console.error` logging for parsing failures within the `MarketChart` visualization plane, ensuring stable reconnection without duplicating timers.
