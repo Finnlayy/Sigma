@@ -349,6 +349,18 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
     return [Math.max(0, Number((min - padding)?.toFixed(2))), Number((max + padding)?.toFixed(2))];
   }, [chartCandles, positionedMarkers]);
 
+  // Bolt Optimization: Group markers by chartX to allow O(1) lookups in the Recharts Tooltip
+  // instead of performing an O(N) .filter() on every mouse move re-render.
+  const markersByTime = useMemo(() => {
+    const map = new Map<string, typeof positionedMarkers>();
+    for (const m of positionedMarkers) {
+      const existing = map.get(m.chartX) || [];
+      existing.push(m);
+      map.set(m.chartX, existing);
+    }
+    return map;
+  }, [positionedMarkers]);
+
   return (
     <div className="space-y-4">
       {/* 1. Live Market Tickers Feed */}
@@ -615,7 +627,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                       const point = payload[0].payload as PricePoint;
                       
                       // Check if there are matching order markers at this time point
-                      const matchingMarkers = positionedMarkers.filter(m => m.chartX === label);
+                      const matchingMarkers = markersByTime.get(String(label)) || [];
 
                       return (
                         <div className="bg-zinc-900 border border-zinc-700/80 rounded p-2.5 text-xs font-mono shadow-xl space-y-1.5 min-w-44">

@@ -73,3 +73,7 @@
 ## 2024-10-24 - [Avoid inline array filters for length metrics in render]
 **Learning:** Found `.filter(s => s.status === 'active').length` in `CalendarHeatmap.tsx` rendering logic, creating O(N) array overhead per render.
 **Action:** Calculate simple counts using a single `for` loop inside a `useMemo` hook rather than relying on inline `.filter().length`.
+
+## 2026-09-24 - [O(1) lookups in Recharts Custom Tooltips]
+**Learning:** Recharts `Tooltip` custom `content` renderers are hot paths that trigger frequently on mouse move over charts. Performing O(N) array filtering operations (like `.filter()`) inside these functions to find matching data points for the hovered area causes rapid, expensive re-evaluations, leading to measurable chart UI lag and CPU spikes.
+**Action:** Always pre-compute data maps (e.g. `Map<label, items[]>`) using `useMemo` outside the chart component for O(1) lookups. In the tooltip renderer, use `map.get(label)` instead of iterating the entire data array.
