@@ -69,8 +69,8 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`bg-slate-950/60 border rounded-xl p-3.5 space-y-2.5 ${
-        state.status === "QUARANTINED" ? "border-red-800/70" : "border-slate-800"
+      className={`bg-[#0a0a0c]/80 backdrop-blur-md shadow-2xl border border-white/10 rounded-xl p-3.5 space-y-2.5 ${
+        state.status === "QUARANTINED" ? "border-red-800/70" : ""
       }`}
       style={{ contain: "layout paint" }}
     >
@@ -94,15 +94,15 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
 
       {/* Budget vs. Base (High-Water-Mark) */}
       <div>
-        <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
+        <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1 tabular-nums">
           <span className="flex items-center gap-1">
             <Wallet className="w-3 h-3" />
             Budget
           </span>
           <span>
-            <span className="text-slate-100 font-bold">${state.current_budget_usd?.toFixed(2)}</span>
-            <span className="text-slate-500"> / ${state.base_budget_usd?.toFixed(2)} Base</span>
-            <span className={`ml-1.5 ${state.budget_multiplier >= 1 ? "text-emerald-400" : state.budget_multiplier > 0 ? "text-amber-400" : "text-red-400"}`}>
+            <span className="text-slate-100 font-bold tabular-nums">${state.current_budget_usd?.toFixed(2)}</span>
+            <span className="text-slate-500 tabular-nums"> / ${state.base_budget_usd?.toFixed(2)} Base</span>
+            <span className={`ml-1.5 tabular-nums ${state.budget_multiplier >= 1 ? "text-emerald-400" : state.budget_multiplier > 0 ? "text-amber-400" : "text-red-400"}`}>
               ×{state.budget_multiplier}
             </span>
           </span>
@@ -125,21 +125,21 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
       </div>
 
       <div className="grid grid-cols-3 gap-1.5 text-center">
-        <div className="bg-slate-900/80 rounded border border-slate-800 py-1">
+        <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
           <div className="text-[9px] font-mono text-slate-500 uppercase">Losses</div>
-          <div className={`text-[11px] font-mono font-bold ${state.consecutive_losses >= 3 ? "text-red-400" : "text-slate-200"}`}>
+          <div className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_losses >= 3 ? "text-red-400" : "text-slate-200"}`}>
             {state.consecutive_losses}
           </div>
         </div>
-        <div className="bg-slate-900/80 rounded border border-slate-800 py-1">
+        <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
           <div className="text-[9px] font-mono text-slate-500 uppercase">Low-PF EOD</div>
-          <div className={`text-[11px] font-mono font-bold ${state.consecutive_low_pf_days >= 3 ? "text-amber-400" : "text-slate-200"}`}>
+          <div className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_low_pf_days >= 3 ? "text-amber-400" : "text-slate-200"}`}>
             {state.consecutive_low_pf_days}/7
           </div>
         </div>
-        <div className="bg-slate-900/80 rounded border border-slate-800 py-1">
+        <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
           <div className="text-[9px] font-mono text-slate-500 uppercase">Shadow W/T</div>
-          <div className="text-[11px] font-mono font-bold text-slate-200">
+          <div className="text-[11px] font-mono font-bold text-slate-200 tabular-nums">
             {state.shadow_wins}/{state.shadow_trades_count}
           </div>
         </div>
