@@ -200,7 +200,15 @@ export default function CalendarHeatmap({
     const todayLosses = aggregateActivePnL.losses;
     const todayVolume = aggregateActivePnL.volumeUSD;
 
-    const activeWorkersCount = strategies.filter(s => s.status === 'active').length;
+    // Bolt Optimization: Calculate active workers count using a memoized O(N) loop
+    // rather than calling .filter().length inline, preventing O(N) penalties on every render.
+    const activeWorkersCount = useMemo(() => {
+      let count = 0;
+      for (const s of strategies) {
+        if (s.status === 'active') count++;
+      }
+      return count;
+    }, [strategies]);
     const hasLiveStrategy = activeStrategies.some(s => s.executionMode === 'live');
 
     for (let dNum = 1; dNum <= daysInMonth; dNum++) {

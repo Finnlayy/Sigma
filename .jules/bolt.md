@@ -69,3 +69,7 @@
 ## 2026-09-14 - Replace inline array filters calculating lengths in JSX
 **Learning:** Found multiple instances of `pairOrders.filter(o => o.type === 'buy').length` executing directly inside the JSX component render output in `MarketPanel.tsx`. Although the parent array (`pairOrders`) was memoized, these `.filter()` calls still executed on every re-render (which occurs frequently due to live market ticker updates). This creates duplicated O(N) penalties during the render cycle.
 **Action:** When calculating sub-group counts or simple metrics from an array for UI display, never compute them using inline `.filter().length` in the JSX. Instead, calculate the counts in a single O(N) iterative loop wrapped in a `useMemo` block, and reference the memoized counts in the JSX.
+
+## 2024-10-24 - [Avoid inline array filters for length metrics in render]
+**Learning:** Found `.filter(s => s.status === 'active').length` in `CalendarHeatmap.tsx` rendering logic, creating O(N) array overhead per render.
+**Action:** Calculate simple counts using a single `for` loop inside a `useMemo` hook rather than relying on inline `.filter().length`.
