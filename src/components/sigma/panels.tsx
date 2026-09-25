@@ -462,6 +462,9 @@ export function MarketChart() {
             channel?: string;
             data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
           };
+          if (typeof msg !== 'object' || msg === null) {
+            throw new Error('Payload is not a valid JSON object');
+          }
           if (msg.channel === 'alpha:executions:live' && msg.data) {
             if (msg.data.markers) setMarkers(msg.data.markers);
             if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
@@ -471,8 +474,8 @@ export function MarketChart() {
           if (!c || typeof c.ts !== 'number') return;
           pending = c;
           if (!raf) raf = requestAnimationFrame(flush);
-        } catch {
-          /* ignore malformed frames */
+        } catch (err) {
+          console.error('Failed to parse WS payload:', err, ev.data);
         }
       };
     } catch {
