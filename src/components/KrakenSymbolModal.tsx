@@ -121,6 +121,7 @@ export default function KrakenSymbolModal({
             <button
               onClick={onClose}
               className="text-zinc-400 hover:text-white p-1 rounded hover:bg-zinc-800 transition-colors"
+              aria-label="Close modal"
             >
               <X className="w-5 h-5" />
             </button>
@@ -144,6 +145,7 @@ export default function KrakenSymbolModal({
                 <button
                   onClick={() => setSearchQuery("")}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                  aria-label="Clear search query"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
