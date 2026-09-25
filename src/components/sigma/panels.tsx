@@ -108,16 +108,23 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
 export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
-  if (!feed) return null;
+  if (!feed) {
+    return (
+      <span className="rounded border border-red-500/40 bg-[#0a0a0c]/80 backdrop-blur-md px-1 py-0.5 text-[9px] font-mono font-bold tracking-wide text-red-400 tabular-nums"
+        title="DISCONNECTED">
+        DISCONNECTED
+      </span>
+    );
+  }
   const tone = feed.source === 'tv_scraper'
-    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+    ? 'border-emerald-500/40 text-emerald-400'
     : feed.source === 'cache_stale'
-      ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
-      : 'border-zinc-600/40 bg-zinc-700/20 text-zinc-400';
+      ? 'border-amber-500/40 text-amber-400'
+      : 'border-zinc-600/40 text-zinc-400';
   const label = feed.source === 'tv_scraper' ? 'LIVE :8001'
     : feed.source === 'cache_stale' ? 'STALE CACHE' : 'SYNTHETIC';
   return (
-    <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}
+    <span className={`rounded border bg-[#0a0a0c]/80 backdrop-blur-md px-1 py-0.5 text-[9px] font-mono font-bold tracking-wide tabular-nums ${tone}`}
       title={feed.upstream_error || `source=${feed.source}`}>
       {label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
     </span>

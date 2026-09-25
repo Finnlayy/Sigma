@@ -1,0 +1,3 @@
+## $(date +%Y-%m-%d) - FeedBadge empty state lacks fail-closed fallback
+**Learning:** Found a component hierarchy breakdown when rendering `FeedBadge` empty states. The fallback returned `null`, violating the requirement to render an explicit empty/error indicator. Additionally, the existing badges lacked the `#0a0a0c` dark-glassmorphism background (`bg-[#0a0a0c]/80 backdrop-blur-md`) and tabular monospace tokens.
+**Action:** Enforce returning an explicit `DISCONNECTED` fallback state for data-driven badges, and strictly apply `bg-[#0a0a0c]/80 backdrop-blur-md tabular-nums font-mono` to all `FeedBadge` variations.
