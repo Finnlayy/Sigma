@@ -12,3 +12,6 @@
 ## 2024-05-14 - [Accessible Icon Buttons]
 **Learning:** React elements with `title` attributes but without text content (such as icon-only buttons) are not automatically read by screen readers on many platforms. A matching `aria-label` should be synced to the `title` attribute to ensure keyboard accessibility and full screen reader compatibility for interactive icon-only elements across the interface.
 **Action:** Always include an `aria-label` describing the action when creating an interactive element that relies entirely on icons, even if a `title` tooltip exists.
+## 2024-05-17 - [Icon-Only Button Accessibility Pattern]
+**Learning:** Found multiple instances of icon-only `<button>` elements (e.g., `<X>` for close, `<HelpCircle>` for info) lacking accessible names (like `aria-label`). While tooltips (`title`) existed in some places, they were missing in others, and relying solely on `title` isn't robust for all screen readers.
+**Action:** Always ensure icon-only buttons have an explicit `aria-label` that describes their action, keeping them consistent with visual tooltips if present.
