@@ -161,9 +161,15 @@ export default function StrategyEditor({
     };
   }, [krakenSymbols]);
 
-  // Bolt Optimization: Prevent O(N) array filtering recalculation on every React re-render
+  // Bolt Optimization: Prevent O(N) array filtering recalculation on every React re-render.
+  // Calculate counts using a single O(N) iterative loop instead of .filter().length
+  // to avoid unnecessary intermediate array allocations.
   const activeWorkersCount = useMemo(() => {
-    return strategies.filter(s => s.status === 'active').length;
+    let count = 0;
+    for (const s of strategies) {
+      if (s.status === 'active') count++;
+    }
+    return count;
   }, [strategies]);
 
   // Fetch Manifest
