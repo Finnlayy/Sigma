@@ -77,3 +77,6 @@
 ## 2026-09-24 - [O(1) lookups in Recharts Custom Tooltips]
 **Learning:** Recharts `Tooltip` custom `content` renderers are hot paths that trigger frequently on mouse move over charts. Performing O(N) array filtering operations (like `.filter()`) inside these functions to find matching data points for the hovered area causes rapid, expensive re-evaluations, leading to measurable chart UI lag and CPU spikes.
 **Action:** Always pre-compute data maps (e.g. `Map<label, items[]>`) using `useMemo` outside the chart component for O(1) lookups. In the tooltip renderer, use `map.get(label)` instead of iterating the entire data array.
+## 2026-09-26 - [Avoid inline array filters for length metrics inside useMemo]
+**Learning:** Found `.filter(s => s.status === 'active').length` inside a `useMemo` block in `StrategyEditor.tsx`. Even though it was memoized and prevented calculating on every render, `.filter().length` still performs an O(N) traversal which allocates an unnecessary intermediate array just to calculate the length, creating an O(N) memory allocation penalty on every recalculation.
+**Action:** When calculating subgroup counts or simple metrics from an array, calculate the counts in a single O(N) iterative loop wrapped in a `useMemo` block, instead of computing them using inline `.filter().length`, to prevent unnecessary intermediate array allocations.
