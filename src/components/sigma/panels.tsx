@@ -78,9 +78,9 @@ export function PanelShell({ title, icon, actions, children }: {
   title: string; icon: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
-    <Card size="sm" className="flex h-full min-h-0 flex-col gap-0 rounded-none py-0 ring-0">
-      <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <Card size="sm" className="flex h-full min-h-0 flex-col gap-0 rounded-xl border border-white/10 bg-[#0a0a0c]/80 py-0 shadow-2xl backdrop-blur-md ring-0">
+      <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
+        <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-neutral-400">
           {icon}{title}
         </div>
         <div className="flex items-center gap-1">{actions}</div>
@@ -95,7 +95,7 @@ export function PanelShell({ title, icon, actions, children }: {
 export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; value: React.ReactNode; tone?: string }) => (
   <div className="rounded border border-zinc-800 bg-zinc-900/50 px-2 py-1.5">
     <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
-    <div className={`font-mono text-sm ${tone}`}>{value}</div>
+    <div className={`font-mono tabular-nums text-sm ${tone}`}>{value}</div>
   </div>
 );
 
@@ -108,7 +108,11 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
 export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
-  if (!feed) return null;
+  if (!feed) return (
+    <span className="rounded border border-red-500/40 bg-red-500/10 px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums text-red-400">
+      DISCONNECTED
+    </span>
+  );
   const tone = feed.source === 'tv_scraper'
     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
     : feed.source === 'cache_stale'
@@ -117,7 +121,7 @@ export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) 
   const label = feed.source === 'tv_scraper' ? 'LIVE :8001'
     : feed.source === 'cache_stale' ? 'STALE CACHE' : 'SYNTHETIC';
   return (
-    <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}
+    <span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums ${tone}`}
       title={feed.upstream_error || `source=${feed.source}`}>
       {label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
     </span>
