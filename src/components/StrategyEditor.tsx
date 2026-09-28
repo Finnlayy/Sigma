@@ -505,6 +505,8 @@ if (diff > parameters.threshold) {
               <button 
                 onClick={() => setIsManifestOpen(false)}
                 className="text-zinc-500 hover:text-white transition-colors"
+                aria-label="Close manifest inspector"
+                title="Close manifest inspector"
               >
                 <X className="w-4 h-4" />
               </button>
