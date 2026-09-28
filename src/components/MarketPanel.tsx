@@ -396,7 +396,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   setSelectedPair(ticker.pair);
                   setSelectedOrderId(null);
                 }}
-                className={`border rounded p-2.5 text-left transition-all duration-200 cursor-pointer ${
+                className={`border rounded p-2.5 text-left transition-colors duration-200 cursor-pointer ${
                   isSelected 
                     ? 'bg-zinc-800/90 border-emerald-500/80 shadow-sm ring-1 ring-emerald-500/30' 
                     : flash === 'up' ? 'bg-emerald-950/40 border-emerald-500/50' :
@@ -445,7 +445,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               <button
                 type="button"
                 onClick={() => setChartViewMode('price-executions')}
-                className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-all flex items-center space-x-1.5 ${
+                className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-colors flex items-center space-x-1.5 ${
                   chartViewMode === 'price-executions'
                     ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
                     : 'text-zinc-400 hover:text-zinc-200'
@@ -457,7 +457,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               <button
                 type="button"
                 onClick={() => setChartViewMode('equity')}
-                className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-all flex items-center space-x-1.5 ${
+                className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-colors flex items-center space-x-1.5 ${
                   chartViewMode === 'equity'
                     ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
                     : 'text-zinc-400 hover:text-zinc-200'
@@ -533,7 +533,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 <button
                   type="button"
                   onClick={() => setShowBuyMarkers(!showBuyMarkers)}
-                  className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-all ${
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-colors ${
                     showBuyMarkers 
                       ? 'bg-emerald-950/70 border-emerald-600/80 text-emerald-300 shadow-xs' 
                       : 'bg-zinc-900 border-zinc-800 text-zinc-500 opacity-60'
@@ -548,7 +548,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 <button
                   type="button"
                   onClick={() => setShowSellMarkers(!showSellMarkers)}
-                  className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-all ${
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-colors ${
                     showSellMarkers 
                       ? 'bg-rose-950/70 border-rose-600/80 text-rose-300 shadow-xs' 
                       : 'bg-zinc-900 border-zinc-800 text-zinc-500 opacity-60'
@@ -927,7 +927,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                     setSelectedOrderId(order.id === selectedOrderId ? null : order.id);
                     setChartViewMode('price-executions');
                   }}
-                  className={`border rounded p-2.5 text-xs font-mono transition-all cursor-pointer ${
+                  className={`border rounded p-2.5 text-xs font-mono transition-colors cursor-pointer ${
                     isHighlighted
                       ? 'bg-zinc-800/90 border-emerald-500/90 shadow-md ring-1 ring-emerald-500/30'
                       : 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-900/80 hover:border-zinc-700'
