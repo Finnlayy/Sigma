@@ -59,7 +59,12 @@ A phase is **not** DONE because the file exists. DONE only after:
 
 After opening a PR, mark it **ready** and **merge it** if GitHub reports MERGEABLE (no conflicts).
 Do not leave Bolt PRs as drafts. Repo workflow `.github/workflows/auto-merge-bolt.yml` also merges
-`⚡ Bolt` / `cursor/application-performance-improvement-*` PRs when possible.
+`⚡ Bolt` / `cursor/application-performance-improvement-*` / `bolt-*` PRs when possible.
+
+## Jules auto-merge
+
+Same workflow squash-merges Jules PRs (`jules/*`, `jules-*`, author login containing `jules`)
+when GitHub reports MERGEABLE. Mark Jules PRs ready; do not leave them as drafts.
 
 ## Jules execute loop (MANDATORY)
 
