@@ -488,55 +488,36 @@ export function MarketChart() {
       });
     };
 
-    const connect = () => {
-      if (closed) return;
-      try {
-        ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
-        ws.onopen = () => {
-          retryCount = 0;
-          setStreamStatus('live');
-        };
-        ws.onerror = () => {
-          if (!closed) setStreamStatus('err');
-        };
-        ws.onclose = () => {
-          if (!closed) setStreamStatus('off');
-          if (closed || reconnectTimer) return;
-          if (retryCount < 5) {
-            const delay = Math.min(1000 * 2 ** retryCount, 15000);
-            retryCount++;
-            reconnectTimer = setTimeout(() => {
-              reconnectTimer = null;
-              connect();
-            }, delay);
+    try {
+      ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
+      ws.onopen = () => setStreamStatus('live');
+      ws.onerror = () => setStreamStatus('err');
+      ws.onclose = () => { if (!closed) setStreamStatus('off'); };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data as string) as {
+            channel?: string;
+            data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
+          };
+          if (typeof msg !== 'object' || msg === null) {
+            throw new Error('Payload is not a valid JSON object');
           }
-        };
-        ws.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data as string) as {
-              channel?: string;
-              data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
-            };
-            if (msg.channel === 'alpha:executions:live' && msg.data) {
-              if (msg.data.markers) setMarkers(msg.data.markers);
-              if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
-              return;
-            }
-            const c = msg.data?.candle;
-            if (!c || typeof c.ts !== 'number') return;
-            pending = c;
-            if (!raf) raf = requestAnimationFrame(flush);
-          } catch (err) {
-            console.error('[MarketChart] WS parse error:', err, ev.data);
+          if (msg.channel === 'alpha:executions:live' && msg.data) {
+            if (msg.data.markers) setMarkers(msg.data.markers);
+            if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
+            return;
           }
-        };
-      } catch (err) {
-        console.error('[MarketChart] WS connect error:', err);
-        setStreamStatus('err');
-      }
-    };
-
-    connect();
+          const c = msg.data?.candle;
+          if (!c || typeof c.ts !== 'number') return;
+          pending = c;
+          if (!raf) raf = requestAnimationFrame(flush);
+        } catch (err) {
+          console.error('Failed to parse WS payload:', err, ev.data);
+        }
+      };
+    } catch {
+      setStreamStatus('err');
+    }
 
     return () => {
       closed = true;
