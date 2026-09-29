@@ -22,6 +22,7 @@ import {
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
+import { z } from 'zod';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -468,10 +469,18 @@ export function MarketChart() {
     let raf = 0;
     let pending: Candle | null = null;
     let closed = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
-    const MAX_RETRIES = 5;
-    const MAX_BACKOFF_MS = 30000;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    const MarketFeedSchema = z.object({
+      channel: z.string().optional(),
+      data: z.object({
+        candle: z.any().optional(),
+        markers: z.any().optional(),
+        price_lines: z.any().optional()
+      }).optional()
+    }).passthrough();
 
     const flush = () => {
       raf = 0;
@@ -491,6 +500,23 @@ export function MarketChart() {
       });
     };
 
+    const startPolling = () => {
+      if (poll) return;
+      setStreamStatus('err');
+      const fetch = () => void sigmaApi.ohlcFallback(symbol, interval, 1).then((r) => {
+        if (r?.candles?.length && !closed) {
+          pending = r.candles[0];
+          if (!raf) raf = requestAnimationFrame(flush);
+        }
+      });
+      fetch();
+      poll = setInterval(fetch, 15000);
+    };
+
+    const stopPolling = () => {
+      if (poll) { clearInterval(poll); poll = null; }
+    };
+
     const connect = () => {
       if (closed) return;
       try {
@@ -498,33 +524,28 @@ export function MarketChart() {
         ws.onopen = () => {
           setStreamStatus('live');
           retryCount = 0;
+          stopPolling();
         };
-        ws.onerror = (err) => {
-          console.error('[MarketChart] WS-Fehler:', err);
+        ws.onerror = () => {
           if (!closed) setStreamStatus('err');
         };
         ws.onclose = () => {
           if (!closed) setStreamStatus('off');
           if (closed || reconnectTimer) return;
-          if (retryCount < MAX_RETRIES) {
-            const delay = Math.min(1000 * 2 ** retryCount, MAX_BACKOFF_MS);
+          if (retryCount < 5) {
+            const delay = Math.min(1000 * 2 ** retryCount, 30000);
             retryCount++;
-            console.warn(`[MarketChart] WS getrennt — Reconnect in ${delay}ms (${retryCount}/${MAX_RETRIES})`);
-            reconnectTimer = setTimeout(() => {
-              reconnectTimer = null;
-              connect();
-            }, delay);
+            console.warn(`[MarketChart] WS disconnected — reconnect in ${delay}ms (${retryCount}/5)`);
+            reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, delay);
           } else {
-            console.error('[MarketChart] WS-Retries erschöpft — HTTP-Poll-Fallback aktiv (load)');
-            void load();
+            console.error('[MarketChart] WS retries exhausted — starting HTTP poll fallback');
+            startPolling();
           }
         };
         ws.onmessage = (ev) => {
           try {
-            const msg = JSON.parse(ev.data as string) as {
-              channel?: string;
-              data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
-            };
+            const parsed = JSON.parse(ev.data as string);
+            const msg = MarketFeedSchema.parse(parsed) as any;
             if (msg.channel === 'alpha:executions:live' && msg.data) {
               if (msg.data.markers) setMarkers(msg.data.markers);
               if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
@@ -534,14 +555,13 @@ export function MarketChart() {
             if (!c || typeof c.ts !== 'number') return;
             pending = c;
             if (!raf) raf = requestAnimationFrame(flush);
-          } catch (e) {
-            console.error('[MarketChart] WS-Frame invalid:', e, ev.data);
+          } catch (err) {
+            console.error('[MarketChart] Failed to parse stream payload:', err, ev.data);
           }
         };
-      } catch (e) {
-        console.error('[MarketChart] WS connect fehlgeschlagen:', e);
-        setStreamStatus('err');
-        void load();
+      } catch (err) {
+        console.error('[MarketChart] WS connection failed:', err);
+        startPolling();
       }
     };
 
@@ -555,6 +575,7 @@ export function MarketChart() {
       }
       if (raf) cancelAnimationFrame(raf);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      stopPolling();
       try { ws?.close(); } catch { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

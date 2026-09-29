@@ -20,7 +20,6 @@
 ## 2026-09-12 - [WebSocket Reconnection Architecture]
 **Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections, while missing cleanup in unmounts causes memory leaks and duplicate message streams.
 **Action:** Always wrap WebSocket logic with an exponential backoff loop, ensure state clearing within event handlers (to avoid concurrent reconnect timers on `error` + `close` sequential triggers), and always validate incoming IPC payloads explicitly.
-
-## 2026-09-13 - [IPC/API Integration Insight]
-**Learning:** Raw WebSocket listeners (like the `MarketChart` component in `src/components/sigma/panels.tsx`) lacking exponential backoff and silent payload parsing failures cause fragile UI state and lost telemetry.
-**Action:** Always wrap WebSocket logic in robust reconnect loops with exponential backoff (e.g., up to 30s delay) before falling back to HTTP polling, handle JSON parsing with explicit `console.error` logs, and manage state clearing within unmount handlers.
+## 2025-03-09 - [WebSocket Reconnection Architecture Insight]
+**Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections. Furthermore, missing strict schema validation allows malformed payloads to crash or pollute state. Clean unmount handling with unconditional `ws?.close()` is crucial to prevent memory leaks.
+**Action:** Always wrap WebSocket logic with an exponential backoff loop, strictly validate incoming payloads with schema guards like Zod, log parsing failures to console.error, provide an HTTP polling fallback mechanism, and ensure state clearing within event handlers.
