@@ -72,7 +72,7 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
       className={`bg-[#0a0a0c]/80 backdrop-blur-md shadow-2xl border rounded-xl p-3.5 space-y-2.5 ${
         state.status === "QUARANTINED" ? "border-red-800/70" : "border-white/10"
       }`}
-      style={{ contain: "layout paint" }}
+
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
@@ -99,10 +99,10 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
             <Wallet className="w-3 h-3" />
             Budget
           </span>
-          <span className="tabular-nums font-mono">
-            <span className="text-slate-100 font-bold">${state.current_budget_usd?.toFixed(2)}</span>
-            <span className="text-slate-500"> / ${state.base_budget_usd?.toFixed(2)} Base</span>
-            <span className={`ml-1.5 ${state.budget_multiplier >= 1 ? "text-emerald-400" : state.budget_multiplier > 0 ? "text-amber-400" : "text-red-400"}`}>
+          <span>
+            <span className="text-slate-100 font-mono font-bold tabular-nums">${state.current_budget_usd?.toFixed(2)}</span>
+            <span className="text-slate-500 font-mono tabular-nums"> / ${state.base_budget_usd?.toFixed(2)} Base</span>
+            <span className={`ml-1.5 font-mono tabular-nums ${state.budget_multiplier >= 1 ? "text-emerald-400" : state.budget_multiplier > 0 ? "text-amber-400" : "text-red-400"}`}>
               ×{state.budget_multiplier}
             </span>
           </span>
@@ -127,19 +127,19 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
       <div className="grid grid-cols-3 gap-1.5 text-center">
         <div className="bg-white/5 rounded border border-white/5 py-1">
           <div className="text-[9px] font-mono text-slate-500 uppercase">Losses</div>
-          <div className={`text-[11px] font-mono tabular-nums font-bold ${state.consecutive_losses >= 3 ? "text-red-400" : "text-slate-200"}`}>
+          <div className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_losses >= 3 ? "text-red-400" : "text-slate-200"}`}>
             {state.consecutive_losses}
           </div>
         </div>
         <div className="bg-white/5 rounded border border-white/5 py-1">
           <div className="text-[9px] font-mono text-slate-500 uppercase">Low-PF EOD</div>
-          <div className={`text-[11px] font-mono tabular-nums font-bold ${state.consecutive_low_pf_days >= 3 ? "text-amber-400" : "text-slate-200"}`}>
+          <div className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_low_pf_days >= 3 ? "text-amber-400" : "text-slate-200"}`}>
             {state.consecutive_low_pf_days}/7
           </div>
         </div>
         <div className="bg-white/5 rounded border border-white/5 py-1">
           <div className="text-[9px] font-mono text-slate-500 uppercase">Shadow W/T</div>
-          <div className="text-[11px] font-mono tabular-nums font-bold text-slate-200">
+          <div className="text-[11px] font-mono font-bold tabular-nums text-slate-200">
             {state.shadow_wins}/{state.shadow_trades_count}
           </div>
         </div>
