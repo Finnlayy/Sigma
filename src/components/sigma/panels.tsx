@@ -465,8 +465,7 @@ export function MarketChart() {
     let pending: Candle | null = null;
     let closed = false;
     let retryCount = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    const MAX_RETRIES = 5;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
 
     const flush = () => {
       raf = 0;
@@ -491,25 +490,19 @@ export function MarketChart() {
       try {
         ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
         ws.onopen = () => {
-          setStreamStatus('live');
           retryCount = 0;
+          setStreamStatus('live');
         };
-        ws.onerror = (err) => {
-          console.error('[MarketFeed] WebSocket error:', err);
-          if (!closed) setStreamStatus('err');
+        ws.onerror = () => {
+          setStreamStatus('err');
         };
         ws.onclose = () => {
-          if (!closed) setStreamStatus('off');
-          if (closed || reconnectTimer) return;
-          if (retryCount < MAX_RETRIES) {
-            const delay = Math.min(1000 * 2 ** retryCount, 30000);
+          if (!closed) {
+            setStreamStatus('off');
+            const delay = Math.min(1000 * (2 ** retryCount), 30000);
             retryCount++;
-            reconnectTimer = setTimeout(() => {
-              reconnectTimer = null;
-              connect();
-            }, delay);
-          } else {
-            console.error('[MarketFeed] WS retries exhausted');
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(connect, delay);
           }
         };
         ws.onmessage = (ev) => {
@@ -527,12 +520,11 @@ export function MarketChart() {
             if (!c || typeof c.ts !== 'number') return;
             pending = c;
             if (!raf) raf = requestAnimationFrame(flush);
-          } catch (e) {
-            console.error('[MarketFeed] Failed to parse payload:', e, ev.data);
+          } catch (err) {
+            console.error('Failed to parse market feed msg', err, ev.data);
           }
         };
-      } catch (err) {
-        console.error('[MarketFeed] Connect error:', err);
+      } catch {
         setStreamStatus('err');
       }
     };
@@ -541,7 +533,7 @@ export function MarketChart() {
 
     return () => {
       closed = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearTimeout(reconnectTimeout);
       if (raf) cancelAnimationFrame(raf);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }
