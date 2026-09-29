@@ -159,7 +159,7 @@ export default function ProcessLogView() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
     };
-  }, [filterParam, push]);
+  }, [filterParam]);
 
   useEffect(() => {
     if (autoScroll && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
