@@ -71,7 +71,8 @@ export const StrategyQueueConfirmModal: React.FC<StrategyQueueConfirmModalProps>
             disabled={isLoading}
             onClick={onCancel}
             className="p-1 rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-            title="Close" aria-label="Close"
+            aria-label="Close confirmation"
+            title="Close confirmation"
           >
             <X className="w-4 h-4" />
           </button>
