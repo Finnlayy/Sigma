@@ -20,3 +20,6 @@
 ## 2026-09-12 - [WebSocket Reconnection Architecture]
 **Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections, while missing cleanup in unmounts causes memory leaks and duplicate message streams.
 **Action:** Always wrap WebSocket logic with an exponential backoff loop, ensure state clearing within event handlers (to avoid concurrent reconnect timers on `error` + `close` sequential triggers), and always validate incoming IPC payloads explicitly.
+## 2026-09-29 - [IPC/API Integration Insight]
+**Learning:** Raw MarketChart WebSocket listener lacked exponential backoff and silently masked corrupted payloads, risking silent stream deaths on network blips.
+**Action:** Wrapped MarketChart websocket in a robust reconnect loop with exponential backoff and strict JSON schema validation, logging errors explicitly.
