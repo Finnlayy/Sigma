@@ -76,27 +76,28 @@ export default function KrakenLedgersPanel({
     }
   };
 
-  // ⚡ Bolt Optimization: Memoize prop-dependent filters and extract invariant string ops
+  // Bolt Optimization: Memoize and hoist toLowerCase to prevent O(N) recalculations on render
   const filteredSpotAssets = useMemo(() => {
-    if (!ledgers?.spot?.assets) return [];
+    if (!ledgers?.spot.assets) return [];
     if (!searchQuery) return ledgers.spot.assets;
-    const qLower = searchQuery.toLowerCase();
+    const searchLower = searchQuery.toLowerCase();
     return ledgers.spot.assets.filter(a =>
-      a.asset.toLowerCase().includes(qLower) ||
-      a.name.toLowerCase().includes(qLower)
+      a.asset.toLowerCase().includes(searchLower) ||
+      a.name.toLowerCase().includes(searchLower)
     );
-  }, [ledgers?.spot?.assets, searchQuery]);
+  }, [ledgers?.spot.assets, searchQuery]);
 
+  // Bolt Optimization: Memoize and hoist toLowerCase to prevent O(N) recalculations on render
   const filteredProPositions = useMemo(() => {
-    if (!ledgers?.pro?.positions) return [];
+    if (!ledgers?.pro.positions) return [];
     if (!searchQuery) return ledgers.pro.positions;
-    const qLower = searchQuery.toLowerCase();
+    const searchLower = searchQuery.toLowerCase();
     return ledgers.pro.positions.filter(p =>
-      p.pair.toLowerCase().includes(qLower) ||
-      p.type.toLowerCase().includes(qLower) ||
-      p.contractType.toLowerCase().includes(qLower)
+      p.pair.toLowerCase().includes(searchLower) ||
+      p.type.toLowerCase().includes(searchLower) ||
+      p.contractType.toLowerCase().includes(searchLower)
     );
-  }, [ledgers?.pro?.positions, searchQuery]);
+  }, [ledgers?.pro.positions, searchQuery]);
 
   return (
     <div className="space-y-4 font-mono">
