@@ -21,6 +21,6 @@
 **Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections, while missing cleanup in unmounts causes memory leaks and duplicate message streams.
 **Action:** Always wrap WebSocket logic with an exponential backoff loop, ensure state clearing within event handlers (to avoid concurrent reconnect timers on `error` + `close` sequential triggers), and always validate incoming IPC payloads explicitly.
 
-## 2026-09-19 - [API Integration Insight]
-**Learning:** The raw market-feed WebSocket in `MarketChart` (src/components/sigma/panels.tsx) lacked automatic reconnects and schema validation, which made the data feed brittle.
-**Action:** Replaced the raw WebSocket with a reconnect loop featuring exponential backoff, manual payload type checks, and explicitly caught malformed JSON frames while preserving the rAF queue rendering pattern.
+## 2024-05-19 - [IPC/API Integration Insight]
+**Learning:** Missing schema validation on incoming raw socket messages allows malformed data to crash or silently desync components (e.g. MarketChart visualization plane). Additionally, idempotent streams lack exponential backoff, failing completely on network interruptions.
+**Action:** Always wrap WebSocket `.onmessage` handling with strict schema validation (like Zod) and explicit error logging (`console.error`). Use exponential backoff for idempotent streams to gracefully recover without overwhelming the server.
