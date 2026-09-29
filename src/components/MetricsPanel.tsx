@@ -119,7 +119,7 @@ export default function MetricsPanel({
           : "Synced with Kraken Pro account!");
       } else {
         setSyncedLiveBalances(null);
-        setSyncFeedback("Awaiting API keys. Add KRAKEN_API_KEY & SECRET in Settings to sync live balances.");
+        setSyncFeedback("Paper only by design — this build holds no exchange keys and syncs from the simulated ledger.");
       }
       setTimeout(() => setSyncFeedback(null), 5000);
     } catch {

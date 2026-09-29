@@ -23,7 +23,7 @@ type SaveFlash = { tone: SaveTone; hint: string; format?: string; allowed?: stri
 const GROUP_COPY: Record<string, { title: string; hint: string }> = {
   secrets: {
     title: "Secrets",
-    hint: "Werte landen in der gitignored .env und im laufenden Prozess. Bereits gesetzte Keys bleiben maskiert — zum Überschreiben neu einfügen.",
+    hint: "In diesem Build gibt es kein Secrets-Backend: /api/settings ist nicht implementiert, eingefügte Werte werden nicht gespeichert. Paper only — es werden keine Exchange-Keys benötigt (AGENTS.md).",
   },
   runtime: {
     title: "Runtime",
