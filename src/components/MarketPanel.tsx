@@ -35,6 +35,17 @@ import { MarketTicker, TradeOrder, KrakenSymbolInfo } from "../types";
 import KrakenSymbolModal from "./KrakenSymbolModal";
 import { safeFetchJson } from "../lib/api";
 
+export function FeedBadge({ status }: { status: 'CONNECTED' | 'DISCONNECTED' }) {
+  const tone = status === 'CONNECTED'
+    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+    : 'border-zinc-600/40 bg-zinc-700/20 text-zinc-400';
+  return (
+    <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}>
+      {status}
+    </span>
+  );
+}
+
 interface MarketPanelProps {
   tickers: MarketTicker[];
   orders: TradeOrder[];
@@ -364,7 +375,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
   return (
     <div className="space-y-4">
       {/* 1. Live Market Tickers Feed */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl">
         <h4 className="text-xs font-mono font-semibold text-zinc-400 tracking-wider uppercase mb-3 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <span>Kraken Public Market Feed</span>
@@ -377,9 +388,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               <span>Catalog ({krakenSymbols.length > 0 ? `${krakenSymbols.length?.toLocaleString()}` : '1,400+'})</span>
             </button>
           </div>
-          <span className="flex items-center text-[10px] text-emerald-400 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-900/30">
-            <Activity className="w-3 h-3 mr-1 animate-pulse" /> Live Exchange Data
-          </span>
+          <FeedBadge status={tickers.length > 0 ? 'CONNECTED' : 'DISCONNECTED'} />
         </h4>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -408,7 +417,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   <span className={`text-[11px] font-mono font-bold ${isSelected ? 'text-emerald-400' : 'text-zinc-300'}`}>
                     {ticker.pair}
                   </span>
-                  <span className={`text-[10px] font-mono font-semibold flex items-center ${
+                  <span className={`text-[10px] font-mono tabular-nums font-semibold flex items-center ${
                     isUp ? 'text-emerald-400' : 'text-rose-400'
                   }`}>
                     {isUp ? <TrendingUp className="w-2.5 h-2.5 mr-0.5" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5" />}
@@ -417,7 +426,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 </div>
 
                 <div className="mt-1">
-                  <span className="text-xs font-mono font-bold text-white tracking-tight">
+                  <span className="text-xs font-mono tabular-nums font-bold text-white tracking-tight">
                     ${ticker.price?.toLocaleString(undefined, { 
                       minimumFractionDigits: ticker.pair.includes('XRP') ? 4 : 2,
                       maximumFractionDigits: ticker.pair.includes('XRP') ? 4 : 2
