@@ -67,6 +67,7 @@ export const StrategyQueueConfirmModal: React.FC<StrategyQueueConfirmModalProps>
           </div>
           <button
             type="button"
+            aria-label="Close modal"
             disabled={isLoading}
             onClick={onCancel}
             aria-label="Close modal"
