@@ -45,9 +45,26 @@ import {
   OnnxBrainPanel, RiskGuardPanel, UnwindPanel, ResearchLabPanel,
 } from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
-import ProcessLogViewImpl from '../../pages/ProcessLogView';   // §37
+import ProcessLogViewImpl, { MAX_WS_RETRIES, WS_BACKOFF_MAX_MS } from '../../pages/ProcessLogView';   // §37
+import { z } from 'zod';
 
 /* ------------------------------------------------------------------ shared */
+
+export const MarketFeedMsgSchema = z.object({
+  channel: z.string().optional(),
+  data: z.object({
+    candle: z.object({
+      ts: z.number(),
+      open: z.number(),
+      high: z.number(),
+      low: z.number(),
+      close: z.number(),
+      volume: z.number().optional(),
+    }).optional(),
+    markers: z.array(z.any()).optional(),
+    price_lines: z.array(z.any()).optional(),
+  }).optional(),
+}).catchall(z.any());
 
 export function usePoll<T>(
   fn: () => Promise<T | null>,
@@ -432,10 +449,8 @@ export function MarketChart() {
     let raf = 0;
     let pending: Candle | null = null;
     let closed = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let retryCount = 0;
-    const MAX_RETRIES = 5;
-    const MAX_BACKOFF = 30000;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const flush = () => {
       raf = 0;
@@ -460,50 +475,42 @@ export function MarketChart() {
       try {
         ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
         ws.onopen = () => {
-          retryCount = 0;
           setStreamStatus('live');
+          retryCount = 0;
         };
         ws.onerror = () => {
           if (!closed) setStreamStatus('err');
         };
         ws.onclose = () => {
-          if (!closed) setStreamStatus('off');
+          setStreamStatus('off');
           if (closed || reconnectTimer) return;
-          if (retryCount < MAX_RETRIES) {
-            const delay = Math.min(1000 * 2 ** retryCount, MAX_BACKOFF);
+          if (retryCount < MAX_WS_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCount, WS_BACKOFF_MAX_MS);
             retryCount++;
-            console.warn(`[MarketChart] WS getrennt — Reconnect in ${delay}ms (${retryCount}/${MAX_RETRIES})`);
             reconnectTimer = setTimeout(() => {
               reconnectTimer = null;
               connect();
             }, delay);
-          } else {
-            console.error('[MarketChart] WS-Retries erschöpft');
           }
         };
         ws.onmessage = (ev) => {
           try {
-            const msg = JSON.parse(ev.data as string);
-            if (!msg || typeof msg !== 'object') {
-              throw new Error('Invalid payload object');
-            }
+            const msg = MarketFeedMsgSchema.parse(JSON.parse(ev.data as string));
             if (msg.channel === 'alpha:executions:live' && msg.data) {
-              if (Array.isArray(msg.data.markers)) setMarkers(msg.data.markers);
-              if (Array.isArray(msg.data.price_lines)) setPriceLines(msg.data.price_lines);
+              if (msg.data.markers) setMarkers(msg.data.markers);
+              if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
               return;
             }
             const c = msg.data?.candle;
-            if (!c || typeof c.ts !== 'number') {
-              throw new Error('Invalid candle structure');
-            }
+            if (!c || typeof c.ts !== 'number') return;
             pending = c as Candle;
             if (!raf) raf = requestAnimationFrame(flush);
           } catch (err) {
-            console.error('[MarketChart] WS payload error:', err, ev.data);
+            console.error('[MarketChart] WS-Frame invalid:', err);
           }
         };
       } catch (err) {
-        console.error('[MarketChart] WS-Verbindung fehlgeschlagen:', err);
+        console.error('[MarketChart] WS connect failed:', err);
         setStreamStatus('err');
       }
     };
