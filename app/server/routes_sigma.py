@@ -699,6 +699,22 @@ async def cancel_job(job_id: str):
     return get_tv_queue().cancel(job_id)
 
 
+def _tv_live_armed(*, arm: bool = False) -> bool:
+    """L4 flag for TV session routes. Login success arms LIVE_APPROVED when env is on."""
+    from app.core.autonomy_levels import is_l4_armed
+    from app.server.main import state
+
+    cfg = getattr(state, "config", None) or load_config()
+    tel = getattr(state, "telemetry", None)
+    live_env = bool(getattr(cfg, "live_trading", False))
+    if arm and live_env and tel is not None:
+        tel.set_state("LIVE_APPROVED", reason="tv_session_login")
+    tel_state = ""
+    if tel is not None:
+        tel_state = str(getattr(getattr(tel, "system", None), "state", "") or "")
+    return is_l4_armed(live_trading=live_env, telemetry_state=tel_state)
+
+
 @router.get("/api/tv/session/status")
 async def tv_session_status():
     import os
@@ -717,23 +733,23 @@ async def tv_session_status():
         "chart_url": bp.TV_CHART_URL,
         "chrome_binary": chrome_binary(),
         "chrome_open": bool(chrome.get("open")),
-        "live_trading": False,
+        "live_trading": _tv_live_armed(),
     }
 
 
 @router.post("/api/tv/session/login")
 async def tv_session_login():
-    """Open (or reopen) Chrome on TradingView for a manual login. Never arms live."""
+    """Open (or reopen) Chrome on TradingView. On success, arms L4 when SIGMA_LIVE_TRADING=1."""
     from app.tv.chrome_login import open_tradingview_login
 
-    result = open_tradingview_login()
-    result["live_trading"] = False
+    result = dict(open_tradingview_login() or {})
     if not result.get("ok") and result.get("error"):
         raise HTTPException(503, detail={
             "code": "TV_CHROME_LAUNCH_FAILED",
             "reason": result.get("error"),
             "live_trading": False,
         })
+    result["live_trading"] = _tv_live_armed(arm=True)
     return result
 
 

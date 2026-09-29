@@ -10,22 +10,26 @@ from app.core import l4_config
 
 def test_paper_is_level_2():
     assert al.resolve_level(paper_trading=True, live_trading=False, live_approved=False) == 2
-    assert al.resolve_level(paper_trading=True, live_trading=True, live_approved=True) == 2
 
 
 def test_supervised_without_approval():
     assert al.resolve_level(paper_trading=False, live_trading=True, live_approved=False) == 3
     assert al.resolve_level(paper_trading=False, live_trading=False, live_approved=False) == 3
+    assert al.resolve_level(paper_trading=True, live_trading=True, live_approved=False) == 3
 
 
 def test_l4_requires_env_and_live_approved():
     assert al.resolve_level(paper_trading=False, live_trading=True, live_approved=True) == 4
+    # Dual-book: futures paper ledger does not drop the runtime below L4.
+    assert al.resolve_level(paper_trading=True, live_trading=True, live_approved=True) == 4
     assert al.live_act_allowed(
         paper_trading=False, live_trading=True, live_approved=True) is True
     assert al.live_act_allowed(
-        paper_trading=False, live_trading=True, live_approved=False) is False
+        paper_trading=True, live_trading=True, live_approved=True) is True
     assert al.live_act_allowed(
-        paper_trading=True, live_trading=True, live_approved=True) is False
+        paper_trading=False, live_trading=True, live_approved=False) is False
+    assert al.is_l4_armed(live_trading=True, telemetry_state="LIVE_APPROVED") is True
+    assert al.is_l4_armed(live_trading=True, telemetry_state="SHADOW_ACTIVE") is False
 
 
 def test_fund_management_forbidden_ceiling():

@@ -430,6 +430,39 @@ def test_paper_mode_routes_to_paper_bridge(tmp_path):
     assert live.calls == [] and len(paper.calls) == 1
 
 
+def test_l4_dual_book_routes_spot_live_and_futures_paper(tmp_path):
+    class _Sys:
+        state = "LIVE_APPROVED"
+
+    class _Tel:
+        system = _Sys()
+
+    live = _FakeBridge([_FakeResult(True, "SPOT-LIVE")])
+    live.config = type("C", (), {"live_trading": True})()
+    live.telemetry = _Tel()
+    paper = _FakeBridge([])
+    fut_live = _FakeBridge([])
+    fut_paper = _FakeBridge([_FakeResult(True, "FUT-PAPER")])
+    disp = ReliableOrderDispatcher(
+        live, paper_bridge=paper, futures_bridge=fut_live,
+        paper_futures_bridge=fut_paper,
+        receipts_log=str(tmp_path / "o.jsonl"),
+    )
+    spot = disp.dispatch(_request(
+        idempotency_key="k1",
+        execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+    ))
+    fut = disp.dispatch(_request(
+        idempotency_key="k2",
+        market_type="futures",
+        execution_mode=bp.ExecutionMode.LIVE.value,
+    ))
+    assert spot.order_id == "SPOT-LIVE"
+    assert live.calls and paper.calls == []
+    assert fut.order_id == "FUT-PAPER"
+    assert fut_paper.calls and fut_live.calls == []
+
+
 def test_idempotency_key_template():
     key = build_idempotency_key("cisd_v6", "XRPUSD", 1787786800)
     assert key == "sig_cisd_v6_XRPUSD_1787786800"

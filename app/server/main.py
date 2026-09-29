@@ -454,6 +454,12 @@ class AppState:
         cfg = self.config
         self.safety = SafetyGuard(cfg, redis_client=self.redis, store=self.store)
         set_safety_guard(self.safety)
+        if bool(getattr(cfg, "live_trading", False)) and not os.environ.get("PYTEST_CURRENT_TEST"):
+            self.telemetry.set_state("LIVE_APPROVED", reason="boot L4: SIGMA_LIVE_TRADING=1")
+            logger.info(
+                "L4 LIVE_APPROVED armed — spot=kraken live, futures=kraken pro paper; "
+                "L5 withdraw remains forbidden"
+            )
         self.kraken_cli = KrakenCliBridge(cfg, telemetry=self.telemetry)
         # Futures bridges created early so Deadman can flatten the primary book.
         paper_bridge = KrakenCliBridge(
@@ -475,11 +481,8 @@ class AppState:
         self.futures_bridge = futures_bridge
         self.paper_futures_bridge = paper_futures_bridge
 
-        deadman_bridge = (
-            paper_futures_bridge
-            if not bool(getattr(cfg, "live_trading", False))
-            else futures_bridge
-        )
+        # Dual-book L4: Deadman flatten stays on Kraken Pro paper (not live futures).
+        deadman_bridge = paper_futures_bridge
         if os.environ.get("PYTEST_CURRENT_TEST"):
             from app.execution.deadman_switch_daemon import TestDeadmanBridge
 
@@ -532,11 +535,12 @@ class AppState:
             paper_futures_bridge=paper_futures_bridge,
             receipts_log=cfg.orders_log_path,
         )
-        self.fills_reconciler = KrakenFillReconciler(
-            futures_bridge,
+        self.fill_reconciler = KrakenFillReconciler(
+            paper_futures_bridge,
             self.store,
             self._on_realized_trade,
         )
+        self.fills_reconciler = self.fill_reconciler
         self.paper.realized_pnl_handler = self._on_realized_trade
 
         # CLI fee schedule → FeeEngine / Churn (fail-open logged inside helper)
@@ -569,11 +573,7 @@ class AppState:
             from app.execution.kraken_cancel_after_session import (
                 get_cancel_after_session, set_cancel_after_session,
             )
-            ca_bridge = (
-                paper_futures_bridge
-                if not bool(getattr(cfg, "live_trading", False))
-                else futures_bridge
-            )
+            ca_bridge = paper_futures_bridge
             self.cancel_after = get_cancel_after_session(ca_bridge)
             set_cancel_after_session(self.cancel_after)
             if not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -978,6 +978,19 @@ def _win_rate(store, strategy_id: str) -> float:
     return max(0.35, min(0.85, wins / len(trades)))
 
 
+def _autonomy_snapshot(st: AppState) -> Dict[str, Any]:
+    from app.core import autonomy_levels as al
+
+    tel_state = str(getattr(getattr(st.telemetry, "system", None), "state", "") or "")
+    live = bool(getattr(st.config, "live_trading", False)) if st.config else False
+    return al.level_snapshot(
+        paper_trading=bool(st.is_paper_trading),
+        live_trading=live,
+        live_approved=tel_state.upper() == "LIVE_APPROVED",
+        telemetry_state=tel_state,
+    )
+
+
 def _iso(ts: float) -> str:
     return _dt.datetime.fromtimestamp(ts, _dt.timezone.utc).isoformat()
 
@@ -1063,6 +1076,8 @@ async def sigma_health():
     except Exception as exc:  # pragma: no cover - defensive
         scraper = {"ok": False, "degraded": True, "error": str(exc)}
 
+    autonomy = _autonomy_snapshot(state)
+    dm = state.deadman.snapshot() if state.deadman is not None else {"armed": False, "bridge_wired": False}
     return {
         "status": "halted" if kill else ("paused" if paused else "ok"),
         "kill_switch": kill,
@@ -1071,6 +1086,14 @@ async def sigma_health():
         "scraper": scraper,
         "tv_worker_ok": tv_worker_ok,
         "live_trading": state.config.live_trading,
+        "live_approved": bool(autonomy.get("liveApproved")),
+        "automationLevel": autonomy.get("automationLevel"),
+        "fundManagementForbidden": True,
+        "deadman": {
+            "armed": bool(dm.get("armed")),
+            "bridge_wired": bool(dm.get("bridge_wired")),
+            "expired": bool(dm.get("expired")),
+        },
         "uptime": round(time.time() - state.started_at, 1),
         "blueprint": bp.spec_summary(),
     }
@@ -1208,6 +1231,7 @@ def _build_metrics(
     paper_active = [s for s in active if s["executionMode"] == "paper"]
     live_active = [s for s in active if s["executionMode"] == "live"]
     btc_price = st.ingestor.last_price("BTC/USD")
+    autonomy = _autonomy_snapshot(st)
     return {
         "cpuUsage": round(_cpu_percent(), 1),
         "memoryUsage": round(_mem_usage_percent(), 1),
@@ -1223,10 +1247,9 @@ def _build_metrics(
         "portfolioUSD": round(portfolio, 2),
         "baselineUSD": baseline,
         "initialPaperBalanceUSD": baseline,
-        "automationLevel": 2 if st.is_paper_trading else 4,
-        "automationLevelLabel": "Level 2 Paper Automation" if st.is_paper_trading
-                                else "Level 4 Live Capital Execution",
-        "activeLedgerMode": "paper" if st.is_paper_trading else "live",
+        "automationLevel": autonomy.get("automationLevel"),
+        "automationLevelLabel": autonomy.get("automationLevelLabel"),
+        "activeLedgerMode": autonomy.get("activeLedgerMode"),
         "paperBalances": {k: round(v, 2) for k, v in balances.items()},
         "liveKrakenBalances": dict(st.live_kraken_balances) if st.has_credentials else {},
         "hasCredentials": st.has_credentials,
@@ -1793,6 +1816,7 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
         pool, name, pair = [s], s["name"], s["assetPair"]
 
     pool_ids = [s["id"] for s in pool]
+    autonomy = _autonomy_snapshot(st)
     closed = st.store.trades(
         strategy_ids=pool_ids,
         status="closed",
@@ -1838,8 +1862,8 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
             "volumeUSD": round(rec["vol"], 2),
             "isToday": d == today,
             "machineState": {
-                "automationLevel": 2 if st.is_paper_trading else 4,
-                "executionMode": "paper" if st.is_paper_trading else "live",
+                "automationLevel": autonomy.get("automationLevel"),
+                "executionMode": autonomy.get("activeLedgerMode"),
                 "engineStatus": "active" if st.telemetry.system.can_execute_orders else "halted",
                 "activeWorkersCount": sum(1 for s in strategies_all if s["status"] == "active"),
                 "daemonHealth": "HEALTHY",
@@ -1962,13 +1986,9 @@ def _enrich_funding_rates(bridge, positions: list) -> list:
 def _pro_positions_from_cli(st: "AppState") -> list:
     """Futures Pro positions from CLI SoT; empty on CLI failure (fail-closed)."""
     from app.execution.kraken_futures_positions_sot import fetch_futures_positions
-    live = bool(getattr(st.config, "live_trading", False)) and bool(getattr(st, "has_credentials", False))
-    bridge = getattr(st, "futures_bridge", None) or getattr(st, "kraken_cli", None)
-    paper_bridge = getattr(st, "paper_futures_bridge", None) or bridge
-    if live:
-        snap = fetch_futures_positions(bridge, paper=False)
-    else:
-        snap = fetch_futures_positions(paper_bridge, paper=True)
+    # Dual-book L4: Kraken Pro stays on the paper ledger.
+    paper_bridge = getattr(st, "paper_futures_bridge", None) or getattr(st, "futures_bridge", None) or getattr(st, "kraken_cli", None)
+    snap = fetch_futures_positions(paper_bridge, paper=True)
     ok = bool(getattr(snap, "ok", False) if not isinstance(snap, dict) else snap.get("ok"))
     if not ok:
         return []
@@ -2063,41 +2083,9 @@ async def kraken_positions_pro():
     from app.execution.kraken_futures_positions_sot import fetch_futures_positions
     from app.execution.kraken_paper_sot import fetch_paper_capital
 
-    live = bool(state.config.live_trading) and bool(getattr(state, "has_credentials", False))
+    # Dual-book L4: Kraken Pro paper ledger even when spot live is armed.
     bridge = getattr(state, "futures_bridge", None) or state.kraken_cli
     paper_bridge = getattr(state, "paper_futures_bridge", None) or bridge
-
-    if live:
-        snap = fetch_futures_positions(bridge, paper=False)
-        fields = _positions_snap_fields(snap)
-        if not fields["ok"]:
-            err = fields["error"]
-            return {
-                "ok": False,
-                "source": "unavailable",
-                "live": True,
-                "reason": "cli_offline" if ("CLI_NOT_FOUND" in err or not fields["available"]) else err,
-                "positions": [],
-                "totalCollateralUSD": None,
-                "freeMarginUSD": None,
-                "totalUnrealizedPnL": None,
-            }
-        positions = _enrich_funding_rates(bridge, fields["positions"])
-        for row in positions:
-            if row.get("fundingRate") == 0.01:
-                row["fundingRate"] = None
-        collateral = sum(float(p.get("collateralUSD") or 0.0) for p in positions)
-        upnl = sum(float(p.get("unrealizedPnLUSD") or 0.0) for p in positions)
-        return {
-            "ok": True,
-            "source": fields["source"] or "futures/live/positions",
-            "live": True,
-            "reason": None,
-            "positions": positions,
-            "totalCollateralUSD": round(collateral, 2) if positions else None,
-            "freeMarginUSD": None,
-            "totalUnrealizedPnL": round(upnl, 2),
-        }
 
     cap = fetch_paper_capital(paper_bridge, futures=True)
     is_offline = bool(getattr(cap, "cli_offline", False))

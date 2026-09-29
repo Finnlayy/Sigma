@@ -113,7 +113,25 @@ class ReliableOrderDispatcher:
         self._receipts: List[OrderReceipt] = []
 
     # ----------------------------------------------------------- routing ---
+    def _l4_dual_book(self) -> bool:
+        """L4: live Kraken spot + Kraken Pro paper futures, even if the alert
+        still says ``kraken_paper`` / ``live``."""
+        cfg = getattr(self.bridge, "config", None)
+        tel = getattr(self.bridge, "telemetry", None)
+        if not bool(getattr(cfg, "live_trading", False)):
+            return False
+        state = str(getattr(getattr(tel, "system", None), "state", "") or "").upper()
+        return state == "LIVE_APPROVED"
+
     def _bridge_for(self, request: OrderRequest) -> Any:
+        if self._l4_dual_book():
+            if request.market_type == "futures":
+                if self.paper_futures_bridge is not None:
+                    return self.paper_futures_bridge
+                if self.futures_bridge is None:
+                    raise RuntimeError("futures bridge is not configured")
+                return self.futures_bridge
+            return self.bridge
         if request.market_type == "futures":
             if (request.execution_mode == bp.ExecutionMode.KRAKEN_PAPER.value
                     and self.paper_futures_bridge is not None):

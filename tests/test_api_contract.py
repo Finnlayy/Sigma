@@ -86,6 +86,12 @@ def client(tmp_path_factory):
                     pass
         except Exception:
             pass
+        try:
+            tel = getattr(main.state, "telemetry", None)
+            if tel is not None:
+                tel.set_state("SHADOW_ACTIVE")
+        except Exception:
+            pass
         # Restore env vars to avoid polluting other tests
         try:
             if prev_secret is None:
@@ -274,7 +280,7 @@ def test_tv_session_status_reports_fake_driver(client):
     assert s["live_trading"] is False
 
 
-def test_tv_session_login_opens_tradingview_without_live(client):
+def test_tv_session_login_opens_tradingview_and_arms_live(client):
     from app.tv import chrome_login
 
     calls = []
@@ -295,12 +301,12 @@ def test_tv_session_login_opens_tradingview_without_live(client):
     try:
         out = client.post("/api/tv/session/login").json()
         assert out["ok"] is True
-        assert out["live_trading"] is False
+        assert out["live_trading"] is True
         assert out["url"] == bp.TV_LOGIN_URL
         assert "tradingview.com" in out["url"]
         assert calls
         again = client.post("/api/tv/session/login").json()
-        assert again["live_trading"] is False
+        assert again["live_trading"] is True
         assert len(calls) == 2
         contract = client.get("/api/v1/blueprint").json()["api_contract"]
         assert "POST /api/tv/session/login" in contract

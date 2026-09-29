@@ -64,6 +64,27 @@ def live_trading_env_name() -> str:
     return str(name or "SIGMA_LIVE_TRADING")
 
 
+def is_live_approved(
+    telemetry_state: Optional[str] = None,
+    *,
+    live_approved: Optional[bool] = None,
+) -> bool:
+    if live_approved is not None:
+        return bool(live_approved)
+    return str(telemetry_state or "").upper() == "LIVE_APPROVED"
+
+
+def is_l4_armed(
+    *,
+    live_trading: bool = False,
+    live_approved: bool = False,
+    telemetry_state: Optional[str] = None,
+) -> bool:
+    """True when env ``SIGMA_LIVE_TRADING=1`` and telemetry is ``LIVE_APPROVED``."""
+    approved = bool(live_approved) or is_live_approved(telemetry_state)
+    return bool(live_trading) and approved
+
+
 def resolve_level(
     *,
     paper_trading: bool = True,
@@ -72,19 +93,19 @@ def resolve_level(
 ) -> int:
     """Effective Kraken-aligned autonomy level for UI / gates.
 
-    Paper-first: any paper book → L2.
-    Live UI without env flag → L3 (supervised / not armed).
+    Dual-book L4: live env + LIVE_APPROVED wins even while futures stay on
+    the Kraken Pro paper ledger (spot live + futures paper).
     Live env without LIVE_APPROVED → L3.
-    Live env + LIVE_APPROVED → L4.
+    Live UI without env flag → L3.
+    Paper-only (no live env) → L2.
     """
-    if paper_trading or not live_trading:
-        if paper_trading:
-            return LEVEL_PAPER
-        # Operator flipped UI to "live" but env gate still off → supervised.
+    if live_trading and live_approved:
+        return LEVEL_AUTONOMOUS
+    if live_trading:
         return LEVEL_SUPERVISED
-    if not live_approved:
-        return LEVEL_SUPERVISED
-    return LEVEL_AUTONOMOUS
+    if paper_trading:
+        return LEVEL_PAPER
+    return LEVEL_SUPERVISED
 
 
 def label_for(level: int) -> str:
@@ -143,7 +164,10 @@ def level_snapshot(
             live_approved=live_approved,
         ),
         "paperTrading": bool(paper_trading),
-        "activeLedgerMode": "paper" if paper_trading else "live",
+        "activeLedgerMode": (
+            "dual" if (live_trading and live_approved)
+            else ("paper" if paper_trading else "live")
+        ),
         "telemetryState": telemetry_state,
         "fundManagementForbidden": True,
         "maxAllowedLevel": MAX_ALLOWED_LEVEL,
