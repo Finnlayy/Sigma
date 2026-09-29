@@ -1,3 +1,3 @@
-## 2025-02-27 - [UI Aesthetic Insight]
-**Learning:** Found StrategyCard component using non-standard slate backgrounds (`bg-slate-950/60`, `border-slate-800`) and missing `tabular-nums` on dynamic numerical elements causing sub-pixel layout jitter during real-time state updates.
-**Action:** Replaced container styling with the MP-17 standard `bg-[#0a0a0c]/80 backdrop-blur-md border border-white/10 shadow-2xl` and added `tabular-nums` to numerical fields to eliminate sub-pixel jitter.
+## $(date +%Y-%m-%d) - FeedBadge empty state lacks fail-closed fallback
+**Learning:** Found a component hierarchy breakdown when rendering `FeedBadge` empty states. The fallback returned `null`, violating the requirement to render an explicit empty/error indicator. Additionally, the existing badges lacked the `#0a0a0c` dark-glassmorphism background (`bg-[#0a0a0c]/80 backdrop-blur-md`) and tabular monospace tokens.
+**Action:** Enforce returning an explicit `DISCONNECTED` fallback state for data-driven badges, and strictly apply `bg-[#0a0a0c]/80 backdrop-blur-md tabular-nums font-mono` to all `FeedBadge` variations.
