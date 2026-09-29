@@ -469,6 +469,7 @@ export function MarketChart() {
     let closed = false;
     let retryCount = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const MAX_RETRIES = 5;
 
     const flush = () => {
       raf = 0;
@@ -488,43 +489,62 @@ export function MarketChart() {
       });
     };
 
-    try {
-      ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
-      ws.onopen = () => setStreamStatus('live');
-      ws.onerror = () => setStreamStatus('err');
-      ws.onclose = () => { if (!closed) setStreamStatus('off'); };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as {
-            channel?: string;
-            data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
-          };
-          if (typeof msg !== 'object' || msg === null) {
-            throw new Error('Payload is not a valid JSON object');
+    const connect = () => {
+      if (closed) return;
+      try {
+        ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
+        ws.onopen = () => {
+          setStreamStatus('live');
+          retryCount = 0;
+        };
+        ws.onerror = (err) => {
+          console.error('[MarketFeed] WebSocket error:', err);
+          if (!closed) setStreamStatus('err');
+        };
+        ws.onclose = () => {
+          if (!closed) setStreamStatus('off');
+          if (closed || reconnectTimer) return;
+          if (retryCount < MAX_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCount, 30000);
+            retryCount++;
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, delay);
+          } else {
+            console.error('[MarketFeed] WS retries exhausted');
           }
-          if (msg.channel === 'alpha:executions:live' && msg.data) {
-            if (msg.data.markers) setMarkers(msg.data.markers);
-            if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
-            return;
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data as string) as {
+              channel?: string;
+              data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
+            };
+            if (msg.channel === 'alpha:executions:live' && msg.data) {
+              if (msg.data.markers) setMarkers(msg.data.markers);
+              if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
+              return;
+            }
+            const c = msg.data?.candle;
+            if (!c || typeof c.ts !== 'number') return;
+            pending = c;
+            if (!raf) raf = requestAnimationFrame(flush);
+          } catch (e) {
+            console.error('[MarketFeed] Failed to parse payload:', e, ev.data);
           }
-          const c = msg.data?.candle;
-          if (!c || typeof c.ts !== 'number') return;
-          pending = c;
-          if (!raf) raf = requestAnimationFrame(flush);
-        } catch (err) {
-          console.error('Failed to parse WS payload:', err, ev.data);
-        }
-      };
-    } catch {
-      setStreamStatus('err');
-    }
+        };
+      } catch (err) {
+        console.error('[MarketFeed] Connect error:', err);
+        setStreamStatus('err');
+      }
+    };
+
+    connect();
 
     return () => {
       closed = true;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (raf) cancelAnimationFrame(raf);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }
