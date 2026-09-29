@@ -21,6 +21,6 @@
 **Learning:** Raw WebSocket implementations without robust error handling or backoff strategies lead to fragile connections, while missing cleanup in unmounts causes memory leaks and duplicate message streams.
 **Action:** Always wrap WebSocket logic with an exponential backoff loop, ensure state clearing within event handlers (to avoid concurrent reconnect timers on `error` + `close` sequential triggers), and always validate incoming IPC payloads explicitly.
 
-## 2024-05-19 - [IPC/API Integration Insight]
-**Learning:** Missing schema validation on incoming raw socket messages allows malformed data to crash or silently desync components (e.g. MarketChart visualization plane). Additionally, idempotent streams lack exponential backoff, failing completely on network interruptions.
-**Action:** Always wrap WebSocket `.onmessage` handling with strict schema validation (like Zod) and explicit error logging (`console.error`). Use exponential backoff for idempotent streams to gracefully recover without overwhelming the server.
+## 2026-09-21 - [IPC/API Integration Insight]
+**Learning:** The frontend `MarketChart` component relied on a raw WebSocket connection without reconnect backoffs, fallback mechanisms, or strict schema validation, which could silently fail and leave the UI desynchronized if a malformed payload arrived or the socket disconnected.
+**Action:** Enforce robust reconnect loops with exponential backoff exclusively in the `onclose` handler (to prevent double-firing), strict manual type guards (`typeof x === 'number'`) before trusting parsed payloads, and fallback to interval HTTP polling when retries are exhausted.

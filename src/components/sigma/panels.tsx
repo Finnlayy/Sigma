@@ -461,6 +461,9 @@ export function MarketChart() {
     let closed = false;
     let retryCount = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    const MAX_WS_RETRIES = 5;
+    const WS_BACKOFF_MAX_MS = 30_000;
 
     const flush = () => {
       raf = 0;
@@ -480,58 +483,73 @@ export function MarketChart() {
       });
     };
 
+    const startPolling = () => {
+      if (pollInterval) return;
+      void load();
+      pollInterval = setInterval(() => {
+        void load();
+      }, 5000);
+    };
+
+    const stopPolling = () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
     const connect = () => {
       if (closed) return;
       try {
         ws = new WebSocket(sigmaApi.marketFeedUrl(symbol, interval));
-
         ws.onopen = () => {
           setStreamStatus('live');
           retryCount = 0;
+          stopPolling();
         };
-
-        ws.onerror = (err) => {
-          console.error('[MarketChart] WS error:', err);
+        ws.onerror = () => {
           if (!closed) setStreamStatus('err');
         };
-
         ws.onclose = () => {
           if (!closed) setStreamStatus('off');
           if (closed || reconnectTimer) return;
 
-          const delay = Math.min(1000 * 2 ** retryCount, 30000);
-          retryCount++;
-          console.warn(`[MarketChart] WS closed — reconnecting in ${delay}ms (${retryCount})`);
-
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            connect();
-          }, delay);
+          if (retryCount < MAX_WS_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCount, WS_BACKOFF_MAX_MS);
+            retryCount++;
+            console.warn(`[MarketChart] WS disconnected — Reconnect in ${delay}ms (${retryCount}/${MAX_WS_RETRIES})`);
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, delay);
+          } else {
+            console.error('[MarketChart] WS retries exhausted — falling back to HTTP polling');
+            startPolling();
+          }
         };
-
         ws.onmessage = (ev) => {
           try {
-            const rawMsg = JSON.parse(ev.data as string);
-            const msg = MarketFeedSchema.parse(rawMsg);
-
+            const msg = JSON.parse(ev.data as string) as {
+              channel?: string;
+              data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
+            };
             if (msg.channel === 'alpha:executions:live' && msg.data) {
-              if (msg.data.markers) setMarkers(msg.data.markers as ChartMarker[]);
-              if (msg.data.price_lines) setPriceLines(msg.data.price_lines as ChartPriceLine[]);
+              if (msg.data.markers) setMarkers(msg.data.markers);
+              if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
               return;
             }
-
-            const c = msg.data?.candle as Candle | undefined;
+            const c = msg.data?.candle;
             if (!c || typeof c.ts !== 'number') return;
-
             pending = c;
             if (!raf) raf = requestAnimationFrame(flush);
           } catch (err) {
-            console.error('[MarketChart] WS parse error:', err, ev.data);
+            console.error('[MarketChart] Failed to parse WS message:', err, ev.data);
           }
         };
       } catch (err) {
-        console.error('[MarketChart] WS setup error:', err);
         setStreamStatus('err');
+        console.error('[MarketChart] WS connection failed:', err);
+        startPolling();
       }
     };
 
@@ -544,6 +562,7 @@ export function MarketChart() {
         reconnectTimer = null;
       }
       if (raf) cancelAnimationFrame(raf);
+      stopPolling();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }
     };
