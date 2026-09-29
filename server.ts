@@ -6,6 +6,7 @@ import { krakenRouter } from './src/server/kraken/routes';
 
 async function startServer() {
   const app = express();
+  app.disable('x-powered-by'); // Security: Do not leak Express version
   const PORT = 3000;
 
   app.use(cors());
