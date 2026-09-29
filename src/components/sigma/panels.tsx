@@ -112,8 +112,8 @@ export function PanelShell({ title, icon, actions, children }: {
 }
 
 export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; value: React.ReactNode; tone?: string }) => (
-  <div className="rounded border border-zinc-800 bg-zinc-900/50 px-2 py-1.5">
-    <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
+  <div className="rounded border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md px-2 py-1.5">
+    <div className="text-[10px] uppercase tracking-wide text-zinc-400">{label}</div>
     <div className={`font-mono tabular-nums text-sm ${tone}`}>{value}</div>
   </div>
 );
