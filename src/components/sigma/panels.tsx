@@ -470,6 +470,10 @@ export function MarketChart() {
       });
     };
 
+    let reconnectTimer: any = null;
+    let retryCount = 0;
+    const maxRetries = 7;
+
     const connect = () => {
       if (closed) return;
       try {
@@ -478,24 +482,32 @@ export function MarketChart() {
           setStreamStatus('live');
           retryCount = 0;
         };
-        ws.onerror = () => {
+        ws.onerror = (e) => {
+          console.error('[MarketChart] WebSocket error', e);
           if (!closed) setStreamStatus('err');
         };
         ws.onclose = () => {
-          setStreamStatus('off');
+          if (!closed) setStreamStatus('off');
           if (closed || reconnectTimer) return;
-          if (retryCount < MAX_WS_RETRIES) {
-            const delay = Math.min(1000 * 2 ** retryCount, WS_BACKOFF_MAX_MS);
+          if (retryCount < maxRetries) {
+            const delay = Math.min(1000 * 2 ** retryCount, 30000);
             retryCount++;
             reconnectTimer = setTimeout(() => {
               reconnectTimer = null;
               connect();
             }, delay);
+          } else {
+             console.error('[MarketChart] WebSocket retries exhausted.');
           }
         };
         ws.onmessage = (ev) => {
           try {
-            const msg = MarketFeedMsgSchema.parse(JSON.parse(ev.data as string));
+            const parsed = JSON.parse(ev.data as string);
+            if (!parsed || typeof parsed !== 'object') throw new Error('Invalid payload');
+            const msg = parsed as {
+              channel?: string;
+              data?: { candle?: Candle; markers?: ChartMarker[]; price_lines?: ChartPriceLine[] };
+            };
             if (msg.channel === 'alpha:executions:live' && msg.data) {
               if (msg.data.markers) setMarkers(msg.data.markers);
               if (msg.data.price_lines) setPriceLines(msg.data.price_lines);
@@ -503,15 +515,15 @@ export function MarketChart() {
             }
             const c = msg.data?.candle;
             if (!c || typeof c.ts !== 'number') return;
-            pending = c as Candle;
+            pending = c;
             if (!raf) raf = requestAnimationFrame(flush);
           } catch (err) {
-            console.error('[MarketChart] WS-Frame invalid:', err);
+            console.error('[MarketChart] WebSocket payload parse error:', err, ev.data);
           }
         };
-      } catch (err) {
-        console.error('[MarketChart] WS connect failed:', err);
-        setStreamStatus('err');
+      } catch (e) {
+        console.error('[MarketChart] WebSocket setup error:', e);
+        if (!closed) setStreamStatus('err');
       }
     };
 
