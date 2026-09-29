@@ -283,6 +283,7 @@ export default function MetricsPanel({
                 onMouseLeave={() => setShowBaselineTooltip(false)}
                 className="text-zinc-400 hover:text-emerald-400 p-0.5 rounded transition-colors cursor-pointer"
                 title="View Baseline Capital & P&L Calculation Breakdown"
+                aria-label="View Baseline Capital & P&L Calculation Breakdown"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
               </button>
@@ -726,6 +727,7 @@ export default function MetricsPanel({
               onClick={handleManualSync}
               disabled={isSyncingBalance}
               title={defaultMetrics.activeLedgerMode === 'live' ? "Sync balances from Kraken Pro account" : "Refresh paper ledger balances"}
+              aria-label={defaultMetrics.activeLedgerMode === 'live' ? "Sync balances from Kraken Pro account" : "Refresh paper ledger balances"}
               className="p-1 rounded bg-zinc-800/80 hover:bg-zinc-750 border border-zinc-700 text-zinc-300 hover:text-white text-xs transition-colors flex items-center space-x-1 disabled:opacity-50"
             >
               <RefreshCw className={`w-3 h-3 ${isSyncingBalance ? 'animate-spin text-emerald-400' : ''}`} />
