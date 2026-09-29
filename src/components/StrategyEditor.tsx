@@ -505,6 +505,7 @@ if (diff > parameters.threshold) {
               <button 
                 onClick={() => setIsManifestOpen(false)}
                 className="text-zinc-500 hover:text-white transition-colors"
+                title="Close Manifest Modal" aria-label="Close Manifest Modal"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1063,7 +1064,7 @@ if (diff > parameters.threshold) {
                         }
                       }}
                       className="bg-zinc-950 border border-zinc-850 hover:border-amber-800/60 hover:bg-amber-950/20 text-zinc-500 hover:text-amber-400 px-3 rounded transition-all"
-                      title="Move to Archives"
+                      title="Move to Archives" aria-label="Move to Archives"
                     >
                       <Archive className="w-4 h-4" />
                     </button>
@@ -1077,7 +1078,7 @@ if (diff > parameters.threshold) {
                     }
                   }}
                   className="bg-zinc-950 border border-zinc-850 hover:border-rose-900/50 hover:bg-rose-950/20 text-zinc-500 hover:text-rose-400 px-3 rounded transition-all"
-                  title="Delete Strategy"
+                  title="Delete Strategy" aria-label="Delete Strategy"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
