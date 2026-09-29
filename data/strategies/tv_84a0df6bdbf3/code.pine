@@ -1,0 +1,2428 @@
+//@version=6
+strategy(
+     title                    = "Sigma Trading System v1.0",
+     overlay                  = true,
+     max_bars_back            = 1000,
+     initial_capital          = 100000,
+     default_qty_type         = strategy.fixed,
+     default_qty_value        = 1,
+     pyramiding               = 0,
+     commission_type          = strategy.commission.percent,
+     commission_value         = 0.05,
+     slippage                 = 1,
+     calc_on_every_tick       = false,
+     process_orders_on_close  = true
+)
+
+// =============================================================================
+
+// =============================================================================
+// SIGMA TRADING SYSTEM v1.0 — Integrated 6-Module Strategy
+// Modules: M1=EMH-LAC Regime | M2=Kelly Sizer | M3=Walk-Forward
+//          M4=Crisis Scanner | M5=Dashboard | M6=Alert Engine
+// =============================================================================
+
+
+// =============================================================================
+// TRADING RULES SUMMARY
+// =============================================================================
+// LONG ENTRY conditions (ALL must be true):
+//   1. m1_ready == true (regime detected, indicators valid)
+//   2. m1_long_signal == true (regime-appropriate signal)
+//   3. m1_block_new_risk == false (no risk flags active)
+//   4. m2_position_qty > 0 (valid position size computed)
+//   5. strategy.position_size <= 0 (not already long)
+//   6. barstate.isconfirmed (bar is confirmed)
+//
+// SHORT ENTRY conditions (ALL must be true):
+//   1. m1_ready == true (regime detected, indicators valid)
+//   2. m1_short_signal == true (regime-appropriate signal)
+//   3. m1_block_new_risk == false (no risk flags active)
+//   4. m2_position_qty > 0 (valid position size computed)
+//   5. strategy.position_size >= 0 (not already short)
+//   6. barstate.isconfirmed (bar is confirmed)
+//
+// POSITION EXIT triggers (ANY triggers exit):
+//   1. Stop-loss: price hits ATR-based stop level
+//   2. Take-profit: price hits ATR-based target level
+//   3. Time exit: crypto held for max_hold_bars
+//   4. Regime filter: position open in RW1 without allow_rw1
+//   5. Risk block: any risk flag becomes active
+//   6. Liquidity crisis: metals emergency exit
+//   7. Exotic swap: forex exotic held for 5+ bars
+// =============================================================================
+
+// =============================================================================
+// M1+M2+M3+M4 INTER-DEPENDENCY CHAIN
+// =============================================================================
+// bar_index 0:  M1 presets applied (asset class calibration)
+// bar_index 1:  M1 helper functions defined
+// bar_index 2:  M1 returns + dual-window regime classification
+// bar_index 3:  M1 active regime selected (mode-dependent)
+// bar_index 4:  M1 peer correlation + contagion check
+// bar_index 5:  M1 metals data + liquidity crisis check
+// bar_index 6:  M1 forex gap detection
+// bar_index 7:  M1 circuit breaker + session filter
+// bar_index 8:  M1 technical indicators + memory flags
+// bar_index 9:  M3 pre-computed indicators + WFO execution
+// bar_index 10: M4 security fetch + correlation scan
+// bar_index 11: M4 VIX proxy + Granger causality
+// bar_index 12: M4 crisis scoring + early warning
+// bar_index 13: M2 Kelly sizing (needs M1 regime + M4 crisis)
+// bar_index 14: M1 signal generation (needs M2 position size)
+// bar_index 15: M1 order execution (needs all above)
+// bar_index 16: M5 dashboard computation + rendering
+// bar_index 17: M6 alert evaluation + cooldown management
+// =============================================================================
+
+// =============================================================================
+// INPUT QUICK REFERENCE
+// =============================================================================
+// [Asset Class]      Asset Class, Sub-Type selection
+// [Statistical]      Full/Short Window, Alpha, LB/ARCH lags, VR horizons
+// [Signal Engine]    EMA lengths, Breakout/MR lookback, RW1 allow flag
+// [Peer Filter]      Enable, Symbol, Correlation lengths, z-threshold
+// [Kelly Sizing]     Mode, Max Risk %, Min trades, Min quantity
+// [Drawdown Tiers]   Tier 1/2/3 drawdown percentage thresholds
+// [Walk-Forward]     Enable, IS/OOS windows, Frequency, Parameter ranges
+// [Crisis Scanner]   Enable, Correlation lengths, Thresholds, Lags
+// [Dashboard]        Enable, Position, Show/hide panels, Opacity
+// [Alert Engine]     Enable, Prefix, Discord format, Min severity
+// [Session Filter]   Enable, Hours, Day filters
+// [Risk/Display]     Regime BG, Signal shapes, Stats, Ann vol
+// =============================================================================
+
+// =============================================================================
+// COMPLIANCE CHECKLIST
+// =============================================================================
+// [x] Single //@version=6 header
+// [x] Single strategy() declaration with all specified params
+// [x] No duplicate input definitions
+// [x] All inputs in appropriate groups
+// [x] Module prefix naming convention (m1_, m2_, m3_, m4_, m5_, m6_)
+// [x] All var declarations before := reassignments
+// [x] All ternary operators on single lines
+// [x] All plot() calls at global scope
+// [x] All alertcondition() calls at global scope
+// [x] Uses strategy.wintrades / strategy.losstrades
+// [x] No := comma-chains
+// [x] All request.security with lookahead_off
+// [x] Interface wiring between all modules
+// [x] Correct execution order maintained
+// [x] Module boundary comments present
+// =============================================================================
+
+// =============================================================================
+// END OF HEADER DOCUMENTATION — STRATEGY CODE FOLLOWS
+// =============================================================================
+
+// =============================================================================
+// INTERFACE WIRING DIAGRAM
+// =============================================================================
+// M1 -> M2:  regime_mult, memory_mult (position sizing multipliers)
+// M1 -> M4:  m1_ret (returns for crisis correlation analysis)
+// M2 -> M1:  m2_position_qty (order entry quantity)
+// M3 -> M1:  opt_fast_len, opt_slow_len, opt_breakout_len (optimized params)
+// M4 -> M2:  m4_corr_shock, m4_risk_off_level (crisis sizing multipliers)
+// M1+M2+M3+M4 -> M5:  ALL outputs for dashboard display
+// M1+M2+M3+M4 -> M6:  ALL outputs for alert triggering
+// =============================================================================
+
+// =============================================================================
+// PINE SCRIPT v6 COMPLIANCE NOTES
+// =============================================================================
+// 1. All var declarations precede := reassignments
+// 2. All ternary operators are on single lines
+// 3. All plot() calls are at global scope
+// 4. All alertcondition() calls are at global scope
+// 5. No := comma-chains (each assignment is separate)
+// 6. Uses strategy.wintrades / strategy.losstrades for trade counts
+// 7. All request.security() calls use lookahead = barmerge.lookahead_off
+// =============================================================================
+
+// =============================================================================
+// MODULE 1: DETAILED COMMENTARY
+// =============================================================================
+// The EMH-LAC Regime Engine classifies market efficiency into 3 regimes:
+//   Regime 1 (RW1/RW2):   Random walk — prices follow random walk
+//   Regime 2 (RW3):       Heteroskedastic random walk — vol clustering
+//   Regime 3 (Inefficient): Statistically inefficient — predictable patterns
+// Tests used: Ljung-Box, Variance Ratio (4 horizons), Runs Test, ARCH
+// Memory: Hurst exponent via R/S analysis for trend persistence measurement
+// Crisis mode: Adaptive window switching when short vol exceeds long vol
+// =============================================================================
+
+// =============================================================================
+// MODULE 2: DETAILED COMMENTARY
+// =============================================================================
+// Kelly-Criterion Position Sizer with the following features:
+//   - Fractional Kelly (Half/Quarter/Full/Adaptive modes)
+//   - Drawdown-based tier reduction (3 tiers with progressive scaling)
+//   - Regime-based position multiplier (RW1=0.25x, RW3=0.5x, Inefficient=1x)
+//   - Memory-based multiplier (persistent/anti-persistent = 1x, neutral = 0.7x)
+//   - Crisis multiplier from M4 (Normal=1x, Elevated=0.75x, High=0.5x, Critical=0.25x)
+//   - Leverage caps per asset class (Forex=20x, Crypto=3x, Metals=10x)
+//   - ATR extreme reduction for crypto (halves position when ATR% > threshold)
+// =============================================================================
+
+// =============================================================================
+// MODULE 3: DETAILED COMMENTARY
+// =============================================================================
+// Walk-Forward Optimization with grid search over 3 parameters:
+//   - Fast EMA: 10-30 in steps of 5 (5 values)
+//   - Slow EMA: 40-80 in steps of 10 (5 values)
+//   - Breakout: 10-30 in steps of 5 (4 values)
+//   - Total combinations: 5 x 5 x 4 = 100 (capped)
+// Robustness = OOS_score / IS_score (must exceed threshold to accept)
+// Parameter stability tracks changes between re-optimization cycles
+// =============================================================================
+
+// =============================================================================
+// MODULE 4: DETAILED COMMENTARY
+// =============================================================================
+// Multi-Asset Crisis Scanner monitors 9 symbols for cross-asset stress:
+//   - SPX, DXY, Gold, BTC, ETH, VIX, TNX, Oil, EURUSD
+// Four scoring components:
+//   1. Correlation collapse (50% weight): sudden correlation breakdowns
+//   2. VIX proxy (30% weight): realized vol + skew + ATR expansion
+//   3. Granger causality (20% weight): lead-lag relationships
+//   4. Volatility regime (10% weight): vol expansion vs baseline
+// Crisis levels: Normal(0-40), Elevated(40-60), High(60-80), Critical(80-100)
+// =============================================================================
+
+// =============================================================================
+// MODULE 5: DETAILED COMMENTARY
+// =============================================================================
+// Portfolio Dashboard with 24 rows displaying:
+//   - Header: System version + active regime
+//   - Module 1: Memory (Hurst), crisis mode
+//   - Module 2: Kelly fraction, position, risk tier
+//   - Performance: Open P&L, session P&L, equity, drawdown
+//   - Statistics: Win rate, profit factor, Sharpe, avg win/loss, W/L ratio
+//   - Trade info: Total trades, consecutive W/L count
+//   - Signal: Current signal direction
+//   - Module 4: Crisis score, correlation status
+//   - Module 3: Robustness score, regime history dots
+//   - Flags: Safe-haven, liquidity crisis, gap freeze, circuit breaker, time exit
+//   - System: Next re-opt countdown, alert status, timestamp
+// =============================================================================
+
+// =============================================================================
+// MODULE 6: DETAILED COMMENTARY
+// =============================================================================
+// Alert Engine with 12 alert conditions and 5-bar cooldown system:
+//   Alert 1:  Long Entry (INFO)
+//   Alert 2:  Short Entry (INFO)
+//   Alert 3:  Regime Change (INFO/WARNING)
+//   Alert 4:  Crisis Detected (CRITICAL)
+//   Alert 5:  Correlation Shock (WARNING)
+//   Alert 6:  Circuit Breaker (CRITICAL)
+//   Alert 7:  Kelly Change (INFO/WARNING)
+//   Alert 8:  WFO Complete (INFO)
+//   Alert 9:  Robustness Low (WARNING)
+//   Alert 10: Liquidity Crisis (CRITICAL)
+//   Alert 11: Safe-Haven Activated (WARNING)
+//   Alert 12: Daily Summary (INFO)
+// Supports Discord JSON webhook format for automated notifications
+// =============================================================================
+
+// SIGMA TRADING SYSTEM v1.0 — Integrated 6-Module Strategy
+// =============================================================================
+// Module 1: EMH-LAC Regime Engine        — Statistical regime classification
+// Module 2: Kelly-Criterion Position Sizer — Adaptive position sizing
+// Module 3: Walk-Forward Optimization    — Parameter re-optimization
+// Module 4: Multi-Asset Crisis Scanner   — Cross-asset crisis detection
+// Module 5: Portfolio Dashboard          — Unified stats display
+// Module 6: Alert Engine                 — 12 alert conditions with cooldown
+// =============================================================================
+// Execution Order: M1 Inputs → M1 Presets → M1 Functions → M1 Regime Calc
+//                  → M3 WFO → M4 Crisis Scan → M2 Kelly Sizing
+//                  → M1 Signal Gen → Order Execution → M5 Dashboard → M6 Alerts
+// =============================================================================
+
+// =============================================================================
+// SECTION 0: CONSOLIDATED INPUTS — ALL 6 MODULES
+// =============================================================================
+
+// --- Asset Class ---
+string group_m1_asset = "M1 — Asset Class"
+m1_asset_class   = input.string("Crypto", "Asset Class", options = ["Crypto", "Forex", "Metals"], group = group_m1_asset, tooltip = "Select primary asset class for regime calibration")
+m1_crypto_type   = input.string("BTC", "Crypto Sub-Type", options = ["BTC", "ETH", "Altcoin"], group = group_m1_asset, tooltip = "BTC = highest persistence threshold")
+m1_fx_type       = input.string("Majors", "FX Sub-Type", options = ["Majors", "Minors", "Exotics"], group = group_m1_asset, tooltip = "Majors = most efficient")
+m1_metal_type    = input.string("Gold", "Metal Sub-Type", options = ["Gold", "Silver"], group = group_m1_asset, tooltip = "Gold = safe-haven logic enabled")
+
+// --- Statistical Tests ---
+string group_m1_stats = "M1 — Statistical Tests"
+m1_full_len    = input.int(252, "Full Analysis Window", minval = 80, maxval = 600, group = group_m1_stats, tooltip = "Long-term window for regime tests")
+m1_short_len   = input.int(63, "Short Analysis Window", minval = 20, maxval = 200, group = group_m1_stats, tooltip = "Short-term window for Adaptive crisis mode")
+m1_mode        = input.string("Adaptive", "Active Window Mode", options = ["Full", "Short", "Adaptive"], group = group_m1_stats, tooltip = "Adaptive switches to short window during volatility spikes")
+m1_alpha       = input.float(0.05, "Significance Level", minval = 0.01, maxval = 0.10, step = 0.01, group = group_m1_stats, tooltip = "p-value threshold for all tests")
+m1_lb_lags     = input.int(12, "Ljung-Box Lags", minval = 2, maxval = 20, group = group_m1_stats, tooltip = "Autocorrelation lags to test")
+m1_arch_lags   = input.int(10, "ARCH-LB2 Lags", minval = 2, maxval = 20, group = group_m1_stats, tooltip = "Lags for ARCH effect on squared returns")
+m1_vr_k1       = input.int(2, "Variance-Ratio k1", minval = 2, maxval = 20, group = group_m1_stats, tooltip = "Shortest holding period")
+m1_vr_k2       = input.int(4, "Variance-Ratio k2", minval = 2, maxval = 20, group = group_m1_stats, tooltip = "Medium-short holding period")
+m1_vr_k3       = input.int(8, "Variance-Ratio k3", minval = 2, maxval = 20, group = group_m1_stats, tooltip = "Medium holding period")
+m1_vr_k4       = input.int(16, "Variance-Ratio k4", minval = 2, maxval = 30, group = group_m1_stats, tooltip = "Longest holding period")
+
+// --- Signal Engine ---
+string group_m1_signal = "M1 — Signal Engine"
+m1_fast_len        = input.int(20, "Fast EMA Length", minval = 5, maxval = 100, group = group_m1_signal, tooltip = "Fast EMA for trend direction")
+m1_slow_len        = input.int(50, "Slow EMA Length", minval = 10, maxval = 200, group = group_m1_signal, tooltip = "Slow EMA for trend confirmation")
+m1_breakout_len    = input.int(20, "Breakout Lookback", minval = 5, maxval = 100, group = group_m1_signal, tooltip = "Donchian channel lookback")
+m1_meanrev_len     = input.int(20, "Mean-Reversion Lookback", minval = 5, maxval = 100, group = group_m1_signal, tooltip = "Bollinger band lookback")
+m1_allow_rw1       = input.bool(false, "Allow Defensive Trades in RW1", group = group_m1_signal, tooltip = "Allow extreme mean-reversion entries in efficient markets")
+m1_show_daily_warn = input.bool(true, "Warn on Non-Daily Charts", group = group_m1_signal, tooltip = "Show label when not on daily timeframe")
+
+// --- Peer / Contagion ---
+string group_m1_peer = "M1 — Peer / Contagion Filter"
+m1_use_peer_filter = input.bool(false, "Use Peer Filter", group = group_m1_peer, tooltip = "Enable correlation-based contagion detection")
+m1_peer_symbol     = input.symbol("AMEX:SPY", "Peer/Benchmark Symbol", group = group_m1_peer, tooltip = "Correlated asset for contagion monitoring")
+m1_corr_base_len   = input.int(120, "Baseline Correlation Length", minval = 20, maxval = 300, group = group_m1_peer, tooltip = "Long-term correlation baseline")
+m1_corr_event_len  = input.int(40, "Event Correlation Length", minval = 10, maxval = 150, group = group_m1_peer, tooltip = "Short-term correlation for sudden changes")
+m1_corr_z_thresh   = input.float(1.65, "Fisher-z Threshold", minval = 1.0, maxval = 3.5, step = 0.05, group = group_m1_peer, tooltip = "z-score threshold for correlation breakdown")
+
+// --- Kelly Sizing ---
+string group_m2_kelly = "M2 — Kelly Sizing"
+m2_kelly_mode      = input.string("Half", "Kelly Mode", options = ["Half", "Quarter", "Full", "Adaptive"], group = group_m2_kelly, tooltip = "Fractional Kelly for safety")
+m2_max_risk_pct    = input.float(5.0, "Max Risk % per Trade", minval = 0.5, maxval = 20.0, step = 0.5, group = group_m2_kelly, tooltip = "Cap on Kelly fraction as %")
+m2_lookback_trades = input.int(30, "Min Trades for Kelly", minval = 5, maxval = 200, group = group_m2_kelly, tooltip = "Minimum closed trades before Kelly activates")
+m2_min_qty         = input.float(0.01, "Minimum Quantity", minval = 0.0001, step = 0.01, group = group_m2_kelly, tooltip = "Minimum position size")
+
+// --- Drawdown Tiers ---
+string group_m2_dd = "M2 — Drawdown Tiers"
+m2_dd_tier1 = input.float(5.0, "Tier 1 Drawdown %", minval = 1.0, maxval = 20.0, step = 0.5, group = group_m2_dd, tooltip = "Reduce to 50% Kelly")
+m2_dd_tier2 = input.float(10.0, "Tier 2 Drawdown %", minval = 2.0, maxval = 30.0, step = 0.5, group = group_m2_dd, tooltip = "Reduce to 25% Kelly")
+m2_dd_tier3 = input.float(15.0, "Tier 3 Drawdown %", minval = 3.0, maxval = 50.0, step = 0.5, group = group_m2_dd, tooltip = "Reduce to 10% Kelly")
+
+// --- Walk-Forward ---
+string group_m3 = "M3 — Walk-Forward Optimization"
+m3_enable_wfo           = input.bool(true,  "Enable Walk-Forward Optimization",    group = group_m3, tooltip = "Master switch for WFO")
+m3_is_window            = input.int(252,     "IS Window (bars)",                    minval = 50,  maxval = 500,  group = group_m3)
+m3_oos_window           = input.int(63,      "OOS Window (bars)",                   minval = 20,  maxval = 150,  group = group_m3)
+m3_reopt_frequency      = input.int(21,      "Re-optimization Frequency (bars)",    minval = 5,   maxval = 100,  group = group_m3)
+m3_sim_bar_cap           = input.int(60,      "WFO Simulation Bars Cap",             minval = 20,  maxval = 120,  group = group_m3, tooltip = "Lower this to accelerate WFO; 60 preserves the current behavior")
+m3_combo_cap             = input.int(100,     "WFO Combination Cap",                 minval = 20,  maxval = 100,  group = group_m3, tooltip = "Lower this to accelerate WFO; 100 evaluates the full grid")
+m3_fast_min             = input.float(10.0,  "Fast EMA Min",                        minval = 5,   maxval = 50,   group = group_m3)
+m3_fast_max             = input.float(30.0,  "Fast EMA Max",                        minval = 5,   maxval = 50,   group = group_m3)
+m3_fast_step            = input.float(5.0,   "Fast EMA Step",                       minval = 1,   maxval = 10,   group = group_m3)
+m3_slow_min             = input.float(40.0,  "Slow EMA Min",                        minval = 20,  maxval = 100,  group = group_m3)
+m3_slow_max             = input.float(80.0,  "Slow EMA Max",                        minval = 20,  maxval = 100,  group = group_m3)
+m3_slow_step            = input.float(10.0,  "Slow EMA Step",                       minval = 5,   maxval = 20,   group = group_m3)
+m3_breakout_min         = input.float(10.0,  "Breakout Min",                        minval = 5,   maxval = 50,   group = group_m3)
+m3_breakout_max         = input.float(30.0,  "Breakout Max",                        minval = 5,   maxval = 50,   group = group_m3)
+m3_breakout_step        = input.float(5.0,   "Breakout Step",                       minval = 1,   maxval = 10,   group = group_m3)
+m3_robustness_threshold = input.float(0.7,   "Robustness Threshold",                minval = 0.1, maxval = 1.0,  step = 0.05, group = group_m3)
+m3_min_trades_for_opt   = input.int(10,      "Min Trades for Optimization",         minval = 5,   maxval = 50,   group = group_m3)
+m3_show_equity_curves   = input.bool(true,  "Show IS/OOS Equity Curves",           group = group_m3)
+m3_show_reopt_markers   = input.bool(true,  "Show Re-optimization Markers",        group = group_m3)
+
+// --- Crisis Scan ---
+string group_m4 = "M4 — Multi-Asset Crisis Scanner"
+m4_enable_scanner       = input.bool(true,  "Enable Crisis Scanner",               group = group_m4)
+m4_correlation_lookback = input.int(60,      "Correlation Lookback (bars)",          minval = 20,  maxval = 200, group = group_m4)
+m4_baseline_update_freq = input.int(120,     "Baseline Update Frequency (bars)",    minval = 50,  maxval = 500, group = group_m4)
+m4_collapse_threshold   = input.float(30.0,  "Correlation Collapse %",              minval = 10,  maxval = 80,  step = 5.0, group = group_m4)
+m4_vix_threshold        = input.float(25.0,  "VIX Proxy Threshold",                 minval = 10,  maxval = 60,  step = 1.0, group = group_m4)
+m4_vix_lookback         = input.int(20,      "VIX Lookback (bars)",                 minval = 10,  maxval = 60,  group = group_m4)
+m4_granger_lookback     = input.int(60,      "Granger Lookback (bars)",             minval = 30,  maxval = 200, group = group_m4)
+m4_granger_lag          = input.int(5,       "Granger Lag (bars)",                  minval = 2,   maxval = 20,  group = group_m4)
+m4_granger_significance = input.float(0.05,  "Granger Significance Level",          minval = 0.01, maxval = 0.2, step = 0.01, group = group_m4)
+m4_crisis_score_smooth  = input.int(5,       "Crisis Score Smoothing",              minval = 1,   maxval = 20,  group = group_m4)
+
+// --- Dashboard ---
+string group_m5_dash = "M5 — Portfolio Dashboard"
+m5_enable_dashboard    = input.bool(true,    "Enable Dashboard",                  group = group_m5_dash, tooltip = "Master switch for the dashboard table")
+m5_dashboard_pos       = input.string("top_right", "Panel Position",               options = ["top_right", "top_left", "bottom_right", "bottom_left"], group = group_m5_dash)
+m5_show_equity_plot    = input.bool(true,    "Show Equity Curve Plot",            group = group_m5_dash)
+m5_show_dd_plot        = input.bool(true,    "Show Drawdown Waterfall",           group = group_m5_dash)
+m5_show_regime_timeline = input.bool(true,   "Show Regime Timeline",              group = group_m5_dash)
+m5_bg_opacity          = input.int(90,        "Table BG Opacity",                  minval = 0, maxval = 100, group = group_m5_dash)
+m5_equity_history_len  = input.int(50,        "Equity History Length",             minval = 10, maxval = 500, group = group_m5_dash)
+m5_regime_history_len  = input.int(20,        "Regime History Length",             minval = 5, maxval = 100, group = group_m5_dash)
+
+// --- Alerts ---
+string group_m6_alert = "M6 — Alert Engine"
+m6_enable_alerts   = input.bool(true,    "Enable All Alerts",       group = group_m6_alert, tooltip = "Master switch for alert conditions")
+m6_alert_prefix    = input.string("SIGMA", "Alert Prefix",          group = group_m6_alert)
+m6_discord_format  = input.bool(false,   "Use Discord JSON Format", group = group_m6_alert)
+m6_min_severity    = input.string("INFO", "Minimum Severity Level", options = ["INFO", "WARNING", "CRITICAL"], group = group_m6_alert)
+
+// --- Session ---
+string group_m1_session = "M1 — Session Filter"
+m1_use_session_filter = input.bool(false, "Use Session Filter", group = group_m1_session, tooltip = "Only trade during specified hours")
+m1_session_hours      = input.string("0000-2359", "Session Time Range", group = group_m1_session, tooltip = "Format: HHMM-HHMM UTC")
+m1_use_day_filter     = input.bool(false, "Filter Trading Days", group = group_m1_session)
+m1_allow_monday       = input.bool(true, "Allow Monday", group = group_m1_session)
+m1_allow_tuesday      = input.bool(true, "Allow Tuesday", group = group_m1_session)
+m1_allow_wednesday    = input.bool(true, "Allow Wednesday", group = group_m1_session)
+m1_allow_thursday     = input.bool(true, "Allow Thursday", group = group_m1_session)
+m1_allow_friday       = input.bool(true, "Allow Friday", group = group_m1_session)
+
+// --- Risk / Display ---
+string group_m1_risk = "M1 — Risk / Display"
+m1_show_regime  = input.bool(true, "Show Regime Background", group = group_m1_risk)
+m1_show_signals = input.bool(true, "Show Signal Shapes", group = group_m1_risk)
+m1_show_stats   = input.bool(true, "Show Statistics Dashboard", group = group_m1_risk)
+m1_show_ann_vol = input.bool(false, "Show Annualized Volatility", group = group_m1_risk)
+
+// Runtime estimate of the largest historical offset used by the configured modules.
+// This is diagnostic only; strategy(max_bars_back=...) must use a constant.
+int auto_m3_need = math.min(m3_is_window, m3_sim_bar_cap) + 1
+int auto_m1_need = math.max(m1_full_len, m1_short_len) + 1
+int auto_m4_need = math.max(m4_correlation_lookback, math.max(m4_granger_lookback + m4_granger_lag, m4_baseline_update_freq + m4_vix_lookback)) + 1
+int auto_m5_need = math.max(m5_equity_history_len, m5_regime_history_len) + 1
+int auto_history_need = math.max(auto_m3_need, math.max(auto_m1_need, math.max(auto_m4_need, auto_m5_need))) + 10
+bool auto_history_warning = auto_history_need > 1000
+
+// =============================================================================
+// ===== MODULE 1: EMH-LAC REGIME ENGINE =====
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// M1.2: EFFECTIVE PRESETS (Asset-Class Calibrated)
+// ---------------------------------------------------------------------------
+var int    eff_full_len          = m1_full_len
+var int    eff_short_len         = m1_short_len
+var float  eff_alpha             = m1_alpha
+var float  eff_hurst_trend_thr   = 0.55
+var float  eff_hurst_mr_thr      = 0.45
+var float  eff_crisis_vol_mult   = 1.5
+var int    eff_atr_len           = 14
+var float  eff_stop_atr          = 2.0
+var float  eff_target_atr        = 3.0
+var float  eff_risk_pct          = 1.0
+var int    eff_lb_lags           = m1_lb_lags
+var int    eff_arch_lags         = m1_arch_lags
+var bool   eff_allow_rw1         = m1_allow_rw1
+var string eff_peer_symbol       = m1_peer_symbol
+var float  eff_atr_pct_threshold = 0.08
+var int    eff_max_hold_bars     = 5
+var float  eff_crisis_ann_vol    = 0.35
+
+// --- CRYPTO PRESETS ---
+if m1_asset_class == "Crypto"
+    if m1_crypto_type == "BTC"
+        eff_full_len          := 180
+        eff_short_len         := 60
+        eff_hurst_trend_thr   := 0.62
+        eff_hurst_mr_thr      := 0.42
+        eff_crisis_vol_mult   := 2.5
+        eff_atr_len           := 20
+        eff_stop_atr          := 3.0
+        eff_target_atr        := 2.0
+        eff_risk_pct          := 1.0
+        eff_lb_lags           := 12
+        eff_arch_lags         := 10
+        eff_allow_rw1         := false
+        eff_peer_symbol       := "BINANCE:BTCUSDT"
+        eff_atr_pct_threshold := 0.07
+        eff_max_hold_bars     := 7
+    else if m1_crypto_type == "ETH"
+        eff_full_len          := 180
+        eff_short_len         := 60
+        eff_hurst_trend_thr   := 0.60
+        eff_hurst_mr_thr      := 0.42
+        eff_crisis_vol_mult   := 2.5
+        eff_atr_len           := 20
+        eff_stop_atr          := 2.8
+        eff_target_atr        := 2.2
+        eff_risk_pct          := 1.25
+        eff_lb_lags           := 12
+        eff_arch_lags         := 10
+        eff_allow_rw1         := false
+        eff_peer_symbol       := "BINANCE:BTCUSDT"
+        eff_atr_pct_threshold := 0.08
+        eff_max_hold_bars     := 5
+    else
+        // Altcoin presets
+        eff_full_len          := 120
+        eff_short_len         := 40
+        eff_hurst_trend_thr   := 0.58
+        eff_hurst_mr_thr      := 0.40
+        eff_crisis_vol_mult   := 2.5
+        eff_atr_len           := 20
+        eff_stop_atr          := 2.5
+        eff_target_atr        := 2.5
+        eff_risk_pct          := 1.5
+        eff_lb_lags           := 10
+        eff_arch_lags         := 8
+        eff_allow_rw1         := false
+        eff_peer_symbol       := "BINANCE:BTCUSDT"
+        eff_atr_pct_threshold := 0.10
+        eff_max_hold_bars     := 3
+// --- FOREX PRESETS ---
+else if m1_asset_class == "Forex"
+    if m1_fx_type == "Majors"
+        eff_full_len       := 126
+        eff_short_len      := 42
+        eff_alpha          := 0.10
+        eff_crisis_vol_mult := 1.4
+        eff_atr_len        := 14
+        eff_stop_atr       := 1.8
+        eff_target_atr     := 2.5
+        eff_risk_pct       := 1.0
+        eff_lb_lags        := 12
+        eff_arch_lags      := 10
+        eff_allow_rw1      := false
+        eff_peer_symbol    := "TVC:DXY"
+    else if m1_fx_type == "Minors"
+        eff_full_len       := 126
+        eff_short_len      := 42
+        eff_alpha          := 0.08
+        eff_crisis_vol_mult := 1.5
+        eff_atr_len        := 14
+        eff_stop_atr       := 2.0
+        eff_target_atr     := 2.5
+        eff_risk_pct       := 1.0
+        eff_lb_lags        := 12
+        eff_arch_lags      := 10
+        eff_allow_rw1      := false
+        eff_peer_symbol    := "TVC:DXY"
+    else
+        // Exotics
+        eff_full_len       := 90
+        eff_short_len      := 30
+        eff_alpha          := 0.05
+        eff_crisis_vol_mult := 1.6
+        eff_atr_len        := 14
+        eff_stop_atr       := 2.3
+        eff_target_atr     := 2.0
+        eff_risk_pct       := 0.75
+        eff_lb_lags        := 10
+        eff_arch_lags      := 8
+        eff_allow_rw1      := false
+        eff_peer_symbol    := "TVC:DXY"
+// --- METALS PRESETS ---
+else if m1_asset_class == "Metals"
+    if m1_metal_type == "Gold"
+        eff_full_len       := 90
+        eff_short_len      := 30
+        eff_crisis_vol_mult := 1.5
+        eff_atr_len        := 14
+        eff_stop_atr       := 2.0
+        eff_target_atr     := 3.0
+        eff_risk_pct       := 0.5
+        eff_lb_lags        := 12
+        eff_arch_lags      := 10
+        eff_allow_rw1      := false
+        eff_peer_symbol    := "TVC:DXY"
+        eff_crisis_ann_vol := 0.35
+    else
+        // Silver
+        eff_full_len       := 90
+        eff_short_len      := 30
+        eff_crisis_vol_mult := 1.6
+        eff_atr_len        := 14
+        eff_stop_atr       := 2.5
+        eff_target_atr     := 2.5
+        eff_risk_pct       := 0.35
+        eff_lb_lags        := 10
+        eff_arch_lags      := 8
+        eff_allow_rw1      := false
+        eff_peer_symbol    := "TVC:DXY"
+        eff_crisis_ann_vol := 0.60
+
+// =============================================================================
+// M1.3: HELPER FUNCTIONS (shared across modules)
+// =============================================================================
+
+// Clamp a value between bounds
+clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
+
+// Safe absolute value (handles NA)
+abs_safe(float x) =>
+    na(x) ? 1e10 : math.abs(x)
+
+// Two-tailed normal critical value
+z_critical(float sig) =>
+    sig <= 0.01 ? 2.576 : sig >= 0.10 ? 1.645 : 1.96
+
+// Chi-squared critical value lookup
+chi2_critical(int df, float sig) =>
+    float result = 18.307
+    if sig <= 0.01
+        result := df == 1 ? 6.635 : df == 2 ? 9.210 : df == 3 ? 11.345 : df == 4 ? 13.277 : df == 5 ? 15.086 : df == 6 ? 16.812 : df == 7 ? 18.475 : df == 8 ? 20.090 : df == 9 ? 21.666 : df == 10 ? 23.209 : df == 11 ? 24.725 : df == 12 ? 26.217 : df == 16 ? 32.000 : df == 20 ? 37.566 : 23.209
+    else if sig >= 0.10
+        result := df == 1 ? 2.706 : df == 2 ? 4.605 : df == 3 ? 6.251 : df == 4 ? 7.779 : df == 5 ? 9.236 : df == 6 ? 10.645 : df == 7 ? 12.017 : df == 8 ? 13.362 : df == 9 ? 14.684 : df == 10 ? 15.987 : df == 11 ? 17.275 : df == 12 ? 18.549 : df == 16 ? 23.542 : df == 20 ? 28.412 : 15.987
+    else
+        // sig = 0.05 (default)
+        result := df == 1 ? 3.841 : df == 2 ? 5.991 : df == 3 ? 7.815 : df == 4 ? 9.488 : df == 5 ? 11.070 : df == 6 ? 12.592 : df == 7 ? 14.067 : df == 8 ? 15.507 : df == 9 ? 16.919 : df == 10 ? 18.307 : df == 11 ? 19.675 : df == 12 ? 21.026 : df == 16 ? 26.296 : df == 20 ? 31.410 : 18.307
+    result
+
+// Standard normal CDF (Abramowitz & Stegun)
+normal_cdf(float x) =>
+    float ax = math.abs(x)
+    float t = 1.0 / (1.0 + 0.2316419 * ax)
+    float d = 0.3989423 * math.exp(-0.5 * ax * ax)
+    float p = 1.0 - d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))))
+    x >= 0 ? p : 1.0 - p
+
+// Fisher z-transformation for correlation coefficients
+fisher_z(float rho) =>
+    float r = clamp(rho, -0.999999, 0.999999)
+    0.5 * math.log((1.0 + r) / (1.0 - r))
+
+// Regime code to human-readable string
+regime_name(int code) =>
+    code == 1 ? "RW1/RW2" : code == 2 ? "RW3" : code == 3 ? "INEFFICIENT" : "WARMUP"
+
+// Memory state to human-readable string
+memory_name(float m) =>
+    not na(m) ? (m > 0.55 ? "persistent" : m < 0.45 ? "anti-persistent" : "neutral") : "na"
+
+// M5 helper: regime name
+m5_regime_name(int regime) =>
+    regime == 1 ? "RW1 Trend" : regime == 2 ? "RW3 MeanRev" : regime == 3 ? "Inefficient" : "WARMUP"
+
+// M5 helper: memory type name
+m5_memory_name(float h) =>
+    h > 0.6 ? "Persistent" : h < 0.4 ? "Anti-Pers" : "Neutral"
+
+// M5 helper: risk-off level name
+m5_risk_off_name(int level) =>
+    level == 0 ? "Normal" : level == 1 ? "Elevated" : level == 2 ? "High" : "CRITICAL"
+
+// M5 helper: regime color
+m5_regime_color(int regime) =>
+    regime == 1 ? color.new(color.green, 20) : regime == 2 ? color.new(color.yellow, 20) : regime == 3 ? color.new(color.red, 20) : color.new(color.gray, 20)
+
+// M5 helper: regime background color
+m5_regime_bg_color(int regime) =>
+    regime == 1 ? color.new(color.green, 85) : regime == 2 ? color.new(color.yellow, 85) : regime == 3 ? color.new(color.red, 85) : color.new(color.gray, 90)
+
+// M4 helper: safe nz wrapper
+nz_f(float x, float def) => na(x) ? def : x
+
+// =============================================================================
+// M1.4: STATISTICAL TEST FUNCTIONS
+// =============================================================================
+
+auto_corr(series float src, int len, int lag) =>
+    ta.correlation(src, src[lag], len)
+
+ljung_box(series float src, int len, int max_lag) =>
+    float n = len
+    float q = 0.0
+    for lag_i = 1 to max_lag
+        float rho = auto_corr(src, len, lag_i)
+        q += not na(rho) and n > lag_i ? (rho * rho) / (n - lag_i) : 0.0
+    n * (n + 2.0) * q
+
+runs_test_zero(series float src, int len) =>
+    int runs = 0
+    int n_pos = 0
+    int n_neg = 0
+    int prev_sign = 0
+    for i = 0 to len - 1
+        float v = src[i]
+        int s = na(v) ? 0 : v > 0 ? 1 : v < 0 ? -1 : 0
+        if s != 0
+            if prev_sign == 0
+                runs := 1
+            else if s != prev_sign
+                runs += 1
+            if s > 0
+                n_pos += 1
+            else
+                n_neg += 1
+            prev_sign := s
+    int n_tot = n_pos + n_neg
+    float exp_runs = n_tot > 0 ? (2.0 * n_pos * n_neg) / n_tot + 1.0 : na
+    float var_runs = n_tot > 1 ? (2.0 * n_pos * n_neg * (2.0 * n_pos * n_neg - n_tot)) / (math.pow(n_tot, 2) * (n_tot - 1.0)) : na
+    float z_run = not na(var_runs) and var_runs > 0 ? (runs - exp_runs) / math.sqrt(var_runs) : na
+    float p_run = not na(z_run) ? 2.0 * (1.0 - normal_cdf(math.abs(z_run))) : na
+    [runs, z_run, p_run]
+
+vr_test_homo(series float src, int len, int k) =>
+    float var1 = math.pow(ta.stdev(src, len), 2)
+    float rk = math.sum(src, k)
+    float vark = math.pow(ta.stdev(rk, len), 2)
+    float vr = na
+    float z_vr = na
+    if not na(var1) and var1 > 0 and not na(vark)
+        vr := vark / (k * var1)
+        float se = math.sqrt(2.0 * (2.0 * k - 1.0) * (k - 1.0) / (3.0 * k * len))
+        z_vr := se > 0 ? (vr - 1.0) / se : na
+    [vr, z_vr]
+
+vr_test_rw3_proxy(series float src, int len, int k, float arch_q, float arch_crit) =>
+    [vr, z_homo] = vr_test_homo(src, len, k)
+    float arch_strength = arch_crit > 0 ? math.max(arch_q / arch_crit, 1.0) : 1.0
+    float scale = math.sqrt(arch_strength)
+    float z_rw3 = not na(z_homo) ? z_homo / scale : na
+    [vr, z_rw3]
+
+hurst_rs(series float src, int len) =>
+    float mean_s = ta.sma(src, len)
+    float stdev_s = ta.stdev(src, len)
+    float cum_dev = 0.0
+    float max_cum = -1e10
+    float min_cum = 1e10
+    for i = 0 to len - 1
+        float dv = nz(src[len - 1 - i]) - mean_s
+        cum_dev += dv
+        max_cum := math.max(max_cum, cum_dev)
+        min_cum := math.min(min_cum, cum_dev)
+    float rs_range = stdev_s > 0 ? (max_cum - min_cum) / stdev_s : na
+    float h_est = not na(rs_range) and rs_range > 0 and len > 1 ? math.log(rs_range) / math.log(len) : 0.5
+    clamp(h_est, 0.0, 1.0)
+
+// =============================================================================
+// M1.5: REGIME CLASSIFICATION FUNCTION
+// =============================================================================
+
+classify_regime(series float src, int len, float sig, int lb_n, int arch_n, int k1, int k2, int k3, int k4) =>
+    int warmup_needed = len + math.max(math.max(lb_n, arch_n), k4) + 5
+    if bar_index < warmup_needed
+        [0, na, na, na, na, na, na, na, na]
+    else
+        float z_cut = z_critical(sig)
+        float lb_q = ljung_box(src, len, lb_n)
+        float lb_crit = chi2_critical(lb_n, sig)
+        bool lb_pass = lb_q < lb_crit
+        [vr1_a, z1_a] = vr_test_homo(src, len, k1)
+        [vr1_b, z1_b] = vr_test_homo(src, len, k2)
+        [vr1_c, z1_c] = vr_test_homo(src, len, k3)
+        [vr1_d, z1_d] = vr_test_homo(src, len, k4)
+        float vr1_max = math.max(math.max(abs_safe(z1_a), abs_safe(z1_b)), math.max(abs_safe(z1_c), abs_safe(z1_d)))
+        bool vr1_pass = vr1_max < z_cut
+        float sq_ret = math.pow(src - ta.sma(src, len), 2)
+        float arch_q = ljung_box(sq_ret, len, arch_n)
+        float arch_crit = chi2_critical(arch_n, sig)
+        bool arch_exists = arch_q > arch_crit
+        [runs_num, runs_z, runs_p] = runs_test_zero(src, len)
+        [vr3_a, z3_a] = vr_test_rw3_proxy(src, len, k1, arch_q, arch_crit)
+        [vr3_b, z3_b] = vr_test_rw3_proxy(src, len, k2, arch_q, arch_crit)
+        [vr3_c, z3_c] = vr_test_rw3_proxy(src, len, k3, arch_q, arch_crit)
+        [vr3_d, z3_d] = vr_test_rw3_proxy(src, len, k4, arch_q, arch_crit)
+        float vr3_max = math.max(math.max(abs_safe(z3_a), abs_safe(z3_b)), math.max(abs_safe(z3_c), abs_safe(z3_d)))
+        bool vr3_pass = vr3_max < z_cut
+        bool uncorr_pass = lb_pass and vr1_pass
+        int regime = 0
+        if not uncorr_pass
+            regime := 3
+        else if arch_exists
+            regime := 2
+        else
+            regime := not na(runs_p) and runs_p > sig ? 1 : vr3_pass ? 2 : 3
+        float mem = hurst_rs(src, len)
+        [regime, lb_q, lb_crit, arch_q, arch_crit, runs_p, vr1_max, vr3_max, mem]
+
+// =============================================================================
+// M1.6: LOG RETURNS + DUAL-WINDOW REGIME CALCULATION
+// =============================================================================
+
+float m1_ret = close[1] > 0 and close > 0 ? math.log(close / close[1]) : na
+max_bars_back(m1_ret, 80)
+[reg_full, lb_q_f, lb_crit_f, arch_q_f, arch_crit_f, runs_p_f, vr1_f, vr3_f, mem_f] = classify_regime(m1_ret, eff_full_len, eff_alpha, eff_lb_lags, eff_arch_lags, m1_vr_k1, m1_vr_k2, m1_vr_k3, m1_vr_k4)
+[reg_short, lb_q_s, lb_crit_s, arch_q_s, arch_crit_s, runs_p_s, vr1_s, vr3_s, mem_s] = classify_regime(m1_ret, eff_short_len, eff_alpha, eff_lb_lags, eff_arch_lags, m1_vr_k1, m1_vr_k2, m1_vr_k3, m1_vr_k4)
+float m1_vol_full = ta.stdev(m1_ret, eff_full_len)
+float m1_vol_short = ta.stdev(m1_ret, eff_short_len)
+bool m1_crisis_mode = not na(m1_vol_full) and not na(m1_vol_short) and m1_vol_short > m1_vol_full * eff_crisis_vol_mult
+
+// =============================================================================
+// M1.7: ACTIVE REGIME SELECTION
+// =============================================================================
+
+var int    m1_active_regime    = 0
+var float  m1_active_mem       = na
+var float  m1_active_lb_q      = na
+var float  m1_active_lb_crit   = na
+var float  m1_active_arch_q    = na
+var float  m1_active_arch_crit = na
+var float  m1_active_runs_p    = na
+var float  m1_active_vr1       = na
+var float  m1_active_vr3       = na
+
+m1_active_regime    := reg_full
+m1_active_mem       := mem_f
+m1_active_lb_q      := lb_q_f
+m1_active_lb_crit   := lb_crit_f
+m1_active_arch_q    := arch_q_f
+m1_active_arch_crit := arch_crit_f
+m1_active_runs_p    := runs_p_f
+m1_active_vr1       := vr1_f
+m1_active_vr3       := vr3_f
+
+if m1_mode == "Short"
+    m1_active_regime    := reg_short
+    m1_active_mem       := mem_s
+    m1_active_lb_q      := lb_q_s
+    m1_active_lb_crit   := lb_crit_s
+    m1_active_arch_q    := arch_q_s
+    m1_active_arch_crit := arch_crit_s
+    m1_active_runs_p    := runs_p_s
+    m1_active_vr1       := vr1_s
+    m1_active_vr3       := vr3_s
+else if m1_mode == "Adaptive"
+    if m1_crisis_mode and reg_short != 0
+        m1_active_regime    := reg_short
+        m1_active_mem       := mem_s
+        m1_active_lb_q      := lb_q_s
+        m1_active_lb_crit   := lb_crit_s
+        m1_active_arch_q    := arch_q_s
+        m1_active_arch_crit := arch_crit_s
+        m1_active_runs_p    := runs_p_s
+        m1_active_vr1       := vr1_s
+        m1_active_vr3       := vr3_s
+
+// =============================================================================
+// M1.8: PEER / CONTAGION FILTER
+// =============================================================================
+
+float m1_peer_close = request.security(eff_peer_symbol, timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m1_peer_ret = m1_peer_close[1] > 0 and m1_peer_close > 0 ? math.log(m1_peer_close / m1_peer_close[1]) : na
+float m1_corr_base = ta.correlation(m1_ret, m1_peer_ret, m1_corr_base_len)
+float m1_corr_event = ta.correlation(m1_ret, m1_peer_ret, m1_corr_event_len)
+var float m1_corr_z = na
+if not na(m1_corr_base) and not na(m1_corr_event) and m1_corr_base_len > 3 and m1_corr_event_len > 3
+    m1_corr_z := (fisher_z(m1_corr_event) - fisher_z(m1_corr_base)) / math.sqrt(1.0 / (m1_corr_event_len - 3) + 1.0 / (m1_corr_base_len - 3))
+bool m1_crypto_peer_shock = m1_asset_class == "Crypto" and m1_use_peer_filter and not na(m1_corr_base) and m1_corr_base > 0.90
+bool m1_peer_shock = (m1_use_peer_filter and not na(m1_corr_z) and m1_corr_event > m1_corr_base and m1_corr_z > m1_corr_z_thresh) or m1_crypto_peer_shock
+
+// =============================================================================
+// M1.9: METALS MARKET DATA (Safe-haven + Liquidity)
+// =============================================================================
+
+float m1_sp500_close = request.security("TVC:SPX", timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m1_sp500_ret = m1_sp500_close[1] > 0 and m1_sp500_close > 0 ? math.log(m1_sp500_close / m1_sp500_close[1]) : na
+string m1_metal_secondary_sym = m1_metal_type == "Gold" ? "TVC:SILVER" : "TVC:GOLD"
+float m1_metal_secondary_close = request.security(m1_metal_secondary_sym, timeframe.period, close, lookahead = barmerge.lookahead_off)
+
+// =============================================================================
+// M1.10: FOREX GAP DETECTOR
+// =============================================================================
+
+var int m1_gap_freeze_cnt = 0
+float m1_ret_stdev_20 = ta.stdev(m1_ret, 20)
+bool m1_large_gap = m1_asset_class == "Forex" and not na(m1_ret) and not na(m1_ret_stdev_20) and m1_ret_stdev_20 > 0 and math.abs(m1_ret) > m1_ret_stdev_20 * 3.0
+if m1_large_gap
+    m1_gap_freeze_cnt := 2
+else if m1_gap_freeze_cnt > 0
+    m1_gap_freeze_cnt -= 1
+bool m1_gap_freeze = m1_gap_freeze_cnt > 0
+
+// =============================================================================
+// M1.11: METALS LIQUIDITY CRISIS DETECTOR
+// =============================================================================
+
+var int m1_liquidity_crisis_cnt = 0
+bool m1_metals_crisis_trigger = m1_asset_class == "Metals" and not na(m1_sp500_ret) and m1_sp500_ret < -0.02 and not na(m1_ret) and m1_ret < -0.01
+if m1_metals_crisis_trigger
+    m1_liquidity_crisis_cnt := 3
+else if m1_liquidity_crisis_cnt > 0
+    m1_liquidity_crisis_cnt -= 1
+bool m1_liquidity_crisis = m1_liquidity_crisis_cnt > 0
+
+// =============================================================================
+// M1.12: CIRCUIT BREAKER (Trailing Drawdown)
+// =============================================================================
+
+var float m1_peak_equity = strategy.equity
+if strategy.equity > m1_peak_equity
+    m1_peak_equity := strategy.equity
+bool m1_circuit_breaker = strategy.equity < m1_peak_equity * 0.98
+
+// =============================================================================
+// M1.13: SESSION FILTER
+// =============================================================================
+
+bool m1_in_session = true
+if m1_use_session_filter
+    m1_in_session := time(timeframe.period, m1_session_hours) != 0
+bool m1_day_allowed = true
+if m1_use_day_filter
+    int dow = dayofweek(time)
+    m1_day_allowed := (dow == dayofweek.monday and m1_allow_monday) or (dow == dayofweek.tuesday and m1_allow_tuesday) or (dow == dayofweek.wednesday and m1_allow_wednesday) or (dow == dayofweek.thursday and m1_allow_thursday) or (dow == dayofweek.friday and m1_allow_friday)
+bool m1_session_ok = m1_in_session and m1_day_allowed
+
+// =============================================================================
+// M1.14: TECHNICAL INDICATORS
+// =============================================================================
+
+float m1_ema_fast = ta.ema(close, m1_fast_len)
+float m1_ema_slow = ta.ema(close, m1_slow_len)
+float m1_basis    = ta.sma(close, m1_meanrev_len)
+float m1_dev      = ta.stdev(close, m1_meanrev_len)
+float m1_z_px     = m1_dev > 0 ? (close - m1_basis) / m1_dev : 0.0
+float m1_rsi_val  = ta.rsi(close, 14)
+float m1_atr_val  = ta.atr(eff_atr_len)
+float m1_break_high_prev = ta.highest(high, m1_breakout_len)[1]
+float m1_break_low_prev  = ta.lowest(low, m1_breakout_len)[1]
+float m1_vol_now   = ta.stdev(m1_ret, 20)
+float m1_vol_base2 = ta.stdev(m1_ret, 60)
+bool  m1_vol_expanding = not na(m1_vol_now) and not na(m1_vol_base2) and m1_vol_now > m1_vol_base2 * 1.2
+bool m1_trend_up = m1_ema_fast > m1_ema_slow and close > m1_ema_slow
+bool m1_trend_dn = m1_ema_fast < m1_ema_slow and close < m1_ema_slow
+float m1_ann_vol_stdev = ta.stdev(m1_ret, 20)
+float m1_ann_vol = not na(m1_ann_vol_stdev) ? m1_ann_vol_stdev * math.sqrt(252) : na
+bool m1_persistent      = not na(m1_active_mem) and m1_active_mem > eff_hurst_trend_thr
+bool m1_anti_persistent = not na(m1_active_mem) and m1_active_mem < eff_hurst_mr_thr
+if m1_asset_class == "Metals" and not na(m1_ann_vol) and m1_ann_vol > eff_crisis_ann_vol and not na(m1_active_mem) and m1_active_mem > 0.52
+    m1_persistent := true
+
+// =============================================================================
+// M1.15: SIGNAL READINESS CHECK
+// =============================================================================
+
+bool m1_ready = m1_active_regime != 0 and not na(m1_active_mem) and not na(m1_atr_val) and not na(m1_ema_slow) and not na(m1_basis)
+
+// =============================================================================
+// M1.16: SAFE-HAVEN LONG LOGIC (METALS ONLY)
+// =============================================================================
+
+bool m1_safe_haven_long = m1_asset_class == "Metals" and not na(m1_sp500_ret) and m1_sp500_ret < -0.02 and not na(m1_ret) and m1_ret > 0.005 and m1_active_regime == 3 and m1_anti_persistent
+
+// =============================================================================
+// ===== MODULE 3: WALK-FORWARD OPTIMIZATION ENGINE =====
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// M3.2: PRE-COMPUTED INDICATORS
+// ---------------------------------------------------------------------------
+
+float m3_ema_f10 = ta.ema(close, 10)
+float m3_ema_f15 = ta.ema(close, 15)
+float m3_ema_f20 = ta.ema(close, 20)
+float m3_ema_f25 = ta.ema(close, 25)
+float m3_ema_f30 = ta.ema(close, 30)
+float m3_ema_s40 = ta.ema(close, 40)
+float m3_ema_s50 = ta.ema(close, 50)
+float m3_ema_s60 = ta.ema(close, 60)
+float m3_ema_s70 = ta.ema(close, 70)
+float m3_ema_s80 = ta.ema(close, 80)
+float m3_hh_10 = ta.highest(high, 10)
+float m3_hh_15 = ta.highest(high, 15)
+float m3_hh_20 = ta.highest(high, 20)
+float m3_hh_25 = ta.highest(high, 25)
+float m3_hh_30 = ta.highest(high, 30)
+float m3_ll_10 = ta.lowest(low, 10)
+float m3_ll_15 = ta.lowest(low, 15)
+float m3_ll_20 = ta.lowest(low, 20)
+float m3_ll_25 = ta.lowest(low, 25)
+float m3_ll_30 = ta.lowest(low, 30)
+m3_sel_fast(int idx) => idx == 0 ? m3_ema_f10 : idx == 1 ? m3_ema_f15 : idx == 2 ? m3_ema_f20 : idx == 3 ? m3_ema_f25 : m3_ema_f30
+m3_sel_slow(int idx) => idx == 0 ? m3_ema_s40 : idx == 1 ? m3_ema_s50 : idx == 2 ? m3_ema_s60 : idx == 3 ? m3_ema_s70 : m3_ema_s80
+m3_sel_hh(int idx)   => idx == 0 ? m3_hh_10   : idx == 1 ? m3_hh_15   : idx == 2 ? m3_hh_20   : idx == 3 ? m3_hh_25   : m3_hh_30
+m3_sel_ll(int idx)   => idx == 0 ? m3_ll_10   : idx == 1 ? m3_ll_15   : idx == 2 ? m3_ll_20   : idx == 3 ? m3_ll_25   : m3_ll_30
+
+// ---------------------------------------------------------------------------
+// M3.3: STATE VARIABLES
+// ---------------------------------------------------------------------------
+
+var int    m3_last_reopt_bar    = 0
+var int    m3_next_reopt_bar    = 21
+var int    m3_reopt_count       = 0
+var float  m3_best_fast         = 20.0
+var float  m3_best_slow         = 50.0
+var float  m3_best_breakout     = 20.0
+var float  m3_best_score        = 0.0
+var float  m3_robustness_score  = 0.0
+var bool   m3_params_valid      = false
+var bool   m3_reopt_completed   = false
+var float  m3_is_equity         = na
+var float  m3_oos_equity        = na
+var float  m3_best_is_pnl       = 0.0
+var float  m3_best_oos_pnl      = 0.0
+var float  m3_prev_fast         = 20.0
+var float  m3_prev_slow         = 50.0
+var float  m3_prev_breakout     = 20.0
+var float  m3_stability_score   = 1.0
+var float  m3_opt_fast_len      = 20.0
+var float  m3_opt_slow_len      = 50.0
+var float  m3_opt_breakout_len  = 20.0
+var int    m3_last_is_bars       = 0
+var int    m3_last_oos_bars      = 0
+var int    m3_last_combo_count   = 0
+var int    m3_estimated_ops      = 0
+
+// ---------------------------------------------------------------------------
+// M3.4: SIMULATION & OPTIMIZATION FUNCTIONS
+// ---------------------------------------------------------------------------
+
+m3_simulate_strategy(int fast_idx, int slow_idx, int breakout_idx, int window) =>
+    int f_i   = fast_idx < 0 ? 0 : fast_idx > 4 ? 4 : fast_idx
+    int s_i   = slow_idx < 0 ? 0 : slow_idx > 4 ? 4 : slow_idx
+    int b_i   = breakout_idx < 0 ? 0 : breakout_idx > 4 ? 4 : breakout_idx
+    float fe  = m3_sel_fast(f_i)
+    float se  = m3_sel_slow(s_i)
+    float hh  = m3_sel_hh(b_i)
+    float ll  = m3_sel_ll(b_i)
+    float pnl = 0.0
+    int   tc  = 0
+    int requested_w = window < 10 ? 10 : window > m3_sim_bar_cap ? m3_sim_bar_cap : window
+    // hh[i + 1] and ll[i + 1] require one extra historical bar.
+    int   available_w = math.max(0, bar_index - 1)
+    int   w = math.min(requested_w, available_w)
+
+    if w >= 1
+        for i = 1 to w
+            bool insufficient_history = na(fe[i]) or na(se[i]) or na(close[i]) or na(hh[i + 1]) or na(ll[i + 1]) or na(m1_ret[i])
+            if not insufficient_history
+                bool trend_up  = fe[i] > se[i]
+                bool trend_dn  = fe[i] < se[i]
+                bool long_sig  = trend_up and close[i] > hh[i + 1]
+                bool short_sig = trend_dn and close[i] < ll[i + 1]
+                if long_sig
+                    pnl := pnl + m1_ret[i]
+                    tc  := tc + 1
+                else if short_sig
+                    pnl := pnl - m1_ret[i]
+                    tc  := tc + 1
+    float min_trades_safe = math.max(1.0, m3_min_trades_for_opt)
+    float score = tc >= m3_min_trades_for_opt ? pnl : pnl * (tc / min_trades_safe)
+    score
+
+m3_optimize_params(int is_window) =>
+    float best_fast     = m3_best_fast
+    float best_slow     = m3_best_slow
+    float best_breakout = m3_best_breakout
+    float best_score    = -999999.0
+    int   combos        = 0
+    for f_i = 0 to 4
+        for s_i = 0 to 4
+            for b_i = 0 to 3
+                if combos < m3_combo_cap
+                    float score = m3_simulate_strategy(f_i, s_i, b_i, is_window)
+                    if score > best_score
+                        best_score    := score
+                        best_fast     := m3_fast_min + f_i * m3_fast_step
+                        best_slow     := m3_slow_min + s_i * m3_slow_step
+                        best_breakout := m3_breakout_min + b_i * m3_breakout_step
+                    combos := combos + 1
+    [best_fast, best_slow, best_breakout, best_score]
+
+m3_test_oos(int fast_idx, int slow_idx, int breakout_idx, int oos_window) =>
+    m3_simulate_strategy(fast_idx, slow_idx, breakout_idx, oos_window)
+
+m3_robustness_score_fn(float is_score, float oos_score) =>
+    float is_abs = math.abs(is_score)
+    float is_safe = is_abs < 0.0001 ? 0.0001 : is_abs
+    float raw_robust = is_score > 0.0 ? oos_score / is_score : (is_score < 0.0 ? oos_score / is_safe : 0.0)
+    raw_robust < -5.0 ? -5.0 : raw_robust > 5.0 ? 5.0 : raw_robust
+
+m3_parameter_stability(float c_f, float c_s, float c_b, float p_f, float p_s, float p_b) =>
+    float f_range_safe = (m3_fast_max - m3_fast_min) < 0.0001 ? 0.0001 : (m3_fast_max - m3_fast_min)
+    float s_range_safe = (m3_slow_max - m3_slow_min) < 0.0001 ? 0.0001 : (m3_slow_max - m3_slow_min)
+    float b_range_safe = (m3_breakout_max - m3_breakout_min) < 0.0001 ? 0.0001 : (m3_breakout_max - m3_breakout_min)
+    float fd = math.abs(c_f - p_f) / f_range_safe
+    float sd = math.abs(c_s - p_s) / s_range_safe
+    float bd = math.abs(c_b - p_b) / b_range_safe
+    float stab = 1.0 - (fd + sd + bd) / 3.0
+    stab < 0.0 ? 0.0 : stab
+
+m3_fast_to_idx(float val) =>
+    int idx = math.floor((val - m3_fast_min) / m3_fast_step)
+    idx < 0 ? 0 : idx > 4 ? 4 : idx
+
+m3_slow_to_idx(float val) =>
+    int idx = math.floor((val - m3_slow_min) / m3_slow_step)
+    idx < 0 ? 0 : idx > 4 ? 4 : idx
+
+m3_breakout_to_idx(float val) =>
+    int idx = math.floor((val - m3_breakout_min) / m3_breakout_step)
+    idx < 0 ? 0 : idx > 4 ? 4 : idx
+
+// ---------------------------------------------------------------------------
+// M3.5: PER-BAR EXECUTION
+// ---------------------------------------------------------------------------
+
+bool m3_reopt_due = m3_enable_wfo and bar_index >= m3_next_reopt_bar and bar_index > m3_is_window + m3_oos_window + 10
+if m3_reopt_due
+    int is_win_raw = bar_index - m3_oos_window - m3_is_window
+    int is_win_cl  = is_win_raw < 1 ? 1 : is_win_raw
+    int is_end_bar = bar_index - m3_oos_window
+    int is_actual  = is_end_bar - is_win_cl
+    int oos_actual = m3_oos_window < 5 ? 5 : m3_oos_window > m3_sim_bar_cap ? m3_sim_bar_cap : m3_oos_window
+    m3_last_is_bars := math.min(is_actual, m3_sim_bar_cap)
+    m3_last_oos_bars := oos_actual
+    m3_last_combo_count := m3_combo_cap
+    m3_estimated_ops := m3_last_combo_count * (m3_last_is_bars + m3_last_oos_bars)
+    if is_actual > 20
+        [opt_f, opt_s, opt_b, is_score] = m3_optimize_params(is_actual)
+        int oos_fi = m3_fast_to_idx(opt_f)
+        int oos_si = m3_slow_to_idx(opt_s)
+        int oos_bi = m3_breakout_to_idx(opt_b)
+        oos_bi := oos_bi > 3 ? 3 : oos_bi
+        float oos_score = m3_test_oos(oos_fi, oos_si, oos_bi, oos_actual)
+        float robust    = m3_robustness_score_fn(is_score, oos_score)
+        float stab      = m3_parameter_stability(opt_f, opt_s, opt_b, m3_prev_fast, m3_prev_slow, m3_prev_breakout)
+        bool accept     = robust >= m3_robustness_threshold and is_score > 0.0
+        if accept
+            m3_prev_fast     := m3_best_fast
+            m3_prev_slow     := m3_best_slow
+            m3_prev_breakout := m3_best_breakout
+            m3_best_fast     := opt_f
+            m3_best_slow     := opt_s
+            m3_best_breakout := opt_b
+            m3_best_score    := is_score
+            m3_best_is_pnl   := is_score
+            m3_best_oos_pnl  := oos_score
+            m3_robustness_score := robust
+            m3_stability_score  := stab
+            m3_params_valid    := true
+            m3_opt_fast_len     := opt_f
+            m3_opt_slow_len     := opt_s
+            m3_opt_breakout_len := opt_b
+        if not accept
+            m3_robustness_score := robust
+            m3_stability_score  := stab
+            m3_params_valid    := false
+        m3_reopt_completed := true
+        m3_reopt_count     := m3_reopt_count + 1
+        m3_last_reopt_bar  := bar_index
+        m3_next_reopt_bar  := bar_index + m3_reopt_frequency
+        m3_is_equity  := is_score
+        m3_oos_equity := oos_score
+    else
+        m3_reopt_completed := false
+else
+    m3_reopt_completed := false
+int m3_bars_to_reopt = bar_index >= m3_next_reopt_bar ? 0 : m3_next_reopt_bar - bar_index
+
+// =============================================================================
+// ===== MODULE 4: MULTI-ASSET CRISIS SCANNER =====
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// M4.2: PEER SYMBOL DEFINITIONS
+// ---------------------------------------------------------------------------
+
+string m4_sym_spx    = "SPX"
+string m4_sym_dxy    = "DXY"
+string m4_sym_gold   = "XAUUSD"
+string m4_sym_btc    = "BTCUSD"
+string m4_sym_eth    = "ETHUSD"
+string m4_sym_vix    = "VIX"
+string m4_sym_tnx    = "TNX"
+string m4_sym_cl     = "USOIL"
+string m4_sym_eurusd = "EURUSD"
+
+// ---------------------------------------------------------------------------
+// M4.3: request.security (all at global scope, lookahead OFF)
+// ---------------------------------------------------------------------------
+
+float m4_p_spx    = request.security(m4_sym_spx,    timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_dxy    = request.security(m4_sym_dxy,    timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_gold   = request.security(m4_sym_gold,   timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_btc    = request.security(m4_sym_btc,    timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_eth    = request.security(m4_sym_eth,    timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_vix    = request.security(m4_sym_vix,    timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_tnx    = request.security(m4_sym_tnx,    timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_cl     = request.security(m4_sym_cl,     timeframe.period, close, lookahead = barmerge.lookahead_off)
+float m4_p_eurusd = request.security(m4_sym_eurusd, timeframe.period, close, lookahead = barmerge.lookahead_off)
+
+// ---------------------------------------------------------------------------
+// M4.4: RETURNS CALCULATION
+// ---------------------------------------------------------------------------
+
+float m4_r_spx    = nz_f(math.log(m4_p_spx / nz_f(m4_p_spx[1], m4_p_spx)), 0.0)
+float m4_r_dxy    = nz_f(math.log(m4_p_dxy / nz_f(m4_p_dxy[1], m4_p_dxy)), 0.0)
+float m4_r_gold   = nz_f(math.log(m4_p_gold / nz_f(m4_p_gold[1], m4_p_gold)), 0.0)
+float m4_r_btc    = nz_f(math.log(m4_p_btc / nz_f(m4_p_btc[1], m4_p_btc)), 0.0)
+float m4_r_eth    = nz_f(math.log(m4_p_eth / nz_f(m4_p_eth[1], m4_p_eth)), 0.0)
+float m4_r_vix    = nz_f(math.log(m4_p_vix / nz_f(m4_p_vix[1], m4_p_vix)), 0.0)
+float m4_r_tnx    = nz_f(math.log(m4_p_tnx / nz_f(m4_p_tnx[1], m4_p_tnx)), 0.0)
+float m4_r_cl     = nz_f(math.log(m4_p_cl / nz_f(m4_p_cl[1], m4_p_cl)), 0.0)
+float m4_r_eurusd = nz_f(math.log(m4_p_eurusd / nz_f(m4_p_eurusd[1], m4_p_eurusd)), 0.0)
+
+// ---------------------------------------------------------------------------
+// M4.5: STATE VARIABLES
+// ---------------------------------------------------------------------------
+
+var float m4_crisis_score_raw    = 0.0
+var float m4_crisis_score        = 0.0
+var int   m4_crisis_level        = 0
+var float m4_base_corr_spx_btc   = 0.0
+var float m4_base_corr_spx_eth   = 0.0
+var float m4_base_corr_spx_gold  = 0.0
+var float m4_base_corr_dxy_gold  = 0.0
+var float m4_curr_corr_spx_btc   = 0.0
+var float m4_curr_corr_spx_eth   = 0.0
+var float m4_curr_corr_spx_gold  = 0.0
+var float m4_curr_corr_dxy_gold  = 0.0
+var float m4_vix_proxy_value     = 0.0
+var float m4_vix_proxy_smooth    = 0.0
+var float m4_granger_spx_btc     = 0.0
+var float m4_granger_spx_gold    = 0.0
+var float m4_granger_dxy_gold    = 0.0
+var float m4_score_correlation   = 0.0
+var float m4_score_vix           = 0.0
+var float m4_score_granger       = 0.0
+var float m4_score_volatility    = 0.0
+var bool  m4_corr_shock          = false
+var bool  m4_corr_collapse_flag  = false
+var bool  m4_early_warning       = false
+var int   m4_risk_off_level      = 0
+var int   m4_baseline_counter    = 0
+
+// ---------------------------------------------------------------------------
+// M4.6: CORRELATION FUNCTIONS
+// ---------------------------------------------------------------------------
+
+m4_correlation(series float src1, series float src2, int length) =>
+    int len = length < 5 ? 5 : length
+    float mean1 = ta.sma(src1, len)
+    float mean2 = ta.sma(src2, len)
+    float cov = ta.sma((src1 - mean1) * (src2 - mean2), len)
+    float std1 = ta.stdev(src1, len)
+    float std2 = ta.stdev(src2, len)
+    float dnom = std1 * std2
+    float corr = dnom == 0.0 or na(dnom) ? 0.0 : cov / dnom
+    corr
+
+m4_scan_correlations() =>
+    int   lb = m4_correlation_lookback
+    float c1 = m4_correlation(m4_r_spx, m4_r_btc, lb)
+    float c2 = m4_correlation(m4_r_spx, m4_r_eth, lb)
+    float c3 = m4_correlation(m4_r_spx, m4_r_gold, lb)
+    float c4 = m4_correlation(m4_r_dxy, m4_r_gold, lb)
+    float c5 = m4_correlation(m4_r_spx, m4_r_dxy, lb)
+    float c6 = m4_correlation(m4_r_btc, m4_r_eth, lb)
+    float avg_c = (math.abs(c1) + math.abs(c2) + math.abs(c3) + math.abs(c4) + math.abs(c5) + math.abs(c6)) / 6.0
+    float mc  = (c1 + c2 + c3 + c4 + c5 + c6) / 6.0
+    float vc  = ((c1 - mc) * (c1 - mc) + (c2 - mc) * (c2 - mc) + (c3 - mc) * (c3 - mc) + (c4 - mc) * (c4 - mc) + (c5 - mc) * (c5 - mc) + (c6 - mc) * (c6 - mc)) / 6.0
+    float dc  = math.sqrt(math.abs(vc))
+    [c1, c2, c3, c4, avg_c, dc]
+
+m4_detect_correlation_collapse(float current_corr, float base_corr) =>
+    float base_abs = math.abs(base_corr)
+    float base_s   = base_abs < 0.01 ? 0.01 : base_abs
+    float curr_abs = math.abs(current_corr)
+    float drop_pct = (base_s - curr_abs) / base_s * 100.0
+    bool collapsed = drop_pct > m4_collapse_threshold and base_abs > 0.1
+    collapsed
+
+// ---------------------------------------------------------------------------
+// M4.7: VIX PROXY FUNCTION
+// ---------------------------------------------------------------------------
+
+m4_vix_proxy_fn() =>
+    int lb = m4_vix_lookback
+    float rv = ta.stdev(m1_ret, lb) * math.sqrt(252.0) * 100.0
+    float atr_c = ta.atr(lb)
+    float atr_m = ta.median(ta.atr(lb), lb * 2)
+    float atr_s = atr_m < 0.0001 ? 0.0001 : atr_m
+    float atr_exp = atr_c / atr_s
+    float ups_vol = 0.0
+    float dns_vol = 0.0
+    for i = 0 to lb - 1
+        float ri = m1_ret[i]
+        if not na(ri)
+            if ri > 0.0
+                ups_vol := ups_vol + ri * ri
+            else
+                dns_vol := dns_vol + ri * ri
+    float skew_p = ups_vol < 0.0001 ? 10.0 : dns_vol / ups_vol
+    skew_p := skew_p > 10.0 ? 10.0 : skew_p
+    float vix_rv = rv * (1.0 + (atr_exp - 1.0) * 0.5) * (1.0 + (skew_p - 1.0) * 0.1)
+    vix_rv
+
+// ---------------------------------------------------------------------------
+// M4.8: GRANGER PROXY FUNCTION
+// ---------------------------------------------------------------------------
+
+m4_granger_proxy_fn(series float leader, series float follower, int lag) =>
+    int lb = m4_granger_lookback
+    int lg = lag < 1 ? 1 : lag
+    float corr0    = m4_correlation(leader, follower, lb)
+    float corr_lag = m4_correlation(leader[lg], follower, lb)
+    float causality = math.abs(corr_lag) > math.abs(corr0) * 0.7 ? math.abs(corr_lag) : math.abs(corr_lag) * 0.5
+    causality
+
+// ---------------------------------------------------------------------------
+// M4.9: EARLY WARNING SCORE
+// ---------------------------------------------------------------------------
+
+m4_early_warning_score(float corr_score, float vix_score, float granger_score, float vol_score) =>
+    float comp = corr_score * 0.50 + vix_score * 0.30 + granger_score * 0.20 + vol_score * 0.10
+    comp < 0.0 ? 0.0 : comp > 100.0 ? 100.0 : comp
+
+// ---------------------------------------------------------------------------
+// M4.10: PER-BAR EXECUTION
+// ---------------------------------------------------------------------------
+
+if m4_enable_scanner and bar_index > m4_correlation_lookback + m4_granger_lag + 10
+    [corr_spx_btc, corr_spx_eth, corr_spx_gold, corr_dxy_gold, avg_corr_val, corr_disp] = m4_scan_correlations()
+    m4_curr_corr_spx_btc  := corr_spx_btc
+    m4_curr_corr_spx_eth  := corr_spx_eth
+    m4_curr_corr_spx_gold := corr_spx_gold
+    m4_curr_corr_dxy_gold := corr_dxy_gold
+
+    m4_baseline_counter := m4_baseline_counter + 1
+    if m4_baseline_counter >= m4_baseline_update_freq or m4_base_corr_spx_btc == 0.0
+        m4_base_corr_spx_btc  := corr_spx_btc
+        m4_base_corr_spx_eth  := corr_spx_eth
+        m4_base_corr_spx_gold := corr_spx_gold
+        m4_base_corr_dxy_gold := corr_dxy_gold
+        m4_baseline_counter   := 0
+
+    bool cl_spx_btc  = m4_detect_correlation_collapse(corr_spx_btc, m4_base_corr_spx_btc)
+    bool cl_spx_eth  = m4_detect_correlation_collapse(corr_spx_eth, m4_base_corr_spx_eth)
+    bool cl_spx_gold = m4_detect_correlation_collapse(corr_spx_gold, m4_base_corr_spx_gold)
+    bool cl_dxy_gold = m4_detect_correlation_collapse(corr_dxy_gold, m4_base_corr_dxy_gold)
+    bool any_collapse = cl_spx_btc or cl_spx_eth or cl_spx_gold or cl_dxy_gold
+    m4_corr_collapse_flag := any_collapse
+
+    float base_avg = (math.abs(m4_base_corr_spx_btc) + math.abs(m4_base_corr_spx_eth) + math.abs(m4_base_corr_spx_gold) + math.abs(m4_base_corr_dxy_gold)) / 4.0
+    float curr_avg = (math.abs(corr_spx_btc) + math.abs(corr_spx_eth) + math.abs(corr_spx_gold) + math.abs(corr_dxy_gold)) / 4.0
+    float drop_pct = base_avg > 0.01 ? (base_avg - curr_avg) / base_avg * 100.0 : 0.0
+    m4_corr_shock := drop_pct > m4_collapse_threshold * 0.5
+
+    float corr_sc = any_collapse ? 80.0 + drop_pct : drop_pct * 2.0
+    corr_sc := corr_sc > 100.0 ? 100.0 : corr_sc
+    m4_score_correlation := corr_sc
+
+    float vix_raw = m4_vix_proxy_fn()
+    m4_vix_proxy_value  := vix_raw
+    m4_vix_proxy_smooth := ta.ema(vix_raw, m4_crisis_score_smooth)
+
+    float vix_sc = vix_raw > m4_vix_threshold ? 50.0 + (vix_raw - m4_vix_threshold) * 3.0 : (vix_raw / m4_vix_threshold) * 30.0
+    vix_sc := vix_sc > 100.0 ? 100.0 : vix_sc
+    m4_score_vix := vix_sc
+
+    float gr_btc  = m4_granger_proxy_fn(m4_r_spx, m4_r_btc, m4_granger_lag)
+    float gr_gold = m4_granger_proxy_fn(m4_r_spx, m4_r_gold, m4_granger_lag)
+    float gr_dxy  = m4_granger_proxy_fn(m4_r_dxy, m4_r_gold, m4_granger_lag)
+    m4_granger_spx_btc  := gr_btc
+    m4_granger_spx_gold := gr_gold
+    m4_granger_dxy_gold := gr_dxy
+
+    float gr_avg = (gr_btc + gr_gold + gr_dxy) / 3.0
+    float gr_sc  = gr_avg > m4_granger_significance ? gr_avg * 100.0 : gr_avg * 50.0
+    gr_sc := gr_sc > 100.0 ? 100.0 : gr_sc
+    m4_score_granger := gr_sc
+
+    float vol_c = ta.stdev(m1_ret, m4_vix_lookback) * math.sqrt(252.0) * 100.0
+    float vol_b = ta.stdev(m1_ret, m4_baseline_update_freq)[m4_vix_lookback] * math.sqrt(252.0) * 100.0
+    float vol_s = vol_b < 0.1 ? 0.1 : vol_b
+    float v_rat = vol_c / vol_s
+    float vol_sc = v_rat > 2.0 ? 70.0 + (v_rat - 2.0) * 15.0 : (v_rat - 1.0) * 50.0
+    vol_sc := vol_sc < 0.0 ? 0.0 : vol_sc > 100.0 ? 100.0 : vol_sc
+    m4_score_volatility := vol_sc
+
+    float raw_sc = m4_early_warning_score(corr_sc, vix_sc, gr_sc, vol_sc)
+    m4_crisis_score_raw := raw_sc
+    m4_crisis_score     := ta.ema(raw_sc, m4_crisis_score_smooth)
+
+    int lvl = m4_crisis_score > 80.0 ? 3 : m4_crisis_score > 60.0 ? 2 : m4_crisis_score > 40.0 ? 1 : 0
+    m4_crisis_level := lvl
+
+    int r_lvl = m4_crisis_score > 70.0 ? 3 : m4_crisis_score > 50.0 ? 2 : m4_crisis_score > 30.0 ? 1 : 0
+    m4_risk_off_level := r_lvl
+
+    m4_early_warning := m4_crisis_score > 70.0
+
+// =============================================================================
+// ===== MODULE 2: KELLY-CRITERION POSITION SIZER =====
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// M2.2: STATE VARIABLES
+// ---------------------------------------------------------------------------
+
+var float m2_kelly_f        = 0.0
+var float m2_win_rate       = 0.0
+var float m2_avg_win        = 0.0
+var float m2_avg_loss       = 0.0
+var float m2_payoff_ratio   = 1.0
+var float m2_kelly_raw      = 0.0
+var float m2_kelly_fraction = 0.0
+var int   m2_risk_tier      = 0
+var float m2_position_qty   = 0.0
+var float m2_peak_equity    = strategy.equity
+var float m2_current_dd_pct = 0.0
+var float m2_stop_dist      = 0.0
+var float m2_target_dist    = 0.0
+var float m2_risk_cash      = 0.0
+var float m2_cum_win_pnl     = 0.0
+var float m2_cum_loss_pnl    = 0.0
+var int   m2_prev_wintrades  = 0
+var int   m2_prev_losstrades = 0
+var float m2_prev_equity     = strategy.equity
+
+// ---------------------------------------------------------------------------
+// M2.3: FUNCTIONS
+// ---------------------------------------------------------------------------
+
+calc_win_rate() =>
+    float total = strategy.wintrades + strategy.losstrades
+    total > 0 ? strategy.wintrades / total : 0.0
+
+kelly_fraction(float p, float b) =>
+    b > 0 ? (p * b - (1.0 - p)) / b : 0.0
+
+adaptive_kelly(float base_f, float current_dd, float tier1, float tier2, float tier3) =>
+    current_dd > tier3 ? base_f * 0.10 : current_dd > tier2 ? base_f * 0.25 : current_dd > tier1 ? base_f * 0.50 : base_f
+
+position_size(float equity, float kelly_f, float stop_dist, float regime_mult, float memory_mult, float crisis_mult, float min_qty) =>
+    float risk_cash = equity * kelly_f
+    float raw_size = stop_dist > 0 ? risk_cash / stop_dist : 0.0
+    float sized = raw_size * regime_mult * memory_mult * crisis_mult
+    sized > min_qty ? sized : min_qty
+
+// ---------------------------------------------------------------------------
+// M2.5: PER-BAR EXECUTION
+// ---------------------------------------------------------------------------
+
+if strategy.equity > m2_peak_equity
+    m2_peak_equity := strategy.equity
+m2_current_dd_pct := m2_peak_equity > 0 ? (m2_peak_equity - strategy.equity) / m2_peak_equity * 100.0 : 0.0
+m2_win_rate := calc_win_rate()
+
+if strategy.wintrades > m2_prev_wintrades
+    float pnl_change = strategy.equity - m2_prev_equity
+    m2_cum_win_pnl := m2_cum_win_pnl + (pnl_change > 0 ? pnl_change : 0)
+    m2_prev_wintrades := strategy.wintrades
+
+if strategy.losstrades > m2_prev_losstrades
+    float pnl_change = strategy.equity - m2_prev_equity
+    m2_cum_loss_pnl := m2_cum_loss_pnl + (pnl_change < 0 ? -pnl_change : 0)
+    m2_prev_losstrades := strategy.losstrades
+
+m2_prev_equity := strategy.equity
+
+int total_trades = strategy.wintrades + strategy.losstrades
+m2_avg_win := strategy.wintrades > 0 ? m2_cum_win_pnl / strategy.wintrades : 0.0
+m2_avg_loss := strategy.losstrades > 0 ? m2_cum_loss_pnl / strategy.losstrades : 0.0
+m2_payoff_ratio := m2_avg_loss > 0 ? m2_avg_win / m2_avg_loss : 1.0
+
+m2_kelly_raw := total_trades >= m2_lookback_trades ? kelly_fraction(m2_win_rate, m2_payoff_ratio) : 0.0
+m2_kelly_raw := math.max(0.0, m2_kelly_raw)
+float capped_kelly = math.min(m2_kelly_raw, m2_max_risk_pct / 100.0)
+
+float adaptive_f = adaptive_kelly(capped_kelly, m2_current_dd_pct, m2_dd_tier1, m2_dd_tier2, m2_dd_tier3)
+m2_risk_tier := m2_current_dd_pct > m2_dd_tier3 ? 3 : m2_current_dd_pct > m2_dd_tier2 ? 2 : m2_current_dd_pct > m2_dd_tier1 ? 1 : 0
+
+float mode_f = m2_kelly_mode == "Full" ? adaptive_f : m2_kelly_mode == "Half" ? adaptive_f * 0.5 : m2_kelly_mode == "Quarter" ? adaptive_f * 0.25 : adaptive_f * 0.5
+m2_kelly_fraction := mode_f
+
+float m2_regime_mult  = m1_active_regime == 1 ? 0.25 : m1_active_regime == 2 ? 0.50 : 1.0
+float m2_memory_mult  = m1_persistent or m1_anti_persistent ? 1.0 : 0.7
+float m2_peer_mult    = m4_corr_shock ? 0.5 : 1.0
+float m2_crisis_mult  = m4_risk_off_level == 0 ? 1.0 : m4_risk_off_level == 1 ? 0.75 : m4_risk_off_level == 2 ? 0.5 : 0.25
+
+m2_stop_dist   := m1_atr_val * eff_stop_atr
+m2_target_dist := m1_atr_val * eff_target_atr
+
+float kelly_for_size = mode_f > 0.0 ? mode_f : eff_risk_pct / 100.0
+m2_position_qty := position_size(strategy.equity, kelly_for_size, m2_stop_dist, m2_regime_mult, m2_memory_mult, m2_crisis_mult, m2_min_qty)
+
+float m2_max_lev = m1_asset_class == "Forex" ? 20.0 : m1_asset_class == "Crypto" ? 3.0 : 10.0
+float m2_max_qty_lev = close > 0 ? (m2_max_lev * strategy.equity) / close : 0.0
+m2_position_qty := math.min(m2_position_qty, m2_max_qty_lev)
+
+bool m2_atr_extreme = false
+if m1_asset_class == "Crypto"
+    float m2_atr_pct = close > 0 ? m1_atr_val / close : 0.0
+    m2_atr_extreme := m2_atr_pct > eff_atr_pct_threshold
+if m2_atr_extreme
+    m2_position_qty := m2_position_qty * 0.5
+
+m2_risk_cash := m2_position_qty * m2_stop_dist
+
+// =============================================================================
+
+// =============================================================================
+// M1 INTERNAL WIRING: How regime flows through the system
+// =============================================================================
+// Step 1: Log returns computed from close prices
+// Step 2: Full-window and short-window regime classification run in parallel
+// Step 3: Active regime selected based on mode (Full/Short/Adaptive)
+// Step 4: Crisis mode detected when short vol > long_vol * crisis_mult
+// Step 5: In Adaptive mode, regime switches to short window during crisis
+// Step 6: Hurst exponent computed for memory state (persistent/anti-persistent)
+// Step 7: Peer correlation monitored for contagion detection
+// Step 8: Metals-specific: safe-haven and liquidity crisis detection
+// Step 9: Forex-specific: gap freeze for 2 bars after large gaps
+// Step 10: Circuit breaker triggers at 2% equity drawdown from peak
+// Step 11: Session filter restricts trading to configured hours/days
+// Step 12: Technical indicators (EMA, BB, RSI, ATR) computed for signals
+// Step 13: Signal generation based on regime + memory + trend + volatility
+// Step 14: Position sizing from M2 fed into order execution
+// =============================================================================
+
+
+// =============================================================================
+// M2 INTERNAL WIRING: Kelly position sizing pipeline
+// =============================================================================
+// Step 1: Track peak equity and current drawdown percentage
+// Step 2: Calculate win rate from strategy.wintrades / total_trades
+// Step 3: Track cumulative wins/losses using equity changes on trade close
+// Step 4: Compute average win, average loss, and payoff ratio
+// Step 5: Calculate raw Kelly fraction: f* = (p*b - (1-p)) / b
+// Step 6: Apply max risk cap and ensure non-negative
+// Step 7: Apply drawdown tier reduction (50%/25%/10% of Kelly)
+// Step 8: Apply Kelly mode (Full/Half/Quarter/Adaptive)
+// Step 9: Apply regime multiplier (RW1=0.25x, RW3=0.5x, Ineff=1x)
+// Step 10: Apply memory multiplier (persistent=1x, neutral=0.7x)
+// Step 11: Apply crisis multiplier from M4 (Normal=1x to Critical=0.25x)
+// Step 12: Calculate position size = equity * kelly_f / stop_distance
+// Step 13: Apply leverage cap per asset class
+// Step 14: Apply ATR extreme reduction for crypto (50% reduction)
+// =============================================================================
+
+
+// =============================================================================
+// M3 INTERNAL WIRING: Walk-forward optimization pipeline
+// =============================================================================
+// Step 1: Pre-compute 5 fast EMAs, 5 slow EMAs, 5 HH channels, 5 LL channels
+// Step 2: On re-optimization due date, define IS and OOS windows
+// Step 3: Grid search: test all 100 combinations (5x5x4)
+// Step 4: For each combo, simulate strategy over IS window
+// Step 5: Select best combo by total P&L score
+// Step 6: Test best combo on OOS window
+// Step 7: Calculate robustness = OOS_score / IS_score
+// Step 8: Calculate parameter stability vs previous optimization
+// Step 9: Accept if robustness >= threshold and IS_score > 0
+// Step 10: If accepted, update optimized parameters fed to M1
+// Step 11: Schedule next re-optimization
+// =============================================================================
+
+
+// =============================================================================
+// M4 INTERNAL WIRING: Crisis scanning pipeline
+// =============================================================================
+// Step 1: Fetch 9 symbol prices via request.security
+// Step 2: Compute log returns for all symbols
+// Step 3: Calculate 6 pairwise correlations (SPX-BTC, SPX-ETH, etc.)
+// Step 4: Update baseline correlations periodically (every N bars)
+// Step 5: Detect correlation collapse vs baseline
+// Step 6: Compute VIX proxy from realized vol + ATR + skew
+// Step 7: Compute Granger causality proxies (3 pairs)
+// Step 8: Compute volatility regime score
+// Step 9: Combine into composite crisis score (weighted average)
+// Step 10: Smooth crisis score with EMA
+// Step 11: Determine crisis level (0-3) and risk-off level (0-3)
+// Step 12: Set early_warning flag if score > 70
+// =============================================================================
+
+
+// =============================================================================
+// M5 INTERNAL WIRING: Dashboard rendering pipeline
+// =============================================================================
+// Step 1: Track peak equity and compute current/max drawdown
+// Step 2: Compute session P&L (resets on new day)
+// Step 3: Maintain equity history ring buffer
+// Step 4: Maintain regime change history
+// Step 5: Track consecutive wins/losses
+// Step 6: Compute win rate, profit factor, W/L ratio
+// Step 7: Compute Sharpe proxy from equity returns
+// Step 8: Compute normalized equity (percentage)
+// Step 9: Build position string, signal string, regime string
+// Step 10: Build flag string from all module states
+// Step 11: Build regime history dot string (G/Y/R)
+// Step 12: On last bar, render all 24 table cells
+// =============================================================================
+
+
+// =============================================================================
+// M6 INTERNAL WIRING: Alert triggering pipeline
+// =============================================================================
+// Step 1: Decrement all cooldown counters
+// Step 2: Evaluate all 12 alert trigger conditions
+// Step 3: Check severity threshold for each alert
+// Step 4: Cooldown check: only fire if cd == 0
+// Step 5: Build alert message (plain text or Discord JSON)
+// Step 6: Set cooldown = 5 bars for fired alert
+// Step 7: Update prev-state variables for edge detection
+// =============================================================================
+
+
+// =============================================================================
+// RISK MANAGEMENT FRAMEWORK
+// =============================================================================
+// Multiple layers of risk protection:
+//   Layer 1: Statistical regime filter (no entries in RW1 unless allowed)
+//   Layer 2: Peer correlation shock filter (blocks entries on contagion)
+//   Layer 3: Liquidity crisis detector (emergency exit for metals)
+//   Layer 4: Gap freeze detector (2-bar freeze for forex)
+//   Layer 5: Circuit breaker (2% equity drawdown triggers full exit)
+//   Layer 6: Session filter (time-of-day and day-of-week restrictions)
+//   Layer 7: Kelly drawdown tiers (progressive sizing reduction)
+//   Layer 8: M4 crisis multiplier (down to 0.25x in critical events)
+//   Layer 9: Leverage caps per asset class
+//   Layer 10: ATR extreme reduction for volatile crypto periods
+//   Layer 11: Time-based exits (crypto max hold bars)
+//   Layer 12: Exotic swap avoidance (5-bar max for exotic forex)
+// =============================================================================
+
+// M1.17: TRADING SIGNAL GENERATION
+// =============================================================================
+
+var bool m1_long_signal  = false
+var bool m1_short_signal = false
+bool m1_long_setup = false
+bool m1_short_setup = false
+
+m1_long_signal  := false
+m1_short_signal := false
+m1_long_setup   := false
+m1_short_setup  := false
+
+if m1_ready
+    if m1_active_regime == 3
+        if m1_persistent
+            m1_long_setup  := m1_trend_up and not na(m1_break_high_prev) and close > m1_break_high_prev
+            m1_short_setup := m1_trend_dn and not na(m1_break_low_prev) and close < m1_break_low_prev
+        else if m1_anti_persistent
+            if m1_safe_haven_long
+                m1_long_setup  := m1_trend_up and not na(m1_break_high_prev) and close > m1_break_high_prev
+                m1_short_setup := false
+            else
+                m1_long_setup  := m1_z_px[1] < -1.5 and ta.crossover(close, m1_basis)
+                m1_short_setup := m1_z_px[1] > 1.5 and ta.crossunder(close, m1_basis)
+        else
+            m1_long_setup  := ta.crossover(m1_ema_fast, m1_ema_slow)
+            m1_short_setup := ta.crossunder(m1_ema_fast, m1_ema_slow)
+    else if m1_active_regime == 2
+        m1_long_setup  := m1_vol_expanding and m1_trend_up and not na(m1_break_high_prev) and close > m1_break_high_prev
+        m1_short_setup := m1_vol_expanding and m1_trend_dn and not na(m1_break_low_prev) and close < m1_break_low_prev
+    else if m1_active_regime == 1 and eff_allow_rw1
+        m1_long_setup  := m1_z_px < -2.0 and m1_rsi_val < 25
+        m1_short_setup := m1_z_px > 2.0 and m1_rsi_val > 75
+
+bool m1_prev_long_setup = bar_index > 0 ? m1_long_setup[1] : false
+bool m1_prev_short_setup = bar_index > 0 ? m1_short_setup[1] : false
+
+// Only fire once when a setup first becomes true, otherwise flat periods keep re-triggering the same regime state.
+m1_long_signal := m1_long_setup and not m1_prev_long_setup
+m1_short_signal := m1_short_setup and not m1_prev_short_setup
+
+// =============================================================================
+// ORDER EXECUTION + RISK MANAGEMENT
+// =============================================================================
+
+var bool m1_block_new_risk = false
+m1_block_new_risk := (m1_peer_shock and m1_active_regime != 3) or m1_liquidity_crisis or m1_gap_freeze or m1_circuit_breaker or not m1_session_ok
+
+var int m1_entry_bar_idx = na
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    m1_entry_bar_idx := bar_index
+else if strategy.position_size == 0
+    m1_entry_bar_idx := na
+
+var bool m1_time_exit = false
+m1_time_exit := m1_asset_class == "Crypto" and not na(m1_entry_bar_idx) and (bar_index - m1_entry_bar_idx) >= eff_max_hold_bars
+
+bool m1_can_open_new_position = strategy.position_size == 0
+
+if m1_ready and barstate.isconfirmed and not m1_block_new_risk and m2_position_qty > 0 and m1_can_open_new_position
+    if m1_long_signal
+        strategy.entry("Long", strategy.long, qty = m2_position_qty)
+    else if m1_short_signal
+        strategy.entry("Short", strategy.short, qty = m2_position_qty)
+
+if m1_time_exit
+    strategy.close_all(comment = "Time exit")
+    m1_entry_bar_idx := na
+
+if m1_asset_class == "Forex" and m1_fx_type == "Exotics" and not na(m1_entry_bar_idx) and (bar_index - m1_entry_bar_idx) >= 5
+    strategy.close_all(comment = "Exotic swap exit")
+    m1_entry_bar_idx := na
+
+if m1_liquidity_crisis
+    strategy.close_all(comment = "Liquidity crisis")
+    m1_entry_bar_idx := na
+
+float m1_long_stop   = strategy.position_avg_price - m2_stop_dist
+float m1_long_limit  = strategy.position_avg_price + m2_target_dist
+float m1_short_stop  = strategy.position_avg_price + m2_stop_dist
+float m1_short_limit = strategy.position_avg_price - m2_target_dist
+
+if strategy.position_size > 0
+    strategy.exit("Long Exit", from_entry = "Long", stop = m1_long_stop, limit = m1_long_limit)
+
+if strategy.position_size < 0
+    strategy.exit("Short Exit", from_entry = "Short", stop = m1_short_stop, limit = m1_short_limit)
+
+if strategy.position_size > 0 and ((m1_active_regime == 1 and not eff_allow_rw1) or m1_block_new_risk)
+    strategy.close("Long", comment = "Regime/Risk filter")
+
+if strategy.position_size < 0 and ((m1_active_regime == 1 and not eff_allow_rw1) or m1_block_new_risk)
+    strategy.close("Short", comment = "Regime/Risk filter")
+
+// =============================================================================
+// M1.20: STATISTICS DASHBOARD TABLE (Module 1 internal)
+// =============================================================================
+
+var table m1_dash = table.new(position.top_right, 2, 18, bgcolor = color.new(color.black, 20), border_width = 1, border_color = color.new(color.gray, 50), frame_color = color.new(color.gray, 50), frame_width = 1)
+
+if barstate.islast and m1_show_stats
+    table.cell(m1_dash, 0, 0, "SIGMA M1+M2 Dashboard", text_color = color.white, text_size = size.small)
+    table.cell(m1_dash, 1, 0, regime_name(m1_active_regime), text_color = m1_active_regime == 1 ? color.lime : m1_active_regime == 2 ? color.yellow : m1_active_regime == 3 ? color.red : color.gray, text_size = size.small)
+
+    table.cell(m1_dash, 0, 1, "Memory (Hurst)", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 1, str.tostring(m1_active_mem, "#.###") + " | " + memory_name(m1_active_mem), text_color = color.white, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 2, "LB Q / Crit", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 2, str.tostring(m1_active_lb_q, "#.##") + " / " + str.tostring(m1_active_lb_crit, "#.##"), text_color = not na(m1_active_lb_q) and not na(m1_active_lb_crit) and m1_active_lb_q < m1_active_lb_crit ? color.lime : color.red, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 3, "ARCH Q / Crit", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 3, str.tostring(m1_active_arch_q, "#.##") + " / " + str.tostring(m1_active_arch_crit, "#.##"), text_color = not na(m1_active_arch_q) and not na(m1_active_arch_crit) and m1_active_arch_q > m1_active_arch_crit ? color.yellow : color.gray, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 4, "Runs p-value", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 4, str.tostring(m1_active_runs_p, "#.###"), text_color = not na(m1_active_runs_p) and m1_active_runs_p > m1_alpha ? color.lime : color.red, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 5, "VR RW1 max|z|", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 5, str.tostring(m1_active_vr1, "#.##"), text_color = not na(m1_active_vr1) and m1_active_vr1 < z_critical(m1_alpha) ? color.lime : color.red, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 6, "VR RW3 max|z|", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 6, str.tostring(m1_active_vr3, "#.##"), text_color = not na(m1_active_vr3) and m1_active_vr3 < z_critical(m1_alpha) ? color.lime : color.red, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 7, "Crisis Mode", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 7, m1_crisis_mode ? "YES" : "NO", text_color = m1_crisis_mode ? color.orange : color.gray, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 8, "Peer z-score", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 8, m1_use_peer_filter ? str.tostring(m1_corr_z, "#.##") : "off", text_color = m1_peer_shock ? color.orange : color.white, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 9, "Position Qty", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 9, str.tostring(m2_position_qty, "#.##"), text_color = color.white, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 10, "Kelly Fraction", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 10, str.tostring(m2_kelly_raw, "#.####"), text_color = color.white, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 11, "Win Rate", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 11, str.tostring(m2_win_rate * 100, "#.##") + "%", text_color = color.white, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 12, "Drawdown %", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 12, str.tostring(m2_current_dd_pct, "#.##") + "%", text_color = m2_current_dd_pct > m2_dd_tier1 ? color.red : color.white, text_size = size.tiny)
+
+    table.cell(m1_dash, 0, 13, "Risk Tier", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 13, str.tostring(m2_risk_tier) + "/3", text_color = m2_risk_tier > 0 ? color.orange : color.gray, text_size = size.tiny)
+
+    string m1_sub_type = m1_asset_class == "Crypto" ? m1_crypto_type : m1_asset_class == "Forex" ? m1_fx_type : m1_metal_type
+    table.cell(m1_dash, 0, 14, "Asset Class", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 14, m1_asset_class + " | " + m1_sub_type, text_color = color.white, text_size = size.tiny)
+
+    float m1_atr_pct_disp = close > 0 ? m1_atr_val / close : 0.0
+    table.cell(m1_dash, 0, 15, "ATR % Price", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 15, str.tostring(m1_atr_pct_disp * 100, "#.##") + "%", text_color = color.white, text_size = size.tiny)
+
+    string m1_flag_txt = (m1_safe_haven_long ? "SH " : "") + (m1_liquidity_crisis ? "LC " : "") + (m1_gap_freeze ? "GF " : "") + (m1_circuit_breaker ? "CB " : "") + (m1_time_exit ? "TE " : "") + (not m1_session_ok ? "SF " : "")
+    table.cell(m1_dash, 0, 16, "Flags", text_color = color.silver, text_size = size.tiny)
+    table.cell(m1_dash, 1, 16, m1_flag_txt == "" ? "none" : m1_flag_txt, text_color = m1_flag_txt != "" ? color.orange : color.gray, text_size = size.tiny)
+
+    string m1_sig_txt = m1_long_signal ? "LONG" : m1_short_signal ? "SHORT" : m1_safe_haven_long ? "SAFE-HAVEN" : "NONE"
+    color m1_sig_col = m1_long_signal ? color.lime : m1_short_signal ? color.red : m1_safe_haven_long ? color.blue : color.gray
+    table.cell(m1_dash, 0, 17, "Signal", text_color = color.silver, text_size = size.small)
+    table.cell(m1_dash, 1, 17, m1_sig_txt, text_color = m1_sig_col, text_size = size.small)
+
+// =============================================================================
+
+// =============================================================================
+// ASSET CLASS CALIBRATION MATRIX
+// =============================================================================
+// Crypto: High volatility, high persistence thresholds, larger stops
+//         BTC: Most conservative (Hurst trend=0.62, stop=3x ATR)
+//         ETH: Moderate (Hurst trend=0.60, stop=2.8x ATR)
+//         Altcoin: Most aggressive (Hurst trend=0.58, stop=2.5x ATR)
+// Forex: Lower volatility, tighter stops, different alpha levels
+//        Majors: Most efficient (alpha=0.10, wider acceptance)
+//        Minors: Moderate (alpha=0.08)
+//        Exotics: Least efficient (alpha=0.05, tightest criteria)
+// Metals: Safe-haven logic, special crisis detection
+//         Gold: Conservative sizing (0.5% risk), safe-haven enabled
+//         Silver: More volatile (0.35% risk), higher crisis vol threshold
+// =============================================================================
+
+// =============================================================================
+// STATISTICAL TEST BATTERY
+// =============================================================================
+// Test 1: Ljung-Box Q-test — detects serial autocorrelation in returns
+// Test 2: Variance Ratio (4 horizons: k=2,4,8,16) — detects predictability
+// Test 3: Runs Test — detects non-random sequences of signs
+// Test 4: ARCH-test on squared returns — detects volatility clustering
+// Test 5: Hurst R/S Analysis — measures long-term memory in returns
+// Combined: LB + VR1 => uncorrelatedness; ARCH => heteroskedasticity
+// =============================================================================
+
+// =============================================================================
+// SIGNAL GENERATION LOGIC BY REGIME
+// =============================================================================
+// Regime 1 (RW1/RW2 - Efficient): No signals unless m1_allow_rw1=true
+//   When allowed: Extreme mean-reversion (z-score > 2, RSI > 75)
+// Regime 2 (RW3 - Heteroskedastic): Vol expansion + trend + breakout
+//   Only trade when volatility is expanding AND trending
+// Regime 3 (Inefficient): Full signal suite based on memory state
+//   Persistent memory: Trend-following via EMA + Donchian breakout
+//   Anti-persistent: Mean-reversion via Bollinger bands
+//   Neutral memory: EMA crossover signals
+// =============================================================================
+
+// =============================================================================
+// M4 CORRELATION MONITORING MATRIX
+// =============================================================================
+// Pair 1: SPX-BTC    (risk-on cross-asset)
+// Pair 2: SPX-ETH    (risk-on cross-asset)
+// Pair 3: SPX-Gold   (risk-on vs safe-haven)
+// Pair 4: DXY-Gold   (currency vs safe-haven)
+// Pair 5: SPX-DXY    (equity vs currency)
+// Pair 6: BTC-ETH    (crypto cross)
+// Average correlation + dispersion used for systematic stress detection
+// =============================================================================
+
+// =============================================================================
+// M6 ALERT COOLDOWN SYSTEM
+// =============================================================================
+// Each alert type has an independent 5-bar cooldown counter
+// Prevents spam during sustained conditions
+// Counters decrement by 1 per bar
+// Counter resets to 5 when alert fires
+// Only fires when counter == 0 (ready state)
+// =============================================================================
+
+// ===== MODULE 5: PORTFOLIO DASHBOARD =====
+// =============================================================================
+
+var table m5_dash = table.new(
+     m5_dashboard_pos == "top_right" ? position.top_right : m5_dashboard_pos == "top_left" ? position.top_left : m5_dashboard_pos == "bottom_right" ? position.bottom_right : position.bottom_left,
+     2, 24,
+     bgcolor        = color.new(color.black, m5_bg_opacity),
+     border_width   = 1,
+     border_color   = color.new(color.gray, 30),
+     frame_color    = color.new(color.gray, 30),
+     frame_width    = 1
+ )
+
+var float[] m5_equity_history = array.new_float(m5_equity_history_len, na)
+var int[] m5_regime_history = array.new_int(m5_regime_history_len, 0)
+var float m5_peak_equity = strategy.equity
+var float m5_current_dd = 0.0
+var float m5_max_dd = 0.0
+var float m5_session_pnl = 0.0
+var float m5_prev_day_equity = strategy.equity
+var int m5_prev_day = 0
+var int m5_consec_wins = 0
+var int m5_consec_losses = 0
+var int m5_prev_closed_trades = 0
+var label m5_regime_label = na
+var float m5_equity_peak_series = na
+
+// 3.1 Peak Equity and Drawdown
+float m5_equity_now = strategy.equity
+m5_peak_equity := m5_equity_now > m5_peak_equity ? m5_equity_now : m5_peak_equity
+float m5_dd_raw = m5_peak_equity > 0 ? (m5_equity_now - m5_peak_equity) / m5_peak_equity * 100.0 : 0.0
+m5_current_dd := m5_dd_raw < 0 ? m5_dd_raw : 0.0
+m5_max_dd := m5_current_dd < m5_max_dd ? m5_current_dd : m5_max_dd
+
+// 3.2 Session P&L
+int m5_current_day = dayofmonth(time)
+bool m5_new_day = m5_current_day != m5_prev_day and m5_prev_day != 0
+if m5_new_day
+    m5_prev_day_equity := m5_equity_now
+    m5_session_pnl := 0.0
+m5_session_pnl := strategy.openprofit
+m5_prev_day := m5_current_day
+
+// 3.3 Equity History
+if not na(m5_equity_now)
+    array.push(m5_equity_history, m5_equity_now)
+    if array.size(m5_equity_history) > m5_equity_history_len
+        array.shift(m5_equity_history)
+
+// 3.4 Regime History
+var int m5_last_logged_regime = 0
+if m1_active_regime != 0 and m1_active_regime != m5_last_logged_regime
+    array.push(m5_regime_history, m1_active_regime)
+    if array.size(m5_regime_history) > m5_regime_history_len
+        array.shift(m5_regime_history)
+    m5_last_logged_regime := m1_active_regime
+
+// 3.5 Win/Loss Tracking
+int m5_total_wins = strategy.wintrades
+int m5_total_losses = strategy.losstrades
+int m5_total_trades = m5_total_wins + m5_total_losses
+
+int m5_closed_now = strategy.closedtrades
+if m5_closed_now > m5_prev_closed_trades
+    float m5_last_trade_pnl = strategy.closedtrades.profit(m5_closed_now - 1)
+    if m5_last_trade_pnl > 0
+        m5_consec_wins := m5_consec_wins + 1
+        m5_consec_losses := 0
+    else
+        m5_consec_losses := m5_consec_losses + 1
+        m5_consec_wins := 0
+m5_prev_closed_trades := m5_closed_now
+
+// 3.6 Derived Statistics
+float m5_win_rate = m5_total_trades > 0 ? m5_total_wins / m5_total_trades * 100.0 : 0.0
+float m5_wl_ratio = m5_total_losses > 0 ? m5_total_wins / m5_total_losses : (m5_total_wins > 0 ? 999.0 : 0.0)
+float m5_profit_factor = m2_avg_loss != 0 and m5_total_losses > 0 ? (m5_total_wins * m2_avg_win) / (m5_total_losses * math.abs(m2_avg_loss)) : (m5_total_wins > 0 ? 999.0 : 0.0)
+
+// 3.7 Sharpe Proxy
+float m5_equity_ret = nz(m5_equity_now / m5_equity_now[1] - 1.0, 0.0)
+var float m5_cum_ret = 0.0
+var float m5_cum_ret_sq = 0.0
+var int   m5_ret_count = 0
+if not na(m5_equity_now) and not na(m5_equity_now[1]) and m5_equity_now[1] > 0
+    m5_cum_ret := m5_cum_ret + m5_equity_ret
+    m5_cum_ret_sq := m5_cum_ret_sq + m5_equity_ret * m5_equity_ret
+    m5_ret_count := m5_ret_count + 1
+float m5_mean_ret = m5_ret_count > 0 ? m5_cum_ret / m5_ret_count : 0.0
+float m5_var_ret = m5_ret_count > 1 ? (m5_cum_ret_sq / m5_ret_count) - (m5_mean_ret * m5_mean_ret) : 0.0
+float m5_sharpe_proxy = m5_var_ret > 0 ? m5_mean_ret / math.sqrt(m5_var_ret) * math.sqrt(252.0) : 0.0
+
+// 3.8 Normalized Equity
+float m5_equity_normalized = strategy.initial_capital > 0 ? (m5_equity_now / strategy.initial_capital - 1.0) * 100.0 : 0.0
+
+string m5_pos_str = strategy.position_size > 0 ? "LONG  " + str.tostring(strategy.position_size, "#.##") : strategy.position_size < 0 ? "SHORT " + str.tostring(math.abs(strategy.position_size), "#.##") : "FLAT"
+color  m5_pos_col = strategy.position_size > 0 ? color.new(color.green, 0) : strategy.position_size < 0 ? color.new(color.red, 0) : color.new(color.gray, 0)
+string m5_sig_str = m1_long_signal ? "LONG" : m1_short_signal ? "SHORT" : "NONE"
+color  m5_sig_col = m1_long_signal ? color.new(color.green, 0) : m1_short_signal ? color.new(color.red, 0) : color.new(color.gray, 0)
+string m5_reg_str = m5_regime_name(m1_active_regime)
+color  m5_reg_col = m5_regime_color(m1_active_regime)
+color  m5_cs_col = m4_crisis_score > 70 ? color.new(color.red, 0) : m4_crisis_score > 40 ? color.new(color.orange, 0) : color.new(color.green, 0)
+string m5_corr_str = m4_corr_shock ? "SHOCK" : m4_corr_collapse_flag ? "Collapse" : "Normal"
+color  m5_corr_col = m4_corr_shock ? color.new(color.red, 0) : m4_corr_collapse_flag ? color.new(color.orange, 0) : color.new(color.green, 0)
+color  m5_rob_col = m3_robustness_score >= 0.7 ? color.new(color.green, 0) : m3_robustness_score >= 0.5 ? color.new(color.yellow, 0) : color.new(color.red, 0)
+string m5_flag_str = (m1_safe_haven_long ? "SH " : "") + (m1_liquidity_crisis ? "LC " : "") + (m1_gap_freeze ? "GF " : "") + (m1_circuit_breaker ? "CB " : "") + (m1_time_exit ? "TE " : "")
+color  m5_flag_col = (m1_safe_haven_long or m1_liquidity_crisis or m1_circuit_breaker) ? color.new(color.red, 0) : (m1_gap_freeze or m1_time_exit) ? color.new(color.orange, 0) : color.new(color.gray, 0)
+string m5_kelly_tier_str = m2_risk_tier == 1 ? "Aggressive" : m2_risk_tier == 2 ? "Normal" : m2_risk_tier == 3 ? "Conservative" : "Minimal"
+int m5_bars_to_reopt = m3_bars_to_reopt
+string m5_alert_status = m6_enable_alerts ? "ACTIVE" : "OFF"
+color  m5_alert_col = m6_enable_alerts ? color.new(color.green, 0) : color.new(color.gray, 0)
+
+string m5_regime_dots = ""
+int m5_reg_hist_size = array.size(m5_regime_history)
+int m5_dot_start = m5_reg_hist_size > 5 ? m5_reg_hist_size - 5 : 0
+for m5_i = m5_dot_start to m5_reg_hist_size - 1
+    int m5_r = array.get(m5_regime_history, m5_i)
+    string m5_dot_char = m5_r == 1 ? "G" : m5_r == 2 ? "Y" : m5_r == 3 ? "R" : "?"
+    m5_regime_dots := m5_regime_dots + m5_dot_char
+
+float m5_dd_series = m5_current_dd
+m5_equity_peak_series := m5_peak_equity
+color m5_bg_regime = m5_regime_bg_color(m1_active_regime)
+
+// ---------------------------------------------------------------------------
+// M5.4: DASHBOARD TABLE RENDERING
+// ---------------------------------------------------------------------------
+
+if barstate.islast and m5_enable_dashboard
+
+    table.cell(m5_dash, 0, 0, "SIGMA v1.0",              text_color = color.new(color.white, 0),    text_size = size.small, text_halign = text.align_left)
+    table.cell(m5_dash, 1, 0, m5_reg_str,                text_color = m5_reg_col,                     text_size = size.small, text_halign = text.align_right)
+
+    string m5_mem_str = str.tostring(m1_active_mem, "#.###") + " | " + m5_memory_name(m1_active_mem)
+    table.cell(m5_dash, 0, 1, "Memory",                  text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 1, m5_mem_str,                text_color = color.new(color.white, 0),    text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_kelly_str = str.tostring(m2_kelly_fraction, "#.###") + " | " + m5_kelly_tier_str
+    table.cell(m5_dash, 0, 2, "Kelly f",                 text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 2, m5_kelly_str,              text_color = m2_kelly_fraction > 0 ? color.new(color.green, 0) : color.new(color.gray, 0), text_size = size.tiny, text_halign = text.align_right)
+
+    table.cell(m5_dash, 0, 3, "Position",                text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 3, m5_pos_str,                text_color = m5_pos_col,                      text_size = size.tiny,  text_halign = text.align_right)
+
+    float m5_open_pnl = strategy.openprofit
+    color m5_open_pnl_col = m5_open_pnl > 0 ? color.new(color.green, 0) : m5_open_pnl < 0 ? color.new(color.red, 0) : color.new(color.gray, 0)
+    table.cell(m5_dash, 0, 4, "Open P&L",                text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 4, "$" + str.tostring(m5_open_pnl, "#."), text_color = m5_open_pnl_col, text_size = size.tiny, text_halign = text.align_right)
+
+    color m5_sess_col = m5_session_pnl > 0 ? color.new(color.green, 0) : m5_session_pnl < 0 ? color.new(color.red, 0) : color.new(color.gray, 0)
+    table.cell(m5_dash, 0, 5, "Session P&L",             text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 5, "$" + str.tostring(m5_session_pnl, "#."), text_color = m5_sess_col, text_size = size.tiny, text_halign = text.align_right)
+
+    table.cell(m5_dash, 0, 6, "Equity",                  text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 6, "$" + str.tostring(m5_equity_now, "#."), text_color = color.new(color.white, 0), text_size = size.tiny, text_halign = text.align_right)
+
+    string m5_dd_str = str.tostring(m5_current_dd, "#.##") + "% / " + str.tostring(m5_max_dd, "#.##") + "%"
+    color  m5_dd_col = m5_current_dd < -5 ? color.new(color.red, 0) : m5_current_dd < -2 ? color.new(color.orange, 0) : color.new(color.green, 0)
+    table.cell(m5_dash, 0, 7, "Drawdown",                text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 7, m5_dd_str,                 text_color = m5_dd_col,                       text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_wr_str = str.tostring(m5_win_rate, "#.##") + "% (" + str.tostring(m5_total_wins) + "W/" + str.tostring(m5_total_losses) + "L)"
+    color  m5_wr_col = m5_win_rate >= 50 ? color.new(color.green, 0) : color.new(color.red, 0)
+    table.cell(m5_dash, 0, 8, "Win Rate",                text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 8, m5_wr_str,                 text_color = m5_wr_col,                       text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_pf_str = m5_profit_factor >= 999 ? "Inf" : str.tostring(m5_profit_factor, "#.##")
+    color  m5_pf_col = m5_profit_factor >= 1.5 ? color.new(color.green, 0) : m5_profit_factor >= 1.0 ? color.new(color.yellow, 0) : color.new(color.red, 0)
+    table.cell(m5_dash, 0, 9, "Profit Factor",           text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 9, m5_pf_str,                 text_color = m5_pf_col,                       text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_sharpe_str = str.tostring(m5_sharpe_proxy, "#.##")
+    color  m5_sharpe_col = m5_sharpe_proxy > 1.0 ? color.new(color.green, 0) : m5_sharpe_proxy > 0 ? color.new(color.yellow, 0) : color.new(color.red, 0)
+    table.cell(m5_dash, 0, 10, "Sharpe",                 text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 10, m5_sharpe_str,            text_color = m5_sharpe_col,                   text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_avg_str = "$" + str.tostring(m2_avg_win, "#.") + " / $" + str.tostring(m2_avg_loss, "#.")
+    table.cell(m5_dash, 0, 11, "Avg Win/Loss",           text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 11, m5_avg_str,               text_color = color.new(color.white, 0),    text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_wlr_str = m5_wl_ratio >= 999 ? "Inf" : str.tostring(m5_wl_ratio, "#.##")
+    color  m5_wlr_col = m5_wl_ratio >= 1.0 ? color.new(color.green, 0) : color.new(color.red, 0)
+    table.cell(m5_dash, 0, 12, "W/L Ratio",              text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 12, m5_wlr_str,               text_color = m5_wlr_col,                      text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_tt_str = str.tostring(m5_total_wins) + "W / " + str.tostring(m5_total_losses) + "L"
+    table.cell(m5_dash, 0, 13, "Total Trades",           text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 13, m5_tt_str,                text_color = color.new(color.white, 0),    text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_consec_str = str.tostring(m5_consec_wins) + "W / " + str.tostring(m5_consec_losses) + "L"
+    color  m5_consec_col = m5_consec_wins > 0 ? color.new(color.green, 0) : m5_consec_losses > 0 ? color.new(color.red, 0) : color.new(color.gray, 0)
+    table.cell(m5_dash, 0, 14, "Consecutive",            text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 14, m5_consec_str,            text_color = m5_consec_col,                   text_size = size.tiny,  text_halign = text.align_right)
+
+    table.cell(m5_dash, 0, 15, "Signal",                 text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 15, m5_sig_str,               text_color = m5_sig_col,                      text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_cs_str = str.tostring(m4_crisis_score, "##") + "/100"
+    table.cell(m5_dash, 0, 16, "Crisis Score",           text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 16, m5_cs_str,                text_color = m5_cs_col,                       text_size = size.tiny,  text_halign = text.align_right)
+
+    table.cell(m5_dash, 0, 17, "Correlation",            text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 17, m5_corr_str,              text_color = m5_corr_col,                     text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_rob_str = str.tostring(m3_robustness_score * 100, "#.") + "%"
+    table.cell(m5_dash, 0, 18, "Robustness",             text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 18, m5_rob_str,               text_color = m5_rob_col,                      text_size = size.tiny,  text_halign = text.align_right)
+
+    table.cell(m5_dash, 0, 19, "Regime Hist",            text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 19, m5_regime_dots,           text_color = color.new(color.white, 0),    text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_flags_display = m5_flag_str == "" ? "—" : m5_flag_str
+    table.cell(m5_dash, 0, 20, "Flags",                  text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 20, m5_flags_display,         text_color = m5_flag_col,                     text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_reopt_str = str.tostring(m5_bars_to_reopt) + " bars"
+    color  m5_reopt_col = m5_bars_to_reopt < 10 ? color.new(color.red, 0) : m5_bars_to_reopt < 50 ? color.new(color.yellow, 0) : color.new(color.green, 0)
+    table.cell(m5_dash, 0, 21, "Next Re-opt",            text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 21, m5_reopt_str,             text_color = m5_reopt_col,                    text_size = size.tiny,  text_halign = text.align_right)
+
+    table.cell(m5_dash, 0, 22, "Alert Status",           text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 22, m5_alert_status,          text_color = m5_alert_col,                    text_size = size.tiny,  text_halign = text.align_right)
+
+    string m5_time_str = str.tostring(year(time)) + "-" + str.tostring(month(time), "00") + "-" + str.tostring(dayofmonth(time), "00") + " " + str.tostring(hour(time), "00") + ":" + str.tostring(minute(time), "00")
+    table.cell(m5_dash, 0, 23, "Time",                   text_color = color.new(color.gray, 10),     text_size = size.tiny,  text_halign = text.align_left)
+    table.cell(m5_dash, 1, 23, m5_time_str,              text_color = color.new(color.white, 0),    text_size = size.tiny,  text_halign = text.align_right)
+
+// ---------------------------------------------------------------------------
+// M5.5: EQUITY CURVE PLOT
+// ---------------------------------------------------------------------------
+
+plot(m5_equity_now, title = "M5 Equity", color = m5_regime_color(m1_active_regime), linewidth = 2, style = plot.style_line, display = m5_show_equity_plot ? display.pane : display.none)
+plot(m5_equity_peak_series, title = "M5 Peak Equity", color = color.new(color.gray, 30), linewidth = 1, style = plot.style_cross, display = m5_show_equity_plot ? display.pane : display.none)
+plot(m5_equity_normalized, title = "M5 Equity %", color = color.new(color.blue, 20), linewidth = 1, style = plot.style_line, display = m5_show_equity_plot ? display.pane : display.none)
+
+// ---------------------------------------------------------------------------
+// M5.6: DRAWDOWN WATERFALL
+// ---------------------------------------------------------------------------
+
+plot(m5_dd_series, title = "M5 Drawdown", color = color.new(color.red, 10), linewidth = 2, style = plot.style_area, display = m5_show_dd_plot ? display.pane : display.none)
+plot(m5_max_dd, title = "M5 Max Drawdown", color = color.new(color.red, 0), linewidth = 1, style = plot.style_circles, display = m5_show_dd_plot ? display.pane : display.none)
+hline(0, "M5 DD Zero", color = color.new(color.gray, 50), linestyle = hline.style_dashed)
+
+// ---------------------------------------------------------------------------
+// M5.7: REGIME TIMELINE
+// ---------------------------------------------------------------------------
+
+bgcolor(m5_bg_regime, title = "M5 Regime BG", display = m5_show_regime_timeline ? display.all : display.none)
+bool m5_regime_changed = m1_active_regime != m1_active_regime[1] and m1_active_regime != 0 and m1_active_regime[1] != 0
+plotshape(m5_regime_changed and m5_show_regime_timeline, title = "M5 Regime Change", style = shape.diamond, location = location.abovebar, color = m5_regime_color(m1_active_regime), size = size.small, display = m5_show_regime_timeline ? display.all : display.none)
+
+var int m5_regime_start_bar = 0
+if m5_regime_changed
+    m5_regime_start_bar := bar_index
+int m5_regime_duration = bar_index - m5_regime_start_bar
+
+if barstate.islast and m5_show_regime_timeline and not na(m5_regime_label)
+    label.delete(m5_regime_label)
+if barstate.islast and m5_show_regime_timeline
+    string m5_reg_label_text = m5_reg_str + "\n" + str.tostring(m5_regime_duration) + " bars"
+    m5_regime_label := label.new(bar_index, high, m5_reg_label_text, color = m5_regime_color(m1_active_regime), textcolor = color.new(color.white, 0), style = label.style_label_down, size = size.small)
+
+// =============================================================================
+
+// =============================================================================
+// PERFORMANCE EXPECTATIONS BY REGIME
+// =============================================================================
+// RW1/RW2 (Efficient): Minimal trading, capital preserved
+//   Expected: Low trade count, flat to slightly negative P&L
+//   Position: Flat or minimal defensive entries
+// RW3 (Heteroskedastic): Moderate trading, volatility-based entries
+//   Expected: Moderate trade count, P&L dependent on vol timing
+//   Position: Half-sized positions (0.5x Kelly)
+// Inefficient (Persistent): Full trading, trend/mean-rev entries
+//   Expected: High trade count, positive P&L if memory aligned
+//   Position: Full Kelly with regime and memory multipliers
+// =============================================================================
+
+// =============================================================================
+// DRAWDOWN TIER RESPONSE TABLE
+// =============================================================================
+// Tier 0 (DD < tier1):   Normal Kelly (Full/Half/Quarter mode)
+// Tier 1 (DD >= tier1):  50% Kelly reduction
+// Tier 2 (DD >= tier2):  75% Kelly reduction (25% of base)
+// Tier 3 (DD >= tier3):  90% Kelly reduction (10% of base)
+// Circuit breaker (DD >= 2%): All positions closed immediately
+// =============================================================================
+
+// =============================================================================
+// CRISIS SCORING RUBRIC
+// =============================================================================
+// Score 0-30:   Normal market conditions (green)
+// Score 30-50:  Elevated risk (yellow) — slight sizing reduction
+// Score 50-70:  High risk (orange) — significant sizing reduction
+// Score 70-100: Critical (red) — near-minimum positions, alerts fired
+// Correlation shock: Additional 0.5x multiplier on new entries
+// Early warning: Regime-appropriate defensive positioning
+// =============================================================================
+
+// =============================================================================
+// RECOMMENDED USAGE GUIDELINES
+// =============================================================================
+// 1. Run on daily timeframe for best statistical significance
+// 2. Select correct asset class for proper calibration
+// 3. Start with Half Kelly mode for safety
+// 4. Monitor the dashboard during first week for regime behavior
+// 5. Enable alerts for crisis detection and circuit breaker
+// 6. Use WFO to adapt parameters to changing market conditions
+// 7. Review regime transitions for strategy alignment
+// 8. Check correlation status before major position entries
+// 9. Monitor drawdown tier for risk escalation
+// 10. Review daily summary for overall health assessment
+// =============================================================================
+
+// =============================================================================
+// KNOWN LIMITATIONS
+// =============================================================================
+// 1. Statistical tests require minimum 80+ bars to produce valid results
+// 2. request.security calls may fail for non-premium TradingView users
+// 3. WFO grid search is computationally intensive (100 combos per cycle)
+// 4. Kelly sizing requires 30+ closed trades for reliable estimates
+// 5. Crisis scanner relies on 9 external symbols being available
+// 6. Granger causality is a simplified proxy, not full Granger test
+// 7. Hurst R/S estimate is approximate for shorter windows
+// 8. Forex gap detection only works with proper session data
+// =============================================================================
+
+// =============================================================================
+// VERSION HISTORY
+// =============================================================================
+// v1.0 — Initial integrated release (all 6 modules unified)
+//        - EMH-LAC Regime Engine with asset-class calibration
+//        - Kelly-Criterion Position Sizer with drawdown tiers
+//        - Walk-Forward Optimization with robustness filter
+//        - Multi-Asset Crisis Scanner with 9 symbols
+//        - Portfolio Dashboard with 24-row display
+//        - Alert Engine with 12 conditions and Discord support
+// =============================================================================
+
+// =============================================================================
+// OUTPUT VARIABLE REFERENCE
+// =============================================================================
+// Module 1 outputs: m1_active_regime, m1_active_mem, m1_long_signal,
+//   m1_short_signal, m1_safe_haven_long, m1_liquidity_crisis,
+//   m1_gap_freeze, m1_circuit_breaker, m1_time_exit, m1_session_ok,
+//   m1_ready, m1_sp500_ret, m1_crisis_mode, m1_block_new_risk,
+//   m1_stop_dist, m1_target_dist
+// Module 2 outputs: m2_kelly_f, m2_risk_tier, m2_position_qty,
+//   m2_current_dd_pct, m2_regime_mult, m2_memory_mult
+// Module 3 outputs: m3_robustness, m3_best_params, m3_bars_to_reopt,
+//   m3_params_valid
+// Module 4 outputs: m4_crisis_score, m4_risk_off_level,
+//   m4_corr_shock, m4_early_warning
+// Module 5 outputs: Dashboard table (visual only)
+// Module 6 outputs: alertcondition triggers (12 conditions)
+// =============================================================================
+
+// ===== MODULE 6: ALERT ENGINE =====
+// =============================================================================
+
+int m6_SEV_INFO     = 0
+int m6_SEV_WARNING  = 1
+int m6_SEV_CRITICAL = 2
+int m6_min_sev_val = m6_min_severity == "INFO" ? m6_SEV_INFO : m6_min_severity == "WARNING" ? m6_SEV_WARNING : m6_SEV_CRITICAL
+
+m6_build_message(string alert_type, string description, int severity, string details) =>
+    string sev_str = severity == m6_SEV_CRITICAL ? "CRITICAL" : severity == m6_SEV_WARNING ? "WARNING" : "INFO"
+    string base_msg = m6_alert_prefix + " | " + sev_str + " | " + alert_type + " | " + description + " | " + details
+    string discord_color = severity == m6_SEV_CRITICAL ? "15158332" : severity == m6_SEV_WARNING ? "16776960" : "3066993"
+    string result = m6_discord_format ? "{\"content\":\"" + base_msg + "\",\"embeds\":[{\"title\":\"" + alert_type + "\",\"description\":\"" + description + "\",\"color\":\"" + discord_color + "\",\"fields\":[{\"name\":\"Details\",\"value\":\"" + details + "\",\"inline\":false}]}]}" : base_msg
+    result
+
+var int  m6_prev_regime      = 0
+var bool m6_crisis_active    = false
+var float m6_prev_kelly      = 0.0
+var bool m6_reopt_done_prev  = false
+var bool m6_liq_prev         = false
+var bool m6_corr_shock_prev  = false
+var int  m6_prev_day         = 0
+
+var int m6_cd_long        = 0
+var int m6_cd_short       = 0
+var int m6_cd_regime      = 0
+var int m6_cd_crisis      = 0
+var int m6_cd_corr        = 0
+var int m6_cd_cb          = 0
+var int m6_cd_kelly       = 0
+var int m6_cd_reopt       = 0
+var int m6_cd_robust      = 0
+var int m6_cd_liq         = 0
+var int m6_cd_sh          = 0
+var int m6_cd_summary     = 0
+
+m6_cd_long    := m6_cd_long    > 0 ? m6_cd_long    - 1 : 0
+m6_cd_short   := m6_cd_short   > 0 ? m6_cd_short   - 1 : 0
+m6_cd_regime  := m6_cd_regime  > 0 ? m6_cd_regime  - 1 : 0
+m6_cd_crisis  := m6_cd_crisis  > 0 ? m6_cd_crisis  - 1 : 0
+m6_cd_corr    := m6_cd_corr    > 0 ? m6_cd_corr    - 1 : 0
+m6_cd_cb      := m6_cd_cb      > 0 ? m6_cd_cb      - 1 : 0
+m6_cd_kelly   := m6_cd_kelly   > 0 ? m6_cd_kelly   - 1 : 0
+m6_cd_reopt   := m6_cd_reopt   > 0 ? m6_cd_reopt   - 1 : 0
+m6_cd_robust  := m6_cd_robust  > 0 ? m6_cd_robust  - 1 : 0
+m6_cd_liq     := m6_cd_liq     > 0 ? m6_cd_liq     - 1 : 0
+m6_cd_sh      := m6_cd_sh      > 0 ? m6_cd_sh      - 1 : 0
+m6_cd_summary := m6_cd_summary > 0 ? m6_cd_summary - 1 : 0
+
+bool m6_alert_1_trigger = m6_enable_alerts and m1_long_signal and m1_ready and not m1_safe_haven_long and m6_cd_long == 0
+bool m6_alert_2_trigger = m6_enable_alerts and m1_short_signal and m1_ready and m6_cd_short == 0
+
+bool m6_regime_changed = m6_prev_regime != m1_active_regime and m6_prev_regime != 0 and m1_active_regime != 0
+int m6_alert_3_severity = (m6_prev_regime == 1 and m1_active_regime == 3) or (m6_prev_regime == 3 and m1_active_regime == 1) ? m6_SEV_WARNING : m6_SEV_INFO
+bool m6_alert_3_trigger = m6_enable_alerts and m6_regime_changed and m6_alert_3_severity >= m6_min_sev_val and m6_cd_regime == 0
+
+bool m6_alert_4_trigger = m6_enable_alerts and m4_crisis_score > 70 and not m6_crisis_active and m6_cd_crisis == 0
+bool m6_alert_5_trigger = m6_enable_alerts and m4_corr_shock and not m6_corr_shock_prev and m6_cd_corr == 0
+bool m6_alert_6_trigger = m6_enable_alerts and m1_circuit_breaker and m6_cd_cb == 0
+
+float m6_kelly_delta = math.abs(m2_kelly_fraction - m6_prev_kelly)
+bool m6_alert_7_trigger = m6_enable_alerts and m6_kelly_delta > 0.1 and m6_prev_kelly != 0.0 and m6_cd_kelly == 0
+int m6_alert_7_severity = m2_kelly_fraction < m6_prev_kelly ? m6_SEV_WARNING : m6_SEV_INFO
+
+bool m6_alert_8_trigger = m6_enable_alerts and m3_reopt_completed and not m6_reopt_done_prev and m6_cd_reopt == 0
+bool m6_alert_9_trigger = m6_enable_alerts and not m3_reopt_completed and m3_reopt_count > 0 and m3_robustness_score < m3_robustness_threshold and m6_cd_robust == 0
+bool m6_alert_10_trigger = m6_enable_alerts and m1_liquidity_crisis and not m6_liq_prev and m6_cd_liq == 0
+bool m6_alert_11_trigger = m6_enable_alerts and m1_safe_haven_long and m6_cd_sh == 0
+
+int m6_current_day = dayofmonth(time)
+bool m6_new_day = m6_current_day != m6_prev_day and m6_prev_day != 0
+bool m6_alert_12_trigger = m6_enable_alerts and m6_new_day and m6_cd_summary == 0
+
+// =============================================================================
+// GLOBAL PLOTS — ALL MODULES
+// =============================================================================
+
+// --- M1: Regime Background + EMAs + Signals ---
+color m1_reg_color = m1_active_regime == 1 ? color.new(color.green, 86) : m1_active_regime == 2 ? color.new(color.yellow, 86) : m1_active_regime == 3 ? color.new(color.red, 88) : na
+bgcolor(m1_reg_color, display = m1_show_regime ? display.all : display.none)
+
+plot(m1_ema_fast, "M1 EMA Fast", color = color.aqua, linewidth = 1, display = m1_show_signals ? display.all : display.none)
+plot(m1_ema_slow, "M1 EMA Slow", color = color.orange, linewidth = 2, display = m1_show_signals ? display.all : display.none)
+
+plotshape(m1_long_signal and m1_ready and not m1_safe_haven_long, "M1 Long Signal", style = shape.triangleup, location = location.belowbar, color = color.lime, size = size.tiny, text = "L", display = m1_show_signals ? display.all : display.none)
+plotshape(m1_short_signal and m1_ready, "M1 Short Signal", style = shape.triangledown, location = location.abovebar, color = color.red, size = size.tiny, text = "S", display = m1_show_signals ? display.all : display.none)
+plotshape(m1_safe_haven_long and m1_ready, "M1 Safe-Haven", style = shape.triangleup, location = location.belowbar, color = color.blue, size = size.small, text = "SH", display = m1_show_signals ? display.all : display.none)
+
+plot(m1_show_ann_vol ? m1_ann_vol : na, "M1 Ann Vol", color = color.purple, display = m1_show_ann_vol ? display.pane : display.none)
+
+// --- M3: WFO Visualization ---
+float m3_plot_is = m3_show_equity_curves ? m3_is_equity : na
+plot(m3_plot_is, "M3 IS Equity", color = color.new(color.green, 20), style = plot.style_line, linewidth = 2)
+float m3_plot_oos = m3_show_equity_curves ? m3_oos_equity : na
+plot(m3_plot_oos, "M3 OOS Equity", color = color.new(color.blue, 20), style = plot.style_line, linewidth = 2)
+float m3_rob_plot = m3_robustness_score < 0.0 ? 0.0 : m3_robustness_score > 2.0 ? 2.0 : m3_robustness_score
+float m3_plot_rob = m3_show_equity_curves ? m3_rob_plot : na
+plot(m3_plot_rob, "M3 Robustness", color = color.new(color.orange, 10), style = plot.style_line, linewidth = 1)
+float m3_plot_stab = m3_show_equity_curves ? m3_stability_score : na
+plot(m3_plot_stab, "M3 Param Stability", color = color.new(color.purple, 10), style = plot.style_line, linewidth = 1)
+// Diagnostics are intentionally not plotted here to stay below TradingView's 64-plot limit.
+// Inspect auto_history_need, m3_estimated_ops, and auto_history_warning in the dashboard or logs if needed.
+
+bool m3_accepted = m3_show_reopt_markers and m3_reopt_completed and m3_params_valid
+plotshape(m3_accepted, "M3 Param Accepted", shape.triangleup, location.bottom, color.new(color.green, 0), size = size.small)
+bool m3_rejected = m3_show_reopt_markers and m3_reopt_completed and not m3_params_valid
+plotshape(m3_rejected, "M3 Param Rejected", shape.triangledown, location.top, color.new(color.red, 0), size = size.small)
+bool m3_bg_reopt = m3_reopt_completed
+bgcolor(m3_bg_reopt ? color.new(color.yellow, 90) : na, title = "M3 Re-opt Background")
+
+// --- M4: Crisis Scanner Visualization ---
+color m4_crisis_clr = m4_crisis_level == 0 ? color.new(color.green, 10) : m4_crisis_level == 1 ? color.new(color.yellow, 10) : m4_crisis_level == 2 ? color.new(color.orange, 10) : color.new(color.red, 10)
+float m4_plot_crisis = m4_enable_scanner ? m4_crisis_score : na
+plot(m4_plot_crisis, "M4 Crisis Score", color = m4_crisis_clr, style = plot.style_area, linewidth = 1)
+plot(m4_plot_crisis, "M4 Crisis Line",  color = color.new(color.white, 20), style = plot.style_line, linewidth = 1)
+
+float m4_plot_vix = m4_enable_scanner ? m4_vix_proxy_smooth : na
+plot(m4_plot_vix, "M4 VIX Proxy", color = color.new(color.fuchsia, 20), style = plot.style_line, linewidth = 1)
+
+float m4_plot_corr_btc  = m4_enable_scanner ? (m4_curr_corr_spx_btc + 1.0) * 50.0 : na
+float m4_plot_corr_gold = m4_enable_scanner ? (m4_curr_corr_spx_gold + 1.0) * 50.0 : na
+plot(m4_plot_corr_btc,  "M4 Corr SPX-BTC",  color = color.new(color.blue, 30),   style = plot.style_line, linewidth = 1)
+plot(m4_plot_corr_gold, "M4 Corr SPX-Gold", color = color.new(color.yellow, 30), style = plot.style_line, linewidth = 1)
+
+bool m4_ew_shape = m4_enable_scanner and m4_early_warning
+plotshape(m4_ew_shape, "M4 Early Warning", shape.diamond, location.top, color.new(color.red, 0), size = size.small)
+bool m4_cc_shape = m4_enable_scanner and m4_corr_collapse_flag
+plotshape(m4_cc_shape, "M4 Corr Collapse", shape.circle, location.bottom, color.new(color.orange, 0), size = size.small)
+bool m4_ro_shape = m4_enable_scanner and m4_risk_off_level > 0
+color m4_ro_clr = m4_risk_off_level >= 3 ? color.new(color.purple, 20) : m4_risk_off_level == 2 ? color.new(color.red, 20) : color.new(color.orange, 20)
+plotshape(m4_ro_shape, "M4 Risk-Off", shape.square, location.top, m4_ro_clr, size = size.tiny)
+
+bgcolor(m4_enable_scanner and m4_crisis_level == 0 ? color.new(color.green, 95)   : na, title = "M4 BG Normal")
+bgcolor(m4_enable_scanner and m4_crisis_level == 1 ? color.new(color.yellow, 92)  : na, title = "M4 BG Elevated")
+bgcolor(m4_enable_scanner and m4_crisis_level == 2 ? color.new(color.orange, 90)  : na, title = "M4 BG High")
+bgcolor(m4_enable_scanner and m4_crisis_level == 3 ? color.new(color.red, 88)     : na, title = "M4 BG Critical")
+
+hline(m4_vix_threshold, "M4 VIX Threshold",       color = color.new(color.gray, 50), linestyle = hline.style_dashed)
+hline(70.0,             "M4 Early Warning Level", color = color.new(color.red, 50),  linestyle = hline.style_dashed)
+hline(50.0,             "M4 Elevated Level",      color = color.new(color.orange, 50), linestyle = hline.style_dotted)
+
+// --- M6: Severity Indicator ---
+float m6_severity_level = m4_crisis_score > 70 ? 2.0 : m4_corr_shock or m1_circuit_breaker or m1_liquidity_crisis ? 1.0 : 0.0
+plot(m6_severity_level, title = "M6 Severity", color = color.new(color.purple, 0), display = display.none)
+
+// =============================================================================
+// GLOBAL ALERTCONDITIONS — ALL MODULES
+// =============================================================================
+
+// --- M1: Entry Alerts ---
+alertcondition(m1_long_signal and m1_ready and not m1_safe_haven_long, title = "SIGMA — Long Entry", message = "SIGMA Long Entry")
+alertcondition(m1_short_signal and m1_ready, title = "SIGMA — Short Entry", message = "SIGMA Short Entry")
+alertcondition(m1_safe_haven_long and m1_ready, title = "SIGMA — Safe-Haven Long", message = "SIGMA Safe-Haven Long | Metals safe-haven activated")
+alertcondition(m1_circuit_breaker, title = "SIGMA — Circuit Breaker", message = "SIGMA Circuit Breaker triggered! Equity dropped 2% from peak.")
+alertcondition(m1_liquidity_crisis, title = "SIGMA — Liquidity Crisis", message = "SIGMA Liquidity Crisis detected! All positions closed.")
+alertcondition(m1_peer_shock, title = "SIGMA — Peer Shock", message = "SIGMA Peer correlation shock detected. New entries blocked.")
+alertcondition(m1_crisis_mode, title = "SIGMA — Crisis Mode", message = "SIGMA Crisis Mode activated. Switched to short analysis window.")
+alertcondition(m1_time_exit, title = "SIGMA — Time Exit", message = "SIGMA Time-based exit executed.")
+
+// --- M3: WFO Alerts ---
+alertcondition(m3_reopt_completed and m3_params_valid, title = "SIGMA — WFO Complete", message = "WFO completed successfully")
+bool m3_robust_alert = not m3_params_valid and m3_reopt_count > 0 and bar_index == m3_last_reopt_bar
+alertcondition(m3_robust_alert, title = "SIGMA — Robustness Low", message = "WFO robustness below threshold")
+
+// --- M4: Crisis Alerts ---
+var bool m4_crisis_prev = false
+bool m4_crisis_trig = m4_crisis_score > 70.0 and not m4_crisis_prev
+alertcondition(m4_crisis_trig, title = "SIGMA — CRISIS DETECTED", message = "Crisis detected")
+m4_crisis_prev := m4_crisis_score > 70.0
+
+var bool m4_shock_prev = false
+bool m4_shock_trig = m4_corr_shock and not m4_shock_prev
+alertcondition(m4_shock_trig, title = "SIGMA — Correlation Shock", message = "Correlation shock detected")
+m4_shock_prev := m4_corr_shock
+
+var bool m4_ew_alert_prev = false
+bool m4_ew_trig = m4_early_warning and not m4_ew_alert_prev
+alertcondition(m4_ew_trig, title = "SIGMA — Early Warning", message = "Early warning")
+m4_ew_alert_prev := m4_early_warning
+
+// --- M6: Engine Alert Conditions ---
+
+alertcondition(
+     m6_alert_1_trigger,
+     title   = "SIGMA — Long Entry",
+     message = "Long entry signal detected")
+
+alertcondition(
+     m6_alert_2_trigger,
+     title   = "SIGMA — Short Entry",
+     message = "Short entry signal detected")
+
+alertcondition(
+     m6_alert_3_trigger,
+     title   = "SIGMA — Regime Change",
+     message = "Regime change detected")
+
+alertcondition(
+     m6_alert_4_trigger,
+     title   = "SIGMA — CRISIS DETECTED",
+     message = "Crisis detected")
+
+alertcondition(
+     m6_alert_5_trigger,
+     title   = "SIGMA — Correlation Shock",
+     message = "Correlation shock detected")
+
+alertcondition(
+     m6_alert_6_trigger,
+     title   = "SIGMA — CIRCUIT BREAKER",
+     message = "Circuit breaker triggered")
+
+alertcondition(
+     m6_alert_7_trigger,
+     title   = "SIGMA — Kelly Change",
+     message = "Kelly fraction changed")
+
+alertcondition(
+     m6_alert_8_trigger,
+     title   = "SIGMA — WFO Complete",
+     message = "Walk-forward re-optimization completed")
+
+alertcondition(
+     m6_alert_9_trigger,
+     title   = "SIGMA — Robustness Low",
+     message = "WFO robustness below threshold")
+
+alertcondition(
+     m6_alert_10_trigger,
+     title   = "SIGMA — Liquidity Crisis",
+     message = "Liquidity crisis detected")
+
+alertcondition(
+     m6_alert_11_trigger,
+     title   = "SIGMA — Safe-Haven",
+     message = "Safe-haven activated")
+
+alertcondition(
+     m6_alert_12_trigger,
+     title   = "SIGMA — Daily Summary",
+     message = "Daily summary generated")
+
+// =============================================================================
+// M6.8: STATE UPDATE
+// =============================================================================
+
+m6_prev_regime := m1_active_regime
+m6_crisis_active := m4_crisis_score > 70
+if m6_kelly_delta > 0.01
+    m6_prev_kelly := m2_kelly_fraction
+m6_reopt_done_prev := m3_reopt_completed
+m6_liq_prev := m1_liquidity_crisis
+m6_corr_shock_prev := m4_corr_shock
+m6_prev_day := dayofmonth(time)
+
+if m6_alert_1_trigger
+    m6_cd_long := 5
+if m6_alert_2_trigger
+    m6_cd_short := 5
+if m6_alert_3_trigger
+    m6_cd_regime := 5
+if m6_alert_4_trigger
+    m6_cd_crisis := 5
+if m6_alert_5_trigger
+    m6_cd_corr := 5
+if m6_alert_6_trigger
+    m6_cd_cb := 5
+if m6_alert_7_trigger
+    m6_cd_kelly := 5
+if m6_alert_8_trigger
+    m6_cd_reopt := 5
+if m6_alert_9_trigger
+    m6_cd_robust := 5
+if m6_alert_10_trigger
+    m6_cd_liq := 5
+if m6_alert_11_trigger
+    m6_cd_sh := 5
+if m6_alert_12_trigger
+    m6_cd_summary := 5
+
+// =============================================================================
+// M1.21: NON-DAILY CHART WARNING LABEL
+// =============================================================================
+
+var label m1_chart_warn = na
+if m1_show_daily_warn and timeframe.period != "D" and timeframe.period != "1D"
+    if na(m1_chart_warn)
+        m1_chart_warn := label.new(bar_index, high, "Warning: Use Daily Charts", color = color.red, textcolor = color.white, style = label.style_label_lower_right)
+    else
+        label.set_xy(m1_chart_warn, bar_index, high)
+else if not na(m1_chart_warn)
+    label.delete(m1_chart_warn)
+    m1_chart_warn := na
+
+// =============================================================================
+// END OF SIGMA TRADING SYSTEM v1.0
+// =============================================================================

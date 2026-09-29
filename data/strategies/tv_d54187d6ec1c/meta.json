@@ -1,0 +1,9 @@
+{
+  "bytes": 58412,
+  "name": "QuantumForexTrader_SOLUSDT_GovClusterReEntry_1to15m",
+  "persisted_at": "2026-09-08T00:06:30Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "tv_d54187d6ec1c",
+  "tv_script_id": "USER;7522b0ba88bf418b8eb87934487ee31b"
+}

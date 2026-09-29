@@ -1,0 +1,143 @@
+//@version=6
+strategy("HYPERION-V VECTORIAL ACCELERATION", 
+         shorttitle="HYPERION-V", 
+         overlay=true, 
+         initial_capital=1000, 
+         default_qty_type=strategy.cash, 
+         default_qty_value=100, 
+         pyramiding=0, 
+         calc_on_every_tick=false, 
+         process_orders_on_close=true, 
+         commission_type=strategy.commission.percent, 
+         commission_value=0.04, 
+         slippage=1)
+
+// ============================================================================
+// PROTOKOL-INPUTS (SUB-AGENT CONFIGURATION)
+// ============================================================================
+// 1. Market Data Parameters
+int   vol_length      = input.int(14, "Market Data: Volatility Vector Length", minval=2, group="01. Market Data")
+float micro_imbal_th  = input.float(1.2, "Market Data: Min Volatility Threshold", step=0.1, group="01. Market Data")
+
+// 2. Adaptive Corridor Parameters
+int   corridor_len    = input.int(9, "Corridor: Velocity Period", minval=2, group="02. Adaptive Corridor")
+float accel_trigger   = input.float(1.5, "Corridor: Acceleration Factor", step=0.1, group="02. Adaptive Corridor")
+
+// 3. Neural Focus (Pattern Exhaustion)
+int   pattern_len     = input.int(5, "Neural Focus: Micro-Pattern Window", minval=3, group="03. Neural Focus")
+float exhaust_mult    = input.float(2.0, "Neural Focus: Exhaustion StdDev Mult", step=0.1, group="03. Neural Focus")
+
+// 4. Risk Governor
+float risk_sd_mult    = input.float(2.5, "Risk Governor: Trailing StdDev Mult", step=0.1, group="04. Risk Governor")
+float max_loss_pct    = input.float(1.0, "Risk Governor: Absolute Circuit-Breaker %", step=0.1, group="04. Risk Governor")
+
+// ============================================================================
+// SUB-AGENT 1: MARKET DATA (Liquidity & Volatility Vector Engine)
+// ============================================================================
+// Da Pine Script kein direktes L2-Orderbuch verarbeitet, simulieren wir den 
+// "Order Book Imbalance Vector" über die volumengewichtete Preisbeschleunigung.
+float price_change = close - open
+float volume_vector = volume > 0 ? price_change * volume : price_change * 1.0
+
+// Volatilitäts-Vektor über Standardabweichung der Preisänderung
+float market_noise = ta.stdev(price_change, vol_length)
+float fast_atr = ta.atr(vol_length)
+bool high_liquidity_momentum = fast_atr > (ta.sma(fast_atr, vol_length * 2) * micro_imbal_th)
+
+// ============================================================================
+// SUB-AGENT 2: ADAPTIVE CORRIDOR (Velocity & Momentum Escalation)
+// ============================================================================
+// Messung der vektoriellen Beschleunigung (Momentum Velocity) via linearer Regression
+float velocity_vector = ta.linreg(volume_vector, corridor_len, 0)
+float acceleration = ta.change(velocity_vector)
+
+float upper_corridor = ta.highest(high, corridor_len)[1]
+float lower_corridor = ta.lowest(low, corridor_len)[1]
+
+bool bull_acceleration = acceleration > 0.0 and close > upper_corridor
+bool bear_acceleration = acceleration < 0.0 and close < lower_corridor
+
+// ============================================================================
+// SUB-AGENT 3: NEURAL FOCUS (Micro-Breakout & Local Exhaustion Engine)
+// ============================================================================
+// Mathematische Annäherung an neuronale Pattern-Erkennung zur Antizipation lokaler Erschöpfung
+float neural_mean = ta.sma(close, pattern_len)
+float neural_sd = ta.stdev(close, pattern_len)
+
+float exhaustion_upper = neural_mean + (neural_sd * exhaust_mult)
+float exhaustion_lower = neural_mean - (neural_sd * exhaust_mult)
+
+// Antizipation von Trendwenden (Exhaustion) vor Makro-Shifts
+bool bullish_exhausted = high >= exhaustion_upper or ta.rsi(close, pattern_len) > 82.0
+bool bearish_exhausted = low <= exhaustion_lower or ta.rsi(close, pattern_len) < 18.0
+
+// ============================================================================
+// EXECUTION ORCHESTRATOR
+// ============================================================================
+bool enter_long  = bull_acceleration and not bullish_exhausted and high_liquidity_momentum and strategy.position_size == 0
+bool enter_short = bear_acceleration and not bearish_exhausted and high_liquidity_momentum and strategy.position_size == 0
+
+// ============================================================================
+// SUB-AGENT 4: RISK GOVERNOR (Dynamic Trailing Stop & Absolute Circuit-Breaker)
+// ============================================================================
+var float long_trailing_stop = 0.0
+var float short_trailing_stop = 0.0
+var float absolute_circuit_breaker = 0.0
+
+// Berechnung des dynamischen Risikobuffers basierend auf der aktuellen Markt-Standardabweichung
+float dynamic_risk_buffer = market_noise * risk_sd_mult
+
+if strategy.position_size > 0
+    float candidate_stop = close - dynamic_risk_buffer
+    long_trailing_stop := math.max(candidate_stop, long_trailing_stop)
+    // Absoluter Notfall-Schutzschalter
+    if close < absolute_circuit_breaker
+        strategy.close("Long", comment="CRITICAL SAFETY ENVELOPE")
+else
+    long_trailing_stop := 0.0
+
+if strategy.position_size < 0
+    float candidate_stop = close + dynamic_risk_buffer
+    short_trailing_stop := math.min(candidate_stop, short_trailing_stop)
+    if close > absolute_circuit_breaker
+        strategy.close("Short", comment="CRITICAL SAFETY ENVELOPE")
+else
+    short_trailing_stop := 0.0
+
+// ============================================================================
+// POSITION DEPLOYMENT
+// ============================================================================
+if barstate.isconfirmed
+    if enter_long
+        strategy.entry("Long", strategy.long, comment="VEC_ACC_LONG")
+        long_trailing_stop := close - dynamic_risk_buffer
+        absolute_circuit_breaker := close * (1.0 - (max_loss_pct / 100.0))
+        
+    if enter_short
+        strategy.entry("Short", strategy.short, comment="VEC_ACC_SHORT")
+        short_trailing_stop := close + dynamic_risk_buffer
+        absolute_circuit_breaker := close * (1.0 + (max_loss_pct / 100.0))
+
+    // Reguläre Ausstiege über den Risk Governor
+    if strategy.position_size > 0 and close < long_trailing_stop
+        strategy.close("Long", comment="GOVERNOR EXIT")
+        
+    if strategy.position_size < 0 and close > short_trailing_stop
+        strategy.close("Short", comment="GOVERNOR EXIT")
+
+    // Vorzeitiger Ausstieg bei Signal-Exhaustion (Neural Focus)
+    if strategy.position_size > 0 and bullish_exhausted
+        strategy.close("Long", comment="NEURAL EXHAUST")
+        
+    if strategy.position_size < 0 and bearish_exhausted
+        strategy.close("Short", comment="NEURAL EXHAUST")
+
+// ============================================================================
+// METRIC VISUALIZATION
+// ============================================================================
+plot(strategy.position_size > 0 ? long_trailing_stop : na, title="Governor Long Trailing Stop", color=color.lime, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size < 0 ? short_trailing_stop : na, title="Governor Short Trailing Stop", color=color.orange, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size != 0 ? absolute_circuit_breaker : na, title="Absolute Circuit Breaker", color=color.red, style=plot.style_circles, linewidth=1)
+
+plotshape(enter_long, title="Vector Long Trigger", style=shape.triangleup, location=location.belowbar, color=color.new(color.teal, 0), size=size.small)
+plotshape(enter_short, title="Vector Short Trigger", style=shape.triangledown, location=location.abovebar, color=color.new(color.purple, 0), size=size.small)

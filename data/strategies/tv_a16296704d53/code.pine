@@ -1,0 +1,170 @@
+//@version=6
+strategy(
+    title="Dense Mean Reversion Grid",
+    overlay=true,
+    initial_capital=10000,
+    currency=currency.USD,
+    default_qty_type=strategy.fixed,
+    default_qty_value=1,
+    commission_type=strategy.commission.percent,
+    commission_value=0.05,
+    calc_on_order_fills=true,
+    process_orders_on_close=true,
+    close_entries_rule="ANY"
+)
+
+// TradingView strategies are net-position based, so this script emulates a
+// 150-200 level grid by scaling one grid cell at a time instead of parking
+// hundreds of simultaneous resting orders.
+
+const int SideNone = 0
+const int SideLong = 1
+const int SideShort = -1
+
+string groupMean = "Mean Reversion"
+string groupGrid = "Dense Grid"
+string groupFilter = "Regime Filter"
+string groupRisk = "Risk"
+
+string tradeDirection = input.string("Both", "Trade Direction", options=["Both", "Long only", "Short only"], group=groupGrid)
+int totalGrids = input.int(180, "Total Grid Count", minval=150, maxval=200, group=groupGrid)
+float qtyPerGrid = input.float(1.0, "Qty Per Grid", minval=0.0001, step=0.0001, group=groupGrid)
+float activationPct = input.float(0.18, "Activation Distance (% of half range)", minval=0.01, maxval=0.90, step=0.01, group=groupGrid)
+float resetBandSteps = input.float(2.0, "Reset Band (grid steps)", minval=0.5, maxval=20.0, step=0.5, group=groupGrid)
+int cooldownBars = input.int(3, "Cooldown Bars", minval=0, maxval=100, group=groupGrid)
+
+string meanType = input.string("EMA", "Mean Type", options=["EMA", "SMA", "VWAP"], group=groupMean)
+int meanLength = input.int(200, "Mean Length", minval=5, maxval=1000, group=groupMean)
+string rangeMode = input.string("ATR", "Range Mode", options=["ATR", "StDev"], group=groupMean)
+int rangeLength = input.int(100, "Range Length", minval=5, maxval=1000, group=groupMean)
+float rangeMult = input.float(1.5, "Half Range Multiplier", minval=0.1, maxval=20.0, step=0.1, group=groupMean)
+
+bool useAdxFilter = input.bool(true, "Use ADX Sideways Filter", group=groupFilter)
+int adxLength = input.int(14, "ADX Length", minval=3, maxval=100, group=groupFilter)
+float adxMax = input.float(25.0, "Max ADX", minval=5.0, maxval=100.0, step=0.5, group=groupFilter)
+
+float stopExtraRange = input.float(0.35, "Stop Outside Grid Range", minval=0.05, maxval=2.0, step=0.05, group=groupRisk)
+int maxGridBars = input.int(400, "Max Bars Per Grid", minval=10, maxval=5000, group=groupRisk)
+bool flattenOnTrendBreak = input.bool(true, "Flatten On Trend Break", group=groupRisk)
+
+f_roundToTick(float price) =>
+    math.round(price / syminfo.mintick) * syminfo.mintick
+
+f_alignStep(float stepValue) =>
+    math.max(math.round(stepValue / syminfo.mintick) * syminfo.mintick, syminfo.mintick)
+
+f_getMean(string selectedType, int selectedLength) =>
+    selectedType == "SMA" ? ta.sma(close, selectedLength) :
+     selectedType == "VWAP" ? ta.vwap(hlc3) :
+     ta.ema(close, selectedLength)
+
+f_getRange(string selectedMode, int selectedLength) =>
+    selectedMode == "StDev" ? ta.stdev(close, selectedLength) : ta.atr(selectedLength)
+
+float basis = f_getMean(meanType, meanLength)
+float rawRange = f_getRange(rangeMode, rangeLength)
+int gridsPerSide = int(math.max(math.floor(totalGrids * 0.5), 1))
+float halfRange = na(rawRange) ? na : math.max(rawRange * rangeMult, syminfo.mintick * gridsPerSide)
+float stepSize = na(halfRange) ? na : f_alignStep(halfRange / gridsPerSide)
+float liveActivationDistance = na(stepSize) or na(halfRange) ? na : math.max(halfRange * activationPct, stepSize)
+[_, _, adxValue] = ta.dmi(adxLength, adxLength)
+
+bool allowLong = tradeDirection != "Short only"
+bool allowShort = tradeDirection != "Long only"
+bool dataReady = not na(basis) and not na(rawRange) and not na(stepSize)
+bool sidewaysOk = not useAdxFilter or adxValue <= adxMax
+
+var int activeSide = SideNone
+var float anchorMean = na
+var float anchorHalfRange = na
+var float anchorStep = na
+var float anchorActivationDistance = na
+var float stopPrice = na
+var int gridStartBar = na
+var int lastResetBar = na
+
+int currentNetUnits = int(math.round(strategy.position_size / qtyPerGrid))
+bool cooldownOver = na(lastResetBar) or bar_index - lastResetBar > cooldownBars
+
+if dataReady and activeSide == SideNone and cooldownOver and sidewaysOk and barstate.isconfirmed
+    if allowLong and close <= basis - liveActivationDistance
+        activeSide := SideLong
+        anchorMean := f_roundToTick(basis)
+        anchorHalfRange := halfRange
+        anchorStep := stepSize
+        anchorActivationDistance := math.max(anchorHalfRange * activationPct, anchorStep)
+        stopPrice := f_roundToTick(anchorMean - anchorHalfRange * (1.0 + stopExtraRange))
+        gridStartBar := bar_index
+    else if allowShort and close >= basis + liveActivationDistance
+        activeSide := SideShort
+        anchorMean := f_roundToTick(basis)
+        anchorHalfRange := halfRange
+        anchorStep := stepSize
+        anchorActivationDistance := math.max(anchorHalfRange * activationPct, anchorStep)
+        stopPrice := f_roundToTick(anchorMean + anchorHalfRange * (1.0 + stopExtraRange))
+        gridStartBar := bar_index
+
+int desiredNetUnits = 0
+if activeSide == SideLong and not na(anchorMean) and not na(anchorStep) and not na(anchorActivationDistance)
+    float distanceBelowMean = anchorMean - close
+    if distanceBelowMean > anchorActivationDistance
+        desiredNetUnits := math.min(gridsPerSide, int(math.floor((distanceBelowMean - anchorActivationDistance) / anchorStep)) + 1)
+
+if activeSide == SideShort and not na(anchorMean) and not na(anchorStep) and not na(anchorActivationDistance)
+    float distanceAboveMean = close - anchorMean
+    if distanceAboveMean > anchorActivationDistance
+        desiredNetUnits := -math.min(gridsPerSide, int(math.floor((distanceAboveMean - anchorActivationDistance) / anchorStep)) + 1)
+
+bool longStopHit = activeSide == SideLong and not na(stopPrice) and low <= stopPrice
+bool shortStopHit = activeSide == SideShort and not na(stopPrice) and high >= stopPrice
+bool timedOut = activeSide != SideNone and not na(gridStartBar) and bar_index - gridStartBar >= maxGridBars
+bool trendBroken = activeSide != SideNone and flattenOnTrendBreak and useAdxFilter and adxValue > adxMax
+bool longFlatReset = activeSide == SideLong and currentNetUnits == 0 and not na(anchorMean) and close >= anchorMean - anchorStep * resetBandSteps
+bool shortFlatReset = activeSide == SideShort and currentNetUnits == 0 and not na(anchorMean) and close <= anchorMean + anchorStep * resetBandSteps
+
+if longStopHit or shortStopHit or timedOut or trendBroken
+    strategy.close_all(comment="Grid emergency reset")
+    activeSide := SideNone
+    anchorMean := na
+    anchorHalfRange := na
+    anchorStep := na
+    anchorActivationDistance := na
+    stopPrice := na
+    gridStartBar := na
+    lastResetBar := bar_index
+else
+    int deltaUnits = desiredNetUnits - currentNetUnits
+    if deltaUnits > 0
+        strategy.order("GridBuy", strategy.long, qty=deltaUnits * qtyPerGrid, comment="Grid scale in/out")
+    else if deltaUnits < 0
+        strategy.order("GridSell", strategy.short, qty=math.abs(deltaUnits) * qtyPerGrid, comment="Grid scale in/out")
+
+    if longFlatReset or shortFlatReset
+        activeSide := SideNone
+        anchorMean := na
+        anchorHalfRange := na
+        anchorStep := na
+        anchorActivationDistance := na
+        stopPrice := na
+        gridStartBar := na
+        lastResetBar := bar_index
+
+float activeUpperRange = activeSide != SideNone and not na(anchorMean) and not na(anchorHalfRange) ? f_roundToTick(anchorMean + anchorHalfRange) : na
+float activeLowerRange = activeSide != SideNone and not na(anchorMean) and not na(anchorHalfRange) ? f_roundToTick(anchorMean - anchorHalfRange) : na
+float activeMean = activeSide != SideNone ? anchorMean : na
+float desiredUnitPlot = desiredNetUnits
+float currentUnitPlot = currentNetUnits
+
+plot activeMeanPlot = plot(activeMean, "Active Grid Mean", color=activeSide == SideLong ? color.lime : activeSide == SideShort ? color.red : color.gray, linewidth=2)
+plot activeUpperPlot = plot(activeUpperRange, "Active Grid Upper", color=color.new(color.aqua, 0), linewidth=1, style=plot.style_linebr)
+plot activeLowerPlot = plot(activeLowerRange, "Active Grid Lower", color=color.new(color.aqua, 0), linewidth=1, style=plot.style_linebr)
+plot stopPlot = plot(activeSide != SideNone ? stopPrice : na, "Stop", color=color.new(color.fuchsia, 0), linewidth=1, style=plot.style_linebr)
+fill(activeUpperPlot, activeLowerPlot, color=activeSide == SideLong ? color.new(color.green, 88) : activeSide == SideShort ? color.new(color.red, 88) : na)
+
+plot(desiredUnitPlot, "Desired Net Grid Units", color=color.new(color.blue, 0), display=display.data_window)
+plot(currentUnitPlot, "Current Net Grid Units", color=color.new(color.purple, 0), display=display.data_window)
+
+plotshape(dataReady and activeSide == SideNone and cooldownOver and sidewaysOk and allowLong and close <= basis - liveActivationDistance, title="Long grid arm", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.tiny, text="GRID L")
+plotshape(dataReady and activeSide == SideNone and cooldownOver and sidewaysOk and allowShort and close >= basis + liveActivationDistance, title="Short grid arm", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="GRID S")
+
+bgcolor(activeSide == SideLong ? color.new(color.green, 93) : activeSide == SideShort ? color.new(color.red, 93) : na, title="Active grid regime")

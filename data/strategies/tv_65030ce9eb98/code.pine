@@ -1,0 +1,51 @@
+//@version=5
+strategy("F-35 Headless Quantitative Strategy v2.0", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, process_orders_on_close=true)
+
+// --- PARAMETERS ---
+sl_atr_mul = input.float(1.5, "Stop Loss ATR Multiplier", step=0.1)
+tp_atr_mul = input.float(3, "Take Profit ATR Multiplier", step=0.1)
+min_alignment = input.int(3, "Min MTF Timeframe Alignment (1-4)", minval=1, maxval=4)
+use_ema_filter = input.bool(true, "Use EMA 200 Trend Filter")
+rsi_ob = input.int(75, "RSI Overbought Level")
+rsi_os = input.int(25, "RSI Oversold Level")
+ob_pivot = input.int(4, "Order Block Pivot Lookback")
+
+// --- INDICATORS ---
+atr = ta.atr(14)
+rsi = ta.rsi(close, 14)
+ema200 = ta.ema(close, 200)
+
+// --- MTF TREND CONDITIONS ---
+h4_trend = request.security(syminfo.tickerid, "240", ta.ema(close, 50) > ta.ema(close, 200))
+h1_trend = request.security(syminfo.tickerid, "60", ta.ema(close, 50) > ta.ema(close, 200))
+m15_trend = request.security(syminfo.tickerid, "15", ta.ema(close, 50) > ta.ema(close, 200))
+m5_trend = ta.ema(close, 50) > ta.ema(close, 200)
+
+align_count = (h4_trend ? 1 : 0) + (h1_trend ? 1 : 0) + (m15_trend ? 1 : 0) + (m5_trend ? 1 : 0)
+mtf_valid = align_count >= min_alignment
+
+// --- ENTRY CONDITIONS ---
+long_condition = mtf_valid and rsi < rsi_ob and (not use_ema_filter or close > ema200) and ta.crossover(ta.rsi(close, 14), rsi_os)
+short_condition = (4 - align_count) >= min_alignment and rsi > rsi_os and (not use_ema_filter or close < ema200) and ta.crossunder(ta.rsi(close, 14), rsi_ob)
+
+// --- EXECUTION (FLIPPING POSITION MODE) ---
+if (long_condition)
+    strategy.entry("F35_LONG", strategy.long)
+    strategy.exit("SL/TP LONG", "F35_LONG", stop=close - atr * sl_atr_mul, limit=close + atr * tp_atr_mul)
+
+if (short_condition)
+    strategy.entry("F35_SHORT", strategy.short)
+    strategy.exit("SL/TP SHORT", "F35_SHORT", stop=close + atr * sl_atr_mul, limit=close - atr * tp_atr_mul)
+
+// --- VISUAL TRADE ENTRY & EXIT MARKERS ON CHART ---
+plotshape(long_condition, title="BUY Entry Point", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.normal, text="ENTRY LONG")
+plotshape(short_condition, title="SELL Entry Point", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.normal, text="ENTRY SHORT")
+
+// Active Target Lines (TP / SL Exit Points)
+plot(strategy.position_size > 0 ? strategy.position_avg_price + atr * tp_atr_mul : na, title="Target TP Level (Long)", color=color.green, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size > 0 ? strategy.position_avg_price - atr * sl_atr_mul : na, title="Stop SL Level (Long)", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size < 0 ? strategy.position_avg_price - atr * tp_atr_mul : na, title="Target TP Level (Short)", color=color.green, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size < 0 ? strategy.position_avg_price + atr * sl_atr_mul : na, title="Stop SL Level (Short)", color=color.red, style=plot.style_linebr, linewidth=2)
+
+// Trade Zone Active Background
+bgcolor(strategy.position_size > 0 ? color.new(color.green, 90) : strategy.position_size < 0 ? color.new(color.red, 90) : na, title="In-Trade Active Background")

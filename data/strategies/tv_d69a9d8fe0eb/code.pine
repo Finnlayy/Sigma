@@ -1,0 +1,171 @@
+//@version=6
+// Direct Pionex Signal Bot version of QuantumForexTrader.
+// TradingView alert setup:
+// 1. Condition: this strategy
+// 2. Trigger: Order fills only
+// 3. Webhook URL: paste the Pionex Signal Bot URL from Pionex
+// 4. Message: {{strategy.order.alert_message}}
+strategy(
+    title="QuantumForexTrader v2 - Pionex Direct",
+    shorttitle="QFT v2 Px",
+    overlay=true,
+    max_labels_count=500,
+    initial_capital=100,
+    default_qty_type=strategy.cash,
+    default_qty_value=1,
+    pyramiding=1,
+    calc_on_every_tick=false,
+    margin_long=0,
+    margin_short=0,
+    process_orders_on_close=true,
+    commission_type=strategy.commission.percent,
+    commission_value=0.05,
+    slippage=2
+)
+// Reconstructed from TradingView snapshot metadata.
+// This copy keeps the original signal logic but emits direct Pionex webhook payloads.
+groupCore = "Core"
+src = input.source(close, "Source", group=groupCore)
+kamaLen = input.int(50, "KAMA Length", minval=1, group=groupCore)
+tmaLen = input.int(30, "TMA Length", minval=1, group=groupCore)
+utAtrLen = input.int(14, "UT ATR Length", minval=1, group=groupCore)
+utAtrMult = input.float(1.5, "UT ATR Mult", minval=0.1, step=0.1, group=groupCore)
+groupMTF = "MTF Bias"
+tf_h4 = input.timeframe("240", "H4 TF", group=groupMTF)
+tf_h1 = input.timeframe("60", "H1 TF", group=groupMTF)
+tf_m15 = input.timeframe("15", "M15 TF", group=groupMTF)
+tf_m5 = input.timeframe("5", "M5 TF", group=groupMTF)
+en_h4 = input.bool(true, "Enable H4", group=groupMTF)
+en_h1 = input.bool(true, "Enable H1", group=groupMTF)
+en_m15 = input.bool(true, "Enable M15", group=groupMTF)
+en_m5 = input.bool(true, "Enable M5", group=groupMTF)
+minBullVotes = input.int(3, "Min Bull Votes", minval=1, maxval=4, group=groupMTF)
+minBearVotes = input.int(3, "Min Bear Votes", minval=1, maxval=4, group=groupMTF)
+groupRisk = "Risk"
+stopAtrMult = input.float(1.5, "Stop ATR Mult", minval=0.1, step=0.1, group=groupRisk)
+tp1R = input.float(0.6, "TP1 R", minval=0.1, step=0.1, group=groupRisk)
+tp2R = input.float(0.3, "TP2 R", minval=0.1, step=0.1, group=groupRisk)
+tp3R = input.float(1.0, "TP3 R", minval=0.1, step=0.1, group=groupRisk)
+tp5R = input.float(2.0, "TP5 R", minval=0.1, step=0.1, group=groupRisk)
+groupFilters = "Filters"
+volLen = input.int(20, "Volume SMA Length", minval=1, group=groupFilters)
+requireVolume = input.bool(true, "Require Volume Filter", group=groupFilters)
+sessionMode = input.string("BACKTEST", "Mode", options=["BACKTEST", "LIVE"], group=groupFilters)
+groupPionex = "Pionex Webhook"
+PionexUuid = input.string("", "Pionex Signal Bot UUID", group=groupPionex)
+SendCloseAlerts = input.bool(true, "Send close alerts", group=groupPionex)
+f_tma(_src, _len) =>
+    ta.sma(ta.sma(_src, _len), _len)
+f_kama(_src, _len) =>
+    float change = math.abs(_src - nz(_src[_len], _src))
+    float volatility = math.sum(math.abs(_src - _src[1]), _len)
+    float efficiency_ratio = volatility != 0 ? change / volatility : 0.0
+    float fast_alpha = 2.0 / 3.0
+    float slow_alpha = 2.0 / 31.0
+    float smoothing = math.pow(efficiency_ratio * (fast_alpha - slow_alpha) + slow_alpha, 2)
+    var float kama = na
+    kama := na(kama[1]) ? _src : nz(kama[1], _src) + smoothing * (_src - nz(kama[1], _src))
+    kama
+f_ut_stop(_src, _atrLen, _atrMult) =>
+    _atr = ta.atr(_atrLen)
+    _longStop = _src - _atr * _atrMult
+    _shortStop = _src + _atr * _atrMult
+    var float _trail = na
+    if na(_trail)
+        _trail := _longStop
+    else if _src > _trail
+        _trail := math.max(_trail, _longStop)
+    else
+        _trail := math.min(_trail, _shortStop)
+    _trail
+f_pionex_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + PionexUuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+// CISD-style directional state inferred from snapshot naming.
+f_htf_cisd() =>
+    _emaFast = ta.ema(close, 25)
+    _emaSlow = ta.ema(close, 99)
+    _kama = f_kama(close, kamaLen)
+    _bull = close > _emaFast and _emaFast > _emaSlow and close > _kama
+    _bear = close < _emaFast and _emaFast < _emaSlow and close < _kama
+    _state = _bull ? 1 : _bear ? -1 : 0
+    [_state, _emaFast > _emaSlow]
+int state_h4 = 0
+bool h4_ema_bull = false
+if en_h4
+    [state_h4_tmp, h4_ema_bull_tmp] = request.security(syminfo.tickerid, tf_h4, f_htf_cisd())
+    state_h4 := state_h4_tmp
+    h4_ema_bull := h4_ema_bull_tmp
+int state_h1 = 0
+bool h1_ema_bull = false
+if en_h1
+    [state_h1_tmp, h1_ema_bull_tmp] = request.security(syminfo.tickerid, tf_h1, f_htf_cisd())
+    state_h1 := state_h1_tmp
+    h1_ema_bull := h1_ema_bull_tmp
+int state_m15 = 0
+bool m15_ema_bull = false
+if en_m15
+    [state_m15_tmp, m15_ema_bull_tmp] = request.security(syminfo.tickerid, tf_m15, f_htf_cisd())
+    state_m15 := state_m15_tmp
+    m15_ema_bull := m15_ema_bull_tmp
+int state_m5 = 0
+bool m5_ema_bull = false
+if en_m5
+    [state_m5_tmp, m5_ema_bull_tmp] = request.security(syminfo.tickerid, tf_m5, f_htf_cisd())
+    state_m5 := state_m5_tmp
+    m5_ema_bull := m5_ema_bull_tmp
+int bull_count = 0
+bull_count += (en_h4 and state_h4 == 1) ? 1 : 0
+bull_count += (en_h1 and state_h1 == 1) ? 1 : 0
+bull_count += (en_m15 and state_m15 == 1) ? 1 : 0
+bull_count += (en_m5 and state_m5 == 1) ? 1 : 0
+int bear_count = 0
+bear_count += (en_h4 and state_h4 == -1) ? 1 : 0
+bear_count += (en_h1 and state_h1 == -1) ? 1 : 0
+bear_count += (en_m15 and state_m15 == -1) ? 1 : 0
+bear_count += (en_m5 and state_m5 == -1) ? 1 : 0
+int ema_bias_count = 0
+ema_bias_count += en_h4 ? (h4_ema_bull ? 1 : -1) : 0
+ema_bias_count += en_h1 ? (h1_ema_bull ? 1 : -1) : 0
+ema_bias_count += en_m15 ? (m15_ema_bull ? 1 : -1) : 0
+ema_bias_count += en_m5 ? (m5_ema_bull ? 1 : -1) : 0
+kamaLine = f_kama(src, kamaLen)
+tmaLine = f_tma(src, tmaLen)
+utStop = f_ut_stop(src, utAtrLen, utAtrMult)
+atr = ta.atr(utAtrLen)
+volOk = not requireVolume or volume > ta.sma(volume, volLen)
+ready = barstate.isconfirmed
+pionexReady = str.length(PionexUuid) > 0
+payloadMessage = pionexReady ? f_pionex_payload() : ""
+trendBull = close > kamaLine and close > tmaLine and close > utStop
+trendBear = close < kamaLine and close < tmaLine and close < utStop
+longSignal = ready and bull_count >= minBullVotes and ema_bias_count > 0 and trendBull and volOk
+shortSignal = ready and bear_count >= minBearVotes and ema_bias_count < 0 and trendBear and volOk
+longStop = close - atr * stopAtrMult
+shortStop = close + atr * stopAtrMult
+longRisk = math.max(close - longStop, syminfo.mintick)
+shortRisk = math.max(shortStop - close, syminfo.mintick)
+longTp1 = close + longRisk * tp1R
+longTp2 = close + longRisk * tp2R
+longTp3 = close + longRisk * tp3R
+longTp5 = close + longRisk * tp5R
+shortTp1 = close - shortRisk * tp1R
+shortTp2 = close - shortRisk * tp2R
+shortTp3 = close - shortRisk * tp3R
+shortTp5 = close - shortRisk * tp5R
+if longSignal and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long, comment=sessionMode, alert_message=payloadMessage)
+    strategy.exit("L-TP1", "Long", limit=longTp1, stop=longStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+    strategy.exit("L-TP2", "Long", limit=longTp2, stop=longStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+    strategy.exit("L-TP3", "Long", limit=longTp3, stop=longStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+    strategy.exit("L-TP5", "Long", limit=longTp5, stop=longStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+if shortSignal and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short, comment=sessionMode, alert_message=payloadMessage)
+    strategy.exit("S-TP1", "Short", limit=shortTp1, stop=shortStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+    strategy.exit("S-TP2", "Short", limit=shortTp2, stop=shortStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+    strategy.exit("S-TP3", "Short", limit=shortTp3, stop=shortStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+    strategy.exit("S-TP5", "Short", limit=shortTp5, stop=shortStop, qty_percent=25, alert_message=SendCloseAlerts ? payloadMessage : "")
+plot(kamaLine, "KAMA", color=color.orange)
+plot(tmaLine, "TMA", color=color.blue)
+plot(utStop, "UT Stop", color=color.new(color.blue, 0), style=plot.style_linebr)
+plotshape(longSignal, "Long Entry", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="L")
+plotshape(shortSignal, "Short Entry", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")

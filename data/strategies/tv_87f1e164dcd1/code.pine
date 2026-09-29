@@ -1,0 +1,1517 @@
+//@version=6
+// Pionex-LuxAlgo Regel-Vermittler v6.5 — Adaptive Auto SL/TP + Temporal Exits + Entry Limits
+
+// Reiner Signal-Relay mit aggressiver Gewinnsicherung, Scalping-Exits und integriertem Evaluations-Dashboard.
+// v6.0: Verknuepfungen UND / ODER / EINZEL / UND NICHT + "Und nicht" Regel-Modus + zeitversetzte Confluence.
+// v6.1: LuxAlgo-Style UI — Analytics Dashboard (Sparkline, Stunden-Histogramm, Heatmap,
+//       Position/Groesse waehlbar), Gradient-Kerzen, Trade-Linien mit Treffer-Markierung.
+// v6.2: Konservatives Fill-Modell, Bar Magnifier, Standard-OHLC, Backtest-Zeitfenster,
+//       keine Realtime-Tick-Rechnung, W/L/BE-Kennzahlen und klar als Exit-Legs markierte Analytics.
+// v6.3: Optionales Online-Lernen mit rollierenden, ATR-normalisierten MAE/MFE-Quantilen für Auto-SL/TP.
+// v6.4: Optionales Zeit-/Bar-Exit-Modul für maximale Haltedauer, stagnierende Trades und Session-Cutoff.
+// v6.5: Optionales, variabel einstellbares Long-/Short-Entry-Limit pro UTC-Stunde.
+
+strategy(
+        title="Pionex LuxAlgo Regel Vermittler v6.5 Trade Limits",
+    shorttitle="Px Lux v6.5 Limits",
+
+    overlay=true,
+    initial_capital=100,
+    currency=currency.USDT,
+        default_qty_type=strategy.cash,
+    default_qty_value=1,          // Pionex-Referenz: 1 USDT = 1 % Margin bei initial_capital 100
+    pyramiding=1,                 // ein Risikoobjekt pro Position; Add-ons erst leg-basiert nachrüsten
+    calc_on_every_tick=false,     // historische und Realtime-Auswertung konsistent halten
+    calc_on_order_fills=false,
+    process_orders_on_close=true, // Pionex-Referenz: Signal und simulierte Marktorder am Kerzenschluss
+
+    commission_type=strategy.commission.percent,
+    commission_value=0.05,
+    slippage=2,
+    backtest_fill_limits_assumption=1, // TP-/Partial-Limits müssen um mindestens einen Tick überlaufen werden
+    use_bar_magnifier=true,
+    fill_orders_on_standard_ohlc=true,
+    margin_long=0,
+    margin_short=0,
+
+    max_lines_count=500,
+    max_labels_count=500
+)
+
+const int STARTZEIT_DEFAULT = 1744119900000
+
+// =====================================================================
+// 0. BACKTEST-INTEGRITAET
+// =====================================================================
+string GRP_BT = "0. Backtest-Integritaet"
+bool bt_zeitfenster_aktiv = input.bool(true, "Festes Backtest-Zeitfenster aktiv", group=GRP_BT)
+int bt_start = input.time(timestamp("01 Jan 2020 00:00 +0000"), "Backtest Start (UTC)", group=GRP_BT)
+int bt_ende = input.time(timestamp("01 Jan 2035 00:00 +0000"), "Backtest Ende (UTC)", group=GRP_BT)
+int bt_mindest_exit_legs = input.int(30, "Mindestzahl Exit-Legs fuer Kennzahlen", minval=5, maxval=500, group=GRP_BT)
+bool bt_kelly_erst_nach_sample = input.bool(true, "Auto Kelly erst nach Mindest-Sample", group=GRP_BT)
+bool bt_restart_erlauben = input.bool(false, "Same-Bar Restart im Backtest erlauben", group=GRP_BT, tooltip="Standard AUS: Close und Re-Entry auf derselben Kerze können die Simulation gegenüber der Live-Ausführung verzerren.")
+bool bt_am_ende_flatten = input.bool(true, "Am Ende des Testfensters flatten", group=GRP_BT)
+
+// =====================================================================
+// 1. VERBINDUNG & GRUNDEINSTELLUNGEN
+
+// =====================================================================
+string GRP_CONN = "1. Verbindung"
+bool lux_quellen_verbunden = input.bool(false, "Lux Quellen verbunden", group=GRP_CONN, tooltip="Erst aktivieren, wenn die genutzten LuxAlgo-Quellen wirklich in den Regeln ausgewaehlt wurden.")
+string ausloese_modus = input.string("Nur neues Signal", "Ausloese-Modus", options=["Nur neues Signal", "Aktiver Zustand"], group=GRP_CONN)
+int signal_gedaechtnis = input.int(0, "Signal-Gedaechtnis Kerzen", minval=-1, maxval=20, group=GRP_CONN, tooltip="0 = nur exakter Bar. 1-20 = Signal bleibt N Bars heiss (zeitversetzte Confluence). -1 = unbegrenzt vorgemerkt bis zum naechsten Entry.")
+float gleich_toleranz = input.float(0.000001, "Gleichheits-Toleranz", minval=0.0, step=0.000001, group=GRP_CONN)
+bool startzeit_aktiv = input.bool(false, "Startzeitfilter aktiv", group=GRP_CONN)
+int startzeit = input.time(STARTZEIT_DEFAULT, "Startzeit", group=GRP_CONN)
+
+// =====================================================================
+// 2. REGEL-BUILDER & CONFLUENCE ENGINE
+// =====================================================================
+// Logik der Verknuepfungen (Option A):
+// - EINZEL / ODER: trennt — die folgende Regel startet eine neue Gruppe.
+// - UND: die folgende Regel gehoert zur selben Gruppe und MUSS (zeitversetzt
+//   innerhalb des Signal-Gedaechtnisses) erfuellt sein.
+// - UND NICHT: die folgende Regel DARF im Zeitfenster NICHT gefeuert haben.
+// Eine Gruppe feuert, wenn alle UND-Regeln erfuellt und keine UND-NICHT-Regel
+// ausgeloest wurde. Das Gesamtsignal ist das ODER aller Gruppen.
+string GRP_RULES = "2. Regel-Builder"
+
+bool regel_1_aktiv = input.bool(false, "Regel 1 aktiv", group=GRP_RULES)
+string regel_1_aktion = input.string("Long oeffnen", "Regel 1 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_1_links = input.source(close, "Regel 1 Quelle", group=GRP_RULES)
+string regel_1_operator = input.string("Gleich", "Regel 1 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_1_modus = input.string("Normal", "Regel 1 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_1_rechts_typ = input.string("Wert", "Regel 1 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_1_wert = input.float(1.0, "Regel 1 Wert", step=0.1, group=GRP_RULES)
+float regel_1_rechts = input.source(open, "Regel 1 Vergleichsquelle", group=GRP_RULES)
+
+string verb_2 = input.string("EINZEL", "Verknuepfung R1 -> R2", options=["UND", "ODER", "EINZEL", "UND NICHT"], group=GRP_RULES)
+bool regel_2_aktiv = input.bool(false, "Regel 2 aktiv", group=GRP_RULES)
+string regel_2_aktion = input.string("Short oeffnen", "Regel 2 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_2_links = input.source(close, "Regel 2 Quelle", group=GRP_RULES)
+string regel_2_operator = input.string("Gleich", "Regel 2 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_2_modus = input.string("Normal", "Regel 2 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_2_rechts_typ = input.string("Wert", "Regel 2 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_2_wert = input.float(1.0, "Regel 2 Wert", step=0.1, group=GRP_RULES)
+float regel_2_rechts = input.source(open, "Regel 2 Vergleichsquelle", group=GRP_RULES)
+
+string verb_3 = input.string("EINZEL", "Verknuepfung R2 -> R3", options=["UND", "ODER", "EINZEL", "UND NICHT"], group=GRP_RULES)
+bool regel_3_aktiv = input.bool(false, "Regel 3 aktiv", group=GRP_RULES)
+string regel_3_aktion = input.string("Long schliessen", "Regel 3 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_3_links = input.source(close, "Regel 3 Quelle", group=GRP_RULES)
+string regel_3_operator = input.string("Gleich", "Regel 3 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_3_modus = input.string("Normal", "Regel 3 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_3_rechts_typ = input.string("Wert", "Regel 3 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_3_wert = input.float(1.0, "Regel 3 Wert", step=0.1, group=GRP_RULES)
+float regel_3_rechts = input.source(open, "Regel 3 Vergleichsquelle", group=GRP_RULES)
+
+string verb_4 = input.string("EINZEL", "Verknuepfung R3 -> R4", options=["UND", "ODER", "EINZEL", "UND NICHT"], group=GRP_RULES)
+bool regel_4_aktiv = input.bool(false, "Regel 4 aktiv", group=GRP_RULES)
+string regel_4_aktion = input.string("Short schliessen", "Regel 4 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_4_links = input.source(close, "Regel 4 Quelle", group=GRP_RULES)
+string regel_4_operator = input.string("Gleich", "Regel 4 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_4_modus = input.string("Normal", "Regel 4 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_4_rechts_typ = input.string("Wert", "Regel 4 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_4_wert = input.float(1.0, "Regel 4 Wert", step=0.1, group=GRP_RULES)
+float regel_4_rechts = input.source(open, "Regel 4 Vergleichsquelle", group=GRP_RULES)
+
+string verb_5 = input.string("EINZEL", "Verknuepfung R4 -> R5", options=["UND", "ODER", "EINZEL", "UND NICHT"], group=GRP_RULES)
+bool regel_5_aktiv = input.bool(false, "Regel 5 aktiv", group=GRP_RULES)
+string regel_5_aktion = input.string("Long oeffnen", "Regel 5 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_5_links = input.source(close, "Regel 5 Quelle", group=GRP_RULES)
+string regel_5_operator = input.string("Gleich", "Regel 5 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_5_modus = input.string("Normal", "Regel 5 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_5_rechts_typ = input.string("Wert", "Regel 5 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_5_wert = input.float(1.0, "Regel 5 Wert", step=0.1, group=GRP_RULES)
+float regel_5_rechts = input.source(open, "Regel 5 Vergleichsquelle", group=GRP_RULES)
+
+string verb_6 = input.string("EINZEL", "Verknuepfung R5 -> R6", options=["UND", "ODER", "EINZEL", "UND NICHT"], group=GRP_RULES)
+bool regel_6_aktiv = input.bool(false, "Regel 6 aktiv", group=GRP_RULES)
+string regel_6_aktion = input.string("Short oeffnen", "Regel 6 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_6_links = input.source(close, "Regel 6 Quelle", group=GRP_RULES)
+string regel_6_operator = input.string("Gleich", "Regel 6 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_6_modus = input.string("Normal", "Regel 6 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_6_rechts_typ = input.string("Wert", "Regel 6 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_6_wert = input.float(1.0, "Regel 6 Wert", step=0.1, group=GRP_RULES)
+float regel_6_rechts = input.source(open, "Regel 6 Vergleichsquelle", group=GRP_RULES)
+
+string verb_7 = input.string("EINZEL", "Verknuepfung R6 -> R7", options=["UND", "ODER", "EINZEL", "UND NICHT"], group=GRP_RULES)
+bool regel_7_aktiv = input.bool(false, "Regel 7 aktiv", group=GRP_RULES)
+string regel_7_aktion = input.string("Long schliessen", "Regel 7 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_7_links = input.source(close, "Regel 7 Quelle", group=GRP_RULES)
+string regel_7_operator = input.string("Gleich", "Regel 7 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_7_modus = input.string("Normal", "Regel 7 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_7_rechts_typ = input.string("Wert", "Regel 7 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_7_wert = input.float(1.0, "Regel 7 Wert", step=0.1, group=GRP_RULES)
+float regel_7_rechts = input.source(open, "Regel 7 Vergleichsquelle", group=GRP_RULES)
+
+string verb_8 = input.string("EINZEL", "Verknuepfung R7 -> R8", options=["UND", "ODER", "EINZEL", "UND NICHT"], group=GRP_RULES)
+bool regel_8_aktiv = input.bool(false, "Regel 8 aktiv", group=GRP_RULES)
+string regel_8_aktion = input.string("Short schliessen", "Regel 8 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES)
+float regel_8_links = input.source(close, "Regel 8 Quelle", group=GRP_RULES)
+string regel_8_operator = input.string("Gleich", "Regel 8 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES)
+string regel_8_modus = input.string("Normal", "Regel 8 Modus", options=["Normal", "Und nicht (rechte Seite)"], group=GRP_RULES, tooltip="Und nicht: Vergleich muss zutreffen UND die rechte Vergleichsquelle darf NICHT aktiv sein. Bei rechter Seite = Wert wird der Vergleich umgekehrt.")
+string regel_8_rechts_typ = input.string("Wert", "Regel 8 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES)
+float regel_8_wert = input.float(1.0, "Regel 8 Wert", step=0.1, group=GRP_RULES)
+float regel_8_rechts = input.source(open, "Regel 8 Vergleichsquelle", group=GRP_RULES)
+
+// =====================================================================
+// 3. LOKALE FILTER (Optional — Standard: deaktiviert)
+// =====================================================================
+string GRP_FILTER = "3. Lokale Filter (optional)"
+bool trend_filter_aktiv = input.bool(false, "Trend-Filter aktiv (EMA/SMA)", group=GRP_FILTER)
+string trend_ma_typ = input.string("EMA", "Trend MA Typ", options=["EMA", "SMA"], group=GRP_FILTER)
+int trend_ma_len = input.int(200, "Trend MA Laenge", minval=1, group=GRP_FILTER)
+float trend_ma_src = input.source(close, "Trend MA Quelle", group=GRP_FILTER)
+bool session_filter_aktiv = input.bool(false, "Session-Filter aktiv", group=GRP_FILTER)
+string session_zeit = input.session("0800-2200:1234567", "Handelszeit (UTC)", group=GRP_FILTER)
+bool wochenende_sperren = input.bool(false, "Wochenende sperren (Sa/So)", group=GRP_FILTER)
+
+// =====================================================================
+// 4. RISIKOMANAGEMENT & CAPITAL PROTECTION
+// =====================================================================
+string GRP_RISK = "4. Risikomanagement"
+bool daily_loss_guard_aktiv = input.bool(false, "Tages-Drawdown-Schutz aktiv", group=GRP_RISK)
+float max_daily_loss_pct = input.float(3.0, "Maximaler Tagesverlust %", minval=0.1, step=0.1, group=GRP_RISK)
+bool consec_loss_guard_aktiv = input.bool(false, "Pause nach Verluststraehne aktiv", group=GRP_RISK)
+int max_consec_losses = input.int(3, "Max. Verluste in Folge", minval=1, maxval=10, group=GRP_RISK)
+int pause_bars_count = input.int(20, "Handelspause in Kerzen", minval=1, maxval=200, group=GRP_RISK)
+bool cooldown_aktiv = input.bool(false, "Re-Entry Cooldown nach SL", group=GRP_RISK, tooltip="Sperrt neue Entries fuer N Kerzen nach einem Stop-Loss-Treffer.")
+int cooldown_bars = input.int(5, "Cooldown Kerzen nach SL", minval=1, maxval=50, group=GRP_RISK)
+
+// =====================================================================
+// 4A. ENTRY-LIMITS PRO UTC-STUNDE (OPTIONAL)
+// =====================================================================
+string GRP_ENTRY_LIMIT = "4A. Entry-Limits pro UTC-Stunde (optional)"
+bool entry_limit_aktiv = input.bool(false, "Long-/Short-Trade-Limit aktiv", group=GRP_ENTRY_LIMIT)
+int max_long_entries_pro_stunde = input.int(3, "Max. Long-Entries pro UTC-Stunde", minval=0, maxval=100, group=GRP_ENTRY_LIMIT, tooltip="Vollständig variabel. 0 sperrt bei aktivem Modul alle neuen Long-Entries in der jeweiligen UTC-Stunde.")
+int max_short_entries_pro_stunde = input.int(3, "Max. Short-Entries pro UTC-Stunde", minval=0, maxval=100, group=GRP_ENTRY_LIMIT, tooltip="Vollständig variabel. 0 sperrt bei aktivem Modul alle neuen Short-Entries in der jeweiligen UTC-Stunde.")
+
+// =====================================================================
+// 5. STOP LOSS & GEWINNSICHERUNG
+// =====================================================================
+string GRP_SL = "5. Stop Loss & Gewinnsicherung"
+bool reversal_aktiv = input.bool(false, "Reversal aktiv", group=GRP_SL)
+string modus_gleiche_richtung = input.string("Schliessen & Neustart", "Aktion bei gleichem Signal", options=["Ignorieren", "Schliessen & Neustart", "Einsatz erhoehen (Pyramiden)"], group=GRP_SL)
+int maximale_trade_dauer = input.int(0, "Maximale Trade-Dauer Kerzen (Legacy)", minval=0, maxval=100, group=GRP_SL)
+bool doppelt_validieren = input.bool(false, "Doppelte Close-Validierung", group=GRP_SL, tooltip="Regel-Close-Signale muessen 2x feuern bevor geschlossen wird. SL/TP/Trail/Pinbar/Fade bleiben sofort.")
+
+// =====================================================================
+// 5A. TEMPORALE EXITS (OPTIONAL)
+// =====================================================================
+string GRP_TIME_EXIT = "5A. Temporale Exits (optional)"
+bool temporal_exit_aktiv = input.bool(false, "Temporale Exits aktiv", group=GRP_TIME_EXIT)
+bool temporal_max_bars_aktiv = input.bool(true, "Maximale Haltedauer verwenden", group=GRP_TIME_EXIT)
+int temporal_max_bars = input.int(24, "Maximale Haltedauer Kerzen", minval=1, maxval=1000, group=GRP_TIME_EXIT)
+bool temporal_stagnation_aktiv = input.bool(false, "Stagnations-Exit verwenden", group=GRP_TIME_EXIT, tooltip="Schließt eine Position, die nach N Kerzen nicht mindestens den definierten Gewinn erreicht hat.")
+int temporal_stagnation_bars = input.int(12, "Stagnation nach Kerzen", minval=1, maxval=500, group=GRP_TIME_EXIT)
+float temporal_min_profit_pct = input.float(0.10, "Mindestgewinn bis Stagnation %", minval=-10.0, step=0.05, group=GRP_TIME_EXIT)
+bool temporal_session_exit_aktiv = input.bool(false, "Session-Cutoff Exit verwenden", group=GRP_TIME_EXIT, tooltip="Schließt auf der ersten Kerze, die den UTC-Cutoff überschreitet. Die Ausführung ist auf groben Timeframes entsprechend weniger präzise.")
+int temporal_cutoff_stunde = input.int(22, "Session-Cutoff Stunde UTC", minval=0, maxval=23, group=GRP_TIME_EXIT)
+int temporal_cutoff_minute = input.int(0, "Session-Cutoff Minute UTC", minval=0, maxval=59, group=GRP_TIME_EXIT)
+string temporal_cutoff_tag = input.string("Taeglich", "Session-Cutoff Tag", options=["Taeglich", "Freitag"], group=GRP_TIME_EXIT)
+
+// Initialer Stop Loss
+bool sl_aktiv = input.bool(true, "Stop Loss aktiv", group=GRP_SL)
+string sl_typ = input.string("ATR", "SL Typ", options=["ATR", "Prozent"], group=GRP_SL)
+float sl_faktor = input.float(2.25, "SL Faktor / Prozentwert", step=0.25, group=GRP_SL)
+int sl_atr_len = input.int(14, "SL ATR Laenge", minval=1, group=GRP_SL)
+
+// Multi-Stage Profit Lock (ersetzt Break-Even)
+bool stage_lock_aktiv = input.bool(false, "Multi-Stage Profit Lock aktiv", group=GRP_SL, tooltip="Zieht den SL stufenweise nach oben. Stufe 1 = Break-Even.")
+float stage1_trigger = input.float(0.4, "Stufe 1 Trigger %", minval=0.05, step=0.05, group=GRP_SL)
+float stage1_lock = input.float(0.05, "Stufe 1 Lock %", minval=0.0, step=0.01, group=GRP_SL, tooltip="0.05% deckt Gebuehren ab = Break-Even.")
+float stage2_trigger = input.float(0.8, "Stufe 2 Trigger %", minval=0.1, step=0.05, group=GRP_SL)
+float stage2_lock = input.float(0.4, "Stufe 2 Lock %", minval=0.0, step=0.05, group=GRP_SL)
+float stage3_trigger = input.float(1.2, "Stufe 3 Trigger %", minval=0.1, step=0.05, group=GRP_SL)
+float stage3_lock = input.float(0.8, "Stufe 3 Lock %", minval=0.0, step=0.05, group=GRP_SL)
+
+// Trailing Stop (Unified: Prozent oder Chandelier ATR)
+bool trailing_aktiv = input.bool(false, "Trailing Stop aktiv", group=GRP_SL)
+string trailing_modus = input.string("Prozent", "Trailing Modus", options=["Prozent", "Chandelier ATR"], group=GRP_SL)
+float trailing_act_pct = input.float(1.0, "Trailing Aktivierung %", minval=0.1, step=0.1, group=GRP_SL, tooltip="Ab wieviel % Gewinn der Trail greift (nur Prozent-Modus).")
+float trailing_trail_pct = input.float(0.5, "Trailing Abstand %", minval=0.1, step=0.1, group=GRP_SL, tooltip="Abstand zum Hoch/Tief in % (nur Prozent-Modus).")
+float chandelier_atr_mult = input.float(1.5, "Chandelier ATR Multiplikator", minval=0.5, step=0.25, group=GRP_SL, tooltip="Abstand = N * ATR vom Extrempunkt (nur Chandelier-Modus).")
+int chandelier_atr_len = input.int(10, "Chandelier ATR Laenge", minval=1, group=GRP_SL)
+
+// =====================================================================
+// 6. TAKE PROFIT
+// =====================================================================
+string GRP_TP = "6. Take Profit"
+bool tp_aktiv = input.bool(false, "Take Profit aktiv", inline="tp_main", group=GRP_TP)
+float tp_faktor = input.float(3.0, "TP Faktor / Prozent / RRR", minval=0.1, step=0.1, inline="tp_main", group=GRP_TP)
+string tp_typ = input.string("Prozent", "TP Typ", options=["Prozent", "ATR", "RRR Multiplikator"], group=GRP_TP, tooltip="RRR = Vielfaches des Stop-Loss-Risikos.")
+bool partial_tp_aktiv = input.bool(false, "Teil-Verkauf (Partial TP) aktiv", inline="ptp", group=GRP_TP)
+float partial_tp_pct = input.float(50.0, "Menge %", minval=10.0, maxval=90.0, step=5.0, inline="ptp", group=GRP_TP)
+float partial_tp_trigger_pct = input.float(1.5, "Teil-Verkauf Trigger %", minval=0.1, step=0.1, group=GRP_TP)
+
+// =====================================================================
+// 6A. ADAPTIVES AUTO SL/TP (OPTIONAL)
+// =====================================================================
+// Kein externes KI-Modell: robustes Online-Lernen aus abgeschlossenen Positionszyklen.
+// Bei AUS bleibt die vorhandene manuelle ATR-/Prozent-/RRR-Logik unverändert.
+string GRP_ADAPT = "6A. Adaptives Auto SL/TP (optional)"
+bool adaptiv_aktiv = input.bool(false, "Adaptives Auto SL/TP aktiv", group=GRP_ADAPT)
+bool adaptiv_auto_sl = input.bool(true, "Auto Stop Loss verwenden", group=GRP_ADAPT)
+bool adaptiv_auto_tp = input.bool(true, "Auto Take Profit verwenden", group=GRP_ADAPT)
+bool adaptiv_hintergrund_lernen = input.bool(false, "Bei AUS im Hintergrund lernen", group=GRP_ADAPT, tooltip="Nur Statistik sammeln; manuelle SL/TP-Logik bleibt unverändert, solange der Hauptschalter aus ist.")
+int adaptiv_lookback = input.int(50, "Lernfenster abgeschlossene Zyklen", minval=10, maxval=250, group=GRP_ADAPT)
+int adaptiv_min_samples = input.int(30, "Mindest-Sample vor Aktivierung", minval=10, maxval=100, group=GRP_ADAPT)
+float adaptiv_sl_quantil = input.float(75.0, "SL Quantil (MAE) %", minval=50.0, maxval=95.0, step=5.0, group=GRP_ADAPT, tooltip="Höheres Quantil = weiterer Auto-SL. Grundlage sind adverse Bewegungen abgeschlossener Zyklen in ATR-Einheiten.")
+float adaptiv_tp_quantil = input.float(55.0, "TP Quantil (MFE Gewinner) %", minval=25.0, maxval=90.0, step=5.0, group=GRP_ADAPT, tooltip="Ziel basiert ausschließlich auf günstigen Bewegungen profitabler Zyklen in ATR-Einheiten.")
+float adaptiv_sl_min_pct = input.float(0.25, "Auto SL Minimum %", minval=0.05, step=0.05, group=GRP_ADAPT)
+float adaptiv_sl_max_pct = input.float(5.00, "Auto SL Maximum %", minval=0.10, step=0.10, group=GRP_ADAPT)
+float adaptiv_tp_min_pct = input.float(0.30, "Auto TP Minimum %", minval=0.05, step=0.05, group=GRP_ADAPT)
+float adaptiv_tp_max_pct = input.float(10.0, "Auto TP Maximum %", minval=0.10, step=0.10, group=GRP_ADAPT)
+
+// =====================================================================
+// 7. SCALPING EXITS
+
+// =====================================================================
+string GRP_SCALP = "7. Scalping Exits"
+bool rejection_exit_aktiv = input.bool(false, "Pinbar Rejection Exit aktiv", group=GRP_SCALP, tooltip="Schliesst im Gewinn, wenn die Kerze einen langen Ablehnungsdocht zeigt.")
+float wick_ratio_threshold = input.float(40.0, "Docht-Schwelle %", minval=20.0, maxval=80.0, step=5.0, group=GRP_SCALP, tooltip="Mindest-Anteil des Dochts an der Kerzenspanne.")
+bool momentum_fade_aktiv = input.bool(false, "Momentum-Fade Exit aktiv", group=GRP_SCALP, tooltip="Schliesst Trade wenn nach N Kerzen nur ein kleiner Gewinn vorliegt.")
+int fade_max_bars = input.int(4, "Fade nach N Kerzen", minval=2, maxval=20, group=GRP_SCALP)
+float fade_profit_schwelle = input.float(0.3, "Fade max. Gewinn %", minval=0.05, step=0.05, group=GRP_SCALP, tooltip="Fade nur wenn aktueller Gewinn unter diesem Wert liegt.")
+
+// =====================================================================
+// 8. POSITIONSGROESSE & KELLY
+// =====================================================================
+string GRP_SIZE = "8. Positionsgroesse und Kelly"
+string groessen_modus = input.string("Fester Einsatz", "Positionsgroessen-Modus", options=["Fester Einsatz", "Manuelles Kelly", "Auto Kelly"], group=GRP_SIZE)
+float fester_einsatz_usdt = input.float(1.0, "Fester Einsatz USDT", minval=0.0, step=1.0, group=GRP_SIZE, tooltip="Pionex-Referenz bei initial_capital=100: 1 USDT entspricht 1 % Margin. Für den Live-Abgleich nur an die tatsächliche Bot-Margin anpassen.")
+
+float manuell_kelly_trefferquote = input.float(50.0, "Manuelles Kelly Trefferquote %", minval=1.0, maxval=99.0, step=0.1, group=GRP_SIZE)
+float manuell_kelly_win_loss = input.float(1.5, "Manuelles Kelly Gewinn/Verlust", minval=0.1, maxval=20.0, step=0.1, group=GRP_SIZE)
+int auto_kelly_lookback = input.int(50, "Auto Kelly Exit-Legs Lookback", minval=5, maxval=500, group=GRP_SIZE)
+
+float kelly_anteil = input.float(0.25, "Kelly Anteil", minval=0.05, maxval=1.0, step=0.05, group=GRP_SIZE)
+float kelly_min_prozent = input.float(0.0, "Kelly Minimum %", minval=0.0, maxval=20.0, step=0.1, group=GRP_SIZE)
+float kelly_max_prozent = input.float(10.0, "Kelly Maximum %", minval=0.1, maxval=100.0, step=0.1, group=GRP_SIZE)
+float mengen_schritt = input.float(0.000001, "Mengen-Schritt", minval=0.000001, step=0.000001, group=GRP_SIZE)
+
+// =====================================================================
+// 9. PIONEX WEBHOOK & ANZEIGE
+// =====================================================================
+string GRP_PIONEX = "9. Pionex Webhook & Anzeige"
+string pionex_uuid = input.string("", "Pionex Signal Bot UUID", group=GRP_PIONEX)
+bool close_alerts_senden = input.bool(true, "Close-Alerts senden", group=GRP_PIONEX)
+bool status_anzeigen = input.bool(true, "Status-Tabelle anzeigen", group=GRP_PIONEX)
+bool eval_anzeigen = input.bool(true, "Evaluation Dashboard (klassisch) anzeigen", group=GRP_PIONEX)
+int eval_lookback = input.int(50, "Evaluation Lookback Trades", minval=5, maxval=500, group=GRP_PIONEX)
+
+// =====================================================================
+// 10. LUX UI & ANALYTICS DASHBOARD
+// =====================================================================
+string GRP_UI = "10. Lux UI & Analytics Dashboard"
+bool lux_analytics_aktiv = input.bool(true, "Lux Analytics Dashboard anzeigen", group=GRP_UI)
+string dash_pos = input.string("Bottom Left", "Dashboard Position", options=["Top Right", "Bottom Right", "Bottom Left"], group=GRP_UI, tooltip="Status-Tabelle bleibt oben rechts, klassisches Evaluation Dashboard unten rechts — Position so waehlen, dass sich nichts ueberlappt.")
+string dash_size = input.string("Small", "Dashboard Groesse", options=["Tiny", "Small", "Normal", "Large"], group=GRP_UI)
+string heatmap_modus = input.string("Months", "Heatmap Zeitraum", options=["Days of Week", "Months"], group=GRP_UI)
+bool gradient_candles = input.bool(true, "Gradient Candle Coloring", group=GRP_UI, tooltip="Faerbt Kerzen per Gradient nach Abstand des Schlusskurses zum Trend-MA.")
+bool trade_linien_aktiv = input.bool(true, "Trade-Linien (SL/TP mit Treffer-Markierung)", group=GRP_UI, tooltip="Zeichnet SL/TP pro Trade als Linien und markiert sie nach dem Exit mit Ergebnis.")
+bool entry_marker_aktiv = input.bool(false, "Lux Entry Marker (Pin unter/ueber der Kerze)", group=GRP_UI)
+
+// =====================================================================
+// HELPER FUNKTIONEN
+// =====================================================================
+f_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + pionex_uuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+
+f_eval_compare(float links, string op, float rechts, float tol) =>
+    bool cross_over = ta.crossover(links, rechts)
+    bool cross_under = ta.crossunder(links, rechts)
+    bool active = not na(links) and math.abs(links) > tol
+    bool result = false
+    if op == "Ist aktiv"
+        result := active
+    else if op == "Ist inaktiv"
+        result := not active
+    else if op == "Gleich"
+        result := math.abs(links - rechts) <= tol
+    else if op == "Nicht gleich"
+        result := math.abs(links - rechts) > tol
+    else if op == "Groesser"
+        result := links > rechts
+    else if op == "Kleiner"
+        result := links < rechts
+    else if op == "Groesser/gleich"
+        result := links >= rechts
+    else if op == "Kleiner/gleich"
+        result := links <= rechts
+    else if op == "Kreuzt ueber"
+        result := cross_over
+    else if op == "Kreuzt unter"
+        result := cross_under
+    result
+
+f_recent(bool bedingung, int kerzen) =>
+    int seit = ta.barssince(bedingung)
+    kerzen == 0 ? bedingung : not na(seit) and seit <= kerzen
+
+f_rule_hit(bool aktiv, float links, string op, string modus, string rechts_typ, float wert, float rechts_quelle) =>
+    float rechts = rechts_typ == "Quelle" ? rechts_quelle : wert
+    bool cmp = f_eval_compare(links, op, rechts, gleich_toleranz)
+    if modus == "Und nicht (rechte Seite)"
+        if rechts_typ == "Quelle"
+            bool rechts_aktiv = not na(rechts_quelle) and math.abs(rechts_quelle) > gleich_toleranz
+            cmp := cmp and not rechts_aktiv
+        else
+            cmp := not cmp
+    bool raw = aktiv and lux_quellen_verbunden and cmp
+    bool edge = raw and not raw[1]
+    var bool vorgemerkt = false
+    bool neuer_entry = strategy.position_size != 0 and math.sign(strategy.position_size) != math.sign(nz(strategy.position_size[1]))
+    if neuer_entry
+        vorgemerkt := false
+    if ausloese_modus == "Nur neues Signal"
+        if edge
+            vorgemerkt := true
+    else
+        if raw and not raw[1]
+            vorgemerkt := true
+    bool result = false
+    if signal_gedaechtnis == -1
+        result := vorgemerkt
+    else if ausloese_modus == "Nur neues Signal"
+        result := f_recent(edge, signal_gedaechtnis)
+    else
+        result := f_recent(raw, signal_gedaechtnis)
+    result
+
+f_action_req(array<bool> hits, array<string> aktionen, array<bool> aktiviert, array<string> verbs, string ziel) =>
+    bool gefeuert = false
+    bool gruppe_hat_positiv = false
+    bool gruppe_ok = true
+    int n = array.size(hits)
+    for i = 0 to n - 1
+        string v = i == 0 ? "START" : array.get(verbs, i - 1)
+        bool neue_gruppe = i == 0 or v == "ODER" or v == "EINZEL"
+        if neue_gruppe and i > 0
+            if gruppe_hat_positiv and gruppe_ok
+                gefeuert := true
+            gruppe_hat_positiv := false
+            gruppe_ok := true
+        bool relevant = array.get(aktiviert, i) and array.get(aktionen, i) == ziel
+        if relevant
+            bool h = array.get(hits, i)
+            if v == "UND NICHT"
+                if h
+                    gruppe_ok := false
+            else
+                gruppe_hat_positiv := true
+                if not h
+                    gruppe_ok := false
+    if gruppe_hat_positiv and gruppe_ok
+        gefeuert := true
+    gefeuert
+
+f_round_qty(float menge, float schritt) =>
+    schritt > 0 ? math.floor(menge / schritt) * schritt : menge
+
+f_kelly_prozent(float trefferquote, float win_loss, float anteil, float min_prozent, float max_prozent) =>
+    float raw = win_loss > 0 ? trefferquote - (1.0 - trefferquote) / win_loss : 0.0
+    float positiv = math.max(0.0, raw)
+    // Bei nicht positiver Edge darf ein Mindestwert keinen neuen Einsatz erzwingen.
+    float prozent = positiv > 0 ? math.max(min_prozent, positiv * anteil * 100.0) : 0.0
+    math.min(max_prozent, math.max(0.0, prozent))
+
+f_roll_push(array<float> werte, float wert, int max_groesse) =>
+    if not na(wert) and wert >= 0
+        array.push(werte, wert)
+        if array.size(werte) > max_groesse
+            array.shift(werte)
+
+f_quantile(array<float> werte, float quantil_pct) =>
+    float result = na
+    int n = array.size(werte)
+    if n > 0
+        array<float> sortiert = array.copy(werte)
+        array.sort(sortiert, order.ascending)
+        float pos = (n - 1) * math.max(0.0, math.min(100.0, quantil_pct)) * 0.01
+        int lo = int(math.floor(pos))
+        int hi = int(math.ceil(pos))
+        float lo_wert = array.get(sortiert, lo)
+        float hi_wert = array.get(sortiert, hi)
+        result := lo == hi ? lo_wert : lo_wert + (hi_wert - lo_wert) * (pos - lo)
+    result
+
+f_auto_kelly_prozent(int lookback, float anteil, float min_prozent, float max_prozent) =>
+
+    int trade_count = strategy.closedtrades
+    int sample_size = math.min(trade_count, lookback)
+    float wins = 0.0
+    float losses = 0.0
+    float gross_win = 0.0
+    float gross_loss = 0.0
+    if sample_size > 0
+        int first_trade = trade_count - sample_size
+        int last_trade = trade_count - 1
+        for trade_no = first_trade to last_trade
+            float trade_profit = strategy.closedtrades.profit(trade_no)
+            if trade_profit > 0
+                wins += 1.0
+                gross_win += trade_profit
+            else if trade_profit < 0
+                losses += 1.0
+                gross_loss += math.abs(trade_profit)
+    float total = wins + losses
+    float trefferquote = total > 0 ? wins / total : 0.0
+    float avg_win = wins > 0 ? gross_win / wins : na
+    float avg_loss = losses > 0 ? gross_loss / losses : na
+    float win_loss = not na(avg_win) and not na(avg_loss) and avg_loss > 0 ? avg_win / avg_loss : 0.0
+    f_kelly_prozent(trefferquote, win_loss, anteil, min_prozent, max_prozent)
+
+// ── Lux UI Helper ────────────────────────────────────────────────────
+f_block_char(float val, float max_val) =>
+    if max_val == 0 or val == 0
+        " "
+    else
+        float ratio = math.abs(val) / max_val
+        ratio < 0.125 ? " " : ratio < 0.25 ? "▂" : ratio < 0.375 ? "▃" : ratio < 0.5 ? "▄" : ratio < 0.625 ? "▅" : ratio < 0.75 ? "▆" : ratio < 0.875 ? "▇" : "█"
+
+f_heat_color(float val, float maxV, float minV) =>
+    color c = #161616
+    if val > 0 and maxV > 0
+        c := color.from_gradient(val, 0, maxV, color.new(#089981, 80), color.new(#089981, 10))
+    else if val < 0 and minV < 0
+        c := color.from_gradient(val, minV, 0, color.new(#f23645, 10), color.new(#f23645, 80))
+    c
+
+f_month_name(int i) =>
+    switch i
+        0 => "Jan"
+        1 => "Feb"
+        2 => "Mar"
+        3 => "Apr"
+        4 => "May"
+        5 => "Jun"
+        6 => "Jul"
+        7 => "Aug"
+        8 => "Sep"
+        9 => "Oct"
+        10 => "Nov"
+        11 => "Dec"
+
+f_day_name(int i) =>
+    switch i
+        0 => "Sun"
+        1 => "Mon"
+        2 => "Tue"
+        3 => "Wed"
+        4 => "Thu"
+        5 => "Fri"
+        6 => "Sat"
+
+f_format_days(int ms) =>
+    str.tostring(math.round(ms / 86400000.0)) + "d"
+
+// =====================================================================
+// REGEL-AUSWERTUNG & CONFLUENCE ENGINE
+// =====================================================================
+bool bt_daten_gueltig = bt_start <= bt_ende
+bool bt_im_fenster = not bt_zeitfenster_aktiv or (bt_daten_gueltig and time >= bt_start and time <= bt_ende)
+bool bt_ende_ueberschritten = bt_zeitfenster_aktiv and bt_daten_gueltig and time > bt_ende
+bool zeit_ok = (not startzeit_aktiv or time >= startzeit) and bt_im_fenster
+
+bool regel_1_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_1_aktiv, regel_1_links, regel_1_operator, regel_1_modus, regel_1_rechts_typ, regel_1_wert, regel_1_rechts)
+bool regel_2_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_2_aktiv, regel_2_links, regel_2_operator, regel_2_modus, regel_2_rechts_typ, regel_2_wert, regel_2_rechts)
+bool regel_3_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_3_aktiv, regel_3_links, regel_3_operator, regel_3_modus, regel_3_rechts_typ, regel_3_wert, regel_3_rechts)
+bool regel_4_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_4_aktiv, regel_4_links, regel_4_operator, regel_4_modus, regel_4_rechts_typ, regel_4_wert, regel_4_rechts)
+bool regel_5_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_5_aktiv, regel_5_links, regel_5_operator, regel_5_modus, regel_5_rechts_typ, regel_5_wert, regel_5_rechts)
+bool regel_6_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_6_aktiv, regel_6_links, regel_6_operator, regel_6_modus, regel_6_rechts_typ, regel_6_wert, regel_6_rechts)
+bool regel_7_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_7_aktiv, regel_7_links, regel_7_operator, regel_7_modus, regel_7_rechts_typ, regel_7_wert, regel_7_rechts)
+bool regel_8_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_8_aktiv, regel_8_links, regel_8_operator, regel_8_modus, regel_8_rechts_typ, regel_8_wert, regel_8_rechts)
+
+var array<string> aktionen_arr = array.from(regel_1_aktion, regel_2_aktion, regel_3_aktion, regel_4_aktion, regel_5_aktion, regel_6_aktion, regel_7_aktion, regel_8_aktion)
+var array<bool> aktiviert_arr = array.from(regel_1_aktiv, regel_2_aktiv, regel_3_aktiv, regel_4_aktiv, regel_5_aktiv, regel_6_aktiv, regel_7_aktiv, regel_8_aktiv)
+var array<string> verbs_arr = array.from(verb_2, verb_3, verb_4, verb_5, verb_6, verb_7, verb_8)
+
+array<bool> hits_arr = array.from(regel_1_hit, regel_2_hit, regel_3_hit, regel_4_hit, regel_5_hit, regel_6_hit, regel_7_hit, regel_8_hit)
+
+bool long_open_req = f_action_req(hits_arr, aktionen_arr, aktiviert_arr, verbs_arr, "Long oeffnen")
+bool short_open_req = f_action_req(hits_arr, aktionen_arr, aktiviert_arr, verbs_arr, "Short oeffnen")
+bool long_close_req = f_action_req(hits_arr, aktionen_arr, aktiviert_arr, verbs_arr, "Long schliessen")
+bool short_close_req = f_action_req(hits_arr, aktionen_arr, aktiviert_arr, verbs_arr, "Short schliessen")
+bool all_close_req = f_action_req(hits_arr, aktionen_arr, aktiviert_arr, verbs_arr, "Alle schliessen")
+
+// =====================================================================
+// FILTER & RISIKOMANAGEMENT
+// =====================================================================
+float trend_ma = trend_ma_typ == "EMA" ? ta.ema(trend_ma_src, trend_ma_len) : ta.sma(trend_ma_src, trend_ma_len)
+bool trend_long_ok = not trend_filter_aktiv or close > trend_ma
+bool trend_short_ok = not trend_filter_aktiv or close < trend_ma
+
+// Gradient Candle Coloring (Lux UI) — Abstand Close zum Trend-MA
+float grad_dist = close - trend_ma
+float grad_max = nz(ta.sma(math.abs(grad_dist), 100)) * 2
+color grad_candle = color.from_gradient(grad_dist, -grad_max, grad_max, #f23645, #089981)
+barcolor(gradient_candles ? grad_candle : na, title="Gradient Candles")
+
+// Session wird explizit in UTC ausgewertet, passend zur Eingabebeschriftung.
+bool in_session = not session_filter_aktiv or not na(time(timeframe.period, session_zeit, "GMT+0"))
+
+bool weekend_ok = not wochenende_sperren or (dayofweek != dayofweek.saturday and dayofweek != dayofweek.sunday)
+bool session_ok = in_session and weekend_ok
+
+var float day_start_equity = strategy.equity
+if ta.change(time("D")) != 0
+    day_start_equity := strategy.equity
+float current_daily_dd_pct = day_start_equity > 0 ? (day_start_equity - strategy.equity) / day_start_equity * 100.0 : 0.0
+bool daily_loss_exceeded = daily_loss_guard_aktiv and current_daily_dd_pct >= max_daily_loss_pct
+
+var int consec_losses = 0
+var int pause_until_bar = na
+var int cooldown_until_bar = na
+var float cycle_start_equity = strategy.equity
+
+// Adaptiver Lernspeicher: MAE aller Zyklen, MFE nur profitabler Zyklen – jeweils in ATR-Einheiten.
+var array<float> adapt_mae_atr = array.new_float()
+var array<float> adapt_mfe_win_atr = array.new_float()
+var float adapt_entry_price = na
+var float adapt_entry_atr_pct = na
+var float adapt_cycle_mae_pct = 0.0
+var float adapt_cycle_mfe_pct = 0.0
+var int adapt_cycle_richtung = 0
+bool adaptiv_lernen = adaptiv_aktiv or adaptiv_hintergrund_lernen
+float adapt_atr_pct = close > 0 ? ta.atr(sl_atr_len) / close * 100.0 : na
+
+// Ein Positionszyklus schließt bei Flat oder bei einem Richtungswechsel. Partial-Exits bleiben reine Exit-Legs.
+bool cycle_opened = strategy.position_size != 0 and (strategy.position_size[1] == 0 or math.sign(strategy.position_size) != math.sign(strategy.position_size[1]))
+bool cycle_closed = strategy.closedtrades > 0 and (strategy.position_size == 0 and strategy.position_size[1] != 0 or strategy.position_size != 0 and strategy.position_size[1] != 0 and math.sign(strategy.position_size) != math.sign(strategy.position_size[1]))
+
+// Im Flat-Zustand ist die Equity die belastbare Basis des nächsten Positionszyklus inklusive aller bisher angefallenen Gebühren.
+// Beim gerade geschlossenen Zyklus darf diese Basis erst NACH dessen Auswertung aktualisiert werden.
+if strategy.position_size == 0 and not cycle_closed
+    cycle_start_equity := strategy.equity
+
+if cycle_closed
+    int last_idx = strategy.closedtrades - 1
+    float cycle_profit = strategy.equity - cycle_start_equity
+    if cycle_profit < 0
+        consec_losses += 1
+    else if cycle_profit > 0
+        consec_losses := 0
+    if consec_loss_guard_aktiv and consec_losses >= max_consec_losses
+        pause_until_bar := bar_index + pause_bars_count
+        consec_losses := 0
+    if cooldown_aktiv and cycle_profit < 0
+        string exit_cmt = strategy.closedtrades.exit_comment(last_idx)
+        if exit_cmt == "SL"
+            cooldown_until_bar := bar_index + cooldown_bars
+    // Nur vergangene, vollständig geschlossene Zyklen fließen in die nächste Auto-SL/TP-Entscheidung ein.
+    if adaptiv_lernen and adapt_cycle_richtung != 0 and not na(adapt_entry_atr_pct) and adapt_entry_atr_pct > 0
+        f_roll_push(adapt_mae_atr, adapt_cycle_mae_pct / adapt_entry_atr_pct, adaptiv_lookback)
+        if cycle_profit > 0
+            f_roll_push(adapt_mfe_win_atr, adapt_cycle_mfe_pct / adapt_entry_atr_pct, adaptiv_lookback)
+    adapt_entry_price := na
+    adapt_entry_atr_pct := na
+    adapt_cycle_mae_pct := 0.0
+    adapt_cycle_mfe_pct := 0.0
+    adapt_cycle_richtung := 0
+    if strategy.position_size == 0
+        cycle_start_equity := strategy.equity
+
+// Erst den alten Zyklus auswerten, dann den neuen (auch bei einem Richtungswechsel) initialisieren.
+if cycle_opened
+    adapt_entry_price := strategy.position_avg_price
+    adapt_entry_atr_pct := adapt_entry_price > 0 ? ta.atr(sl_atr_len) / adapt_entry_price * 100.0 : na
+    adapt_cycle_mae_pct := 0.0
+    adapt_cycle_mfe_pct := 0.0
+    adapt_cycle_richtung := strategy.position_size > 0 ? 1 : -1
+
+// Die OHLC-Extrema der Entry-Kerze lagen vor einem Close-Entry und werden deshalb nicht rückwirkend zum Training gezählt.
+if strategy.position_size != 0 and not cycle_opened and adapt_cycle_richtung != 0 and not na(adapt_entry_price) and adapt_entry_price > 0
+    float adverse_pct = adapt_cycle_richtung > 0 ? math.max(0.0, (adapt_entry_price - low) / adapt_entry_price * 100.0) : math.max(0.0, (high - adapt_entry_price) / adapt_entry_price * 100.0)
+    float favorable_pct = adapt_cycle_richtung > 0 ? math.max(0.0, (high - adapt_entry_price) / adapt_entry_price * 100.0) : math.max(0.0, (adapt_entry_price - low) / adapt_entry_price * 100.0)
+    adapt_cycle_mae_pct := math.max(adapt_cycle_mae_pct, adverse_pct)
+    adapt_cycle_mfe_pct := math.max(adapt_cycle_mfe_pct, favorable_pct)
+
+// Bei einem direkten Richtungswechsel beginnt der neue Zyklus mit der Equity nach dem Wechsel.
+if cycle_opened and strategy.position_size[1] != 0
+    cycle_start_equity := strategy.equity
+
+bool streak_paused = not na(pause_until_bar) and bar_index < pause_until_bar
+if not na(pause_until_bar) and bar_index >= pause_until_bar
+    pause_until_bar := na
+
+bool cooldown_paused = not na(cooldown_until_bar) and bar_index < cooldown_until_bar
+if not na(cooldown_until_bar) and bar_index >= cooldown_until_bar
+    cooldown_until_bar := na
+
+bool risk_filters_ok = not daily_loss_exceeded and not streak_paused and not cooldown_paused and session_ok
+
+// Richtungsgetrennte Entry-Zähler; die Stunde wird explizit in UTC bestimmt und bei jedem Stundenwechsel zurückgesetzt.
+int utc_stunden_schluessel = year(time, "GMT+0") * 1000000 + month(time, "GMT+0") * 10000 + dayofmonth(time, "GMT+0") * 100 + hour(time, "GMT+0")
+var int entry_limit_stunden_schluessel = na
+var int long_entries_diese_stunde = 0
+var int short_entries_diese_stunde = 0
+if na(entry_limit_stunden_schluessel) or utc_stunden_schluessel != entry_limit_stunden_schluessel
+    entry_limit_stunden_schluessel := utc_stunden_schluessel
+    long_entries_diese_stunde := 0
+    short_entries_diese_stunde := 0
+
+bool long_entry_limit_ok = not entry_limit_aktiv or long_entries_diese_stunde < max_long_entries_pro_stunde
+bool short_entry_limit_ok = not entry_limit_aktiv or short_entries_diese_stunde < max_short_entries_pro_stunde
+
+// =====================================================================
+// ORDER GROESSE
+// =====================================================================
+float manuell_kelly_prozent = f_kelly_prozent(manuell_kelly_trefferquote * 0.01, manuell_kelly_win_loss, kelly_anteil, kelly_min_prozent, kelly_max_prozent)
+float auto_kelly_prozent = not bt_kelly_erst_nach_sample or strategy.closedtrades >= bt_mindest_exit_legs ? f_auto_kelly_prozent(auto_kelly_lookback, kelly_anteil, kelly_min_prozent, kelly_max_prozent) : 0.0
+
+float aktiver_kapital_prozent = groessen_modus == "Manuelles Kelly" ? manuell_kelly_prozent : groessen_modus == "Auto Kelly" ? auto_kelly_prozent : na
+float order_wert = groessen_modus == "Fester Einsatz" ? fester_einsatz_usdt : strategy.equity * aktiver_kapital_prozent * 0.01
+float order_menge_raw = close > 0 ? order_wert / close : 0.0
+float order_menge = f_round_qty(order_menge_raw, mengen_schritt)
+bool groesse_ok = order_menge >= mengen_schritt
+
+// Die Auto-Werte werden ausschließlich aus vorherigen Zyklen abgeleitet und nur nach dem Mindest-Sample aktiv.
+int adaptiv_benoetigte_samples = math.min(adaptiv_min_samples, adaptiv_lookback)
+bool adaptiv_sl_bereit = adaptiv_aktiv and adaptiv_auto_sl and array.size(adapt_mae_atr) >= adaptiv_benoetigte_samples and not na(adapt_atr_pct)
+bool adaptiv_tp_bereit = adaptiv_aktiv and adaptiv_auto_tp and array.size(adapt_mfe_win_atr) >= adaptiv_benoetigte_samples and not na(adapt_atr_pct)
+float adaptiv_sl_pct = adaptiv_sl_bereit ? math.min(adaptiv_sl_max_pct, math.max(adaptiv_sl_min_pct, f_quantile(adapt_mae_atr, adaptiv_sl_quantil) * adapt_atr_pct)) : na
+float adaptiv_tp_pct = adaptiv_tp_bereit ? math.min(adaptiv_tp_max_pct, math.max(adaptiv_tp_min_pct, f_quantile(adapt_mfe_win_atr, adaptiv_tp_quantil) * adapt_atr_pct)) : na
+string payload_message = str.length(pionex_uuid) > 0 ? f_payload() : ""
+
+// =====================================================================
+// ENTRY / CLOSE LOGIK
+// =====================================================================
+bool clean_long_open = long_open_req and not short_open_req and trend_long_ok and risk_filters_ok and long_entry_limit_ok
+bool clean_short_open = short_open_req and not long_open_req and trend_short_ok and risk_filters_ok and short_entry_limit_ok
+
+bool opposite_long_to_short = clean_short_open and strategy.position_size > 0
+bool opposite_short_to_long = clean_long_open and strategy.position_size < 0
+bool same_long_to_long = clean_long_open and strategy.position_size > 0
+bool same_short_to_short = clean_short_open and strategy.position_size < 0
+
+// Reversal und Verhalten bei gleichem Signal sind unterschiedliche Entscheidungen.
+bool turn_long_to_short = reversal_aktiv and opposite_long_to_short
+bool turn_short_to_long = reversal_aktiv and opposite_short_to_long
+
+bool restart_long = bt_restart_erlauben and same_long_to_long and modus_gleiche_richtung == "Schliessen & Neustart"
+bool restart_short = bt_restart_erlauben and same_short_to_short and modus_gleiche_richtung == "Schliessen & Neustart"
+// V6.2 nutzt pyramiding=1. Scale-ins sind absichtlich deaktiviert, bis Entries und Exits leg-basiert geführt werden.
+bool scale_long = false
+bool scale_short = false
+
+var int entry_bar = na
+bool neue_position = strategy.position_size != 0 and strategy.position_size[1] == 0
+bool richtungswechsel = (strategy.position_size > 0 and strategy.position_size[1] < 0) or (strategy.position_size < 0 and strategy.position_size[1] > 0)
+bool position_geschlossen = strategy.position_size == 0 and strategy.position_size[1] != 0
+if neue_position or richtungswechsel or restart_long or restart_short or scale_long or scale_short
+    entry_bar := bar_index
+if position_geschlossen
+    entry_bar := na
+int bars_im_trade = not na(entry_bar) ? bar_index - entry_bar : 0
+
+// Legacy-Barlimit bleibt aus Kompatibilitätsgründen erhalten; das v6.4-Modul kann separat zugeschaltet werden.
+bool zeit_exit_long = maximale_trade_dauer > 0 and strategy.position_size > 0 and bars_im_trade >= maximale_trade_dauer
+bool zeit_exit_short = maximale_trade_dauer > 0 and strategy.position_size < 0 and bars_im_trade >= maximale_trade_dauer
+bool temporal_maxbars_long = temporal_exit_aktiv and temporal_max_bars_aktiv and strategy.position_size > 0 and bars_im_trade >= temporal_max_bars
+bool temporal_maxbars_short = temporal_exit_aktiv and temporal_max_bars_aktiv and strategy.position_size < 0 and bars_im_trade >= temporal_max_bars
+
+// Ein Stagnations-Exit beendet unproduktive Trades nach einer Mindesthaltedauer; der Gewinn ist richtungsbereinigt.
+bool temporal_stagnation_long = false
+bool temporal_stagnation_short = false
+
+float upper_wick = high - math.max(open, close)
+float lower_wick = math.min(open, close) - low
+float total_range = high - low
+float wick_r_upper = total_range > 0 ? upper_wick / total_range * 100.0 : 0.0
+float wick_r_lower = total_range > 0 ? lower_wick / total_range * 100.0 : 0.0
+float pos_price = strategy.position_avg_price
+
+bool long_in_profit = strategy.position_size > 0 and pos_price > 0 and close > pos_price
+bool short_in_profit = strategy.position_size < 0 and pos_price > 0 and close < pos_price
+
+bool pinbar_exit_long = rejection_exit_aktiv and long_in_profit and wick_r_upper >= wick_ratio_threshold
+bool pinbar_exit_short = rejection_exit_aktiv and short_in_profit and wick_r_lower >= wick_ratio_threshold
+
+float profit_pct_l = strategy.position_size > 0 and pos_price > 0 ? (close - pos_price) / pos_price * 100.0 : 0.0
+float profit_pct_s = strategy.position_size < 0 and pos_price > 0 ? (pos_price - close) / pos_price * 100.0 : 0.0
+
+bool fade_exit_long = momentum_fade_aktiv and strategy.position_size > 0 and bars_im_trade >= fade_max_bars and profit_pct_l > 0 and profit_pct_l < fade_profit_schwelle
+bool fade_exit_short = momentum_fade_aktiv and strategy.position_size < 0 and bars_im_trade >= fade_max_bars and profit_pct_s > 0 and profit_pct_s < fade_profit_schwelle
+
+temporal_stagnation_long := temporal_exit_aktiv and temporal_stagnation_aktiv and strategy.position_size > 0 and bars_im_trade >= temporal_stagnation_bars and profit_pct_l <= temporal_min_profit_pct
+temporal_stagnation_short := temporal_exit_aktiv and temporal_stagnation_aktiv and strategy.position_size < 0 and bars_im_trade >= temporal_stagnation_bars and profit_pct_s <= temporal_min_profit_pct
+
+// Session-Cutoff nur auf der Kerze, die den UTC-Zeitpunkt überschreitet; dadurch kein wiederholter Close-Alert.
+int temporal_cutoff_zeit = timestamp("GMT+0", year, month, dayofmonth, temporal_cutoff_stunde, temporal_cutoff_minute)
+bool temporal_cutoff_tag_ok = temporal_cutoff_tag == "Taeglich" or dayofweek == dayofweek.friday
+bool temporal_cutoff_bar = temporal_exit_aktiv and temporal_session_exit_aktiv and temporal_cutoff_tag_ok and time < temporal_cutoff_zeit and time_close >= temporal_cutoff_zeit
+bool temporal_session_long = temporal_cutoff_bar and strategy.position_size > 0
+bool temporal_session_short = temporal_cutoff_bar and strategy.position_size < 0
+
+var int long_close_count = 0
+var int short_close_count = 0
+
+if strategy.position_size == 0
+    long_close_count := 0
+    short_close_count := 0
+
+bool raw_rule_close_long = long_close_req or all_close_req
+bool raw_rule_close_short = short_close_req or all_close_req
+
+if strategy.position_size > 0 and raw_rule_close_long and not raw_rule_close_long[1]
+    long_close_count += 1
+if strategy.position_size < 0 and raw_rule_close_short and not raw_rule_close_short[1]
+    short_close_count += 1
+
+bool validated_rule_close_long = doppelt_validieren ? long_close_count >= 2 : raw_rule_close_long
+bool validated_rule_close_short = doppelt_validieren ? short_close_count >= 2 : raw_rule_close_short
+
+bool bt_close_long = bt_am_ende_flatten and bt_ende_ueberschritten and strategy.position_size > 0
+bool bt_close_short = bt_am_ende_flatten and bt_ende_ueberschritten and strategy.position_size < 0
+bool temporal_exit_long = temporal_maxbars_long or temporal_stagnation_long or temporal_session_long
+bool temporal_exit_short = temporal_maxbars_short or temporal_stagnation_short or temporal_session_short
+bool do_long_close = strategy.position_size > 0 and (bt_close_long or temporal_exit_long or validated_rule_close_long or restart_long or zeit_exit_long or pinbar_exit_long or fade_exit_long)
+bool do_short_close = strategy.position_size < 0 and (bt_close_short or temporal_exit_short or validated_rule_close_short or restart_short or zeit_exit_short or pinbar_exit_short or fade_exit_short)
+
+// =====================================================================
+// ORDER AUSFUEHRUNG
+// =====================================================================
+if do_long_close
+    string lc = bt_close_long ? "BT Ende" : temporal_session_long ? "Session" : temporal_stagnation_long ? "NoProgress" : temporal_maxbars_long ? "MaxBars" : pinbar_exit_long ? "Pinbar" : fade_exit_long ? "Fade" : restart_long ? "Restart" : zeit_exit_long ? "MaxBars Legacy" : "Rule LC"
+    strategy.close("Long", comment=lc, alert_message=close_alerts_senden ? payload_message : "")
+
+if do_short_close
+    string sc = bt_close_short ? "BT Ende" : temporal_session_short ? "Session" : temporal_stagnation_short ? "NoProgress" : temporal_maxbars_short ? "MaxBars" : pinbar_exit_short ? "Pinbar" : fade_exit_short ? "Fade" : restart_short ? "Restart" : zeit_exit_short ? "MaxBars Legacy" : "Rule SC"
+    strategy.close("Short", comment=sc, alert_message=close_alerts_senden ? payload_message : "")
+
+float atr_sl = ta.atr(sl_atr_len)
+float atr_chan = ta.atr(chandelier_atr_len)
+var float trade_sl_price = na
+var float trade_tp_price = na
+var float partial_tp_price = na
+var bool trade_sl_aktiv = false
+var bool trade_tp_aktiv = false
+var string sl_exit_type = "SL"
+
+// Trade-Linien (Lux UI)
+var line ln_sl = na
+var line ln_tp = na
+var label lb_sl = na
+var label lb_tp = na
+
+if strategy.position_size == 0
+    trade_sl_price := na
+    trade_tp_price := na
+    partial_tp_price := na
+    trade_sl_aktiv := false
+    trade_tp_aktiv := false
+    sl_exit_type := "SL"
+
+bool enter_long = clean_long_open and groesse_ok and (strategy.position_size == 0 or turn_short_to_long or restart_long or scale_long)
+bool enter_short = clean_short_open and groesse_ok and (strategy.position_size == 0 or turn_long_to_short or restart_short or scale_short)
+
+if enter_long
+    // Das Limit zählt reale Entry-Absichten: neue Longs und Long-Reversals jeweils einmal pro Signalbar.
+    long_entries_diese_stunde += 1
+    float manual_sl_dist = sl_typ == "ATR" ? (atr_sl * sl_faktor) : (close * sl_faktor / 100.0)
+    float sl_dist = adaptiv_sl_bereit ? close * adaptiv_sl_pct / 100.0 : manual_sl_dist
+    trade_sl_price := close - sl_dist
+    trade_sl_aktiv := sl_aktiv or adaptiv_sl_bereit
+    sl_exit_type := adaptiv_sl_bereit ? "Auto SL" : "SL"
+    trade_tp_aktiv := tp_aktiv or adaptiv_tp_bereit
+    if adaptiv_tp_bereit
+        trade_tp_price := close * (1.0 + adaptiv_tp_pct / 100.0)
+    else if tp_aktiv
+        if tp_typ == "Prozent"
+            trade_tp_price := close * (1.0 + tp_faktor / 100.0)
+        else if tp_typ == "ATR"
+            trade_tp_price := close + (atr_sl * tp_faktor)
+        else if tp_typ == "RRR Multiplikator"
+            trade_tp_price := close + (sl_dist * tp_faktor)
+    else
+        trade_tp_price := na
+
+    partial_tp_price := partial_tp_aktiv ? close * (1.0 + partial_tp_trigger_pct / 100.0) : na
+    strategy.entry("Long", strategy.long, qty=order_menge, comment=scale_long ? "SI Long" : turn_short_to_long ? "Rev Long" : "R Long", alert_message=payload_message)
+
+    // Initiales Bracket wird mit dem Entry erzeugt, damit die nächste Kerze nicht ungeschützt simuliert wird.
+    if partial_tp_aktiv and not na(partial_tp_price)
+        strategy.exit("Partial Long", "Long", qty_percent=partial_tp_pct, limit=partial_tp_price, comment="Partial", alert_message=close_alerts_senden ? payload_message : "")
+    strategy.exit("Exit Long", "Long", stop=trade_sl_aktiv ? trade_sl_price : na, limit=trade_tp_aktiv ? trade_tp_price : na, comment_loss=sl_exit_type, comment_profit=adaptiv_tp_bereit ? "Auto TP" : "TP", alert_message=close_alerts_senden ? payload_message : "")
+    // Lux UI: Trade-Linien nur bei frischem Einstieg (nicht bei Scale-In/Restart)
+
+    if trade_linien_aktiv and strategy.position_size == 0
+        ln_sl := line.new(bar_index, trade_sl_price, bar_index, trade_sl_price, color=#f23645, style=line.style_dashed)
+        lb_sl := label.new(bar_index, trade_sl_price, "SL", textcolor=#f23645, color=#00000000, size=size.tiny, style=label.style_label_left)
+        if trade_tp_aktiv and not na(trade_tp_price)
+            ln_tp := line.new(bar_index, trade_tp_price, bar_index, trade_tp_price, color=#089981, style=line.style_dashed)
+            lb_tp := label.new(bar_index, trade_tp_price, "TP", textcolor=#089981, color=#00000000, size=size.tiny, style=label.style_label_left)
+    if entry_marker_aktiv
+        float offset_m = atr_sl != 0 ? atr_sl : (high - low)
+        line.new(bar_index, low, bar_index, low - offset_m * 1.5, color=#089981, style=line.style_dashed)
+        label.new(bar_index, low - offset_m * 1.5, "", color=color.new(#089981, 80), style=label.style_circle, size=size.huge)
+        label.new(bar_index, low - offset_m * 1.5, "LONG", color=#363a45, textcolor=color.white, style=label.style_label_center, size=size.small)
+
+if enter_short
+    // Das Limit zählt reale Entry-Absichten: neue Shorts und Short-Reversals jeweils einmal pro Signalbar.
+    short_entries_diese_stunde += 1
+    float manual_sl_dist = sl_typ == "ATR" ? (atr_sl * sl_faktor) : (close * sl_faktor / 100.0)
+    float sl_dist = adaptiv_sl_bereit ? close * adaptiv_sl_pct / 100.0 : manual_sl_dist
+    trade_sl_price := close + sl_dist
+    trade_sl_aktiv := sl_aktiv or adaptiv_sl_bereit
+    sl_exit_type := adaptiv_sl_bereit ? "Auto SL" : "SL"
+    trade_tp_aktiv := tp_aktiv or adaptiv_tp_bereit
+    if adaptiv_tp_bereit
+        trade_tp_price := close * (1.0 - adaptiv_tp_pct / 100.0)
+    else if tp_aktiv
+        if tp_typ == "Prozent"
+            trade_tp_price := close * (1.0 - tp_faktor / 100.0)
+        else if tp_typ == "ATR"
+            trade_tp_price := close - (atr_sl * tp_faktor)
+        else if tp_typ == "RRR Multiplikator"
+            trade_tp_price := close - (sl_dist * tp_faktor)
+    else
+        trade_tp_price := na
+
+    partial_tp_price := partial_tp_aktiv ? close * (1.0 - partial_tp_trigger_pct / 100.0) : na
+    strategy.entry("Short", strategy.short, qty=order_menge, comment=scale_short ? "SI Short" : turn_long_to_short ? "Rev Short" : "R Short", alert_message=payload_message)
+
+    // Initiales Bracket wird mit dem Entry erzeugt, damit die nächste Kerze nicht ungeschützt simuliert wird.
+    if partial_tp_aktiv and not na(partial_tp_price)
+        strategy.exit("Partial Short", "Short", qty_percent=partial_tp_pct, limit=partial_tp_price, comment="Partial", alert_message=close_alerts_senden ? payload_message : "")
+    strategy.exit("Exit Short", "Short", stop=trade_sl_aktiv ? trade_sl_price : na, limit=trade_tp_aktiv ? trade_tp_price : na, comment_loss=sl_exit_type, comment_profit=adaptiv_tp_bereit ? "Auto TP" : "TP", alert_message=close_alerts_senden ? payload_message : "")
+    if trade_linien_aktiv and strategy.position_size == 0
+
+        ln_sl := line.new(bar_index, trade_sl_price, bar_index, trade_sl_price, color=#f23645, style=line.style_dashed)
+        lb_sl := label.new(bar_index, trade_sl_price, "SL", textcolor=#f23645, color=#00000000, size=size.tiny, style=label.style_label_left)
+        if trade_tp_aktiv and not na(trade_tp_price)
+            ln_tp := line.new(bar_index, trade_tp_price, bar_index, trade_tp_price, color=#089981, style=line.style_dashed)
+            lb_tp := label.new(bar_index, trade_tp_price, "TP", textcolor=#089981, color=#00000000, size=size.tiny, style=label.style_label_left)
+    if entry_marker_aktiv
+        float offset_m = atr_sl != 0 ? atr_sl : (high - low)
+        line.new(bar_index, high, bar_index, high + offset_m * 1.5, color=#f23645, style=line.style_dashed)
+        label.new(bar_index, high + offset_m * 1.5, "", color=color.new(#f23645, 80), style=label.style_circle, size=size.huge)
+        label.new(bar_index, high + offset_m * 1.5, "SHORT", color=#363a45, textcolor=color.white, style=label.style_label_center, size=size.small)
+
+// =====================================================================
+// UNIFIED SL MANAGER: Stage Lock + Trailing (Prozent / Chandelier)
+// =====================================================================
+var float pos_high = na
+var float pos_low = na
+
+if strategy.position_size > 0
+    pos_high := na(pos_high) ? high : math.max(pos_high, high)
+    pos_low := na
+else if strategy.position_size < 0
+    pos_low := na(pos_low) ? low : math.min(pos_low, low)
+    pos_high := na
+else
+    pos_high := na
+    pos_low := na
+
+// --- LONG SL Management ---
+if strategy.position_size > 0 and pos_price > 0 and not na(trade_sl_price)
+    float pct_gain = (close - pos_price) / pos_price * 100.0
+
+    if stage_lock_aktiv
+        if pct_gain >= stage3_trigger
+            float new_sl = pos_price * (1.0 + stage3_lock / 100.0)
+            if new_sl > trade_sl_price
+                trade_sl_price := new_sl
+                sl_exit_type := "Lock 3"
+        else if pct_gain >= stage2_trigger
+            float new_sl = pos_price * (1.0 + stage2_lock / 100.0)
+            if new_sl > trade_sl_price
+                trade_sl_price := new_sl
+                sl_exit_type := "Lock 2"
+        else if pct_gain >= stage1_trigger
+            float new_sl = pos_price * (1.0 + stage1_lock / 100.0)
+            if new_sl > trade_sl_price
+                trade_sl_price := new_sl
+                sl_exit_type := "Lock 1"
+
+    if trailing_aktiv and not na(pos_high)
+        if trailing_modus == "Prozent"
+            bool trail_activated = pos_high >= pos_price * (1.0 + trailing_act_pct / 100.0)
+            if trail_activated
+                float trail_sl = pos_high * (1.0 - trailing_trail_pct / 100.0)
+                if trail_sl > trade_sl_price
+                    trade_sl_price := trail_sl
+                    sl_exit_type := "Trail"
+        else // Chandelier ATR
+            float chan_sl = pos_high - atr_chan * chandelier_atr_mult
+            if chan_sl > trade_sl_price
+                trade_sl_price := chan_sl
+                sl_exit_type := "Chan"
+
+// --- SHORT SL Management ---
+if strategy.position_size < 0 and pos_price > 0 and not na(trade_sl_price)
+    float pct_gain = (pos_price - close) / pos_price * 100.0
+
+    if stage_lock_aktiv
+        if pct_gain >= stage3_trigger
+            float new_sl = pos_price * (1.0 - stage3_lock / 100.0)
+            if new_sl < trade_sl_price
+                trade_sl_price := new_sl
+                sl_exit_type := "Lock 3"
+        else if pct_gain >= stage2_trigger
+            float new_sl = pos_price * (1.0 - stage2_lock / 100.0)
+            if new_sl < trade_sl_price
+                trade_sl_price := new_sl
+                sl_exit_type := "Lock 2"
+        else if pct_gain >= stage1_trigger
+            float new_sl = pos_price * (1.0 - stage1_lock / 100.0)
+            if new_sl < trade_sl_price
+                trade_sl_price := new_sl
+                sl_exit_type := "Lock 1"
+
+    if trailing_aktiv and not na(pos_low)
+        if trailing_modus == "Prozent"
+            bool trail_activated = pos_low <= pos_price * (1.0 - trailing_act_pct / 100.0)
+            if trail_activated
+                float trail_sl = pos_low * (1.0 + trailing_trail_pct / 100.0)
+                if trail_sl < trade_sl_price
+                    trade_sl_price := trail_sl
+                    sl_exit_type := "Trail"
+        else
+            float chan_sl = pos_low + atr_chan * chandelier_atr_mult
+            if chan_sl < trade_sl_price
+                trade_sl_price := chan_sl
+                sl_exit_type := "Chan"
+
+// =====================================================================
+// LUX UI: TRADE-LINIEN VERLAENGERN & TREFFER MARKIEREN
+// =====================================================================
+if trade_linien_aktiv and strategy.position_size != 0
+    if not na(ln_sl) and not na(trade_sl_price)
+        ln_sl.set_x2(bar_index)
+        ln_sl.set_y1(trade_sl_price)
+        ln_sl.set_y2(trade_sl_price)
+        lb_sl.set_x(bar_index)
+        lb_sl.set_y(trade_sl_price)
+    if not na(ln_tp) and not na(trade_tp_price)
+        ln_tp.set_x2(bar_index)
+        ln_tp.set_y1(trade_tp_price)
+        ln_tp.set_y2(trade_tp_price)
+        lb_tp.set_x(bar_index)
+        lb_tp.set_y(trade_tp_price)
+
+if trade_linien_aktiv and position_geschlossen and strategy.closedtrades > 0
+    int li = strategy.closedtrades - 1
+    float lp = strategy.closedtrades.profit(li)
+    string ec_last = strategy.closedtrades.exit_comment(li)
+    bool was_tp_hit = ec_last == "TP" or ec_last == "Auto TP" or ec_last == "Partial"
+
+    if not na(lb_tp)
+        lb_tp.set_text(was_tp_hit and lp > 0 ? "TP ✓" : "TP")
+    if not na(lb_sl)
+        lb_sl.set_text(was_tp_hit ? "SL" : ec_last + (lp > 0 ? " ✓" : " ✗"))
+
+// =====================================================================
+// STRATEGY.EXIT — TP & SL
+// =====================================================================
+if strategy.position_size > 0
+    if partial_tp_aktiv and not na(partial_tp_price)
+        strategy.exit("Partial Long", "Long", qty_percent=partial_tp_pct, limit=partial_tp_price, comment="Partial", alert_message=close_alerts_senden ? payload_message : "")
+    strategy.exit("Exit Long", "Long", stop=trade_sl_aktiv ? trade_sl_price : na, limit=trade_tp_aktiv ? trade_tp_price : na, comment_loss=sl_exit_type, comment_profit=adaptiv_tp_bereit ? "Auto TP" : "TP", alert_message=close_alerts_senden ? payload_message : "")
+
+if strategy.position_size < 0
+    if partial_tp_aktiv and not na(partial_tp_price)
+        strategy.exit("Partial Short", "Short", qty_percent=partial_tp_pct, limit=partial_tp_price, comment="Partial", alert_message=close_alerts_senden ? payload_message : "")
+    strategy.exit("Exit Short", "Short", stop=trade_sl_aktiv ? trade_sl_price : na, limit=trade_tp_aktiv ? trade_tp_price : na, comment_loss=sl_exit_type, comment_profit=adaptiv_tp_bereit ? "Auto TP" : "TP", alert_message=close_alerts_senden ? payload_message : "")
+
+// =====================================================================
+// EVALUATION ENGINE (klassisch, Lookback-basiert)
+// =====================================================================
+int total_closed = strategy.closedtrades
+int eval_sample = math.min(total_closed, eval_lookback)
+
+var float eval_wins = 0.0
+var float eval_losses = 0.0
+var float eval_be = 0.0
+
+var float eval_gross_win = 0.0
+var float eval_gross_loss = 0.0
+var float eval_total_bars = 0.0
+var float eval_total_mae = 0.0
+var float eval_total_mfe = 0.0
+var float eval_long_wins = 0.0
+var float eval_long_total = 0.0
+var float eval_short_wins = 0.0
+var float eval_short_total = 0.0
+var int eval_exit_sl = 0
+var int eval_exit_tp = 0
+var int eval_exit_trail = 0
+var int eval_exit_lock = 0
+var int eval_exit_time = 0
+var int eval_exit_other = 0
+
+if barstate.islast and eval_sample > 0
+    eval_wins := 0.0
+    eval_losses := 0.0
+    eval_be := 0.0
+
+    eval_gross_win := 0.0
+    eval_gross_loss := 0.0
+    eval_total_bars := 0.0
+    eval_total_mae := 0.0
+    eval_total_mfe := 0.0
+    eval_long_wins := 0.0
+    eval_long_total := 0.0
+    eval_short_wins := 0.0
+    eval_short_total := 0.0
+    eval_exit_sl := 0
+    eval_exit_tp := 0
+    eval_exit_trail := 0
+    eval_exit_lock := 0
+    eval_exit_time := 0
+    eval_exit_other := 0
+
+    int first_t = total_closed - eval_sample
+    int last_t = total_closed - 1
+    for i = first_t to last_t
+        float t_profit = strategy.closedtrades.profit(i)
+        float t_size = math.abs(strategy.closedtrades.size(i))
+        float t_entry_p = strategy.closedtrades.entry_price(i)
+        float t_pos_val = t_entry_p * t_size
+        float t_mae = t_pos_val > 0 ? math.abs(strategy.closedtrades.max_drawdown(i)) / t_pos_val * 100.0 : 0.0
+        float t_mfe = t_pos_val > 0 ? math.abs(strategy.closedtrades.max_runup(i)) / t_pos_val * 100.0 : 0.0
+
+        int t_bars = strategy.closedtrades.exit_bar_index(i) - strategy.closedtrades.entry_bar_index(i)
+        bool t_is_long = strategy.closedtrades.size(i) > 0
+
+        eval_total_mae += t_mae
+        eval_total_mfe += t_mfe
+        eval_total_bars += t_bars
+
+        if t_profit > 0
+            eval_wins += 1
+            eval_gross_win += t_profit
+        else if t_profit < 0
+            eval_losses += 1
+            eval_gross_loss += math.abs(t_profit)
+
+        else
+            eval_be += 1
+
+        if t_is_long
+
+            eval_long_total += 1
+            if t_profit > 0
+                eval_long_wins += 1
+        else
+            eval_short_total += 1
+            if t_profit > 0
+                eval_short_wins += 1
+
+        string ec = strategy.closedtrades.exit_comment(i)
+        if ec == "SL" or ec == "Auto SL"
+            eval_exit_sl += 1
+        else if ec == "TP" or ec == "Auto TP"
+            eval_exit_tp += 1
+        else if ec == "Trail" or ec == "Chan"
+            eval_exit_trail += 1
+        else if str.contains(ec, "Lock")
+            eval_exit_lock += 1
+        else if ec == "MaxBars" or ec == "MaxBars Legacy" or ec == "NoProgress" or ec == "Session"
+            eval_exit_time += 1
+        else
+            eval_exit_other += 1
+
+float eval_total_trades = eval_wins + eval_losses + eval_be
+float eval_directional_trades = eval_wins + eval_losses
+float eval_winrate = eval_total_trades > 0 ? eval_wins / eval_total_trades * 100.0 : 0.0
+float eval_winrate_ex_be = eval_directional_trades > 0 ? eval_wins / eval_directional_trades * 100.0 : 0.0
+float eval_pf = eval_gross_loss > 0 ? eval_gross_win / eval_gross_loss : na
+float eval_avg_win = eval_wins > 0 ? eval_gross_win / eval_wins : 0.0
+float eval_avg_loss = eval_losses > 0 ? eval_gross_loss / eval_losses : 0.0
+float eval_expectancy = eval_total_trades > 0 ? (eval_gross_win - eval_gross_loss) / eval_total_trades : 0.0
+float eval_avg_bars = eval_total_trades > 0 ? eval_total_bars / eval_total_trades : 0.0
+float eval_avg_mae = eval_total_trades > 0 ? eval_total_mae / eval_total_trades : 0.0
+float eval_avg_mfe = eval_total_trades > 0 ? eval_total_mfe / eval_total_trades : 0.0
+
+float empf_sl = eval_avg_mae * 1.5
+float empf_tp = eval_avg_mfe * 0.75
+float eval_long_wr = eval_long_total > 0 ? eval_long_wins / eval_long_total * 100.0 : 0.0
+float eval_short_wr = eval_short_total > 0 ? eval_short_wins / eval_short_total * 100.0 : 0.0
+
+// =====================================================================
+// VISUALISIERUNG
+// =====================================================================
+plot(trade_sl_aktiv and strategy.position_size != 0 ? trade_sl_price : na, title="Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(trade_tp_aktiv and strategy.position_size != 0 ? trade_tp_price : na, title="Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+
+plot(partial_tp_aktiv and strategy.position_size != 0 ? partial_tp_price : na, title="Partial TP", color=color.teal, style=plot.style_linebr, linewidth=1)
+plot(trend_filter_aktiv ? trend_ma : na, title="Trend MA", color=color.purple, linewidth=2)
+
+plotshape(clean_long_open, title="Long Signal", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small, text="LO")
+plotshape(clean_short_open, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SO")
+plotshape(do_long_close, title="Long Close", style=shape.xcross, location=location.abovebar, color=color.orange, size=size.tiny, text="LC")
+plotshape(do_short_close, title="Short Close", style=shape.xcross, location=location.belowbar, color=color.orange, size=size.tiny, text="SC")
+bgcolor(not lux_quellen_verbunden ? color.new(color.orange, 90) : not zeit_ok ? color.new(color.gray, 92) : daily_loss_exceeded or streak_paused or cooldown_paused ? color.new(color.red, 92) : na)
+
+// =====================================================================
+// STATUS TABELLE (oben rechts)
+// =====================================================================
+int aktive_regeln = (regel_1_aktiv ? 1 : 0) + (regel_2_aktiv ? 1 : 0) + (regel_3_aktiv ? 1 : 0) + (regel_4_aktiv ? 1 : 0) + (regel_5_aktiv ? 1 : 0) + (regel_6_aktiv ? 1 : 0) + (regel_7_aktiv ? 1 : 0) + (regel_8_aktiv ? 1 : 0)
+int getroffene_regeln = (regel_1_hit ? 1 : 0) + (regel_2_hit ? 1 : 0) + (regel_3_hit ? 1 : 0) + (regel_4_hit ? 1 : 0) + (regel_5_hit ? 1 : 0) + (regel_6_hit ? 1 : 0) + (regel_7_hit ? 1 : 0) + (regel_8_hit ? 1 : 0)
+
+var table tbl_status = table.new(position.top_right, 2, 22, bgcolor=color.new(color.black, 78), border_width=1)
+
+if status_anzeigen and barstate.islast
+    table.cell(tbl_status, 0, 0, "Px Rules v6.5", text_color=color.white, bgcolor=color.new(color.blue, 55))
+
+    table.cell(tbl_status, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(tbl_status, 0, 1, "Quellen", text_color=color.white)
+    table.cell(tbl_status, 1, 1, not bt_daten_gueltig ? "BT DATUM?" : lux_quellen_verbunden ? zeit_ok ? "OK" : "AUSSERHALB" : "FEHLT", text_color=lux_quellen_verbunden and zeit_ok and bt_daten_gueltig ? color.lime : color.orange)
+
+    table.cell(tbl_status, 0, 2, "Regeln (Gruppen)", text_color=color.white)
+    table.cell(tbl_status, 1, 2, str.tostring(getroffene_regeln) + "/" + str.tostring(aktive_regeln), text_color=getroffene_regeln > 0 ? color.lime : color.white)
+    string risk_status = daily_loss_exceeded ? "TAGESLIMIT" : streak_paused ? "PAUSE" : cooldown_paused ? "COOLDOWN" : "OK"
+    color risk_color = daily_loss_exceeded or streak_paused or cooldown_paused ? color.red : color.lime
+    table.cell(tbl_status, 0, 3, "Risk Guard", text_color=color.white)
+    table.cell(tbl_status, 1, 3, risk_status, text_color=risk_color)
+    table.cell(tbl_status, 0, 4, "Aktion", text_color=color.white)
+    string aktion_text = scale_long ? "SCALE LONG" : scale_short ? "SCALE SHORT" : restart_long ? "RESTART L" : restart_short ? "RESTART S" : turn_short_to_long ? "REV->LONG" : turn_long_to_short ? "REV->SHORT" : clean_long_open ? "LONG" : clean_short_open ? "SHORT" : do_long_close ? "CLOSE L" : do_short_close ? "CLOSE S" : "WARTEN"
+    color aktion_color = clean_long_open or turn_short_to_long or restart_long or scale_long ? color.lime : clean_short_open or turn_long_to_short or restart_short or scale_short ? color.red : do_long_close or do_short_close ? color.orange : color.gray
+    table.cell(tbl_status, 1, 4, aktion_text, text_color=aktion_color)
+    table.cell(tbl_status, 0, 5, "Position", text_color=color.white)
+    table.cell(tbl_status, 1, 5, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray)
+    table.cell(tbl_status, 0, 6, "Groesse", text_color=color.white)
+    table.cell(tbl_status, 1, 6, groesse_ok ? str.tostring(order_menge, "#.######") : "KEINE", text_color=groesse_ok ? color.white : color.orange)
+    table.cell(tbl_status, 0, 7, "Bars", text_color=color.white)
+    string bars_status = temporal_exit_aktiv and temporal_max_bars_aktiv ? str.tostring(bars_im_trade) + "/" + str.tostring(temporal_max_bars) + " T" : maximale_trade_dauer > 0 ? str.tostring(bars_im_trade) + "/" + str.tostring(maximale_trade_dauer) + " L" : str.tostring(bars_im_trade)
+    table.cell(tbl_status, 1, 7, bars_status, text_color=temporal_maxbars_long or temporal_maxbars_short or zeit_exit_long or zeit_exit_short ? color.orange : color.white)
+    table.cell(tbl_status, 0, 8, "SL Preis", text_color=color.white)
+    table.cell(tbl_status, 1, 8, not na(trade_sl_price) ? str.tostring(trade_sl_price, "#.##") : "-", text_color=color.red)
+    table.cell(tbl_status, 0, 9, "SL Typ", text_color=color.white)
+    table.cell(tbl_status, 1, 9, strategy.position_size != 0 ? sl_exit_type : sl_typ + " " + str.tostring(sl_faktor), text_color=sl_exit_type == "SL" ? color.white : color.lime)
+    table.cell(tbl_status, 0, 10, "TP Preis", text_color=color.white)
+    table.cell(tbl_status, 1, 10, not na(trade_tp_price) ? str.tostring(trade_tp_price, "#.##") : "-", text_color=color.green)
+    table.cell(tbl_status, 0, 11, "Stage Lock", text_color=color.white)
+    table.cell(tbl_status, 1, 11, stage_lock_aktiv ? "AN (3 Stufen)" : "AUS", text_color=stage_lock_aktiv ? color.lime : color.gray)
+    table.cell(tbl_status, 0, 12, "Trailing", text_color=color.white)
+    table.cell(tbl_status, 1, 12, trailing_aktiv ? trailing_modus : "AUS", text_color=trailing_aktiv ? color.lime : color.gray)
+    table.cell(tbl_status, 0, 13, "Partial TP", text_color=color.white)
+    table.cell(tbl_status, 1, 13, partial_tp_aktiv ? str.tostring(partial_tp_pct, "#") + "% @" + str.tostring(partial_tp_trigger_pct, "#.#") + "%" : "AUS", text_color=partial_tp_aktiv ? color.lime : color.gray)
+    table.cell(tbl_status, 0, 14, "Pinbar Exit", text_color=color.white)
+    table.cell(tbl_status, 1, 14, rejection_exit_aktiv ? "AN (" + str.tostring(wick_ratio_threshold, "#") + "%)" : "AUS", text_color=rejection_exit_aktiv ? color.lime : color.gray)
+    table.cell(tbl_status, 0, 15, "Fade Exit", text_color=color.white)
+    table.cell(tbl_status, 1, 15, momentum_fade_aktiv ? str.tostring(fade_max_bars) + "K <" + str.tostring(fade_profit_schwelle, "#.#") + "%" : "AUS", text_color=momentum_fade_aktiv ? color.lime : color.gray)
+    string temporal_status = not temporal_exit_aktiv ? "AUS" : (temporal_max_bars_aktiv ? "Max " + str.tostring(temporal_max_bars) + "K" : "") + (temporal_stagnation_aktiv ? " Stag" : "") + (temporal_session_exit_aktiv ? " UTC " + str.tostring(temporal_cutoff_stunde, "00") + ":" + str.tostring(temporal_cutoff_minute, "00") : "")
+    table.cell(tbl_status, 0, 20, "Zeit Exits", text_color=color.white)
+    table.cell(tbl_status, 1, 20, temporal_status, text_color=temporal_exit_aktiv ? color.lime : color.gray)
+    string entry_limit_status = not entry_limit_aktiv ? "AUS" : "L " + str.tostring(long_entries_diese_stunde) + "/" + str.tostring(max_long_entries_pro_stunde) + " | S " + str.tostring(short_entries_diese_stunde) + "/" + str.tostring(max_short_entries_pro_stunde)
+    bool entry_limit_blockiert = entry_limit_aktiv and (not long_entry_limit_ok or not short_entry_limit_ok)
+    table.cell(tbl_status, 0, 21, "Entries / UTC h", text_color=color.white)
+    table.cell(tbl_status, 1, 21, entry_limit_status, text_color=not entry_limit_aktiv ? color.gray : entry_limit_blockiert ? color.orange : color.lime)
+    table.cell(tbl_status, 0, 16, "PF", text_color=color.white)
+    float pf_display = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    table.cell(tbl_status, 1, 16, na(pf_display) ? "NA" : str.tostring(pf_display, "#.##"), text_color=na(pf_display) ? color.gray : pf_display >= 1.0 ? color.lime : color.red)
+    table.cell(tbl_status, 0, 17, "Net Profit", text_color=color.white)
+    table.cell(tbl_status, 1, 17, str.tostring(strategy.netprofit, "#.##") + " USDT", text_color=strategy.netprofit >= 0 ? color.lime : color.red)
+
+    string adaptiv_status = not adaptiv_aktiv ? "AUS" : not adaptiv_sl_bereit and not adaptiv_tp_bereit ? "LERNT " + str.tostring(array.size(adapt_mae_atr)) + "/" + str.tostring(adaptiv_benoetigte_samples) : "AKTIV"
+    table.cell(tbl_status, 0, 18, "Auto SL/TP", text_color=color.white)
+    table.cell(tbl_status, 1, 18, adaptiv_status, text_color=not adaptiv_aktiv ? color.gray : adaptiv_sl_bereit or adaptiv_tp_bereit ? color.lime : color.orange)
+    string adaptiv_werte = (adaptiv_sl_bereit ? "SL " + str.tostring(adaptiv_sl_pct, "#.##") + "%" : "SL manuell") + " | " + (adaptiv_tp_bereit ? "TP " + str.tostring(adaptiv_tp_pct, "#.##") + "%" : "TP manuell")
+    table.cell(tbl_status, 0, 19, "Auto Werte", text_color=color.white)
+    table.cell(tbl_status, 1, 19, adaptiv_werte, text_color=adaptiv_sl_bereit or adaptiv_tp_bereit ? color.lime : color.gray)
+
+// =====================================================================
+// EVALUATION DASHBOARD (klassisch, unten rechts)
+// =====================================================================
+var table tbl_eval = table.new(position.bottom_right, 2, 15, bgcolor=color.new(color.black, 78), border_width=1)
+if eval_anzeigen and barstate.islast and eval_sample >= 5
+    table.cell(tbl_eval, 0, 0, "EVALUATION", text_color=color.white, bgcolor=color.new(color.purple, 55))
+    table.cell(tbl_eval, 1, 0, "Letzte " + str.tostring(eval_sample) + " Exit-Legs", text_color=color.white, bgcolor=color.new(color.purple, 55))
+    table.cell(tbl_eval, 0, 1, "Exit-Legs (W/L/BE)", text_color=color.white)
+    table.cell(tbl_eval, 1, 1, str.tostring(eval_wins, "#") + "W / " + str.tostring(eval_losses, "#") + "L / " + str.tostring(eval_be, "#") + "BE", text_color=color.white)
+    table.cell(tbl_eval, 0, 2, "Win Rate (inkl./ex BE)", text_color=color.white)
+    table.cell(tbl_eval, 1, 2, str.tostring(eval_winrate, "#.#") + "% / " + str.tostring(eval_winrate_ex_be, "#.#") + "%", text_color=eval_winrate >= 50 ? color.lime : color.red)
+
+    table.cell(tbl_eval, 0, 3, "Profit Factor", text_color=color.white)
+    table.cell(tbl_eval, 1, 3, na(eval_pf) ? "NA" : str.tostring(eval_pf, "#.##"), text_color=na(eval_pf) ? color.gray : eval_pf >= 1.0 ? color.lime : color.red)
+    table.cell(tbl_eval, 0, 4, "Expectancy", text_color=color.white)
+    table.cell(tbl_eval, 1, 4, str.tostring(eval_expectancy, "#.##") + " USDT", text_color=eval_expectancy >= 0 ? color.lime : color.red)
+    table.cell(tbl_eval, 0, 5, "Avg Win / Loss", text_color=color.white)
+    table.cell(tbl_eval, 1, 5, "+" + str.tostring(eval_avg_win, "#.##") + " / -" + str.tostring(eval_avg_loss, "#.##"), text_color=color.white)
+    table.cell(tbl_eval, 0, 6, "Avg Bars/Trade", text_color=color.white)
+    table.cell(tbl_eval, 1, 6, str.tostring(eval_avg_bars, "#.#"), text_color=color.white)
+    table.cell(tbl_eval, 0, 7, "Avg MAE %", text_color=color.white)
+    table.cell(tbl_eval, 1, 7, "-" + str.tostring(eval_avg_mae, "#.##") + "%", text_color=color.orange)
+    table.cell(tbl_eval, 0, 8, "Avg MFE %", text_color=color.white)
+    table.cell(tbl_eval, 1, 8, "+" + str.tostring(eval_avg_mfe, "#.##") + "%", text_color=color.lime)
+    table.cell(tbl_eval, 0, 9, "MAE/MFE-Orientierung", text_color=color.white)
+    table.cell(tbl_eval, 1, 9, str.tostring(empf_sl, "#.##") + "% / " + str.tostring(empf_tp, "#.##") + "%", text_color=color.yellow)
+
+    table.cell(tbl_eval, 0, 10, "Long WR", text_color=color.white)
+    table.cell(tbl_eval, 1, 10, eval_long_total > 0 ? str.tostring(eval_long_wr, "#.#") + "% (" + str.tostring(eval_long_total, "#") + ")" : "NA", text_color=eval_long_wr >= 50 ? color.lime : color.red)
+    table.cell(tbl_eval, 0, 11, "Short WR", text_color=color.white)
+    table.cell(tbl_eval, 1, 11, eval_short_total > 0 ? str.tostring(eval_short_wr, "#.#") + "% (" + str.tostring(eval_short_total, "#") + ")" : "NA", text_color=eval_short_wr >= 50 ? color.lime : color.red)
+    string exit_info = "SL:" + str.tostring(eval_exit_sl) + " TP:" + str.tostring(eval_exit_tp) + " Tr:" + str.tostring(eval_exit_trail)
+    table.cell(tbl_eval, 0, 12, "Exits (SL/TP/Tr)", text_color=color.white)
+    table.cell(tbl_eval, 1, 12, exit_info, text_color=color.white)
+    string exit_info2 = "Lock:" + str.tostring(eval_exit_lock) + " Zeit:" + str.tostring(eval_exit_time) + " And:" + str.tostring(eval_exit_other)
+    table.cell(tbl_eval, 0, 13, "Exits (Lock/Zeit/And.)", text_color=color.white)
+    table.cell(tbl_eval, 1, 13, exit_info2, text_color=color.white)
+    table.cell(tbl_eval, 0, 14, "Zeit-Exit aktuell", text_color=color.white)
+    string zeit_jetzt = temporal_session_long or temporal_session_short ? "Session" : temporal_stagnation_long or temporal_stagnation_short ? "NoProgress" : temporal_maxbars_long or temporal_maxbars_short ? "MaxBars" : "-"
+    table.cell(tbl_eval, 1, 14, zeit_jetzt, text_color=zeit_jetzt == "-" ? color.gray : color.orange)
+
+// =====================================================================
+// LUX ANALYTICS DASHBOARD (LuxAlgo-Style, alle Trades)
+// =====================================================================
+color LUX_DATA = #DBDBDB
+color LUX_HEADERS = #808080
+color LUX_BG = #161616
+color LUX_BORDERS = #2E2E2E
+color LUX_GREEN = #089981
+color LUX_RED = #f23645
+
+var string lux_pos = switch dash_pos
+    "Top Right" => position.top_right
+    "Bottom Right" => position.bottom_right
+    "Bottom Left" => position.bottom_left
+
+var string lux_size = switch dash_size
+    "Tiny" => size.tiny
+    "Small" => size.small
+    "Normal" => size.normal
+    "Large" => size.large
+
+var table lux = table.new(lux_pos, 24, 26, bgcolor=LUX_BG, border_width=1, border_color=LUX_BG, frame_color=LUX_BORDERS, frame_width=1)
+
+if lux_analytics_aktiv and barstate.islast and total_closed > 0
+    // ── Daten aus allen geschlossenen Trades sammeln ────────────────
+    array<float> pnl_arr = array.new_float()
+    array<float> eq_arr = array.new_float()
+    array<float> hourly = array.new_float(24, 0.0)
+    map<int, float> month_map = map.new<int, float>()
+    map<int, float> dow_map = map.new<int, float>()
+    array<int> years_arr = array.new_int()
+
+        float eq = 0.0
+    float max_eq = 0.0
+    float max_dd = 0.0
+    int last_high_time = strategy.closedtrades.entry_time(0)
+
+    int max_stag = 0
+        float lux_wins = 0.0
+    float lux_losses = 0.0
+    float lux_be = 0.0
+
+    float lux_gw = 0.0
+    float lux_gl = 0.0
+    int cnt_sl = 0
+    int cnt_tp = 0
+    int cnt_trail = 0
+    int cnt_lock = 0
+    int cnt_other = 0
+
+    for i = 0 to total_closed - 1
+        float p = strategy.closedtrades.profit(i)
+        int et = strategy.closedtrades.entry_time(i)
+        int xt = strategy.closedtrades.exit_time(i)
+        array.push(pnl_arr, p)
+        eq += p
+        array.push(eq_arr, eq)
+        if eq > max_eq
+            max_eq := eq
+            last_high_time := xt
+        max_dd := math.max(max_dd, max_eq - eq)
+        int stag = xt - last_high_time
+        if stag > max_stag
+            max_stag := stag
+        if p > 0
+            lux_wins += 1
+            lux_gw += p
+        else if p < 0
+            lux_losses += 1
+            lux_gl += math.abs(p)
+        else
+            lux_be += 1
+        array.set(hourly, hour(et), array.get(hourly, hour(et)) + p)
+
+        int y = year(et)
+        int m_key = y * 100 + (month(et) - 1)
+        month_map.put(m_key, nz(month_map.get(m_key)) + p)
+        if array.indexof(years_arr, y) == -1
+            array.push(years_arr, y)
+        int d_key = dayofweek(et) - 1
+        dow_map.put(d_key, nz(dow_map.get(d_key)) + p)
+        string ecl = strategy.closedtrades.exit_comment(i)
+        if ecl == "SL"
+            cnt_sl += 1
+        else if ecl == "TP"
+            cnt_tp += 1
+        else if ecl == "Trail" or ecl == "Chan"
+            cnt_trail += 1
+        else if str.contains(ecl, "Lock")
+            cnt_lock += 1
+        else
+            cnt_other += 1
+
+        float lux_total = lux_wins + lux_losses + lux_be
+
+    float lux_wr = lux_total > 0 ? lux_wins / lux_total * 100.0 : 0.0
+    float lux_pf = lux_gl > 0 ? lux_gw / lux_gl : lux_gw > 0 ? 99.9 : 0.0
+    float lux_recovery = max_dd > 0 ? eq / max_dd : eq > 0 ? 99.9 : 0.0
+    float lux_mean = array.size(pnl_arr) > 0 ? array.sum(pnl_arr) / array.size(pnl_arr) : 0.0
+    float dev_sum = 0.0
+    for pv in pnl_arr
+        dev_sum += math.pow(pv - lux_mean, 2)
+    float lux_std = array.size(pnl_arr) > 0 ? math.sqrt(dev_sum / array.size(pnl_arr)) : 0.0
+    float lux_sharpe = lux_std > 0 ? lux_mean / lux_std : 0.0
+
+    // ── Equity Sparkline ────────────────────────────────────────────
+    string eq_str = ""
+    int eq_n = array.size(eq_arr)
+    if eq_n > 0
+        int bins = 24
+        float step = eq_n / bins
+        float min_e = array.min(eq_arr)
+        float max_e = array.max(eq_arr)
+        float range_e = math.max(0.0001, max_e - min_e)
+        for b = 0 to bins - 1
+            int idx = math.min(eq_n - 1, math.floor(b * step))
+            float r = (array.get(eq_arr, idx) - min_e) / range_e
+            eq_str += r < 0.125 ? " " : r < 0.25 ? "▂" : r < 0.375 ? "▃" : r < 0.5 ? "▄" : r < 0.625 ? "▅" : r < 0.75 ? "▆" : r < 0.875 ? "▇" : "█"
+
+    // ── Kopfbereich ─────────────────────────────────────────────────
+    lux.merge_cells(0, 0, 23, 0)
+    lux.cell(0, 0, "Strategy Analytics — Px Rules v6.2 (Exit-Legs)", text_color=LUX_DATA, text_size=lux_size, text_halign=text.align_center, bgcolor=LUX_BORDERS)
+
+    lux.merge_cells(0, 1, 5, 1)
+        lux.cell(0, 1, "Total Exit-Legs", text_color=LUX_HEADERS, text_size=lux_size)
+
+    lux.merge_cells(6, 1, 11, 1)
+    lux.cell(6, 1, "Win Rate", text_color=LUX_HEADERS, text_size=lux_size)
+    lux.merge_cells(12, 1, 17, 1)
+    lux.cell(12, 1, "Profit Factor", text_color=LUX_HEADERS, text_size=lux_size)
+    lux.merge_cells(18, 1, 23, 1)
+    lux.cell(18, 1, "Net Profit (USDT)", text_color=LUX_HEADERS, text_size=lux_size)
+
+    lux.merge_cells(0, 2, 5, 2)
+    lux.cell(0, 2, str.tostring(total_closed), text_color=LUX_DATA, text_size=lux_size)
+    lux.merge_cells(6, 2, 11, 2)
+    lux.cell(6, 2, str.tostring(lux_wr, "#.#") + "%", text_color=lux_wr >= 50 ? LUX_GREEN : LUX_RED, text_size=lux_size)
+    lux.merge_cells(12, 2, 17, 2)
+    lux.cell(12, 2, str.tostring(lux_pf, "#.##"), text_color=lux_pf >= 1 ? LUX_GREEN : LUX_RED, text_size=lux_size)
+    lux.merge_cells(18, 2, 23, 2)
+    lux.cell(18, 2, str.tostring(eq, "#.##"), text_color=eq >= 0 ? LUX_GREEN : LUX_RED, text_size=lux_size)
+
+    lux.merge_cells(0, 3, 5, 3)
+        lux.cell(0, 3, "Trade Quality (μ/σ)", text_color=LUX_HEADERS, text_size=lux_size)
+
+    lux.merge_cells(6, 3, 11, 3)
+    lux.cell(6, 3, "Recovery Factor", text_color=LUX_HEADERS, text_size=lux_size)
+    lux.merge_cells(12, 3, 17, 3)
+    lux.cell(12, 3, "Max Drawdown", text_color=LUX_HEADERS, text_size=lux_size)
+    lux.merge_cells(18, 3, 23, 3)
+    lux.cell(18, 3, "Max Stagnation", text_color=LUX_HEADERS, text_size=lux_size)
+
+    lux.merge_cells(0, 4, 5, 4)
+    lux.cell(0, 4, str.tostring(lux_sharpe, "#.##"), text_color=LUX_DATA, text_size=lux_size)
+    lux.merge_cells(6, 4, 11, 4)
+    lux.cell(6, 4, str.tostring(lux_recovery, "#.##"), text_color=LUX_DATA, text_size=lux_size)
+    lux.merge_cells(12, 4, 17, 4)
+    lux.cell(12, 4, str.tostring(max_dd, "#.##"), text_color=LUX_RED, text_size=lux_size)
+    lux.merge_cells(18, 4, 23, 4)
+    lux.cell(18, 4, f_format_days(max_stag), text_color=LUX_DATA, text_size=lux_size)
+
+    lux.merge_cells(0, 5, 5, 5)
+    lux.cell(0, 5, "SL Exits", text_color=LUX_HEADERS, text_size=lux_size)
+    lux.merge_cells(6, 5, 11, 5)
+    lux.cell(6, 5, "TP Exits", text_color=LUX_HEADERS, text_size=lux_size)
+    lux.merge_cells(12, 5, 17, 5)
+    lux.cell(12, 5, "Trail / Lock", text_color=LUX_HEADERS, text_size=lux_size)
+    lux.merge_cells(18, 5, 23, 5)
+    lux.cell(18, 5, "Andere Exits", text_color=LUX_HEADERS, text_size=lux_size)
+
+    lux.merge_cells(0, 6, 5, 6)
+    lux.cell(0, 6, str.tostring(cnt_sl), text_color=LUX_DATA, text_size=lux_size)
+    lux.merge_cells(6, 6, 11, 6)
+    lux.cell(6, 6, str.tostring(cnt_tp), text_color=LUX_DATA, text_size=lux_size)
+    lux.merge_cells(12, 6, 17, 6)
+    lux.cell(12, 6, str.tostring(cnt_trail) + " / " + str.tostring(cnt_lock), text_color=LUX_DATA, text_size=lux_size)
+    lux.merge_cells(18, 6, 23, 6)
+    lux.cell(18, 6, str.tostring(cnt_other), text_color=LUX_DATA, text_size=lux_size)
+
+    lux.merge_cells(0, 7, 23, 7)
+    lux.cell(0, 7, "Equity Curve  " + eq_str, text_color=LUX_GREEN, text_size=lux_size, text_halign=text.align_left)
+
+    lux.merge_cells(0, 8, 23, 8)
+    lux.cell(0, 8, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", text_color=LUX_BORDERS, text_size=lux_size, height=0.5)
+
+    // ── Stunden-Histogramm ──────────────────────────────────────────
+    lux.merge_cells(0, 9, 23, 9)
+    lux.cell(0, 9, "Performance by Entry Hour (Exchange TZ)", text_color=LUX_HEADERS, text_size=lux_size)
+
+    float max_h = array.max(hourly)
+    float min_h = array.min(hourly)
+    float abs_max_h = math.max(math.abs(max_h), math.abs(min_h))
+    for h = 0 to 23
+        float hv = array.get(hourly, h)
+        lux.cell(h, 10, f_block_char(hv, abs_max_h), text_color=hv >= 0 ? LUX_GREEN : LUX_RED, text_size=lux_size)
+        lux.cell(h, 11, str.tostring(h), text_color=LUX_HEADERS, text_size=size.tiny)
+
+    lux.merge_cells(0, 12, 23, 12)
+    lux.cell(0, 12, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", text_color=LUX_BORDERS, text_size=lux_size, height=0.5)
+
+    // ── Heatmap ─────────────────────────────────────────────────────
+    lux.merge_cells(0, 13, 23, 13)
+    lux.cell(0, 13, "Performance by " + heatmap_modus, text_color=LUX_HEADERS, text_size=lux_size)
+
+    if heatmap_modus == "Days of Week"
+        array<float> dow_vals = array.new_float()
+        for d = 0 to 6
+            array.push(dow_vals, nz(dow_map.get(d)))
+        float max_d = array.max(dow_vals)
+        float min_d = array.min(dow_vals)
+        lux.merge_cells(3, 14, 5, 14)
+        lux.cell(3, 14, "Tag", text_color=LUX_HEADERS, text_size=size.tiny, text_halign=text.align_center)
+        for d = 0 to 6
+            int c0 = 6 + d * 2
+            lux.merge_cells(c0, 14, c0 + 1, 14)
+            lux.cell(c0, 14, f_day_name(d), text_color=LUX_HEADERS, text_size=size.tiny, text_halign=text.align_center)
+        lux.merge_cells(20, 14, 22, 14)
+        lux.cell(20, 14, "Total", text_color=LUX_HEADERS, text_size=size.tiny, text_halign=text.align_center)
+
+        lux.merge_cells(3, 15, 5, 15)
+        lux.cell(3, 15, "PnL", text_color=LUX_DATA, text_size=size.tiny, text_halign=text.align_center)
+        float dow_total = 0.0
+        for d = 0 to 6
+            float dv = nz(dow_map.get(d))
+            dow_total += dv
+            int c0 = 6 + d * 2
+            lux.merge_cells(c0, 15, c0 + 1, 15)
+            lux.cell(c0, 15, dv == 0 ? "-" : str.tostring(dv, "#.#"), bgcolor=dv == 0 ? LUX_BG : f_heat_color(dv, max_d, min_d), text_color=LUX_DATA, text_size=size.tiny, text_halign=text.align_center)
+        lux.merge_cells(20, 15, 22, 15)
+        lux.cell(20, 15, str.tostring(dow_total, "#.#"), bgcolor=dow_total == 0 ? LUX_BG : f_heat_color(dow_total, max_d * 3, min_d * 3), text_color=LUX_DATA, text_size=size.tiny, text_halign=text.align_center)
+    else
+        array<float> month_vals = month_map.values()
+        float max_m = array.size(month_vals) > 0 ? array.max(month_vals) : 0.0
+        float min_m = array.size(month_vals) > 0 ? array.min(month_vals) : 0.0
+        array.sort(years_arr, order.ascending)
+        int n_years = array.size(years_arr)
+        int draw_years = math.min(n_years, 10)
+
+        lux.merge_cells(4, 14, 5, 14)
+        lux.cell(4, 14, "Year", text_color=LUX_HEADERS, text_size=size.tiny, text_halign=text.align_center)
+        for mm = 0 to 11
+            lux.cell(6 + mm, 14, f_month_name(mm), text_color=LUX_HEADERS, text_size=size.tiny, text_halign=text.align_center)
+        lux.merge_cells(18, 14, 19, 14)
+        lux.cell(18, 14, "Total", text_color=LUX_HEADERS, text_size=size.tiny, text_halign=text.align_center)
+
+        if draw_years > 0
+            for yi = 0 to draw_years - 1
+                int r = 15 + yi
+                int yy = array.get(years_arr, n_years - draw_years + yi)
+                lux.merge_cells(4, r, 5, r)
+                lux.cell(4, r, str.tostring(yy), text_color=LUX_DATA, text_size=size.tiny, text_halign=text.align_center)
+                float row_total = 0.0
+                for mm = 0 to 11
+                    int mk = yy * 100 + mm
+                    float mv = nz(month_map.get(mk))
+                    row_total += mv
+                    lux.cell(6 + mm, r, mv == 0 ? "-" : str.tostring(mv, "#.#"), bgcolor=mv == 0 ? LUX_BG : f_heat_color(mv, max_m, min_m), text_color=LUX_DATA, text_size=size.tiny, text_halign=text.align_center)
+                lux.merge_cells(18, r, 19, r)
+                lux.cell(18, r, str.tostring(row_total, "#.#"), bgcolor=row_total == 0 ? LUX_BG : f_heat_color(row_total, max_m * 3, min_m * 3), text_color=LUX_DATA, text_size=size.tiny, text_halign=text.align_center)

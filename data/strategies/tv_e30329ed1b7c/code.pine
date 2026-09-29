@@ -1,0 +1,195 @@
+//@version=6
+// =================================================================================================
+// Psychology Trader Bot – 
+// =================================================================================================
+// PIONEX MASTER RULES APPLIED:
+// - initial_capital = 100
+// - default_qty_type = strategy.cash
+// - default_qty_value = 1 (bis 100 USDT)
+// - pyramiding = 1
+// - calc_on_every_tick = false
+// - margin_long = 0, margin_short = 0
+// - process_orders_on_close = true
+// - Webhook Payload: Pionex Standard Format (signal_listener)
+// =================================================================================================
+
+// =================================================================================================
+
+strategy(
+    title             = "Psychology Trader Bot ",
+    shorttitle        = "PsyBTC15m",
+    overlay           = true,
+    initial_capital   = 100,
+    default_qty_type  = strategy.cash,
+    default_qty_value = 1,
+    pyramiding        = 1,
+    calc_on_every_tick= false,
+    margin_long       = 0,
+    margin_short      = 0,
+    process_orders_on_close = true,
+    commission_type   = strategy.commission.percent,
+    commission_value  = 0.05,
+    slippage          = 2
+)
+
+// =================================================================================================
+// 1. EINSTELLUNGEN – Eth 15min OPTIMIZED
+// =================================================================================================
+grp_main   = "Haupt-Einstellungen"
+uuid       = input.string("", "Pionex Signal Bot UUID", group=grp_main)
+use_shorts = input.bool(true, "Short-Trades erlauben", group=grp_main)
+
+grp_risk   = "Risiko & Exit "
+sl_atr_mul = input.float(1.5, "SL ATR Multiplikator", step=0.1, minval=0.1, group=grp_risk)
+tp_atr_mul = input.float(3.75, "TP ATR Multiplikator", step=0.1, minval=0.1, group=grp_risk)
+
+grp_session = "Session Filter (OFF für Crypto 24/7)"
+use_session = input.bool(false, "Session-Filter aktivieren", group=grp_session)
+session_time = input.session("0945-1600", "Trading Session (EST)", group=grp_session)
+
+grp_strat = "Strategie-Parameter "
+ema_fast_len = input.int(21, "EMA Fast", group=grp_strat)
+ema_slow_len = input.int(55, "EMA Slow", group=grp_strat)
+rsi_len      = input.int(14, "RSI Length", group=grp_strat)
+rsi_ob       = input.int(65, "RSI Overbought (Long-Filter)", minval=50, maxval=85, group=grp_strat)
+rsi_os       = input.int(35, "RSI Oversold (Short-Filter)", minval=15, maxval=50, group=grp_strat)
+atr_len      = input.int(14, "ATR Length", group=grp_strat)
+
+grp_filter = "Zusatz-Filter (Whipsaw-Reduktion)"
+use_macd_filter  = input.bool(true, "MACD Histogram Bestätigung", group=grp_filter)
+use_adx_filter   = input.bool(true, "ADX Trend-Filter", group=grp_filter)
+adx_len          = input.int(14, "ADX Length", group=grp_filter)
+adx_threshold    = input.float(20.0, "ADX Minimum (Trendstärke)", step=1.0, minval=10.0, maxval=50.0, group=grp_filter)
+use_vol_filter   = input.bool(true, "Volumen-Filter (über SMA)", group=grp_filter)
+vol_sma_len      = input.int(20, "Volume SMA Length", group=grp_filter)
+
+// =================================================================================================
+// 2. SYSTEM STATUS (Session Check)
+// =================================================================================================
+bool in_session = not use_session or not na(time(timeframe.period, session_time, "America/New_York"))
+
+// =================================================================================================
+// 3. INDIKATOREN & SETUP LOGIK
+// =================================================================================================
+
+// --- EMAs (21/55 für 15min – responsiver als 20/50) ---
+ema_fast = ta.ema(close, ema_fast_len)
+ema_slow = ta.ema(close, ema_slow_len)
+
+// --- RSI ---
+rsi = ta.rsi(close, rsi_len)
+
+// --- ATR ---
+atr_val  = ta.atr(atr_len)
+atr_safe = math.max(atr_val, close * 0.0001)
+
+// --- MACD (12/26/9 Standard, Histogramm als Richtungsfilter) ---
+[macd_line, signal_line, histogram] = ta.macd(close, 12, 26, 9)
+macd_bullish = histogram > 0
+macd_bearish = histogram < 0
+
+// --- ADX (Trendstärke – vermeidet Seitwärtsmarkt-Einstiege) ---
+[di_plus, di_minus, adx_val] = ta.dmi(adx_len, adx_len)
+strong_trend = adx_val > adx_threshold
+
+// --- Volumen (überdurchschnittliches Volumen = glaubwürdiger Ausbruch) ---
+vol_sma   = ta.sma(volume, vol_sma_len)
+vol_ok    = volume > vol_sma
+
+// =================================================================================================
+// 4. SETUP-BEDINGUNGEN (mit Filtern gegen Whipsaws)
+// =================================================================================================
+
+// Basis-Setup: EMA Crossover
+bool ema_cross_long  = ta.crossover(ema_fast, ema_slow)
+bool ema_cross_short = ta.crossunder(ema_fast, ema_slow)
+
+// RSI-Filter: Nicht zu überkauft/überverkauft einsteigen
+bool rsi_ok_long  = rsi < rsi_ob and rsi > 40
+bool rsi_ok_short = rsi > rsi_os and rsi < 60
+
+// MACD-Filter: Histogramm bestätigt Richtung
+bool macd_ok_long  = not use_macd_filter or macd_bullish
+bool macd_ok_short = not use_macd_filter or macd_bearish
+
+// ADX-Filter: Nur bei klarem Trend handeln
+bool adx_ok = not use_adx_filter or strong_trend
+
+// Volumen-Filter: Überdurchschnittliches Volumen
+bool vol_ok_entry = not use_vol_filter or vol_ok
+
+// Kombiniertes Setup
+bool setup_long  = ema_cross_long  and rsi_ok_long  and macd_ok_long  and adx_ok and vol_ok_entry
+bool setup_short = ema_cross_short and rsi_ok_short and macd_ok_short and adx_ok and vol_ok_entry
+
+// =================================================================================================
+// 5. ENTRY / EXIT LOGIK
+// =================================================================================================
+bool confirmed = barstate.isconfirmed
+
+bool go_long  = confirmed and setup_long  and in_session and strategy.position_size == 0
+bool go_short = confirmed and setup_short and in_session and strategy.position_size == 0 and use_shorts
+
+float sl_long_price  = close - (atr_safe * sl_atr_mul)
+float tp_long_price  = close + (atr_safe * tp_atr_mul)
+float sl_short_price = close + (atr_safe * sl_atr_mul)
+float tp_short_price = close - (atr_safe * tp_atr_mul)
+
+if go_long
+    strategy.entry("Long", strategy.long, comment="L")
+    strategy.exit("Long Exit", "Long", stop=sl_long_price, limit=tp_long_price, comment_loss="SL", comment_profit="TP")
+
+if go_short
+    strategy.entry("Short", strategy.short, comment="S")
+    strategy.exit("Short Exit", "Short", stop=sl_short_price, limit=tp_short_price, comment_loss="SL", comment_profit="TP")
+
+plotshape(go_long, "Long Signal", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(go_short, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// =================================================================================================
+// 6. WEBHOOK ALERTS (PIONEX MASTER FORMAT)
+// =================================================================================================
+string pionex_payload = '{ "data": { "action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_param": "{}", "signal_type": "' + uuid + '", "symbol": "{{ticker}}", "time": "{{timenow}}" }'
+
+if go_long or go_short
+    alert(pionex_payload, alert.freq_once_per_bar_close)
+
+// =================================================================================================
+// 7. DASHBOARD (Psychology Stats – BTC 15m)
+// =================================================================================================
+var table dash = table.new(position.top_right, 2, 8, bgcolor=color.new(#0f172a, 10), border_width=1, border_color=color.new(#334155, 0))
+
+if barstate.islast
+    // Header
+    table.cell(dash, 0, 0, "Psych BTC 15m", text_color=color.white, text_size=size.small, bgcolor=color.new(#1e293b, 0))
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=color.new(#38bdf8, 0), text_size=size.small, bgcolor=color.new(#1e293b, 0))
+
+    // Session
+    table.cell(dash, 0, 1, "Session", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 1, in_session ? "ACTIVE" : "CLOSED", text_color=in_session ? color.new(#10b981, 0) : color.new(#f43f5e, 0), text_size=size.small)
+
+    // R:R
+    table.cell(dash, 0, 2, "Risk-Reward", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 2, "1 : " + str.tostring(tp_atr_mul / sl_atr_mul, "#.#"), text_color=color.white, text_size=size.small)
+
+    // Win Rate
+    table.cell(dash, 0, 3, "Win Rate", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    float wr = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades * 100) : 0
+    table.cell(dash, 1, 3, str.tostring(wr, "#.#") + "%", text_color=wr >= 50 ? color.new(#10b981, 0) : color.new(#f59e0b, 0), text_size=size.small)
+
+    // Net Profit
+    table.cell(dash, 0, 4, "Net Profit", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 4, str.tostring(strategy.netprofit, "#.##") + " $", text_color=strategy.netprofit >= 0 ? color.new(#10b981, 0) : color.new(#f43f5e, 0), text_size=size.small)
+
+    // ADX
+    table.cell(dash, 0, 5, "ADX", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 5, str.tostring(adx_val, "#.#"), text_color=strong_trend ? color.new(#10b981, 0) : color.new(#f59e0b, 0), text_size=size.small)
+
+    // MACD Hist
+    table.cell(dash, 0, 6, "MACD Hist", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 6, str.tostring(histogram, "#.##"), text_color=histogram > 0 ? color.new(#10b981, 0) : color.new(#f43f5e, 0), text_size=size.small)
+
+    // Filters Status
+    table.cell(dash, 0, 7, "Filters", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    string filters_active = (use_macd_filter ? "MACD " : "") + (use_adx_filter ? "ADX " : "") + (use_vol_filter ? "VOL" : "")
+    table.cell(dash, 1, 7, filters_active, text_color=color.new(#94a3b8, 0), text_size=size.small)

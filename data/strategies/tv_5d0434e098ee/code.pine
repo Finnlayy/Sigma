@@ -1,0 +1,116 @@
+//@version=5
+strategy("Der Architekt x TradingLab - Ultimate ORR", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// =========================================================================
+// 1. INPUTS & PARAMETER
+// =========================================================================
+grp_trend = "Trend Filter (Daily Bias)"
+sma_length = input.int(50, title="Daily SMA Länge", group=grp_trend)
+
+grp_time = "Zeit & Session"
+session_time = input.session("0930-1600", title="Trading Session", group=grp_time)
+or_duration = input.int(15, title="Opening Range Dauer (Minuten)", group=grp_time)
+
+grp_breakout = "Breakout Bestätigung (Video)"
+atrMult = input.float(2.0, "Chandelier ATR Multiplier", step=0.1)
+tp1_ratio = input.float(1.5, "Take Profit 1 (CRV)", step=0.1)
+
+// =========================================================================
+// 2. INDIKATOREN & BIAS
+// =========================================================================
+daily_sma = request.security(syminfo.tickerid, "D", ta.sma(close, sma_length))
+plot(daily_sma, color=color.new(color.blue, 0), linewidth=2, title="50 Daily SMA")
+
+is_bullish_bias = close > daily_sma
+is_bearish_bias = close < daily_sma
+
+// Chandelier Exit Logik
+atrValue = ta.atr(22)
+longStop = ta.highest(high, 22) - atrValue * atrMult
+shortStop = ta.lowest(low, 22) + atrValue * atrMult
+
+var bool chandelierLong = false
+if close > longStop
+    chandelierLong := true
+else if close < shortStop
+    chandelierLong := false
+
+// =========================================================================
+// 3. SESSION & OPENING RANGE LOGIK
+// =========================================================================
+in_session = time(timeframe.period, session_time) 
+is_new_session = in_session and not in_session[1] 
+
+var float or_high = na
+var float or_low = na
+var int session_start_time = na
+
+if is_new_session
+    or_high := high
+    or_low := low
+    session_start_time := time
+
+in_or_window = in_session and (time - session_start_time) < (or_duration * 60 * 1000)
+
+if in_or_window
+    or_high := math.max(or_high, high)
+    or_low := math.min(or_low, low)
+
+// Visualisierung der Range
+plot(in_session ? or_high : na, color=color.new(color.green, 50), style=plot.style_linebr, linewidth=2)
+plot(in_session ? or_low : na, color=color.new(color.red, 50), style=plot.style_linebr, linewidth=2)
+bgcolor(in_or_window ? color.new(color.yellow, 95) : na)
+
+// =========================================================================
+// 4. BREAKOUT LOGIK (TRADINGLAB STYLE)
+// =========================================================================
+// Wir triggern, wenn die Range nach der OR-Zeit mit Momentum durchbrochen wird
+is_out_of_or = in_session and not in_or_window
+
+// Momentum: Große Kerze ODER 3 Kerzen in Folge
+momentum_long = (close > or_high) and (math.abs(close - open) > ta.atr(14) * 1.5 or (close > open and close[1] > open[1] and close[2] > open[2]))
+momentum_short = (close < or_low) and (math.abs(close - open) > ta.atr(14) * 1.5 or (close < open and close[1] < open[1] and close[2] < open[2]))
+
+long_trigger = is_out_of_or and momentum_long and is_bullish_bias
+short_trigger = is_out_of_or and momentum_short and is_bearish_bias
+
+// =========================================================================
+// 5. AUSFÜHRUNG & RISIKOMANAGEMENT
+// =========================================================================
+var float stopLossPrice = na
+var float takeProfit1 = na
+
+// LONG ENTRY
+if long_trigger and strategy.position_size == 0
+    stopLossPrice := or_low // SL an das untere Ende der Opening Range
+    float risk = close - stopLossPrice
+    takeProfit1 := close + (risk * tp1_ratio)
+    strategy.entry("Long", strategy.long)
+
+// SHORT ENTRY
+if short_trigger and strategy.position_size == 0
+    stopLossPrice := or_high // SL an das obere Ende der Opening Range
+    float risk = stopLossPrice - close
+    takeProfit1 := close - (risk * tp1_ratio)
+    strategy.entry("Short", strategy.short)
+
+// EXIT MANAGEMENT
+if (strategy.position_size > 0)
+    // Teil-Exit 1 & Stop Loss
+    strategy.exit("TP1/SL", qty_percent=50, limit=takeProfit1, stop=stopLossPrice, comment_profit="TP1", comment_loss="SL")
+    
+    // Teil-Exit 2: Chandelier Exit (wenn Trend dreht)
+    if (strategy.position_size > 0 and chandelierLong == false)
+        strategy.close("Long", comment="Chandelier Exit")
+    
+if (strategy.position_size < 0)
+    // Teil-Exit 1 & Stop Loss
+    strategy.exit("TP1/SL", qty_percent=50, limit=takeProfit1, stop=stopLossPrice, comment_profit="TP1", comment_loss="SL")
+    
+    // Teil-Exit 2: Chandelier Exit (wenn Trend dreht)
+    if (strategy.position_size < 0 and chandelierLong == true)
+        strategy.close("Short", comment="Chandelier Exit")
+
+// EOD Close
+if not in_session and in_session[1]
+    strategy.close_all(comment="End of Day")

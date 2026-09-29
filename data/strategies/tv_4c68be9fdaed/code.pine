@@ -1,0 +1,508 @@
+//@version=6
+strategy("QuantumForexTrader v2", overlay=true,
+     initial_capital    = 100,
+     default_qty_type   = strategy.percent_of_equity,
+     default_qty_value  = 1,
+     commission_type    = strategy.commission.percent,
+     commission_value   = 0.05,
+     slippage           = 3,
+     calc_on_every_tick = false,
+     process_orders_on_close = true)
+
+// ─────────────────────────────────────────────
+// GLOBAL INPUTS
+// ─────────────────────────────────────────────
+// Quantum Engine
+int   historyBars  = input.int  (4096,  "History Bars",   minval=10,  maxval=4096, group="Quantum Engine")
+float decayFactor  = input.float(50.0,  "Decay Factor",   minval=1.0, maxval=500.0, group="Quantum Engine")
+float quantumThres = input.float(1.0,   "Score Threshold",minval=0.1, maxval=5.0,   group="Quantum Engine")
+
+// HTF / CISD
+string htfTF       = input.timeframe("15", "HTF Timeframe", group="CISD MTF")
+
+// KAMA
+int   kamaFast     = input.int(2,  "KAMA Fast Length", minval=1,  group="KAMA")
+int   kamaSlow     = input.int(30, "KAMA Slow Length", minval=2,  group="KAMA")
+int   kamaER       = input.int(10, "KAMA ER Length",   minval=2,  group="KAMA")
+
+// ATR / Stops
+int   atrLen       = input.int  (14,  "ATR Length",      minval=1,  group="Risk")
+float atrMult      = input.float(1.5, "ATR Multiplier",  minval=0.1, group="Risk")
+int   pivotLen     = input.int  (3,   "Pivot Lookback",  minval=1, maxval=10, group="Risk")
+
+// TP Levels
+float tp1R         = input.float(1.0, "TP1 R-Multiple", minval=0.1, group="Take Profit")
+float tp2R         = input.float(2.0, "TP2 R-Multiple", minval=0.1, group="Take Profit")
+float tp3R         = input.float(3.0, "TP3 R-Multiple", minval=0.1, group="Take Profit")
+float tp4R         = input.float(4.0, "TP4 R-Multiple", minval=0.1, group="Take Profit")
+float tp5R         = input.float(5.0, "TP5 R-Multiple", minval=0.1, group="Take Profit")
+
+// Partial Close
+float tp1Pct       = input.float(25.0, "TP1 Close %", minval=1, maxval=99, group="Take Profit")
+
+// Trailing Stop
+float trailActR    = input.float(1.5, "Trail Activate (R)", minval=0.1, group="Trailing Stop")
+float trailOffR    = input.float(0.5, "Trail Offset (R)",   minval=0.1, group="Trailing Stop")
+
+// Governance
+int   maxHoldBars  = input.int(50,  "Max Hold Bars",    minval=1,  group="Governance")
+int   baseCooldown = input.int(5,   "Base Cooldown Bars",minval=1, group="Governance")
+
+// HFT Layer
+bool  hftEnabled   = input.bool(true, "Enable HFT Layer", group="HFT")
+float hftThres     = input.float(0.6, "HFT Confluence Gate", minval=0.0, maxval=1.0, group="HFT")
+
+// Conflict Resolution
+float conflictThres = input.float(0.3, "Composite Conflict Threshold", minval=0.0, maxval=1.0, group="Filters")
+//⚡ SECTION 2 — O(1) Quantum Engine
+// ─────────────────────────────────────────────
+// QUANTUM ENGINE — O(1) Incremental EWM
+// ─────────────────────────────────────────────
+float alpha = math.exp(-1.0 / decayFactor)
+
+// ✅ FIX: var (not varip) — consistent bar-close state
+var float ewmPrice      = na
+var float ewmMomentum   = na
+var float ewmVolatility = na
+var float ewmWeightSum  = 0.0
+var int   barCount      = 0
+
+if na(ewmPrice)
+    ewmPrice      := close
+    ewmMomentum   := 0.0
+    ewmVolatility := math.abs(close - open)
+    ewmWeightSum  := 1.0
+else
+    ewmPrice      := alpha * ewmPrice      + (1.0 - alpha) * close
+    ewmMomentum   := alpha * ewmMomentum   + (1.0 - alpha) * (close - close[1])
+    ewmVolatility := alpha * ewmVolatility + (1.0 - alpha) * math.abs(close - close[1])
+    ewmWeightSum  := alpha * ewmWeightSum  + 1.0
+
+barCount := barCount + 1
+
+bool  quantumReady = barCount >= math.min(historyBars, 500)
+float quantumScore = na
+float quantumBias  = na
+float quantumConf  = na
+
+if quantumReady and ewmVolatility > 0
+    quantumScore := (close - ewmPrice) / ewmVolatility
+    quantumBias  := ewmMomentum / ewmVolatility
+    quantumConf  := 1.0 / (1.0 + math.exp(-math.abs(quantumScore)))
+
+bool quantumLong  = quantumReady and quantumScore >  quantumThres and quantumBias > 0
+bool quantumShort = quantumReady and quantumScore < -quantumThres and quantumBias < 0
+//📡 SECTION 3 — CISD MTF (Lookahead Fixed)
+
+// ─────────────────────────────────────────────
+// CISD MTF — ✅ FIX: lookahead_off + [1] offset
+// References last confirmed closed HTF bar only
+// ─────────────────────────────────────────────
+float htf_close  = request.security(syminfo.tickerid, htfTF, close[1],  lookahead=barmerge.lookahead_off)
+float htf_open   = request.security(syminfo.tickerid, htfTF, open[1],   lookahead=barmerge.lookahead_off)
+float htf_high   = request.security(syminfo.tickerid, htfTF, high[1],   lookahead=barmerge.lookahead_off)
+float htf_low    = request.security(syminfo.tickerid, htfTF, low[1],    lookahead=barmerge.lookahead_off)
+
+// HTF bias: bullish if last closed HTF bar was bullish
+bool  cisdBull   = htf_close > htf_open
+bool  cisdBear   = htf_close < htf_open
+
+// HTF structure break detection
+float htf_prevHigh = request.security(syminfo.tickerid, htfTF, high[2], lookahead=barmerge.lookahead_off)
+float htf_prevLow  = request.security(syminfo.tickerid, htfTF, low[2],  lookahead=barmerge.lookahead_off)
+
+bool  cisdBreakUp   = htf_close > htf_prevHigh and cisdBull
+bool  cisdBreakDown = htf_close < htf_prevLow  and cisdBear
+
+// Normalized CISD score: -1.0 to +1.0
+float cisdScore = cisdBreakUp ? 1.0 : cisdBreakDown ? -1.0 : cisdBull ? 0.5 : cisdBear ? -0.5 : 0.0
+//📈 SECTION 4 — KAMA Filter (Input-Driven)
+
+// ─────────────────────────────────────────────
+// KAMA — ✅ FIX: uses kamaFast/kamaSlow inputs
+// (was hard-coded slow=30 ignoring user input)
+// ─────────────────────────────────────────────
+float direction  = math.abs(close - close[kamaER])
+float volatility = math.sum(math.abs(close - close[1]), kamaER)
+float er         = volatility != 0 ? direction / volatility : 0.0
+
+float fastSC     = 2.0 / (kamaFast + 1)
+float slowSC     = 2.0 / (kamaSlow + 1)
+float sc         = math.pow(er * (fastSC - slowSC) + slowSC, 2)
+
+var float kama   = na
+kama := na(kama[1]) ? close : kama[1] + sc * (close - kama[1])
+
+bool  kamaLong   = close > kama
+bool  kamaShort  = close < kama
+//🌊 SECTION 5 — TMA Context
+
+// ─────────────────────────────────────────────
+// TMA CONTEXT — Triangular Moving Average
+// ─────────────────────────────────────────────
+int   tmaLen     = input.int(20, "TMA Length", minval=2, group="TMA")
+float tma        = ta.sma(ta.sma(close, math.ceil(tmaLen / 2)), math.floor(tmaLen / 2) + 1)
+float tmaSlope   = tma - tma[3]
+
+// Context: +1 = bullish trend, -1 = bearish, 0 = flat
+int   tmaContext = tmaSlope > 0 ? 1 : tmaSlope < 0 ? -1 : 0
+
+// Normalized TMA score
+float tmaScore   = tmaContext == 1 ? 0.5 : tmaContext == -1 ? -0.5 : 0.0
+//🎯 SECTION 6 — UT Bot Trigger
+
+// ─────────────────────────────────────────────
+// UT BOT TRIGGER
+// ─────────────────────────────────────────────
+float atr         = ta.atr(atrLen)
+float utTrailUp   = close - atrMult * atr
+float utTrailDown = close + atrMult * atr
+
+var float utStop  = na
+var int   utDir   = 0
+
+float prevStop    = nz(utStop[1], close)
+
+if close > prevStop
+    utStop := math.max(prevStop, utTrailUp)
+    utDir  := 1
+else if close < prevStop
+    utStop := math.min(prevStop, utTrailDown)
+    utDir  := -1
+else
+    utStop := prevStop
+    utDir  := utDir[1]
+
+bool utLong  = utDir ==  1 and utDir[1] == -1  // Direction flip up
+bool utShort = utDir == -1 and utDir[1] ==  1  // Direction flip down
+
+float utScore = utLong ? 1.0 : utShort ? -1.0 : utDir == 1 ? 0.3 : -0.3
+//⚡ SECTION 7 — HFT Turbo Layer (Filter-Hardened)
+
+// ─────────────────────────────────────────────
+// HFT TURBO LAYER
+// ✅ FIX: Now requires TMA context + KAMA alignment
+// (was bypassing all filters via bare `or hftSignal`)
+// ─────────────────────────────────────────────
+float hftMom     = close - close[2]
+float hftVol     = ta.stdev(close, 5)
+float hftScore   = hftVol > 0 ? hftMom / hftVol : 0.0
+
+// Minimum confluence gate — TMA + KAMA must agree
+bool hftLongRaw  = hftEnabled and hftScore >  hftThres
+bool hftShortRaw = hftEnabled and hftScore < -hftThres
+
+// ✅ FIX: HFT only fires when major filters align
+bool hftLongSignal  = hftLongRaw  and tmaContext >= 0 and kamaLong
+bool hftShortSignal = hftShortRaw and tmaContext <= 0 and kamaShort
+
+float hftNormScore  = math.max(-1.0, math.min(1.0, hftScore / 2.0))
+//⚖️ SECTION 8 — Composite Conflict Resolution
+
+// ─────────────────────────────────────────────
+// COMPOSITE CONFLICT RESOLUTION
+// ✅ FIX: Full weighted score (not sniper-only)
+// ─────────────────────────────────────────────
+
+// Sniper bias from quantum
+float sniperScore = nz(quantumScore, 0.0) * 0.5 + nz(quantumBias, 0.0) * 0.5
+float sniperNorm  = math.max(-1.0, math.min(1.0, sniperScore / 3.0))
+
+// Weighted composite across all layers
+float compositeScore =
+     sniperNorm  * 0.30 +
+     cisdScore   * 0.20 +
+     tmaScore    * 0.15 +
+     utScore     * 0.15 +
+     hftNormScore* 0.20
+
+// Gate: only trade when composite has clear directional conviction
+bool longAllowed  = compositeScore >  conflictThres
+bool shortAllowed = compositeScore < -conflictThres
+//🔄 SECTION 9 — Governance: Cooldown, Re-entry, Hold Limit
+
+// ─────────────────────────────────────────────
+// DYNAMIC ATR-SCALED COOLDOWN
+// ─────────────────────────────────────────────
+float atrBaseline    = ta.sma(atr, 50)
+int   dynCooldown    = atrBaseline > 0 ?
+     math.round(baseCooldown * (atrBaseline / atr)) : baseCooldown
+dynCooldown         := math.max(3, math.min(dynCooldown, 20))
+
+// ─────────────────────────────────────────────
+// ACTIVE DIRECTION TRACKING
+// ✅ FIX: Blocks re-entry in already-open direction
+// ─────────────────────────────────────────────
+var int activeDirection = 0
+
+if strategy.position_size > 0
+    activeDirection := 1
+else if strategy.position_size < 0
+    activeDirection := -1
+else
+    activeDirection := 0
+
+// ─────────────────────────────────────────────
+// COOLDOWN TIMER
+// ─────────────────────────────────────────────
+var int cooldownBar  = 0
+bool    inCooldown   = (bar_index - cooldownBar) < dynCooldown
+
+// ─────────────────────────────────────────────
+// MAX HOLD BARS — force exit if held too long
+// ─────────────────────────────────────────────
+var int entryBar     = 0
+
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    entryBar := bar_index  // Record entry bar
+
+bool maxHoldBreached = strategy.position_size != 0 and
+     (bar_index - entryBar) >= maxHoldBars
+//🚦 SECTION 10 — Final Signal Assembly
+
+// ─────────────────────────────────────────────
+// FINAL SIGNAL ASSEMBLY
+// All layers must agree | governance gates applied
+// ─────────────────────────────────────────────
+bool baseLong  = quantumLong  and cisdBull  and kamaLong  and (tmaContext >= 0)
+bool baseShort = quantumShort and cisdBear  and kamaShort and (tmaContext <= 0)
+
+// Merge HFT layer (now filter-hardened)
+bool rawLong   = (baseLong  or hftLongSignal)  and longAllowed
+bool rawShort  = (baseShort or hftShortSignal) and shortAllowed
+
+// Governance gates
+bool canLong   = rawLong  and not inCooldown and activeDirection != 1  and strategy.position_size == 0
+bool canShort  = rawShort and not inCooldown and activeDirection != -1 and strategy.position_size == 0
+//📐 SECTION 11 — Stop & TP Calculations
+
+// ─────────────────────────────────────────────
+// STOPS — Blended ATR + Structure (3-bar pivot)
+// ✅ FIX: pivotLen=3 (was 8), reduces lag on 1m
+// ─────────────────────────────────────────────
+float swingHigh   = ta.highest(high, pivotLen)
+float swingLow    = ta.lowest (low,  pivotLen)
+
+float rawLongStop  = math.max(swingLow,  close - atrMult * atr)
+float rawShortStop = math.min(swingHigh, close + atrMult * atr)
+
+// Store stop & entry at time of signal
+var float entryPrice  = na
+var float stopDist    = na
+var float longStop    = na
+var float shortStop   = na
+
+// ─────────────────────────────────────────────
+// TP LEVELS — computed from entry + R-multiples
+// ─────────────────────────────────────────────
+var float tp1 = na
+var float tp2 = na
+var float tp3 = na
+var float tp4 = na
+var float tp5 = na
+
+var float trailActPrice = na
+var float trailOff      = na
+//🎯 SECTION 12 — Entry Execution
+
+// ─────────────────────────────────────────────
+// ENTRY EXECUTION
+// ─────────────────────────────────────────────
+if canLong
+    entryPrice    := close
+    longStop      := rawLongStop
+    stopDist      := entryPrice - longStop
+    tp1           := entryPrice + stopDist * tp1R
+    tp2           := entryPrice + stopDist * tp2R
+    tp3           := entryPrice + stopDist * tp3R
+    tp4           := entryPrice + stopDist * tp4R
+    tp5           := entryPrice + stopDist * tp5R
+    trailActPrice := entryPrice + stopDist * trailActR
+    trailOff      := stopDist   * trailOffR
+
+    strategy.entry("Long", strategy.long)
+    cooldownBar   := bar_index
+
+if canShort
+    entryPrice    := close
+    shortStop     := rawShortStop
+    stopDist      := shortStop - entryPrice
+    tp1           := entryPrice - stopDist * tp1R
+    tp2           := entryPrice - stopDist * tp2R
+    tp3           := entryPrice - stopDist * tp3R
+    tp4           := entryPrice - stopDist * tp4R
+    tp5           := entryPrice - stopDist * tp5R
+    trailActPrice := entryPrice - stopDist * trailActR
+    trailOff      := stopDist   * trailOffR
+
+    strategy.entry("Short", strategy.short)
+    cooldownBar   := bar_index
+//💰 SECTION 13 — Exit Management
+
+// ─────────────────────────────────────────────
+// LONG EXITS
+// ✅ FIX 1: Sequential TP partial closes
+// ✅ FIX 2: strategy.exit cancel+reissue for trail
+// ─────────────────────────────────────────────
+var float entryQty    = na
+var bool  tp1LongHit  = false
+var bool  tp2LongHit  = false
+var bool  tp3LongHit  = false
+var bool  tp4LongHit  = false
+
+// Capture entry qty once on entry bar
+if canLong
+    entryQty     := strategy.position_size
+    tp1LongHit   := false
+    tp2LongHit   := false
+    tp3LongHit   := false
+    tp4LongHit   := false
+
+if strategy.position_size > 0
+    // ── TP1: 25% partial close ──────────────────
+    if not tp1LongHit and close >= tp1
+        strategy.close("Long", qty_percent=tp1Pct, comment="TP1")
+        tp1LongHit := true
+
+    // ── TP2: 33% of remaining ───────────────────
+    if tp1LongHit and not tp2LongHit and close >= tp2
+        strategy.close("Long", qty_percent=33.0, comment="TP2")
+        tp2LongHit := true
+
+    // ── TP3: 50% of remaining ───────────────────
+    if tp2LongHit and not tp3LongHit and close >= tp3
+        strategy.close("Long", qty_percent=50.0, comment="TP3")
+        tp3LongHit := true
+
+    // ── TP4: 100% of remaining (or let TP5/trail run) ──
+    if tp3LongHit and not tp4LongHit and close >= tp4
+        strategy.close("Long", qty_percent=50.0, comment="TP4")
+        tp4LongHit := true
+
+    // ── TP5 + Hard Stop ─────────────────────────
+    strategy.exit("ExitLong_Hard", from_entry="Long",
+         limit = tp5,
+         stop  = longStop,
+         comment="TP5/Stop")
+
+    // ── Trailing Stop — cancel+reissue pattern ──
+    // ✅ FIX: Cancels and reissues each bar so Pine
+    //         registers the updated trail level
+    if close >= trailActPrice
+        strategy.cancel("TrailLong")
+        strategy.exit("TrailLong", from_entry="Long",
+             trail_price  = close,
+             trail_offset = trailOff / syminfo.mintick,
+             comment      = "Trail")
+
+// ─────────────────────────────────────────────
+// SHORT EXITS
+// ─────────────────────────────────────────────
+var bool tp1ShortHit = false
+var bool tp2ShortHit = false
+var bool tp3ShortHit = false
+var bool tp4ShortHit = false
+
+if canShort
+    entryQty      := math.abs(strategy.position_size)
+    tp1ShortHit   := false
+    tp2ShortHit   := false
+    tp3ShortHit   := false
+    tp4ShortHit   := false
+
+if strategy.position_size < 0
+    if not tp1ShortHit and close <= tp1
+        strategy.close("Short", qty_percent=tp1Pct, comment="TP1")
+        tp1ShortHit := true
+
+    if tp1ShortHit and not tp2ShortHit and close <= tp2
+        strategy.close("Short", qty_percent=33.0, comment="TP2")
+        tp2ShortHit := true
+
+    if tp2ShortHit and not tp3ShortHit and close <= tp3
+        strategy.close("Short", qty_percent=50.0, comment="TP3")
+        tp3ShortHit := true
+
+    if tp3ShortHit and not tp4ShortHit and close <= tp4
+        strategy.close("Short", qty_percent=50.0, comment="TP4")
+        tp4ShortHit := true
+
+    strategy.exit("ExitShort_Hard", from_entry="Short",
+         limit = tp5,
+         stop  = shortStop,
+         comment="TP5/Stop")
+
+    if close <= trailActPrice
+        strategy.cancel("TrailShort")
+        strategy.exit("TrailShort", from_entry="Short",
+             trail_price  = close,
+             trail_offset = trailOff / syminfo.mintick,
+             comment      = "Trail")
+
+// ─────────────────────────────────────────────
+// MAX HOLD BARS — force flat if held too long
+// ─────────────────────────────────────────────
+if maxHoldBreached
+    strategy.close_all(comment="MaxHold")
+    cooldownBar := bar_index
+//📊 SECTION 14 — Visuals & Dashboard
+
+// ─────────────────────────────────────────────
+// PLOTS
+// ─────────────────────────────────────────────
+plot(kama,    "KAMA",    color=color.orange, linewidth=1)
+plot(tma,     "TMA",     color=color.blue,   linewidth=1)
+plot(utStop,  "UT Stop", color=utDir == 1 ? color.green : color.red,
+     style=plot.style_circles, linewidth=1)
+
+// Entry signals
+plotshape(canLong,  "Long Entry",  shape.triangleup,
+     location.belowbar, color.new(color.green, 0), size=size.small)
+plotshape(canShort, "Short Entry", shape.triangledown,
+     location.abovebar, color.new(color.red,   0), size=size.small)
+
+// TP/Stop levels when in trade
+plot(strategy.position_size > 0 ? tp1       : na, "L-TP1",  color.new(color.green, 60), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? tp2       : na, "L-TP2",  color.new(color.green, 40), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? tp3       : na, "L-TP3",  color.new(color.green, 20), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? tp5       : na, "L-TP5",  color.new(color.green,  0), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? longStop  : na, "L-Stop", color.new(color.red,    0), style=plot.style_linebr)
+
+plot(strategy.position_size < 0 ? tp1       : na, "S-TP1",  color.new(color.aqua,  60), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? tp2       : na, "S-TP2",  color.new(color.aqua,  40), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? tp3       : na, "S-TP3",  color.new(color.aqua,  20), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? tp5       : na, "S-TP5",  color.new(color.aqua,   0), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? shortStop : na, "S-Stop", color.new(color.red,    0), style=plot.style_linebr)
+
+// ─────────────────────────────────────────────
+// INFO DASHBOARD TABLE
+// ─────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 8,
+     bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(dash, 0, 0, "Component",     text_color=color.gray,  text_size=size.small)
+    table.cell(dash, 1, 0, "Status",        text_color=color.gray,  text_size=size.small)
+    table.cell(dash, 0, 1, "Quantum",       text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, quantumReady ? str.tostring(math.round(quantumScore, 2)) : "WARMUP",
+         text_color = quantumScore > 0 ? color.green : color.red, text_size=size.small)
+    table.cell(dash, 0, 2, "CISD",          text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(math.round(cisdScore, 1)),
+         text_color = cisdScore > 0 ? color.green : color.red, text_size=size.small)
+    table.cell(dash, 0, 3, "Composite",     text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(math.round(compositeScore, 2)),
+         text_color = compositeScore > 0 ? color.green : color.red, text_size=size.small)
+    table.cell(dash, 0, 4, "KAMA",          text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, kamaLong ? "BULL" : "BEAR",
+         text_color = kamaLong ? color.green : color.red, text_size=size.small)
+    table.cell(dash, 0, 5, "TMA",           text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, tmaContext == 1 ? "BULL" : tmaContext == -1 ? "BEAR" : "FLAT",
+         text_color = tmaContext == 1 ? color.green : tmaContext == -1 ? color.red : color.gray,
+         text_size=size.small)
+    table.cell(dash, 0, 6, "Cooldown",      text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 6, inCooldown ? str.tostring(dynCooldown - (bar_index - cooldownBar)) + "b" : "READY",
+         text_color = inCooldown ? color.orange : color.green, text_size=size.small)
+    table.cell(dash, 0, 7, "Direction",     text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 7, activeDirection == 1 ? "LONG" : activeDirection == -1 ? "SHORT" : "FLAT",
+         text_color = activeDirection == 1 ? color.green : activeDirection == -1 ? color.red : color.gray,
+         text_size=size.small)

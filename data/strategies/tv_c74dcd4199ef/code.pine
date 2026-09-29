@@ -1,0 +1,47 @@
+//@version=6
+strategy("Scalp-Master v19.1 - 2-Bar Striker", overlay=true, initial_capital=1000, default_qty_type=strategy.cash, currency=currency.EUR, commission_value=0.04, pyramiding=1, calc_on_every_tick=true)
+
+// ==========================================
+// --- 1. CORE ENGINE ---
+// ==========================================
+ema_filter = ta.ema(close, 200)
+[superTrend, direction] = ta.supertrend(3, 10)
+atr_v = ta.atr(14)
+vola_active = atr_v > ta.sma(atr_v, 50)
+
+// ==========================================
+// --- 2. EXECUTION & BAR COUNTER ---
+// ==========================================
+fixed_margin = 100.0
+pos_size     = (fixed_margin * 10) / close
+is_new_min   = ta.change(time("1")) != 0
+
+// Wir tracken, bei welchem Bar-Index wir eingestiegen sind
+var int entry_bar_index = 0
+
+long_signal  = close > ema_filter and direction < 0 and vola_active
+short_signal = close < ema_filter and direction > 0 and vola_active
+
+if strategy.position_size == 0 and is_new_min
+    if long_signal
+        strategy.entry("L", strategy.long, qty=pos_size)
+        entry_bar_index := bar_index
+    else if short_signal
+        strategy.entry("S", strategy.short, qty=pos_size)
+        entry_bar_index := bar_index
+
+// ==========================================
+// --- 3. THE 2-BAR TIMEOUT & GOLDEN EXIT ---
+// ==========================================
+if strategy.position_size != 0
+    // A. Mathematischer Exit (Das 3.113 Ratio)
+    float sl_dist = atr_v * 1.5
+    float tp_dist = sl_dist * 3.113 
+    
+    strategy.exit("Safe", qty_percent=50, loss=sl_dist/syminfo.mintick, profit=sl_dist/syminfo.mintick)
+    strategy.exit("Giant", qty_percent=100, loss=sl_dist/syminfo.mintick, profit=tp_dist/syminfo.mintick)
+
+    // B. Der "Divine Time-Out": Raus nach exakt 2 Kerzen
+    // bar_index - entry_bar_index zählt die vergangenen Kerzen
+    if bar_index - entry_bar_index >= 2
+        strategy.close_all(comment="2-Bar Limit")

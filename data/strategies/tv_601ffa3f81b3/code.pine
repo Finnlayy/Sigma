@@ -1,0 +1,415 @@
+//@version=6
+strategy("ICC Strategy v6 — Indication · Correction · Continuation", overlay=true, 
+     default_qty_type=strategy.percent_of_equity, default_qty_value=2.0,
+     commission_type=strategy.commission.percent, commission_value=0.04,
+     slippage=1, initial_capital=10000, currency="USD",
+     max_lines_count=500, max_labels_count=500, max_boxes_count=500,
+     process_orders_on_close=true, calc_on_every_tick=false)
+
+// ═══════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════
+group_1 = "─── Trend & Structure ───"
+i_pivotLen      = input.int(5,  "Pivot Length",        group=group_1, minval=2, maxval=20, step=1)
+i_emaFast       = input.int(8,  "EMA Fast",            group=group_1, minval=3,  maxval=50)
+i_emaSlow       = input.int(21, "EMA Slow",            group=group_1, minval=10, maxval=200)
+i_emaTrend      = input.int(50, "EMA Trend Filter",    group=group_1, minval=20, maxval=300)
+i_atrLen        = input.int(14, "ATR Length",          group=group_1, minval=5,  maxval=50)
+i_useTrendFilter= input.bool(true, "Use Trend Filter", group=group_1)
+
+group_2 = "─── ICC Detection ───"
+i_indicMinBars  = input.int(3,  "Indication Min Bars", group=group_2, minval=2, maxval=10, tooltip="Consecutive impulse candles required")
+i_indicMinPct   = input.float(0.8, "Indication Min Move (%)", group=group_2, minval=0.1, maxval=3.0, step=0.1, tooltip="Min ATR-multiple move to qualify as indication")
+i_corrMaxDepth  = input.float(61.8, "Correction Max Depth (%)", group=group_2, minval=20.0, maxval=78.6, step=0.1, tooltip="Max Fib retracement allowed before invalidation")
+i_corrMinBars   = input.int(2,  "Correction Min Bars", group=group_2, minval=1, maxval=10)
+i_volConfirm    = input.bool(true, "Volume Confirmation", group=group_2)
+
+group_3 = "─── Risk & Execution ───"
+i_slAtxMul      = input.float(1.5, "SL ATR Multiplier",   group=group_3, minval=0.5, maxval=5.0, step=0.1)
+i_tpAtxMul      = input.float(2.5, "TP ATR Multiplier",   group=group_3, minval=0.5, maxval=6.0, step=0.1)
+i_confThreshold = input.int(35, "Min Confidence",        group=group_3, minval=0,  maxval=100, tooltip="Minimum ICC score to trade")
+i_maxDailyPct   = input.float(10.0, "Max Daily Move (%)", group=group_3, minval=2.0, maxval=25.0, step=0.5)
+i_useTrail      = input.bool(true, "Use Trailing Stop",   group=group_3)
+i_trailAtxMul   = input.float(1.0, "Trail ATR Multiplier",group=group_3, minval=0.3, maxval=3.0, step=0.1)
+i_partialsAtR   = input.float(1.5, "Take Partials at R",  group=group_3, minval=0.5, maxval=3.0, step=0.1, tooltip="Close % position when R-multiple reached")
+i_partialsPct   = input.int(50,  "Partial Close %",     group=group_3, minval=10, maxval=90)
+i_sessionStart  = input.string("0800", "Session Start",   group=group_3)
+i_sessionEnd    = input.string("2200", "Session End",     group=group_3)
+i_useSession    = input.bool(false, "Enforce Session",   group=group_3)
+i_usePyramiding = input.int(1,   "Max Pyramiding",      group=group_3, minval=1, maxval=5)
+i_useShorts     = input.bool(true, "Allow Shorts",       group=group_3)
+
+group_4 = "─── Scoring Weights ───"
+w_trend = input.int(20, "Trend Weight",   group=group_4, minval=0, maxval=50)
+w_cisd  = input.int(25, "CISD Weight",    group=group_4, minval=0, maxval=50)
+w_ob    = input.int(20, "OB Weight",      group=group_4, minval=0, maxval=50)
+w_fvg   = input.int(20, "FVG Weight",     group=group_4, minval=0, maxval=50)
+w_vol   = input.int(15, "Volume Weight",  group=group_4, minval=0, maxval=50)
+
+// ═══════════════════════════════════════════════════════════
+// CORE CALCULATIONS
+// ═══════════════════════════════════════════════════════════
+emaFast   = ta.ema(close, i_emaFast)
+emaSlow   = ta.ema(close, i_emaSlow)
+emaTrend  = ta.ema(close, i_emaTrend)
+atr       = ta.atr(i_atrLen)
+rsi       = ta.rsi(close, 14)
+volMa     = ta.sma(volume, 20)
+
+// ── Swing Structure ───────────────────────────────────────
+pivotHigh = ta.pivothigh(high, i_pivotLen, i_pivotLen)
+pivotLow  = ta.pivotlow(low, i_pivotLen, i_pivotLen)
+
+var float swingHigh    = na
+var float swingLow     = na
+var int   swingHighBar = na
+var int   swingLowBar  = na
+
+if not na(pivotHigh)
+    swingHigh    := pivotHigh
+    swingHighBar := bar_index[i_pivotLen]
+if not na(pivotLow)
+    swingLow     := pivotLow
+    swingLowBar  := bar_index[i_pivotLen]
+
+// ── Trend State ─────────────────────────────────────────
+bullTrend = emaFast > emaSlow and (not i_useTrendFilter or close > emaTrend)
+bearTrend = emaFast < emaSlow and (not i_useTrendFilter or close < emaTrend)
+trendScore = bullTrend ? 100 : bearTrend ? -100 : 0
+
+// ═══════════════════════════════════════════════════════════
+// ICC PHASE DETECTION (State Machine)
+// ═══════════════════════════════════════════════════════════
+// States: 0=searching, 1=indication, 2=correction, 3=continuation-ready
+
+var int   phase       = 0      // 0=none, 1=indication, 2=correction, 3=continuation
+var int   phaseDir    = 0      // +1=bull, -1=bear
+var float indicHigh   = na
+var float indicLow    = na
+var int   indicBar    = na
+var float corrHigh    = na
+var float corrLow     = na
+var int   corrBar     = na
+var float indicStart  = na
+var int   barsInPhase = 0
+
+// Detect indication: consecutive directional candles with volume
+indicBull = false
+indicBear = false
+if phase == 0 and not na(swingHigh) and not na(swingLow)
+    range_  = swingHigh - swingLow
+    if range_ > 0
+        // Bull indication: new higher high after higher low
+        hh = close > swingHigh and close > open
+        hl = low > nz(swingLow[1], low)
+        bullImpulse = hh and hl and (close - open) > i_indicMinPct * atr
+        bullVol = not i_volConfirm or volume > volMa
+        if bullImpulse and bullVol and bullTrend
+            indicBull := true
+        // Bear indication: new lower low after lower high
+        ll = close < swingLow and close < open
+        lh = high < nz(swingHigh[1], high)
+        bearImpulse = ll and lh and (open - close) > i_indicMinPct * atr
+        bearVol = not i_volConfirm or volume > volMa
+        if bearImpulse and bearVol and bearTrend
+            indicBear := true
+
+// State transitions
+if indicBull
+    phase       := 1
+    phaseDir    := 1
+    indicHigh   := high
+    indicLow    := low
+    indicBar    := bar_index
+    indicStart  := close
+    barsInPhase := 0
+    corrHigh    := high
+    corrLow     := low
+    corrBar     := bar_index
+else if indicBear
+    phase       := 1
+    phaseDir    := -1
+    indicHigh   := high
+    indicLow    := low
+    indicBar    := bar_index
+    indicStart  := close
+    barsInPhase := 0
+    corrHigh    := high
+    corrLow     := low
+    corrBar     := bar_index
+
+// Track bars in current phase
+if phase > 0
+    barsInPhase += 1
+
+// Phase 1 → 2 (Correction detection)
+if phase == 1 and barsInPhase >= i_indicMinBars
+    // Bull: pullback from high into 38.2%-61.8% zone
+    if phaseDir == 1
+        retracement = (indicHigh - low) / (indicHigh - nz(indicLow, low))
+        if high < indicHigh and low > nz(indicLow, low) and retracement > 0.0 and retracement < i_corrMaxDepth / 100.0 and barsInPhase >= i_corrMinBars
+            phase := 2
+            corrHigh := high
+            corrLow  := low
+            corrBar  := bar_index
+    // Bear: pullback from low into 38.2%-61.8% zone
+    if phaseDir == -1
+        retracement = (high - nz(indicLow, low)) / (nz(indicHigh, high) - indicLow)
+        if low > indicLow and high < nz(indicHigh, high) and retracement > 0.0 and retracement < i_corrMaxDepth / 100.0 and barsInPhase >= i_corrMinBars
+            phase := 2
+            corrHigh := high
+            corrLow  := low
+            corrBar  := bar_index
+
+// Phase 2 → 0 invalidation (correction too deep or too long)
+if phase == 2
+    tooDeep = false
+    tooLong = barsInPhase > i_corrMinBars * 5
+    if phaseDir == 1
+        tooDeep := low < indicLow or (indicHigh - low) / (indicHigh - nz(indicLow, low)) > i_corrMaxDepth / 100.0
+    if phaseDir == -1
+        tooDeep := high > indicHigh or (nz(indicHigh, high) - indicLow) / (nz(indicHigh, high) - indicLow) > i_corrMaxDepth / 100.0
+    if tooDeep or tooLong
+        phase := 0
+        phaseDir := 0
+
+// Phase 2 → 3 (Continuation breakout)
+if phase == 2
+    contBull = phaseDir == 1 and close > corrHigh and close > emaFast
+    contBear = phaseDir == -1 and close < corrLow and close < emaFast
+    if contBull or contBear
+        phase := 3
+
+// Phase 3 → 0 after entry (handled by strategy.position_size)
+if phase == 3 and strategy.position_size != 0
+    phase := 0
+    phaseDir := 0
+
+// Phase 3 timeout (no entry within 10 bars → reset)
+if phase == 3 and barsInPhase > 10
+    phase := 0
+    phaseDir := 0
+
+// ═══════════════════════════════════════════════════════════
+// SCENARIO CLASSIFICATION
+// ═══════════════════════════════════════════════════════════
+// A = Pre-trade setup (no position, ICC forming)
+// B = Active trade management (position open)
+// C = No setup / no position
+
+bool hasLong  = strategy.position_size > 0
+bool hasShort = strategy.position_size < 0
+bool hasPos   = hasLong or hasShort
+
+// Scenario detection
+scenario = "C"  // default
+if hasPos
+    scenario := "B"
+else if phase == 3
+    scenario := "A"
+else if phase == 1 or phase == 2
+    scenario := "A"
+
+// ═══════════════════════════════════════════════════════════
+// SCORING & CONFIDENCE
+// ═══════════════════════════════════════════════════════════
+// CISD = Close relative to swing structure
+float cisdScore = 0
+if not na(swingHigh) and not na(swingLow) and (swingHigh - swingLow) > 0
+    cisdScore := (close - swingLow) / (swingHigh - swingLow) * 200 - 100
+
+// OB detection (momentum candle at swing)
+obBull = (close > open) and (high - low) > 1.2 * atr and close == high
+obBear = (close < open) and (high - low) > 1.2 * atr and close == low
+float obScore = obBull ? 100 : obBear ? -100 : 0
+
+// FVG detection (gap between candles)
+fvgUp  = low > high[2]
+fvgDn  = high < low[2]
+float fvgScore = fvgUp ? 80 : fvgDn ? -80 : 0
+
+// Volume score
+float volScore = volume > volMa * 1.2 ? (volume > volMa * 1.8 ? 100 : 60) : (volume < volMa * 0.7 ? -30 : 0)
+
+// Composite confidence
+int totalW = w_trend + w_cisd + w_ob + w_fvg + w_vol
+float confLong = math.max(0, (trendScore * w_trend + cisdScore * w_cisd + obScore * w_ob + fvgScore * w_fvg + volScore * w_vol) / totalW)
+float confShort = math.max(0, -(trendScore * w_trend + cisdScore * w_cisd + obScore * w_ob + fvgScore * w_fvg + volScore * w_vol) / totalW)
+
+bool setupLong  = phase == 3 and phaseDir == 1 and confLong >= i_confThreshold and bullTrend
+bool setupShort = phase == 3 and phaseDir == -1 and confShort >= i_confThreshold and bearTrend and i_useShorts
+
+// ═══════════════════════════════════════════════════════════
+// SESSION & DAILY GUARD
+// ═══════════════════════════════════════════════════════════
+bool inSession = true
+if i_useSession
+    t = time(timeframe.period, i_sessionStart + "-" + i_sessionEnd)
+    inSession := not na(t)
+
+float dayOpen = request.security(syminfo.tickerid, "D", open, lookahead=barmerge.lookahead_on)
+bool dailyGuard = math.abs((close - dayOpen) / dayOpen * 100) < i_maxDailyPct
+
+// ═══════════════════════════════════════════════════════════
+// ENTRIES
+// ═══════════════════════════════════════════════════════════
+float slDist = i_slAtxMul * atr
+float tpDist = i_tpAtxMul * atr
+
+if setupLong and inSession and dailyGuard and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, comment="ICC-L", alert_message="ICC LONG entry: " + str.tostring(close))
+    strategy.exit("SLTP-L", "Long", stop=close - slDist, limit=close + tpDist, alert_message="ICC LONG exit")
+
+if setupShort and inSession and dailyGuard and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, comment="ICC-S", alert_message="ICC SHORT entry: " + str.tostring(close))
+    strategy.exit("SLTP-S", "Short", stop=close + slDist, limit=close - tpDist, alert_message="ICC SHORT exit")
+
+// ═══════════════════════════════════════════════════════════
+// ACTIVE TRADE MANAGEMENT (Scenario B)
+// ═══════════════════════════════════════════════════════════
+if hasLong
+    entryPrice = strategy.position_avg_price
+    currR = (close - entryPrice) / slDist
+    
+    // Trailing stop
+    if i_useTrail and currR >= 1.0
+        trailPrice = close - i_trailAtxMul * atr
+        if trailPrice > entryPrice
+            strategy.exit("Trail-L", "Long", stop=trailPrice, alert_message="ICC LONG trail stop moved")
+    
+    // Partials at R-multiple
+    if currR >= i_partialsAtR
+        strategy.close("Long", comment="Partial-" + str.tostring(i_partialsPct) + "%", qty_percent=i_partialsPct, alert_message="ICC LONG partials taken at " + str.tostring(currR, "#.#") + "R")
+
+if hasShort
+    entryPrice = strategy.position_avg_price
+    currR = (entryPrice - close) / slDist
+    
+    if i_useTrail and currR >= 1.0
+        trailPrice = close + i_trailAtxMul * atr
+        if trailPrice < entryPrice
+            strategy.exit("Trail-S", "Short", stop=trailPrice, alert_message="ICC SHORT trail stop moved")
+    
+    if currR >= i_partialsAtR
+        strategy.close("Short", comment="Partial-" + str.tostring(i_partialsPct) + "%", qty_percent=i_partialsPct, alert_message="ICC SHORT partials taken at " + str.tostring(currR, "#.#") + "R")
+
+// ═══════════════════════════════════════════════════════════
+// ALERTS — Key Events
+// ═══════════════════════════════════════════════════════════
+// Phase change alerts
+if phase == 1 and phase[1] == 0
+    alert("ICC: INDICATION detected — " + (phaseDir == 1 ? "BULLISH" : "BEARISH") + " on " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+if phase == 2 and phase[1] == 1
+    alert("ICC: CORRECTION started — watch for continuation setup", alert.freq_once_per_bar_close)
+
+if phase == 3 and phase[1] == 2
+    alert("ICC: CONTINUATION ready — " + (phaseDir == 1 ? "LONG setup" : "SHORT setup") + " | Confidence: " + str.tostring(phaseDir == 1 ? confLong : confShort, "#.#"), alert.freq_once_per_bar_close)
+
+// Setup invalidation
+if phase == 0 and phase[1] > 0
+    alert("ICC: Setup invalidated — reset to search", alert.freq_once_per_bar_close)
+
+// ═══════════════════════════════════════════════════════════
+// VISUALIZATION
+// ═══════════════════════════════════════════════════════════
+
+// ── EMAs (Scenario A color coding) ────────────────────────
+// GREEN above RED = LONG idea | RED above GREEN = SHORT idea
+plot(emaFast, "EMA Fast", color=emaFast > emaSlow ? color.new(color.green, 20) : color.new(color.red, 20), linewidth=2)
+plot(emaSlow, "EMA Slow", color=emaFast > emaSlow ? color.new(color.red, 40) : color.new(color.green, 40), linewidth=2)
+plot(emaTrend, "EMA Trend", color=color.new(color.gray, 60), linewidth=1)
+
+// ── Swing structure ───────────────────────────────────────
+plotshape(not na(pivotHigh), "Swing High", style=shape.triangledown, location=location.abovebar, color=color.orange, size=size.tiny)
+plotshape(not na(pivotLow),  "Swing Low",  style=shape.triangleup,   location=location.belowbar, color=color.blue,   size=size.tiny)
+
+// ── Phase background coloring ─────────────────────────────
+phaseColor = phase == 1 ? color.new(color.orange, 90) :
+             phase == 2 ? color.new(color.yellow, 90) :
+             phase == 3 ? (phaseDir == 1 ? color.new(color.green, 85) : color.new(color.red, 85)) :
+             color.new(color.gray, 95)
+bgcolor(phaseColor)
+
+// ── Scenario B: Active position markers ───────────────────
+// BLUE dot = active LONG | RED dot = active SHORT
+plotshape(hasLong and not hasLong[1], "Entry Long",  style=shape.labelup,   location=location.belowbar, color=color.new(color.blue, 0),   text="▲ LONG", textcolor=color.white, size=size.small)
+plotshape(hasShort and not hasShort[1], "Entry Short", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0),    text="▼ SHORT", textcolor=color.white, size=size.small)
+
+// ── SL / TP lines for active trades ───────────────────────
+if hasLong
+    entryP = strategy.position_avg_price
+    line.new(bar_index - 5, entryP, bar_index, entryP, color=color.white, style=line.style_dashed, width=1)
+    line.new(bar_index - 5, entryP - slDist, bar_index, entryP - slDist, color=color.red, style=line.style_solid, width=1)
+    line.new(bar_index - 5, entryP + tpDist, bar_index, entryP + tpDist, color=color.green, style=line.style_solid, width=1)
+
+if hasShort
+    entryP = strategy.position_avg_price
+    line.new(bar_index - 5, entryP, bar_index, entryP, color=color.white, style=line.style_dashed, width=1)
+    line.new(bar_index - 5, entryP + slDist, bar_index, entryP + slDist, color=color.red, style=line.style_solid, width=1)
+    line.new(bar_index - 5, entryP - tpDist, bar_index, entryP - tpDist, color=color.green, style=line.style_solid, width=1)
+
+// ── P/L label for active trades ───────────────────────────
+if hasPos
+    entryP = strategy.position_avg_price
+    pl = strategy.openprofit
+    plColor = pl >= 0 ? color.green : color.red
+    label.new(bar_index, high + atr * 0.5, 
+         text="P/L: $" + str.tostring(pl, "#.") + " | R: " + str.tostring((close - entryP) / slDist, "#.#"),
+         color=plColor, textcolor=color.white, style=label.style_label_lower_right, size=size.small)
+
+// ═══════════════════════════════════════════════════════════
+// INFO TABLE (Top-right)
+// ═══════════════════════════════════════════════════════════
+if barstate.islast
+    tbl = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), 
+                    border_width=1, border_color=color.gray, frame_width=1)
+    
+    // Row 0: Symbol
+    table.cell(tbl, 0, 0, "SYMBOL", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 0, syminfo.ticker, text_color=color.yellow, text_size=size.small)
+    
+    // Row 1: Scenario
+    scenarioColor = scenario == "A" ? color.green : scenario == "B" ? color.blue : color.gray
+    table.cell(tbl, 0, 1, "SCENARIO", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 1, scenario, text_color=scenarioColor, text_size=size.normal)
+    
+    // Row 2: Phase
+    phaseText = phase == 0 ? "SEARCHING" : phase == 1 ? "INDICATION" : phase == 2 ? "CORRECTION" : "CONTINUATION"
+    phaseTxtColor = phase == 1 ? color.orange : phase == 2 ? color.yellow : phase == 3 ? (phaseDir == 1 ? color.green : color.red) : color.gray
+    table.cell(tbl, 0, 2, "PHASE", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 2, phaseText, text_color=phaseTxtColor, text_size=size.normal)
+    
+    // Row 3: Direction
+    dirText = phaseDir == 1 ? "BULLISH" : phaseDir == -1 ? "BEARISH" : "NEUTRAL"
+    dirColor = phaseDir == 1 ? color.green : phaseDir == -1 ? color.red : color.gray
+    table.cell(tbl, 0, 3, "DIRECTION", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 3, dirText, text_color=dirColor, text_size=size.small)
+    
+    // Row 4: Confidence
+    confVal = phaseDir == 1 ? confLong : confShort
+    confColor = confVal >= i_confThreshold ? color.green : confVal >= i_confThreshold * 0.7 ? color.yellow : color.red
+    table.cell(tbl, 0, 4, "CONFIDENCE", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 4, str.tostring(confVal, "#.") + "%", text_color=confColor, text_size=size.normal)
+    
+    // Row 5: Position
+    posText = hasLong ? "LONG OPEN" : hasShort ? "SHORT OPEN" : "FLAT"
+    posColor = hasLong ? color.blue : hasShort ? color.red : color.gray
+    table.cell(tbl, 0, 5, "POSITION", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 5, posText, text_color=posColor, text_size=size.normal)
+    
+    // Row 6: P/L
+    if hasPos
+        pl = strategy.openprofit
+        plText = "$" + str.tostring(pl, "#.")
+        plCol = pl >= 0 ? color.green : color.red
+    else
+        plText = "—"
+        plCol = color.gray
+    table.cell(tbl, 0, 6, "P/L", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 6, plText, text_color=plCol, text_size=size.normal)
+    
+    // Row 7: Session
+    sessColor = inSession ? color.green : color.red
+    table.cell(tbl, 0, 7, "SESSION", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 7, inSession ? "OPEN" : "CLOSED", text_color=sessColor, text_size=size.small)

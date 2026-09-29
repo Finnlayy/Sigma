@@ -1,0 +1,217 @@
+//@version=6
+strategy("Trend Ribbon Quant-Master [Full Armor]", 
+     overlay=true, 
+     pyramiding=0, 
+     initial_capital=1000, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=10, 
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2)
+
+// ============================================================================
+// PIONEX WEBHOOK
+// ============================================================================
+uuid = input.string("8a17bcf9-0d9c-4a09-92ae-27adf755d95d", "Pionex Signal Bot UUID", group="00. Setup")
+string pionex_payload = '{ "data": { "action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_param": "{}", "signal_type": "' + uuid + '", "symbol": "{{ticker}}", "time": "{{timenow}}" }'
+
+// ============================================================================
+// FRAMEWORK 1: DYNAMIC TREND RIBBON
+// ============================================================================
+int   ribbon_fast = input.int(21, "Ribbon Fast EMA", group="01. Trend Ribbon")
+int   ribbon_slow = input.int(50, "Ribbon Slow EMA", group="01. Trend Ribbon")
+
+float ema_fast = ta.ema(close, ribbon_fast)
+float ema_slow = ta.ema(close, ribbon_slow)
+
+bool is_bullish = ema_fast > ema_slow
+bool is_bearish = ema_fast < ema_slow
+
+color col_bull = color.new(#2962FF, 70) 
+color col_bear = color.new(#F44336, 70) 
+
+p1 = plot(ema_fast, color=is_bullish ? #2962FF : #F44336, linewidth=1, title="Fast Boundary", display=display.none)
+p2 = plot(ema_slow, color=is_bullish ? #2962FF : #F44336, linewidth=1, title="Slow Boundary", display=display.none)
+fill(p1, p2, color=is_bullish ? col_bull : col_bear, title="Trend Ribbon")
+
+// ============================================================================
+// FRAMEWORK 2: MULTI-TIMEFRAME HARMONY INDEX (HI)
+// ============================================================================
+float hi_threshold = input.float(0.2, "HI Min Threshold", minval=0.0, maxval=1.0, step=0.1, group="02. Harmony Index")
+
+get_htf_bias(tf, f_len, s_len) =>
+    request.security(syminfo.tickerid, tf, ta.ema(close, f_len) > ta.ema(close, s_len) ? 1.0 : -1.0, lookahead=barmerge.lookahead_off)
+
+float bias_1d  = get_htf_bias("D", ribbon_fast, ribbon_slow)
+float bias_4h  = get_htf_bias("240", ribbon_fast, ribbon_slow)
+float bias_1h  = get_htf_bias("60", ribbon_fast, ribbon_slow)
+float bias_15m = is_bullish ? 1.0 : -1.0
+
+float raw_hi    = (bias_1d * 0.40) + (bias_4h * 0.25) + (bias_1h * 0.20) + (bias_15m * 0.15)
+float smooth_hi = ta.ema(raw_hi, 5) 
+
+bool hi_long_ok  = smooth_hi >= hi_threshold
+bool hi_short_ok = smooth_hi <= -hi_threshold
+
+// ============================================================================
+// FRAMEWORK 3: ADVANCED QUANT FILTERS
+// ============================================================================
+bool  use_er     = input.bool(true, "Use Efficiency Ratio (DER)", group="03. Quant Filters")
+bool  use_hurst  = input.bool(true, "Use Hurst Exponent (Choppiness)", group="03. Quant Filters")
+bool  use_adx    = input.bool(true, "Use ADX Trend Filter", group="03. Quant Filters")
+
+float er_change = math.abs(close - close[10])
+float er_vol    = math.sum(math.abs(close - close[1]), 10)
+float er        = er_vol != 0 ? er_change / er_vol : 0.0
+bool  er_ok     = not use_er or (er >= 0.25) 
+
+float atr_sum = math.sum(ta.atr(1), 14)
+float hi_max  = ta.highest(high, 14)
+float lo_min  = ta.lowest(low, 14)
+float chop    = 100 * math.log10(atr_sum / (hi_max - lo_min)) / math.log10(14)
+bool  hurst_ok= not use_hurst or (chop < 50) 
+
+[diplus, diminus, adx_val] = ta.dmi(14, 14)
+bool  adx_ok  = not use_adx or (adx_val > 20) 
+
+bool quant_filters_ok = er_ok and hurst_ok and adx_ok
+
+// ============================================================================
+// FRAMEWORK 4: MACHINE LEARNING / HIGH-CONVICTION FILTER (+)
+// ============================================================================
+float vol_sma = ta.sma(volume, 20)
+bool  ml_plus_bull = (volume > vol_sma) and ta.rising(close, 2)
+bool  ml_plus_bear = (volume > vol_sma) and ta.falling(close, 2)
+
+// ============================================================================
+// FRAMEWORK 8: ANOMALY & CRASH PROTECTION (THE KILL-SWITCH)
+// ============================================================================
+float shock_mult    = input.float(3.5, "Anomaly ATR Multiplier", step=0.5, group="04. Crash Protection", tooltip="Wenn eine Kerze X-mal größer ist als normal, wird der Handel gestoppt.")
+int   cooldown_bars = input.int(4, "Cooldown Timer (Bars)", group="04. Crash Protection", tooltip="Wie lange das System nach einem Schock pausiert.")
+
+float baseline_atr   = ta.atr(50)
+bool  is_price_shock = (high - low) > (baseline_atr * shock_mult)
+bool  is_gap_shock   = math.abs(open - close[1]) > (baseline_atr * (shock_mult / 1.5))
+
+bool  is_anomaly     = is_price_shock or is_gap_shock
+
+var int current_cooldown = 0
+if is_anomaly
+    current_cooldown := cooldown_bars
+else if current_cooldown > 0
+    current_cooldown -= 1
+
+bool system_safe = current_cooldown == 0
+
+// ============================================================================
+// FRAMEWORK 5: PULLBACK ENTRIES
+// ============================================================================
+bool pb_long_base = is_bullish and (low <= ema_fast) and (close > open) and (close > ema_slow) and hi_long_ok and quant_filters_ok and system_safe
+bool pb_long      = pb_long_base and not pb_long_base[1]
+
+bool entry_l_plus = pb_long and ml_plus_bull
+bool entry_l_std  = pb_long and not ml_plus_bull
+
+bool pb_short_base = is_bearish and (high >= ema_fast) and (close < open) and (close < ema_slow) and hi_short_ok and quant_filters_ok and system_safe
+bool pb_short      = pb_short_base and not pb_short_base[1]
+
+bool entry_s_plus = pb_short and ml_plus_bear
+bool entry_s_std  = pb_short and not ml_plus_bear
+
+// ============================================================================
+// FRAMEWORK 6: DYNAMISCHE EXITS (ChoCH) & RISK
+// ============================================================================
+int   exit_speed = input.int(13, "Exit Momentum EMA", group="05. Exit Logik")
+float ema_exit   = ta.ema(close, exit_speed)
+
+bool exit_l_trigger = is_bullish and ta.crossunder(ema_exit, ema_fast) and not (is_bullish[1] and ta.crossunder(ema_exit[1], ema_fast[1]))
+bool exit_s_trigger = is_bearish and ta.crossover(ema_exit, ema_fast) and not (is_bearish[1] and ta.crossover(ema_exit[1], ema_fast[1]))
+
+float sl_atr_mult = input.float(2.0, "Notfall SL Buffer (ATR)", minval=0.5, step=0.1, group="05. Exit Logik")
+float atr         = ta.atr(14)
+
+// ============================================================================
+// FRAMEWORK 7: KELLY CRITERION POSITION SIZING
+// ============================================================================
+bool  use_kelly      = input.bool(true, "Auto-Kelly Sizing nutzen", group="06. Position Sizing")
+float kelly_fraction = input.float(0.5, "Kelly Multiplier (0.5 = Half-Kelly)", group="06. Position Sizing")
+float max_kelly_risk = input.float(0.15, "Max Auto-Risk (15%)", group="06. Position Sizing")
+
+float risk_std       = input.float(0.05, "Manuelles Risiko Standard (5%)", group="06. Position Sizing")
+float risk_plus      = input.float(0.10, "Manuelles Risiko High Conviction (10%)", group="06. Position Sizing")
+
+float win_rate       = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) : 0.0
+float avg_win        = strategy.wintrades > 0 ? (strategy.grossprofit / strategy.wintrades) : 0.0
+float avg_loss       = strategy.losstrades > 0 ? (strategy.grossloss / strategy.losstrades) : 0.0
+float win_loss_ratio = avg_loss > 0 ? (avg_win / avg_loss) : 1.0
+
+float kelly_pct = win_loss_ratio > 0 ? win_rate - ((1.0 - win_rate) / win_loss_ratio) : 0.0
+
+var float trade_sl_l = na
+var float trade_sl_s = na
+
+if strategy.position_size == 0
+    trade_sl_l := na
+    trade_sl_s := na
+
+if (entry_l_std or entry_l_plus) and strategy.position_size == 0
+    trade_sl_l := low - (atr * sl_atr_mult)
+    float base_risk = entry_l_plus ? risk_plus : risk_std
+    float applied_risk = use_kelly and strategy.closedtrades >= 10 and kelly_pct > 0 ? math.min(kelly_pct * kelly_fraction, max_kelly_risk) : base_risk
+    float qty_long = (strategy.equity * applied_risk) / close
+    strategy.entry("Long", strategy.long, qty=qty_long, comment=entry_l_plus ? "L+" : "L", alert_message=pionex_payload)
+
+if (entry_s_std or entry_s_plus) and strategy.position_size == 0
+    trade_sl_s := high + (atr * sl_atr_mult)
+    float base_risk = entry_s_plus ? risk_plus : risk_std
+    float applied_risk = use_kelly and strategy.closedtrades >= 10 and kelly_pct > 0 ? math.min(kelly_pct * kelly_fraction, max_kelly_risk) : base_risk
+    float qty_short = (strategy.equity * applied_risk) / close
+    strategy.entry("Short", strategy.short, qty=qty_short, comment=entry_s_plus ? "S+" : "S", alert_message=pionex_payload)
+
+if strategy.position_size > 0
+    if exit_l_trigger
+        strategy.close("Long", comment="L-ChoCH", alert_message=pionex_payload)
+    strategy.exit("L-Hard SL", "Long", stop=trade_sl_l, alert_message=pionex_payload)
+
+if strategy.position_size < 0
+    if exit_s_trigger
+        strategy.close("Short", comment="S-ChoCH", alert_message=pionex_payload)
+    strategy.exit("S-Hard SL", "Short", stop=trade_sl_s, alert_message=pionex_payload)
+
+// ============================================================================
+// VISUALISIERUNG & DASHBOARD
+// ============================================================================
+plotshape(entry_l_std,  style=shape.labelup, location=location.belowbar, color=color.new(#00C853, 0), size=size.normal, title="Entry Long", text="▲", textcolor=color.white)
+plotshape(entry_l_plus, style=shape.labelup, location=location.belowbar, color=color.new(#00E676, 0), size=size.normal, title="Entry Long +", text="▲+", textcolor=color.white)
+
+plotshape(entry_s_std,  style=shape.labeldown, location=location.abovebar, color=color.new(#D50000, 0), size=size.normal, title="Entry Short", text="▼", textcolor=color.white)
+plotshape(entry_s_plus, style=shape.labeldown, location=location.abovebar, color=color.new(#FF5252, 0), size=size.normal, title="Entry Short +", text="▼+", textcolor=color.white)
+
+plotshape(exit_l_trigger, style=shape.xcross, location=location.abovebar, color=color.new(color.orange, 0), size=size.small, title="Exit Long Marker")
+plotshape(exit_s_trigger, style=shape.xcross, location=location.belowbar, color=color.new(#2962FF, 0), size=size.small, title="Exit Short Marker")
+
+bgcolor(is_anomaly ? color.new(color.yellow, 85) : na, title="Shock Warning BG")
+
+var table dash = table.new(position.bottom_right, 2, 6, bgcolor=color.new(color.black, 80), border_color=color.gray, border_width=1)
+if barstate.islast
+    table.cell(dash, 0, 0, "Harmony Index", text_color=color.white, text_size=size.small)
+    color hi_color = smooth_hi >= hi_threshold ? #00E676 : smooth_hi <= -hi_threshold ? #FF5252 : color.gray
+    table.cell(dash, 1, 0, str.tostring(smooth_hi, "#.##"), text_color=hi_color, text_size=size.small)
+    
+    table.cell(dash, 0, 1, "Efficiency Ratio (DER)", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(er, "#.##"), text_color=er >= 0.25 ? #00E676 : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 2, "Hurst Proxy (Chop)", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(chop, "#.##"), text_color=chop < 50 ? #00E676 : color.gray, text_size=size.small)
+    
+    table.cell(dash, 0, 3, "ADX (Trend)", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(adx_val, "#.##"), text_color=adx_val > 20 ? #00E676 : color.gray, text_size=size.small)
+
+    table.cell(dash, 0, 4, "Current Kelly Risk", text_color=color.white, text_size=size.small)
+    float cur_risk = strategy.closedtrades >= 10 and kelly_pct > 0 ? math.min(kelly_pct * kelly_fraction, max_kelly_risk) : risk_std
+    table.cell(dash, 1, 4, str.tostring(cur_risk * 100, "#.##") + "%", text_color=color.orange, text_size=size.small)
+    
+    table.cell(dash, 0, 5, "System Status", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, system_safe ? "NORMAL" : "COOLDOWN", text_color=system_safe ? #00E676 : color.yellow, text_size=size.small)

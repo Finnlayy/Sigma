@@ -1,0 +1,158 @@
+//@version=6
+strategy(
+    title="CompetitionBot (Pine) - Fixed - HYPEUSDT 1m",
+    shorttitle="CompetitionBot HYPE 1m",
+    overlay=true,
+    initial_capital=100,
+    currency=currency.USDT,
+    default_qty_type=strategy.fixed,
+    default_qty_value=1,
+    pyramiding=0,
+    margin_long=0,
+    margin_short=0,
+    calc_on_every_tick=false,
+    process_orders_on_close=false
+)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+string GRP_MAIN = "CompetitionBot Inputs"
+int FastEma         = input.int(9, "Fast EMA", minval=1, maxval=50, group=GRP_MAIN)
+int SlowEma         = input.int(21, "Slow EMA", minval=10, maxval=200, group=GRP_MAIN)
+float StopATR       = input.float(1.5, "Stop ATR", minval=1.0, maxval=5.0, step=0.1, group=GRP_MAIN)
+float ProfitATR     = input.float(2.5, "Profit ATR", minval=1.0, maxval=5.0, step=0.1, group=GRP_MAIN)
+int AtrPeriod       = input.int(14, "ATR Period", minval=5, maxval=30, group=GRP_MAIN)
+float RiskPerTrade  = input.float(1.0, "Risk %", minval=0.1, maxval=2.0, step=0.1, group=GRP_MAIN)
+int StartTime       = input.int(0, "StartTime (HHMM)", minval=0, maxval=2359, group=GRP_MAIN)
+int EndTime         = input.int(2359, "EndTime (HHMM)", minval=0, maxval=2359, group=GRP_MAIN)
+
+string GRP_EXTRA = "Execution"
+string SessionTimezone = input.string("UTC", "Session Timezone", options=["Exchange", "America/New_York", "UTC", "Europe/Berlin"], group=GRP_EXTRA)
+int WarmupBars = input.int(50, "Warmup Bars", minval=10, maxval=500, group=GRP_EXTRA)
+float QtyStep = input.float(0.001, "Qty Step", minval=0.000001, group=GRP_EXTRA)
+
+string GRP_ENV = "Exact Environment Lock"
+bool LockToHype1m = input.bool(true, "Lock to HYPEUSDT 1m", group=GRP_ENV)
+string TargetSymbol = input.string("HYPEUSDT", "Target Symbol", group=GRP_ENV)
+bool ShowMismatchLabel = input.bool(true, "Show mismatch label", group=GRP_ENV)
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+f_norm_hhmm(int hhmm) =>
+    int h = int(math.floor(hhmm / 100))
+    int m = hhmm % 100
+    h := math.max(0, math.min(23, h))
+    m := math.max(0, math.min(59, m))
+    h * 100 + m
+
+f_in_session(int start_hhmm, int end_hhmm, string tz) =>
+    string effective_tz = tz == "Exchange" ? syminfo.timezone : tz
+    int now_hhmm = hour(time, effective_tz) * 100 + minute(time, effective_tz)
+    bool regular_window = start_hhmm <= end_hhmm
+    regular_window ? (now_hhmm >= start_hhmm and now_hhmm <= end_hhmm) : (now_hhmm >= start_hhmm or now_hhmm <= end_hhmm)
+
+f_round_qty(float qty, float step) =>
+    math.floor(qty / step) * step
+
+f_is_symbol_match(string target) =>
+    string target_up = str.upper(target)
+    string ticker_up = str.upper(syminfo.ticker)
+    string tickerid_up = str.upper(syminfo.tickerid)
+    ticker_up == target_up or str.contains(tickerid_up, ":" + target_up) or str.contains(tickerid_up, target_up + ".P") or str.contains(tickerid_up, target_up)
+
+// ============================================================================
+// CORE INDICATORS
+// ============================================================================
+float emaFast = ta.ema(close, FastEma)
+float emaSlow = ta.ema(close, SlowEma)
+float atrVal  = ta.atr(AtrPeriod)
+float vwapVal = ta.vwap(hlc3)
+
+int start_hhmm = f_norm_hhmm(StartTime)
+int end_hhmm   = f_norm_hhmm(EndTime)
+bool session_ok = f_in_session(start_hhmm, end_hhmm, SessionTimezone)
+
+bool symbol_ok = f_is_symbol_match(TargetSymbol)
+bool tf_ok = timeframe.isminutes and timeframe.multiplier == 1
+bool env_ok = not LockToHype1m or (symbol_ok and tf_ok)
+
+bool ready = barstate.isconfirmed and bar_index >= WarmupBars
+
+// ============================================================================
+// ENTRY LOGIC
+// ============================================================================
+bool longSetup  = ta.crossover(emaFast, emaSlow) and close > vwapVal
+bool shortSetup = ta.crossunder(emaFast, emaSlow) and close < vwapVal
+
+float riskDollars       = strategy.equity * (RiskPerTrade / 100.0)
+float stopDistance      = atrVal * StopATR
+float riskPerUnit       = stopDistance * syminfo.pointvalue
+float rawQty            = riskPerUnit > 0 ? (riskDollars / riskPerUnit) : 0.0
+float orderQty          = math.max(QtyStep, f_round_qty(rawQty, QtyStep))
+
+var float longStop   = na
+var float longTarget = na
+var float shortStop  = na
+var float shortTarget = na
+
+if ready and session_ok and env_ok and strategy.position_size == 0
+    if longSetup
+        strategy.entry("Long", strategy.long, qty=orderQty)
+    else if shortSetup
+        strategy.entry("Short", strategy.short, qty=orderQty)
+
+// ============================================================================
+// BUILD EXITS FROM ACTUAL FILLED PRICE
+// ============================================================================
+bool newLong  = strategy.position_size > 0 and strategy.position_size[1] <= 0
+bool newShort = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if newLong
+    longStop   := strategy.position_avg_price - atrVal * StopATR
+    longTarget := strategy.position_avg_price + atrVal * ProfitATR
+    shortStop := na
+    shortTarget := na
+
+if newShort
+    shortStop   := strategy.position_avg_price + atrVal * StopATR
+    shortTarget := strategy.position_avg_price - atrVal * ProfitATR
+    longStop := na
+    longTarget := na
+
+if strategy.position_size > 0 and not na(longStop) and not na(longTarget)
+    strategy.exit("Long Exit", "Long", stop=longStop, limit=longTarget)
+
+if strategy.position_size < 0 and not na(shortStop) and not na(shortTarget)
+    strategy.exit("Short Exit", "Short", stop=shortStop, limit=shortTarget)
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    longStop := na
+    longTarget := na
+    shortStop := na
+    shortTarget := na
+
+// ============================================================================
+// VISUALS
+// ============================================================================
+plot(emaFast, "EMA Fast", color=color.new(color.green, 0), linewidth=2)
+plot(emaSlow, "EMA Slow", color=color.new(color.red, 0), linewidth=2)
+plot(vwapVal, "VWAP", color=color.new(color.blue, 0), linewidth=2)
+
+plotshape(ready and session_ok and env_ok and longSetup and strategy.position_size == 0, title="Long Setup", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.tiny, text="L")
+plotshape(ready and session_ok and env_ok and shortSetup and strategy.position_size == 0, title="Short Setup", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny, text="S")
+
+plot(strategy.position_size > 0 ? longStop : na, "Long Stop", color=color.new(color.red, 0), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? longTarget : na, "Long Target", color=color.new(color.green, 0), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? shortStop : na, "Short Stop", color=color.new(color.red, 0), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? shortTarget : na, "Short Target", color=color.new(color.green, 0), style=plot.style_linebr)
+
+bgcolor(not env_ok ? color.new(color.red, 90) : na, title="Env Mismatch")
+
+var bool mismatch_emitted = false
+if barstate.islast and ShowMismatchLabel and not env_ok and not mismatch_emitted
+    label.new(bar_index, high, "Use HYPEUSDT on 1m", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+    mismatch_emitted := true
+if env_ok
+    mismatch_emitted := false

@@ -1,0 +1,9 @@
+{
+  "bytes": 162,
+  "name": "ETH Momentum SMA-Cross",
+  "persisted_at": "2026-09-08T00:22:35Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "SMA_CROSS_V2__ETH-USDT__15m__PAPER",
+  "tv_script_id": ""
+}

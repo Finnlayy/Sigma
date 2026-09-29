@@ -1,0 +1,196 @@
+//@version=6
+strategy("Unified 4-in-1 Strategy", overlay=true, initial_capital=10000,
+     commission_type=strategy.commission.percent, commission_value=0.05, pyramiding=0)
+
+// -----------------------------
+// Inputs
+// -----------------------------
+trendLenFast = input.int(50,   "Trend Fast EMA",           minval=1)
+trendLenSlow = input.int(200,  "Trend Slow EMA",           minval=1)
+rsiLen       = input.int(14,   "RSI Length",               minval=2)
+rsiBull      = input.int(55,   "RSI Bull Threshold",       minval=1, maxval=99)
+rsiBear      = input.int(45,   "RSI Bear Threshold",       minval=1, maxval=99)
+bbLen        = input.int(20,   "Bollinger Length",         minval=5)
+bbMult       = input.float(2.0,"Bollinger Mult",           minval=0.1)
+donLen       = input.int(55,   "Breakout Length",          minval=2)
+minVotes     = input.int(3,    "Min Votes to Enter (1-4)", minval=1, maxval=4)
+useAtrSl     = input.bool(true,"Use ATR-based Stop Loss")
+atrLen       = input.int(14,   "ATR Length",               minval=1)
+atrMult      = input.float(1.5,"ATR SL Multiplier",        minval=0.1)
+
+// Fixed fallback risk model (used when useAtrSl=false)
+slPct  = 0.003
+tp1Pct = 0.015
+tp2Pct = 0.020
+
+// -----------------------------
+// Core Indicators
+// -----------------------------
+emaFast = ta.ema(close, trendLenFast)
+emaSlow = ta.ema(close, trendLenSlow)
+rsi     = ta.rsi(close, rsiLen)
+atr     = ta.atr(atrLen)
+
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+donHigh = ta.highest(high, donLen)
+donLow  = ta.lowest(low,  donLen)
+
+// -----------------------------
+// Regime Detection
+// ✅ v6: math.abs(), ta.highest(), ta.lowest() unchanged — still valid
+// -----------------------------
+emaDiff  = math.abs(emaFast - emaSlow)
+emaRange = ta.highest(emaDiff, 50) - ta.lowest(emaDiff, 50)
+
+// ✅ v6: na() replaced with na keyword check using na(x) — still supported
+// ✅ v6: Conditional expression style unchanged
+isTrending = emaRange > 0 and (emaDiff / emaRange) > 0.3
+isRanging  = not isTrending
+
+// -----------------------------
+// Version 1: Trend Following (EMA Regime)
+// -----------------------------
+v1Long  = emaFast > emaSlow
+v1Short = emaFast < emaSlow
+
+// -----------------------------
+// Version 2: Momentum Filter (RSI)
+// -----------------------------
+v2Long  = rsi > rsiBull
+v2Short = rsi < rsiBear
+
+// -----------------------------
+// Version 3: Mean Reversion (Bollinger Touch + Recovery)
+// Only active in ranging markets
+// -----------------------------
+v3Long  = isRanging and close[1] < bbLower[1] and close > bbLower
+v3Short = isRanging and close[1] > bbUpper[1] and close < bbUpper
+
+// -----------------------------
+// Version 4: Breakout Confirmation (Donchian)
+// Only active in trending markets
+// -----------------------------
+v4Long  = isTrending and close > donHigh[1]
+v4Short = isTrending and close < donLow[1]
+
+// -----------------------------
+// Vote Aggregation
+// ✅ v6: Ternary expressions unchanged
+// -----------------------------
+longVotes  = (v1Long  ? 1 : 0) + (v2Long  ? 1 : 0) + (v3Long  ? 1 : 0) + (v4Long  ? 1 : 0)
+shortVotes = (v1Short ? 1 : 0) + (v2Short ? 1 : 0) + (v3Short ? 1 : 0) + (v4Short ? 1 : 0)
+
+enterLong  = longVotes  >= minVotes and longVotes  > shortVotes
+enterShort = shortVotes >= minVotes and shortVotes > longVotes
+
+// -----------------------------
+// Entry Throttle
+// ✅ v6: timenow removed from time-based logic — use `time` bar timestamp
+// ✅ v6: int() casting replaced with int() — still valid in v6
+// ✅ v6: var declaration syntax unchanged
+// -----------------------------
+isFlat            = strategy.position_size == 0
+minuteKey         = int(math.floor(time / 60000))
+var int lastEntryMinute = na
+
+canOpenThisMinute = isFlat and (na(lastEntryMinute) or minuteKey > lastEntryMinute)
+
+if canOpenThisMinute and enterLong
+    strategy.entry("Long", strategy.long)
+    lastEntryMinute := minuteKey
+
+if canOpenThisMinute and enterShort
+    strategy.entry("Short", strategy.short)
+    lastEntryMinute := minuteKey
+
+// -----------------------------
+// Dynamic SL/TP Levels
+// ✅ v6: strategy.position_avg_price still valid
+// ✅ v6: Conditional assignment with ternary unchanged
+// -----------------------------
+avgPrice = strategy.position_avg_price
+slDist   = useAtrSl ? atr * atrMult : avgPrice * slPct
+
+longStop  = avgPrice - slDist
+longTp1   = avgPrice * (1 + tp1Pct)
+longTp2   = avgPrice * (1 + tp2Pct)
+
+shortStop = avgPrice + slDist
+shortTp1  = avgPrice * (1 - tp1Pct)
+shortTp2  = avgPrice * (1 - tp2Pct)
+
+// -----------------------------
+// Exits
+// ✅ v6: strategy.exit() API unchanged
+// ✅ v6: Separate TP limit exits + dedicated stop exit per side
+// -----------------------------
+strategy.exit("Long TP1",   from_entry="Long",  limit=longTp1,  qty_percent=80)
+strategy.exit("Long TP2",   from_entry="Long",  limit=longTp2,  qty_percent=20)
+strategy.exit("Long Stop",  from_entry="Long",  stop=longStop)
+
+strategy.exit("Short TP1",  from_entry="Short", limit=shortTp1, qty_percent=80)
+strategy.exit("Short TP2",  from_entry="Short", limit=shortTp2, qty_percent=20)
+strategy.exit("Short Stop", from_entry="Short", stop=shortStop)
+
+// -----------------------------
+// Visuals
+// ✅ v6: plot(), plotshape(), bgcolor() API unchanged
+// ✅ v6: color.new() still valid
+// ✅ v6: display.data_window still valid
+// -----------------------------
+plot(emaFast, "EMA Fast", color=color.teal)
+plot(emaSlow, "EMA Slow", color=color.orange)
+plot(bbUpper, "BB Upper", color=color.new(color.gray, 70))
+plot(bbBasis, "BB Basis", color=color.new(color.gray, 80))
+plot(bbLower, "BB Lower", color=color.new(color.gray, 70))
+
+plotshape(enterLong,  title="Long Signal",  style=shape.triangleup,
+     location=location.belowbar, color=color.lime, size=size.tiny, text="L")
+plotshape(enterShort, title="Short Signal", style=shape.triangledown,
+     location=location.abovebar, color=color.red,  size=size.tiny, text="S")
+
+bgcolor(isTrending ? color.new(color.blue,   95) :
+        color.new(color.yellow, 95), title="Market Regime")
+
+// -----------------------------
+// Info Table
+// ✅ v6 NEW: table API for live debug — replaces data window plots
+// -----------------------------
+var table infoTable = table.new(position.top_right, 2, 6,
+     bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Metric",      text_color=color.gray,  text_size=size.small)
+    table.cell(infoTable, 1, 0, "Value",        text_color=color.gray,  text_size=size.small)
+    table.cell(infoTable, 0, 1, "Long Votes",   text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(longVotes),
+         text_color=longVotes >= minVotes ? color.lime : color.white, text_size=size.small)
+    table.cell(infoTable, 0, 2, "Short Votes",  text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(shortVotes),
+         text_color=shortVotes >= minVotes ? color.red : color.white,  text_size=size.small)
+    table.cell(infoTable, 0, 3, "Regime",       text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 3, isTrending ? "Trending" : "Ranging",
+         text_color=isTrending ? color.blue : color.yellow,            text_size=size.small)
+    table.cell(infoTable, 0, 4, "RSI",          text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(math.round(rsi, 2)),
+         text_color=rsi > rsiBull ? color.lime : rsi < rsiBear ? color.red : color.white,
+         text_size=size.small)
+    table.cell(infoTable, 0, 5, "ATR",          text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 5, str.tostring(math.round(atr, 4)),
+         text_color=color.white,                                        text_size=size.small)
+
+// Debug — still available in data window as secondary reference
+plot(longVotes,              "Long Votes",   display=display.data_window)
+plot(shortVotes,             "Short Votes",  display=display.data_window)
+plot(isTrending ? 1 : 0,    "Is Trending",  display=display.data_window)
+// ─── ALERTS ───────────────────────────────────────────────────────────────────
+alertcondition(enterLong,  title="Long Entry",  message="4-in-1 Strategy: LONG signal on {{ticker}} @ {{close}}")
+alertcondition(enterShort, title="Short Entry", message="4-in-1 Strategy: SHORT signal on {{ticker}} @ {{close}}")
+
+// Optional: exit alerts
+alertcondition(strategy.position_size[1] > 0 and strategy.position_size == 0, title="Long Closed",  message="4-in-1 Strategy: Long position closed on {{ticker}}")
+alertcondition(strategy.position_size[1] < 0 and strategy.position_size == 0, title="Short Closed", message="4-in-1 Strategy: Short position closed on {{ticker}}")

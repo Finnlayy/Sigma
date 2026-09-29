@@ -1,0 +1,322 @@
+// ============================================================
+// HYPE/USDT Pionex Webhook Bot
+// Strategie: RSI Mean-Reversion + EMA-Trend + ATR Risk Management
+// Timeframe: 5-Minuten | Asset: HYPEUSDT.P (Perpetual Futures)
+// Ziel: Profitfaktor ≥ 2 | 1-2 Trades/Tag
+// Version: 1.0 | Pine Script v6
+// ============================================================
+//@version=6
+strategy(
+    title             = "HYPE/USDT RSI-MeanRev Pionex Bot",
+    shorttitle        = "HYPE_Pionex",
+    overlay           = true,
+    initial_capital   = 100,               // PFLICHT: 100 (Pionex-Standard)
+    default_qty_type  = strategy.cash,     // PFLICHT: strategy.cash
+    default_qty_value = 1,                 // 1% Margin pro Position in Pionex
+    pyramiding        = 1,                 // Max. 1 offene Position
+    calc_on_every_tick= false,             // PFLICHT: false (kein Repainting)
+    margin_long       = 0,                 // PFLICHT: 0%
+    margin_short      = 0,                 // PFLICHT: 0%
+    process_orders_on_close = true,        // OHLC-Ausführung
+    commission_type   = strategy.commission.percent,
+    commission_value  = 0.05,             // Hyperliquid Taker-Gebühr
+    slippage          = 2                  // Realistisches Slippage
+)
+
+// ============================================================
+// EINGABEPARAMETER
+// ============================================================
+
+// --- Pionex Webhook ---
+string uuid = input.string(
+    defval  = "YOUR_PIONEX_UUID_HERE",
+    title   = "Pionex Signal Bot UUID",
+    tooltip = "UUID aus dem Pionex Signal Bot Dashboard einfügen",
+    group   = "🔗 Pionex Webhook"
+)
+
+// --- Gruppe A: EMA-Trendfilter ---
+int ema_fast_len = input.int(
+    defval  = 5,
+    title   = "Fast EMA Periode",
+    minval  = 3, maxval = 15,
+    tooltip = "Schneller EMA für Trendrichtung (Standard: 5)",
+    group   = "📈 Trendfilter (EMA)"
+)
+int ema_slow_len = input.int(
+    defval  = 21,
+    title   = "Slow EMA Periode",
+    minval  = 10, maxval = 50,
+    tooltip = "Langsamer EMA für Trendbestätigung (Standard: 21)",
+    group   = "📈 Trendfilter (EMA)"
+)
+int ema_trend_len = input.int(
+    defval  = 50,
+    title   = "Trend-EMA Periode (Haupttrend)",
+    minval  = 20, maxval = 200,
+    tooltip = "Haupttrend-EMA: Trades nur in Richtung dieses EMA (Standard: 50)",
+    group   = "📈 Trendfilter (EMA)"
+)
+
+// --- Gruppe B: RSI-Momentum ---
+int rsi_len = input.int(
+    defval  = 9,
+    title   = "RSI Periode",
+    minval  = 5, maxval = 14,
+    tooltip = "RSI-Periode für 5-Min-Chart (Standard: 9, empfohlen: 7-12)",
+    group   = "📊 RSI Momentum"
+)
+int rsi_oversold = input.int(
+    defval  = 28,
+    title   = "RSI Überverkauft (Long-Signal)",
+    minval  = 15, maxval = 40,
+    tooltip = "RSI-Schwelle für Long-Einstieg (Standard: 28)",
+    group   = "📊 RSI Momentum"
+)
+int rsi_overbought = input.int(
+    defval  = 72,
+    title   = "RSI Überkauft (Short-Signal)",
+    minval  = 60, maxval = 85,
+    tooltip = "RSI-Schwelle für Short-Einstieg (Standard: 72)",
+    group   = "📊 RSI Momentum"
+)
+int rsi_confirm_bars = input.int(
+    defval  = 2,
+    title   = "RSI Bestätigungs-Bars",
+    minval  = 1, maxval = 5,
+    tooltip = "Anzahl Bars, die RSI über/unter Schwelle bleiben muss (reduziert Fehlsignale)",
+    group   = "📊 RSI Momentum"
+)
+
+// --- Gruppe C: Volatilitätsfilter (ATR) ---
+int atr_len = input.int(
+    defval  = 10,
+    title   = "ATR Periode",
+    minval  = 5, maxval = 20,
+    group   = "⚡ Volatilitätsfilter (ATR)"
+)
+float atr_min_pct = input.float(
+    defval  = 0.35,
+    title   = "Min. ATR % (Trade-Freigabe)",
+    minval  = 0.1, maxval = 1.0, step = 0.05,
+    tooltip = "Mindest-Volatilität für Trade-Freigabe. Verhindert Trades in Seitwärtsphasen.",
+    group   = "⚡ Volatilitätsfilter (ATR)"
+)
+float atr_max_pct = input.float(
+    defval  = 2.5,
+    title   = "Max. ATR % (Risiko-Begrenzung)",
+    minval  = 1.0, maxval = 5.0, step = 0.1,
+    tooltip = "Maximale Volatilität. Bei Überschreitung: kein Trade (zu hohes Risiko).",
+    group   = "⚡ Volatilitätsfilter (ATR)"
+)
+
+// --- Gruppe D: Volumenfilter ---
+int vol_ma_len = input.int(
+    defval  = 20,
+    title   = "Volumen-MA Periode",
+    minval  = 10, maxval = 50,
+    group   = "📦 Volumenfilter"
+)
+float vol_mult = input.float(
+    defval  = 1.3,
+    title   = "Volumen-Multiplikator",
+    minval  = 0.8, maxval = 3.0, step = 0.1,
+    tooltip = "Signal nur wenn Volumen > MA × Multiplikator (Standard: 1.3)",
+    group   = "📦 Volumenfilter"
+)
+
+// --- Gruppe E: Risk Management ---
+float sl_atr_mult = input.float(
+    defval  = 1.5,
+    title   = "Stop-Loss ATR-Multiplikator",
+    minval  = 0.8, maxval = 3.0, step = 0.1,
+    tooltip = "SL = Entry ± ATR × Multiplikator (Standard: 1.5)",
+    group   = "🛡️ Risk Management"
+)
+float tp_atr_mult = input.float(
+    defval  = 3.5,
+    title   = "Take-Profit ATR-Multiplikator",
+    minval  = 1.5, maxval = 6.0, step = 0.5,
+    tooltip = "TP = Entry ± ATR × Multiplikator (Standard: 3.5 = R/R 1:2.3)",
+    group   = "🛡️ Risk Management"
+)
+bool use_trailing = input.bool(
+    defval  = true,
+    title   = "Trailing-Stop aktivieren",
+    tooltip = "Aktiviert dynamischen Trailing-Stop nach Gewinnzone",
+    group   = "🛡️ Risk Management"
+)
+float trail_atr_mult = input.float(
+    defval  = 1.0,
+    title   = "Trailing-Stop ATR-Multiplikator",
+    minval  = 0.5, maxval = 2.0, step = 0.1,
+    tooltip = "Trailing-Stop-Distanz = ATR × Multiplikator",
+    group   = "🛡️ Risk Management"
+)
+float trail_activation_pct = input.float(
+    defval  = 0.8,
+    title   = "Trailing-Stop Aktivierung (%)",
+    minval  = 0.3, maxval = 2.0, step = 0.1,
+    tooltip = "Trailing-Stop aktiviert sich nach X% Gewinn",
+    group   = "🛡️ Risk Management"
+)
+
+// --- Gruppe F: Zeitfilter ---
+bool use_time_filter = input.bool(
+    defval  = false,
+    title   = "Zeitfilter aktivieren",
+    tooltip = "Trades nur in definierten Handelsstunden",
+    group   = "🕐 Zeitfilter"
+)
+int session_start = input.int(
+    defval  = 8,
+    title   = "Handelsstart (UTC Stunde)",
+    minval  = 0, maxval = 23,
+    group   = "🕐 Zeitfilter"
+)
+int session_end = input.int(
+    defval  = 22,
+    title   = "Handelsende (UTC Stunde)",
+    minval  = 0, maxval = 23,
+    group   = "🕐 Zeitfilter"
+)
+
+// ============================================================
+// INDIKATOREN BERECHNEN
+// ============================================================
+
+float ema_fast  = ta.ema(close, ema_fast_len)
+float ema_slow  = ta.ema(close, ema_slow_len)
+float ema_trend = ta.ema(close, ema_trend_len)
+float rsi_val   = ta.rsi(close, rsi_len)
+float atr_val   = ta.atr(atr_len)
+float atr_pct   = (atr_val / close) * 100
+float vol_ma    = ta.sma(volume, vol_ma_len)
+
+// ============================================================
+// FILTER-BEDINGUNGEN
+// ============================================================
+
+// Trendfilter: Preis über/unter Trend-EMA
+bool bull_trend = close > ema_trend and ema_fast > ema_slow
+bool bear_trend = close < ema_trend and ema_fast < ema_slow
+
+// Volatilitätsfilter
+bool vola_ok = atr_pct >= atr_min_pct and atr_pct <= atr_max_pct
+
+// Volumenfilter
+bool vol_ok = volume > (vol_ma * vol_mult)
+
+// Zeitfilter
+bool time_ok = not use_time_filter or (hour(time, "UTC") >= session_start and hour(time, "UTC") < session_end)
+
+// ============================================================
+// RSI-SIGNALLOGIK (Mean Reversion)
+// ============================================================
+
+// RSI-Kreuzung aus überverkauftem/überkauftem Bereich
+// Mit Bestätigungs-Bars für weniger Fehlsignale
+bool rsi_was_oversold  = ta.lowest(rsi_val, rsi_confirm_bars) < rsi_oversold
+bool rsi_was_overbought = ta.highest(rsi_val, rsi_confirm_bars) > rsi_overbought
+
+bool rsi_long_signal  = rsi_was_oversold  and rsi_val > rsi_oversold  and rsi_val[1] <= rsi_oversold
+bool rsi_short_signal = rsi_was_overbought and rsi_val < rsi_overbought and rsi_val[1] >= rsi_overbought
+
+// ============================================================
+// KOMBINIERTE EINSTIEGSSIGNALE
+// ============================================================
+
+bool long_entry  = bull_trend and vola_ok and vol_ok and time_ok and rsi_long_signal  and strategy.position_size == 0
+bool short_entry = bear_trend and vola_ok and vol_ok and time_ok and rsi_short_signal and strategy.position_size == 0
+
+// ============================================================
+// POSITIONSMANAGEMENT
+// ============================================================
+
+var float sl_long  = na
+var float tp_long  = na
+var float sl_short = na
+var float tp_short = na
+var float trail_sl = na
+
+// Long Entry
+if long_entry
+    sl_long := close - (atr_val * sl_atr_mult)
+    tp_long := close + (atr_val * tp_atr_mult)
+    strategy.entry("Long", strategy.long)
+
+// Short Entry
+if short_entry
+    sl_short := close + (atr_val * sl_atr_mult)
+    tp_short := close - (atr_val * tp_atr_mult)
+    strategy.entry("Short", strategy.short)
+
+// Exit: Long Position
+if strategy.position_size > 0
+    float entry_p = strategy.position_avg_price
+    float trail_dist = atr_val * trail_atr_mult
+    bool trail_active = use_trailing and (close - entry_p) / entry_p * 100 >= trail_activation_pct
+
+    if trail_active
+        trail_sl := math.max(nz(trail_sl, close - trail_dist), close - trail_dist)
+        strategy.exit("Exit Long", "Long", stop=math.max(sl_long, trail_sl), limit=tp_long)
+    else
+        trail_sl := na
+        strategy.exit("Exit Long", "Long", stop=sl_long, limit=tp_long)
+
+// Exit: Short Position
+if strategy.position_size < 0
+    float entry_p = strategy.position_avg_price
+    float trail_dist = atr_val * trail_atr_mult
+    bool trail_active = use_trailing and (entry_p - close) / entry_p * 100 >= trail_activation_pct
+
+    if trail_active
+        trail_sl := math.min(nz(trail_sl, close + trail_dist), close + trail_dist)
+        strategy.exit("Exit Short", "Short", stop=math.min(sl_short, trail_sl), limit=tp_short)
+    else
+        trail_sl := na
+        strategy.exit("Exit Short", "Short", stop=sl_short, limit=tp_short)
+
+// Reset Trail SL bei geschlossener Position
+if strategy.position_size == 0
+    trail_sl := na
+    sl_long  := na
+    tp_long  := na
+    sl_short := na
+    tp_short := na
+
+// ============================================================
+// VISUALISIERUNG
+// ============================================================
+
+// EMA-Linien
+plot(ema_fast,  color=color.new(color.blue, 0),   linewidth=1, title="EMA Fast")
+plot(ema_slow,  color=color.new(color.orange, 0), linewidth=1, title="EMA Slow")
+plot(ema_trend, color=color.new(color.gray, 30),  linewidth=2, title="EMA Trend")
+
+// SL/TP Visualisierung
+plot(strategy.position_size > 0 ? sl_long  : na, color=color.new(color.red, 0),   style=plot.style_linebr, linewidth=1, title="Long SL")
+plot(strategy.position_size > 0 ? tp_long  : na, color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1, title="Long TP")
+plot(strategy.position_size < 0 ? sl_short : na, color=color.new(color.red, 0),   style=plot.style_linebr, linewidth=1, title="Short SL")
+plot(strategy.position_size < 0 ? tp_short : na, color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1, title="Short TP")
+
+// Trailing Stop
+plot(use_trailing and not na(trail_sl) ? trail_sl : na,
+     color=color.new(color.purple, 0), style=plot.style_linebr, linewidth=1, title="Trailing Stop")
+
+// Hintergrundfarbe für Trendrichtung
+bgcolor(bull_trend ? color.new(color.green, 95) : bear_trend ? color.new(color.red, 95) : na, title="Trend Hintergrund")
+
+// Signal-Marker
+plotshape(long_entry,  title="Long Signal",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), size=size.small)
+plotshape(short_entry, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),   size=size.small)
+
+// ============================================================
+// PIONEX WEBHOOK PAYLOAD
+// ============================================================
+
+string pionex_payload = '{ "data": { "action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_param": "{}", "signal_type": "' + uuid + '", "symbol": "{{ticker}}", "time": "{{timenow}}" }'
+
+// Alert bei neuen Trades (on bar close)
+if strategy.opentrades > strategy.opentrades[1] or strategy.closedtrades > strategy.closedtrades[1]
+    alert(pionex_payload, alert.freq_once_per_bar_close)

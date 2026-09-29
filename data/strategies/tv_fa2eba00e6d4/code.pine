@@ -1,0 +1,370 @@
+//@version=6
+
+strategy("ATM",
+     shorttitle="Liquidity Sweep 15m (Clean)",
+     overlay=true,
+     initial_capital=1000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     pyramiding=0, // Strikt auf 0 gemäß Pflichtregeln
+     calc_on_every_tick=false,
+     margin_long=0,
+     margin_short=0,
+     process_orders_on_close=true,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2)
+
+// ============================================================================
+// PIONEX WEBHOOK INTEGRATION
+// ============================================================================
+uuid = input.string("8a17bcf9-0d9c-4a09-92ae-27adf755d95d", "Pionex Signal Bot UUID", group="Pionex Webhook")
+string pionex_payload = '{ "data": { "action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_param": "{}", "signal_type": "' + uuid + '", "symbol": "{{ticker}}", "time": "{{timenow}}" }'
+
+// ============================================================================
+// INPUTS - OPTIMIERT FÜR 15 MINUTEN
+// ============================================================================
+
+bool use_doji           = input.bool(true, "Doji aktivieren", group="01. Kerzen-Erkennung")
+bool use_rejection      = input.bool(true, "Rejection Candles aktivieren", group="01. Kerzen-Erkennung")
+bool use_momentum       = input.bool(true, "High Momentum aktivieren", group="01. Kerzen-Erkennung")
+bool use_cluster        = input.bool(true, "Low Momentum Cluster aktivieren", group="01. Kerzen-Erkennung")
+
+float doji_max_body_pct   = input.float(8.0, "Doji: Max Body %", minval=0.5, maxval=30.0, step=0.5, group="01. Kerzen-Erkennung")
+float rej_min_wick_ratio  = input.float(2.0, "Rejection: Min Wick/Body", minval=0.25, maxval=8.0, step=0.25, group="01. Kerzen-Erkennung")
+float rej_max_body_pct    = input.float(30.0, "Rejection: Max Body %", minval=5.0, maxval=50.0, step=2.5, group="01. Kerzen-Erkennung")
+
+float mom_min_atr_mult    = input.float(1.1, "Momentum: Min Body/ATR", minval=0.1, maxval=5.0, step=0.1, group="01. Kerzen-Erkennung")
+float mom_max_wick_pct    = input.float(25.0, "Momentum: Max Wick/Body %", minval=5.0, maxval=60.0, step=2.5, group="01. Kerzen-Erkennung")
+int   cluster_min_candles = input.int(3, "Cluster: Min Kerzen", minval=2, maxval=8, group="01. Kerzen-Erkennung")
+float cluster_max_range_pct = input.float(0.6, "Cluster: Max Range %", minval=0.1, maxval=2.0, step=0.1, group="01. Kerzen-Erkennung")
+
+int   zone_max_age      = input.int(150, "Zone: Max Alter (Bars)", minval=50, maxval=500, group="02. Zonen-Einstellungen")
+float zone_merge_atr    = input.float(0.5, "Zone: Merge Abstand (ATR-Mult)", minval=0.1, maxval=3.0, step=0.1, group="02. Zonen-Einstellungen")
+int   zone_max_count    = input.int(15, "Zone: Max aktive Zonen", minval=5, maxval=50, group="02. Zonen-Einstellungen")
+
+// --- TRADING & EXIT EINSTELLUNGEN ---
+bool  use_ema_filter    = input.bool(true, "EMA 99 Trend Filter", group="03. Trading")
+float sl_atr_mult       = input.float(0.8, "SL Buffer unterm Sweep (ATR)", minval=0.1, maxval=5.0, step=0.1, group="03. Trading")
+
+bool  use_trailing_tp   = input.bool(true, "Trailing Take-Profit nutzen", group="03. Trading")
+float tp_act_atr        = input.float(2.5, "Trailing TP Start (ATR)", minval=0.5, step=0.25, group="03. Trading")
+float tp_trail_atr      = input.float(0.8, "Trailing TP Abstand (ATR)", minval=0.1, step=0.1, group="03. Trading")
+
+bool  use_time_exit     = input.bool(true, "Time-Out Exit nutzen", group="03. Trading")
+int   max_bars_in_trade = input.int(16, "Max Kerzen im Trade", minval=1, maxval=100, group="03. Trading")
+
+bool show_zone_labels   = input.bool(true, "Zone-Labels anzeigen", group="04. Visualisierung")
+bool show_entry_markers = input.bool(true, "Entry-Marker anzeigen", group="04. Visualisierung")
+bool show_dashboard     = input.bool(true, "Dashboard anzeigen", group="04. Visualisierung")
+
+// ============================================================================
+// TYPES & ARRAYS
+// ============================================================================
+
+type Zone
+    float top
+    float bottom
+    int   ztype
+    int   start_bar
+    bool  neutralized = false
+    box   box_id
+    label label_id
+
+var Zone[] active_zones = array.new<Zone>(0)
+
+// ============================================================================
+// INDIKATOREN
+// ============================================================================
+float atr = ta.atr(14)
+float ema99 = ta.ema(close, 99)
+float min_zone_width = atr * 0.1
+
+// ============================================================================
+// KERZENEVALUIERUNG
+// ============================================================================
+float doji_range = high - low
+float doji_body = math.abs(close - open)
+float doji_body_pct = doji_range > 0.0 ? (doji_body / doji_range) * 100.0 : 100.0
+bool doji_detected = use_doji and doji_body_pct <= doji_max_body_pct and doji_range > min_zone_width
+
+float doji_zone_top = 0.0
+float doji_zone_bottom = 0.0
+
+if doji_detected
+    if close >= open
+        doji_zone_bottom := low
+        doji_zone_top := math.max(open, low + min_zone_width)
+    else
+        doji_zone_bottom := math.min(close, high - min_zone_width)
+        doji_zone_top := high
+
+float rej_range = high - low
+float rej_body = math.abs(close - open)
+float rej_body_pct = rej_range > 0.0 ? (rej_body / rej_range) * 100.0 : 100.0
+float rej_upper_wick = high - math.max(open, close)
+float rej_lower_wick = math.min(open, close) - low
+float uw_ratio = rej_body > 0.0 ? rej_upper_wick / rej_body : 999.0
+float lw_ratio = rej_body > 0.0 ? rej_lower_wick / rej_body : 999.0
+
+bool is_bull_rej = use_rejection and lw_ratio >= rej_min_wick_ratio and rej_body_pct <= rej_max_body_pct and rej_lower_wick > rej_upper_wick * 0.5
+bool is_bear_rej = use_rejection and uw_ratio >= rej_min_wick_ratio and rej_body_pct <= rej_max_body_pct and rej_upper_wick > rej_lower_wick * 0.5
+
+float rej_zone_top = 0.0
+float rej_zone_bottom = 0.0
+
+if is_bull_rej
+    rej_zone_bottom := low
+    rej_zone_top := low + math.max(rej_lower_wick * 0.5, min_zone_width)
+else if is_bear_rej
+    rej_zone_bottom := high - math.max(rej_upper_wick * 0.5, min_zone_width)
+    rej_zone_top := high
+
+float mom_body = math.abs(close - open)
+float body_atr_ratio = atr > 0.0 ? mom_body / atr : 0.0
+float mom_upper_wick = high - math.max(open, close)
+float mom_lower_wick = math.min(open, close) - low
+bool small_wicks = mom_body > 0.0 and (mom_upper_wick / mom_body <= mom_max_wick_pct / 100.0) and (mom_lower_wick / mom_body <= mom_max_wick_pct / 100.0)
+bool mom_detected = use_momentum and body_atr_ratio >= mom_min_atr_mult and small_wicks
+
+float mom_zone_top = 0.0
+float mom_zone_bottom = 0.0
+
+if mom_detected
+    if close > open
+        mom_zone_bottom := low
+        mom_zone_top := math.max(open, low + min_zone_width)
+    else
+        mom_zone_bottom := math.min(close, high - min_zone_width)
+        mom_zone_top := high
+
+var float cluster_high_val = 0.0
+var float cluster_low_val = 0.0
+var int   cluster_count_val = 0
+var bool  in_cluster = false
+var bool  cluster_just_ended = false
+
+float body_pct_of_range = (high - low) > 0.0 ? math.abs(close - open) / (high - low) * 100.0 : 100.0
+bool is_small_body = body_pct_of_range <= 50.0 and (high - low) <= atr * 0.8
+
+if is_small_body
+    if not in_cluster
+        cluster_high_val := high
+        cluster_low_val := low
+        cluster_count_val := 1
+        in_cluster := true
+    else
+        cluster_high_val := math.max(cluster_high_val, high)
+        cluster_low_val := math.min(cluster_low_val, low)
+        cluster_count_val += 1
+        cluster_just_ended := false
+else
+    if in_cluster and cluster_count_val >= cluster_min_candles
+        cluster_just_ended := true
+    else
+        cluster_just_ended := false
+    in_cluster := false
+
+bool cluster_detected = cluster_just_ended
+float cluster_zt = cluster_high_val
+float cluster_zb = cluster_low_val
+float cluster_range_pct = (cluster_high_val + cluster_low_val) > 0.0 ? (cluster_high_val - cluster_low_val) / ((cluster_high_val + cluster_low_val) / 2.0) * 100.0 : 0.0
+
+// ============================================================================
+// ZONEN-MANAGEMENT
+// ============================================================================
+
+add_zone(float zt, float zb, int ztype, string zsrc) =>
+    if zt > zb and math.abs(zt - zb) > min_zone_width
+        bool merged = false
+        for active_zone in active_zones
+            if active_zone.ztype != ztype or active_zone.neutralized
+                continue
+            float mid_existing = (active_zone.top + active_zone.bottom) / 2.0
+            float mid_new = (zt + zb) / 2.0
+            if math.abs(mid_existing - mid_new) <= zone_merge_atr * atr
+                active_zone.top := math.max(active_zone.top, zt)
+                active_zone.bottom := math.min(active_zone.bottom, zb)
+                box.set_top(active_zone.box_id, active_zone.top)
+                box.set_bottom(active_zone.box_id, active_zone.bottom)
+                merged := true
+                break
+
+        if not merged and active_zones.size() < zone_max_count
+            color bcolor = ztype == 1 ? color.new(#00BCD4, 80) : color.new(#FF5722, 80)
+            box new_box = box.new(bar_index, zt, bar_index, zb, border_color=na, bgcolor=bcolor)
+            label new_label = na
+            if show_zone_labels
+                new_label := label.new(bar_index, (zt + zb) / 2.0, (ztype == 1 ? "D\n" : "S\n") + zsrc, color=color.new(bcolor, 30), textcolor=color.white, size=size.tiny, style=label.style_label_left)
+            array.push(active_zones, Zone.new(zt, zb, ztype, bar_index, false, new_box, new_label))
+
+if barstate.isconfirmed
+    if doji_detected
+        add_zone(doji_zone_top, doji_zone_bottom, close >= open ? 1 : 2, "Doji")
+    if is_bull_rej or is_bear_rej
+        add_zone(rej_zone_top, rej_zone_bottom, is_bull_rej ? 1 : 2, "Rej")
+    if mom_detected
+        add_zone(mom_zone_top, mom_zone_bottom, close > open ? 1 : 2, "Mom")
+    if cluster_detected and cluster_range_pct <= cluster_max_range_pct
+        add_zone(cluster_zt, cluster_zb, 1, "Clus")
+        add_zone(cluster_zt, cluster_zb, 2, "Clus")
+
+    int i = 0
+    while i < active_zones.size()
+        Zone z = active_zones.get(i)
+        bool remove = false
+        
+        if bar_index - z.start_bar > zone_max_age
+            remove := true
+        
+        if not z.neutralized
+            // Neutralisierung bei Schlusskurs durch die Zone
+            if z.ztype == 1 and close < z.bottom
+                z.neutralized := true
+                box.set_bgcolor(z.box_id, color.new(color.gray, 90))
+            if z.ztype == 2 and close > z.top
+                z.neutralized := true
+                box.set_bgcolor(z.box_id, color.new(color.gray, 90))
+        
+        if remove
+            box.delete(z.box_id)
+            if not na(z.label_id)
+                label.delete(z.label_id)
+            active_zones.remove(i)
+        else
+            box.set_right(z.box_id, bar_index)
+            if not na(z.label_id)
+                label.set_x(z.label_id, bar_index)
+            i += 1
+
+// ============================================================================
+// LIQUIDITY SWEEP SIGNALS (CLEAN)
+// ============================================================================
+
+bool sweep_demand = false
+bool sweep_supply = false
+float active_sweep_sl_l = na
+float active_sweep_sl_s = na
+
+for z in active_zones
+    if z.neutralized
+        continue
+    
+    if z.ztype == 1
+        // Sweep Long: Wick drunter, Body drüber/drin
+        if low < z.bottom and close >= z.bottom
+            sweep_demand := true
+            active_sweep_sl_l := na(active_sweep_sl_l) ? low : math.min(active_sweep_sl_l, low)
+            
+    else if z.ztype == 2
+        // Sweep Short: Wick drüber, Body drunter/drin
+        if high > z.top and close <= z.top
+            sweep_supply := true
+            active_sweep_sl_s := na(active_sweep_sl_s) ? high : math.max(active_sweep_sl_s, high)
+
+bool ema_long_ok  = use_ema_filter ? (close > ema99) : true
+bool ema_short_ok = use_ema_filter ? (close < ema99) : true
+
+// Signal Auslösung (pyramiding = 0 strict)
+bool final_long = sweep_demand and ema_long_ok and strategy.position_size == 0
+bool final_short = sweep_supply and ema_short_ok and strategy.position_size == 0
+
+bool entry_long = final_long and not final_long[1]
+bool entry_short = final_short and not final_short[1]
+
+// ============================================================================
+// DIREKTE ORDER AUSFÜHRUNG & TRAILING TP EXIT
+// ============================================================================
+
+var float saved_sl_l = na
+var float saved_sl_s = na
+var float saved_atr = na
+var int trade_entry_bar = na
+
+// State Reset & Update
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    saved_atr := atr
+    trade_entry_bar := bar_index
+
+if strategy.position_size == 0
+    saved_sl_l := na
+    saved_sl_s := na
+    saved_atr := na
+    trade_entry_bar := na
+
+// Entry Ausführung
+if entry_long
+    saved_sl_l := active_sweep_sl_l - (atr * sl_atr_mult)
+    strategy.entry("Long", strategy.long, comment="Sweep L", alert_message=pionex_payload)
+    
+if entry_short
+    saved_sl_s := active_sweep_sl_s + (atr * sl_atr_mult)
+    strategy.entry("Short", strategy.short, comment="Sweep S", alert_message=pionex_payload)
+
+// Exit Ausführung (Permanent aktiv in Position)
+if strategy.position_size > 0
+    float trail_start_l = strategy.position_avg_price + (saved_atr * tp_act_atr)
+    int trail_ticks_l = int(math.max(1, math.round((saved_atr * tp_trail_atr) / syminfo.mintick)))
+    float tp_limit_l = strategy.position_avg_price + (saved_atr * tp_act_atr)
+    
+    if use_trailing_tp
+        strategy.exit("Exit_L", "Long", stop=saved_sl_l, trail_price=trail_start_l, trail_offset=trail_ticks_l, comment_loss="SL", comment_profit="Trail TP", alert_message=pionex_payload)
+    else
+        strategy.exit("Exit_L", "Long", stop=saved_sl_l, limit=tp_limit_l, comment_loss="SL", comment_profit="TP", alert_message=pionex_payload)
+
+if strategy.position_size < 0
+    float trail_start_s = strategy.position_avg_price - (saved_atr * tp_act_atr)
+    int trail_ticks_s = int(math.max(1, math.round((saved_atr * tp_trail_atr) / syminfo.mintick)))
+    float tp_limit_s = strategy.position_avg_price - (saved_atr * tp_act_atr)
+
+    if use_trailing_tp
+        strategy.exit("Exit_S", "Short", stop=saved_sl_s, trail_price=trail_start_s, trail_offset=trail_ticks_s, comment_loss="SL", comment_profit="Trail TP", alert_message=pionex_payload)
+    else
+        strategy.exit("Exit_S", "Short", stop=saved_sl_s, limit=tp_limit_s, comment_loss="SL", comment_profit="TP", alert_message=pionex_payload)
+
+// Time-Out Exit
+int bars_in_pos = na(trade_entry_bar) ? 0 : (bar_index - trade_entry_bar)
+if use_time_exit and strategy.position_size != 0 and bars_in_pos >= max_bars_in_trade
+    strategy.close_all(comment="Time-Out", alert_message=pionex_payload)
+
+// ============================================================================
+// VISUALISIERUNG
+// ============================================================================
+
+plot(use_ema_filter ? ema99 : na, "EMA 99", color=color.new(color.orange, 0), linewidth=2)
+
+plotshape(show_entry_markers and entry_long, style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 0), size=size.normal, title="Sweep Long", text="SW", textcolor=color.white)
+plotshape(show_entry_markers and entry_short, style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.normal, title="Sweep Short", text="SW", textcolor=color.white)
+
+// ============================================================================
+// DASHBOARD
+// ============================================================================
+
+var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 80), border_color=color.gray, border_width=1)
+
+if show_dashboard and barstate.isconfirmed and bar_index % 5 == 0
+    table.cell(dash, 0, 0, "Net Profit", text_color=color.white, text_size=size.small)
+    color netprofit_color = strategy.netprofit >= 0.0 ? color.green : color.red
+    table.cell(dash, 1, 0, str.tostring(strategy.netprofit, "#.##"), text_color=netprofit_color, text_size=size.small)
+
+    float total_trades_w = strategy.wintrades + strategy.losstrades
+    float win_rate = total_trades_w > 0.0 ? (strategy.wintrades / total_trades_w) * 100.0 : 0.0
+    table.cell(dash, 0, 1, "Win Rate", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(win_rate, "#.##") + "%", text_color=color.gray, text_size=size.small)
+
+    float grossloss_pf = strategy.grossloss
+    float pf = grossloss_pf > 0.0 ? strategy.grossprofit / grossloss_pf : 0.0
+    table.cell(dash, 0, 2, "Profit Factor", text_color=color.white, text_size=size.small)
+    color pf_color = pf >= 1.5 ? color.green : color.gray
+    table.cell(dash, 1, 2, str.tostring(pf, "#.##"), text_color=pf_color, text_size=size.small)
+
+    table.cell(dash, 0, 3, "ATR", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(atr, "#.##"), text_color=color.gray, text_size=size.small)
+
+    string pos_text = strategy.position_size > 0 ? "LONG (" + str.tostring(bars_in_pos) + "m)" : strategy.position_size < 0 ? "SHORT (" + str.tostring(bars_in_pos) + "m)" : "FLAT"
+    color pos_color = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    table.cell(dash, 0, 4, "Position", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, pos_text, text_color=pos_color, text_size=size.small)
+
+    table.cell(dash, 0, 5, "Total Zones", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, str.tostring(active_zones.size()), text_color=color.gray, text_size=size.small)

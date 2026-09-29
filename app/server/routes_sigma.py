@@ -30,6 +30,7 @@ from app.execution.SafetyGuard import get_safety_guard
 from app.execution.VirtualBotEngine import get_virtual_bot_engine
 from app.execution.deadman_switch_daemon import get_deadman
 from app.optimizer.StrategyAllocator import get_allocator
+from app.optimizer.academy_progress import persist_academy_snapshot
 from app.optimizer.reward_shaping import get_reward_engine
 from app.quant.onnx_kelly import get_quant_engine
 from app.quant.regime_detector import detect_regime
@@ -913,6 +914,10 @@ async def academy_ingest(body: TradeResultIn):
     reward = get_reward_engine().score_trade(
         body.strategy_id, pnl_pct=body.pnl_pct, mfe_pct=body.mfe_pct, mae_pct=body.mae_pct,
         duration_bars=body.duration_bars, fee_usd=body.fee_usd, notional_usd=body.notional_usd)
+    try:
+        persist_academy_snapshot(training_rows=alloc.export_training_dataset())
+    except Exception as exc:
+        logger.warning("academy training snapshot failed: %s", exc)
     return {"profile": profile, "reward": reward.to_dict()}
 
 

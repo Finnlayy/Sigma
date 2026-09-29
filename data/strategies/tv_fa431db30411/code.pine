@@ -1,0 +1,199 @@
+//@version=6
+strategy(
+  title       = "Unified 4-in-1 Strategy",
+  overlay     = true,
+  initial_capital = 10000,
+  commission_type = strategy.commission.percent,
+  commission_value = 0.05,
+  pyramiding  = 0,
+  default_qty_type  = strategy.percent_of_equity,
+  default_qty_value = 100
+)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// — EMA (V1)
+emaFast     = input.int(9,   "EMA Fast",       group="V1 — EMA Trend")
+emaSlow     = input.int(21,  "EMA Slow",       group="V1 — EMA Trend")
+
+// — RSI (V2)
+rsiLen      = input.int(14,  "RSI Length",     group="V2 — RSI Momentum")
+rsiOB       = input.int(55,  "RSI Overbought", group="V2 — RSI Momentum")
+rsiOS       = input.int(45,  "RSI Oversold",   group="V2 — RSI Momentum")
+
+// — Bollinger Bands (V3)
+bbLen       = input.int(20,  "BB Length",      group="V3 — Bollinger Mean Reversion")
+bbMult      = input.float(2.0,"BB StdDev",     group="V3 — Bollinger Mean Reversion")
+
+// — Donchian (V4)
+donLen      = input.int(55,  "Donchian Length",group="V4 — Donchian Breakout")
+
+// — Vote System
+minVotes    = input.int(3,   "Min Votes (1-4)",group="Vote System", minval=1, maxval=4)
+
+// — Risk
+useAtr      = input.bool(true,  "Use ATR Stop Loss", group="Risk")
+atrLen      = input.int(14,     "ATR Length",        group="Risk")
+atrMult     = input.float(1.5,  "ATR Multiplier",    group="Risk")
+fixedSL     = input.float(0.3,  "Fixed SL %",        group="Risk")
+tp1Pct      = input.float(1.5,  "TP1 %",             group="Risk")
+tp2Pct      = input.float(2.0,  "TP2 %",             group="Risk")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INDICATORS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// — EMA
+emaF        = ta.ema(close, emaFast)
+emaS        = ta.ema(close, emaSlow)
+
+// — RSI
+rsi         = ta.rsi(close, rsiLen)
+
+// — Bollinger Bands
+[bbMiddle, bbUpper, bbLower] = ta.bb(close, bbLen, bbMult)
+
+// — Donchian Channel
+donHigh     = ta.highest(high, donLen)
+donLow      = ta.lowest(low,  donLen)
+
+// — ATR
+atrVal      = ta.atr(atrLen)
+
+// — Regime Detection (Trending vs Ranging)
+emaDiff     = math.abs(emaF - emaS)
+emaDiffAvg  = ta.sma(emaDiff, 20)
+isTrending  = emaDiff > emaDiffAvg
+isRanging   = not isTrending
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VOTE SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// V1 — EMA Trend
+v1Long      = emaF > emaS
+v1Short     = emaF < emaS
+
+// V2 — RSI Momentum
+v2Long      = rsi > rsiOB
+v2Short     = rsi < rsiOS
+
+// V3 — Bollinger Mean Reversion (ranging markets only)
+v3Long      = isRanging and (close <= bbLower)
+v3Short     = isRanging and (close >= bbUpper)
+
+// V4 — Donchian Breakout (trending markets only)
+v4Long      = isTrending and (close >= donHigh)
+v4Short     = isTrending and (close <= donLow)
+
+// — Tally votes
+longVotes   = (v1Long ? 1 : 0) + (v2Long ? 1 : 0) + (v3Long ? 1 : 0) + (v4Long ? 1 : 0)
+shortVotes  = (v1Short ? 1 : 0) + (v2Short ? 1 : 0) + (v3Short ? 1 : 0) + (v4Short ? 1 : 0)
+
+// — Entry signals
+enterLong   = longVotes  >= minVotes and strategy.position_size == 0
+enterShort  = shortVotes >= minVotes and strategy.position_size == 0
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STOP LOSS & TAKE PROFIT LEVELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+slDist      = useAtr ? atrVal * atrMult : close * (fixedSL / 100)
+
+// Long levels
+slLong      = strategy.position_avg_price - slDist
+tp1Long     = strategy.position_avg_price * (1 + tp1Pct / 100)
+tp2Long     = strategy.position_avg_price * (1 + tp2Pct / 100)
+
+// Short levels
+slShort     = strategy.position_avg_price + slDist
+tp1Short    = strategy.position_avg_price * (1 - tp1Pct / 100)
+tp2Short    = strategy.position_avg_price * (1 - tp2Pct / 100)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WEBHOOK MESSAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var string WEBHOOK_MSG = '{"data":{"action":"{{strategy.order.action}}","contracts":"{{strategy.order.contracts}}","position_size":"{{strategy.position_size}}"},"price":"{{close}}","signal_param":"{}","signal_type":"26c9d0bc-3329-418c-9deb-b48b424b2fcb","symbol":"{{ticker}}","time":"{{timenow}}"}'
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRATEGY ENTRIES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+if enterLong
+    strategy.entry("Long", strategy.long, alert_message=WEBHOOK_MSG)
+
+if enterShort
+    strategy.entry("Short", strategy.short, alert_message=WEBHOOK_MSG)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRATEGY EXITS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Long Exits
+strategy.exit("TP1 Long", from_entry="Long", qty_percent=80,
+  limit=tp1Long, alert_message=WEBHOOK_MSG)
+strategy.exit("TP2 Long", from_entry="Long", qty_percent=20,
+  limit=tp2Long, alert_message=WEBHOOK_MSG)
+strategy.exit("SL Long",  from_entry="Long",
+  stop=slLong,  alert_message=WEBHOOK_MSG)
+
+// Short Exits
+strategy.exit("TP1 Short", from_entry="Short", qty_percent=80,
+  limit=tp1Short, alert_message=WEBHOOK_MSG)
+strategy.exit("TP2 Short", from_entry="Short", qty_percent=20,
+  limit=tp2Short, alert_message=WEBHOOK_MSG)
+strategy.exit("SL Short",  from_entry="Short",
+  stop=slShort,  alert_message=WEBHOOK_MSG)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLOTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+plot(emaF,     "EMA Fast", color=color.new(color.blue,  0), linewidth=1)
+plot(emaS,     "EMA Slow", color=color.new(color.orange,0), linewidth=1)
+plot(bbUpper,  "BB Upper", color=color.new(color.gray,  50))
+plot(bbMiddle, "BB Mid",   color=color.new(color.gray,  70))
+plot(bbLower,  "BB Lower", color=color.new(color.gray,  50))
+plot(donHigh,  "Don High", color=color.new(color.green, 50))
+plot(donLow,   "Don Low",  color=color.new(color.red,   50))
+
+// Entry markers
+plotshape(enterLong,  title="Long",  style=shape.triangleup,
+  location=location.belowbar, color=color.green, size=size.small)
+plotshape(enterShort, title="Short", style=shape.triangledown,
+  location=location.abovebar, color=color.red,   size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INFO TABLE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var table infoTable = table.new(position.top_right, 2, 6,
+  bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    // Header
+    table.cell(infoTable, 0, 0, "Indicator", text_color=color.white,  text_size=size.small, bgcolor=color.new(color.blue, 60))
+    table.cell(infoTable, 1, 0, "Value",     text_color=color.white,  text_size=size.small, bgcolor=color.new(color.blue, 60))
+    // Regime
+    table.cell(infoTable, 0, 1, "Regime",    text_color=color.white,  text_size=size.small)
+    table.cell(infoTable, 1, 1, isTrending ? "Trending" : "Ranging",
+      text_color=isTrending ? color.green : color.yellow, text_size=size.small)
+    // RSI
+    table.cell(infoTable, 0, 2, "RSI",       text_color=color.white,  text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(math.round(rsi, 2)),
+      text_color=color.white, text_size=size.small)
+    // ATR
+    table.cell(infoTable, 0, 3, "ATR",       text_color=color.white,  text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(math.round(atrVal, 4)),
+      text_color=color.white, text_size=size.small)
+    // Long Votes
+    table.cell(infoTable, 0, 4, "Long Votes", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(longVotes) + " / 4",
+      text_color=longVotes >= minVotes ? color.green : color.red, text_size=size.small)
+    // Short Votes
+    table.cell(infoTable, 0, 5, "Short Votes", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 5, str.tostring(shortVotes) + " / 4",
+      text_color=shortVotes >= minVotes ? color.red : color.gray, text_size=size.small)

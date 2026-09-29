@@ -1,0 +1,81 @@
+//@version=5
+strategy("Long/Short Template mit Sharpe & Sortino", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=1)
+
+// === Inputs ===
+enableLongs = input.bool(true, "Enable Longs")
+enableShorts = input.bool(true, "Enable Shorts")
+riskPercent = input.float(1.0, "Risk per Trade (%)", step=0.1)
+atrLen = input.int(14, "ATR Length")
+atrMult = input.float(1.5, "ATR Stop Multiplier", step=0.1)
+takeProfitR = input.float(2.0, "Take Profit (R multiple)", step=0.1)
+barsPerYear = input.int(252, "Bars per Year for annualization", minval=1)
+
+// === Example signal (replace with your logic) ===
+fast = ta.sma(close, 9)
+slow = ta.sma(close, 21)
+longSignal  = ta.crossover(fast, slow)
+shortSignal = ta.crossunder(fast, slow)
+
+// === Position sizing (uses strategy.percent_of_equity default_qty_value) ===
+// You can adjust default_qty_value at top or compute size manually if needed.
+
+// === Stop and TP calculation using ATR ===
+atr = ta.atr(atrLen)
+longStop  = close - atr * atrMult
+shortStop = close + atr * atrMult
+longTP  = close + (close - longStop) * takeProfitR
+shortTP = close - (shortStop - close) * takeProfitR
+
+// === Entries and Exits ===
+if (enableLongs and longSignal)
+    strategy.entry("Long", strategy.long)
+
+if (enableShorts and shortSignal)
+    strategy.entry("Short", strategy.short)
+
+// Attach exits with stop and profit for both directions
+strategy.exit("Exit Long", from_entry="Long", stop=longStop, limit=longTP)
+strategy.exit("Exit Short", from_entry="Short", stop=shortStop, limit=shortTP)
+
+// === Performance metrics calculation (bar returns from equity) ===
+// Use equity series to compute per-bar returns
+eq = strategy.equity
+ret = na(eq[1]) ? 0.0 : math.log(eq / eq[1])  // log returns, 0 on first valid bar
+
+// Rolling window for stats
+statLen = input.int(100, "Return window length for stats", minval=10)
+meanRet = ta.sma(ret, statLen)
+stdRet  = ta.stdev(ret, statLen)
+
+// Sharpe (annualized)
+sharpe = stdRet == 0 ? na : math.sqrt(barsPerYear) * (meanRet / stdRet)
+
+// Sortino (annualized)
+// target return (risk-free) set to 0 by default; you can change if desired
+target = 0.0
+downside = ret < target ? (ret - target) : 0.0
+downsideDev = math.sqrt(ta.sma(math.pow(downside, 2), statLen))
+sortino = downsideDev == 0 ? na : math.sqrt(barsPerYear) * (meanRet / downsideDev)
+
+// === Plots ===
+plotshape(longSignal, title="Long Signal", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.tiny)
+plotshape(shortSignal, title="Short Signal", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.tiny)
+
+plotchar(sharpe, title="Sharpe (annualized)", location=location.top, char='S', color=color.blue, size=size.tiny)
+plotchar(sortino, title="Sortino (annualized)", location=location.top, char='T', color=color.orange, size=size.tiny)
+
+// Separate pane plots for readability
+plot(sharpe, title="Sharpe", color=color.blue, linewidth=2)
+plot(sortino, title="Sortino", color=color.orange, linewidth=2)
+
+// === Labels for quick readout ===
+var label perfLabel = label.new(x=bar_index, y=na, text="", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=color.new(color.black, 80))
+if barstate.islast
+    label.set_xy(perfLabel, bar_index, high)
+    label.set_text(perfLabel, "Sharpe: " + (sharpe==na ? "n/a" : str.tostring(sharpe, format.percent)) + "\nSortino: " + (sortino==na ? "n/a" : str.tostring(sortino, format.percent)))
+
+// === Notes ===
+// - Ersetze die Beispiel-Signale (SMA crossover) durch deine eigene Logik.
+// - Passe barsPerYear an dein Chart-Timeframe an (e.g., 252 for daily, 252*6.5 for hourly intraday sessions, etc.).
+// - Wenn du exakte %-Risikosteuerung pro Trade brauchst, kann man die Positionsgröße manuell berechnen und strategy.order mit qty verwenden.
+// - Sortino/Sharpe hier basieren auf log-returns des strategy.equity; für andere Definitionen (z.B. simple returns) passe die Formeln an.

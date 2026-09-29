@@ -1,0 +1,1493 @@
+//@version=6
+// ══════════════════════════════════════════════════════════
+// LIQUIDITY TRAIL MATRIX [WillyAlgoTrader]
+// ══════════════════════════════════════════════════════════
+// Author:  Willy | WillyAlgoTrader
+// Version: 1.3.0
+
+indicator(
+     title            = "Liquidity Trail Matrix [WillyAlgoTrader]",
+     shorttitle       = "LTM [WillyAlgoTrader]",
+     overlay          = true,
+     max_lines_count  = 500,
+     max_labels_count = 500,
+     max_boxes_count  = 500,
+     max_bars_back    = 5000)
+
+// ══════════════════════════════════════════════════════════
+// 2. CONSTANTS
+// ══════════════════════════════════════════════════════════
+GRP_MAIN   = "⚙️ Trend Engine"
+GRP_SIG    = "🎯 Signals"
+GRP_PROF   = "📦 Volume Profile"
+GRP_VISUAL = "🎨 Visual Settings"
+GRP_RISK   = "🛡️ Risk Management"
+GRP_DASH   = "📊 Dashboard"
+GRP_ALERT  = "🔔 Alerts"
+GRP_COLORS = "🎨 Colors"
+GRP_ADV    = "🔧 Advanced"
+
+INDICATOR_VERSION = "v1.3.0"
+LINE_FORWARD_BARS = 20
+LINE_UPDATE_BARS  = 5
+LABEL_OFFSET_BARS = 1
+BE_DIM_TRANSP     = 70
+FORM_LEN          = 10    // recent-form strip length
+
+// ══════════════════════════════════════════════════════════
+// 3. INPUTS
+// ══════════════════════════════════════════════════════════
+
+// ── Trend Engine ────────────────────────────────────────────
+bandPresetInput = input.string("Balanced", "Band Width Preset",
+     options = ["Scalping", "Balanced", "Deep Trend", "Custom"],
+     group   = GRP_MAIN,
+     tooltip = "Quick presets for band geometry:\n" +
+               "• Scalping: tight bands (2.5×ATR base), fast flips, 1-15M charts\n" +
+               "• Balanced: 4.0×ATR base, works on most timeframes\n" +
+               "• Deep Trend: wide bands (6.0×ATR base), position trading, D-W\n" +
+               "• Custom: use manual Base Multiplier / Band Spacing below")
+
+baseMultInput = input.float(5.0, "Base Multiplier (×ATR)", minval = 0.5, maxval = 15.0, step = 0.1,
+     group   = GRP_MAIN,
+     tooltip = "Distance of the innermost band from price, in ATR units.\n" +
+               "Only active when Preset = Custom.\n" +
+               "• Lower = tighter trail, earlier flips, more noise\n" +
+               "• Higher = wider trail, later flips, fewer whipsaws\n" +
+               "• Recommended: 2.5-6.0")
+
+bandStepInput = input.float(0.25, "Band Spacing (proportional step)", minval = 0.05, maxval = 1.0, step = 0.05,
+     group   = GRP_MAIN,
+     tooltip = "Proportional spacing between bands: band K = base × (1 + K×step).\n" +
+               "Unlike fixed +1/+2/+3 offsets, spacing scales with the base multiplier\n" +
+               "so band geometry stays consistent at any width.\n" +
+               "Only active when Preset = Custom. Recommended: 0.2-0.35")
+
+atrLenInput = input.int(13, "ATR Length", minval = 5, maxval = 100,
+     group   = GRP_MAIN,
+     tooltip = "Lookback period for the ATR that drives band width.\n" +
+               "• 14 = standard\n" +
+               "• Lower = more reactive bands\n" +
+               "• Higher = smoother, more stable bands")
+
+srcInput = input.source(close, "Source",
+     group   = GRP_MAIN,
+     tooltip = "Price source used for trailing and flip detection.\n" +
+               "Close (default) is the most robust; HL2 reacts slightly faster")
+
+flipBandStr = input.string("Balanced (Band 3)", "Flip Band",
+     options = ["Fast (Band 2)", "Balanced (Band 3)", "Deep (Band 4)"],
+     group   = GRP_MAIN,
+     tooltip = "Which band a close must breach to flip the trend.\n" +
+               "• Fast (Band 2): earliest flips, more signals, more noise\n" +
+               "• Balanced (Band 3): recommended default\n" +
+               "• Deep (Band 4): only major reversals flip the trend")
+
+htfInput = input.timeframe("", "Higher Timeframe Bias",
+     group   = GRP_MAIN,
+     tooltip = "HTF used for bias scoring (EMA-50 direction on that timeframe).\n" +
+               "Leave empty to use the chart timeframe.\n" +
+               "Example: set 1H while trading 15M.\n" +
+               "Non-repainting: uses closed HTF bars only")
+
+// ── Signals ─────────────────────────────────────────────────
+minScoreInput = input.int(80, "Min Retest Score (0-100)", minval = 0, maxval = 100,
+     group   = GRP_SIG,
+     tooltip = "Quality threshold for retest signals.\n" +
+               "Score components: pullback depth (25), reclaim candle (20),\n" +
+               "volume (20), HTF bias (20), trend age (15).\n" +
+               "• 40-50 = more signals\n" +
+               "• 55 = balanced (recommended)\n" +
+               "• 70+ = only premium setups")
+
+retestWindowInput = input.int(8, "Retest Window (bars)", minval = 1, maxval = 30,
+     group   = GRP_SIG,
+     tooltip = "After price touches a band, how many bars the reclaim\n" +
+               "(close back above/below Band 1) remains valid.\n" +
+               "Recommended: 5-10")
+
+cooldownInput = input.int(5, "Signal Cooldown (bars)", minval = 0, maxval = 100,
+     group   = GRP_SIG,
+     tooltip = "Minimum bars between consecutive retest signals.\n" +
+               "Prevents signal clusters during choppy pullbacks.\n" +
+               "Shared across directions by design (anti-whipsaw).\n" +
+               "Recommended: 3-10")
+
+// ── Volume Profile ──────────────────────────────────────────
+showProfileInput = input.bool(true, "Show Segment Volume Profile", group = GRP_PROF,
+     tooltip = "Volume profile of the CURRENT trend segment only.\n" +
+               "Bar volume is distributed proportionally across every price bin\n" +
+               "the bar's high-low range overlaps — not dumped into one close-price\n" +
+               "bin. On zero-volume symbols (forex) a range-weighted proxy is used")
+
+profRowsInput = input.int(30, "Profile Rows", minval = 10, maxval = 100, group = GRP_PROF,
+     tooltip = "Vertical resolution of the profile.\n" +
+               "• 20-30 = clean structure (recommended)\n" +
+               "• 50+ = fine detail, needs longer segments")
+
+profWidthInput = input.int(34, "Profile Width (bars)", minval = 10, maxval = 100, group = GRP_PROF,
+     tooltip = "Maximum horizontal width of the histogram, in chart bars")
+
+maxProfBarsInput = input.int(500, "Max Profile Bars", minval = 50, maxval = 2000, group = GRP_PROF,
+     tooltip = "Hard cap on how many bars of the segment are accumulated.\n" +
+               "Keeps performance bounded on very old trends.\n" +
+               "Recommended: 300-800")
+
+showPocInput = input.bool(true, "Show POC", group = GRP_PROF,
+     tooltip = "Point of Control — the price bin with the highest traded volume\n" +
+               "in the current trend segment. Strongest magnet/defense level")
+
+showVaInput = input.bool(true, "Show Value Area (70%)", group = GRP_PROF,
+     tooltip = "Value Area — the price range containing 70% of segment volume,\n" +
+               "expanded symmetrically from POC. Edges (VAH/VAL) act as S/R")
+
+profLabelSizeInput = input.string("Small", "Profile Label Size",
+     options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = GRP_PROF,
+     tooltip = "Font size for POC and LVN labels on the profile")
+
+showNodesInput = input.bool(true, "Show HVN / LVN Levels", group = GRP_PROF,
+     tooltip = "HVN (High Volume Nodes) — local volume peaks: acceptance zones,\n" +
+               "price tends to stall there.\n" +
+               "LVN (Low Volume Nodes) — volume gaps inside the Value Area:\n" +
+               "price tends to travel through them quickly")
+
+// ── Visual ──────────────────────────────────────────────────
+themeInput = input.string("Auto", "Theme",
+     options = ["Auto", "Dark", "Light"],
+     group   = GRP_VISUAL,
+     tooltip = "Chart color theme.\n" +
+               "• Auto: detects from chart background\n" +
+               "• Dark: optimized for dark backgrounds\n" +
+               "• Light: optimized for light/white backgrounds")
+
+showBandsInput = input.bool(true, "Show Trail Bands", group = GRP_VISUAL,
+     tooltip = "Draw the four trailing band lines")
+
+showHeatInput = input.bool(true, "Show Band Heatmap Fill", group = GRP_VISUAL,
+     tooltip = "Gradient fill between bands (liquidity pressure zone)")
+
+showTrendPnlInput = input.bool(false, "Show Trend P&L Tracker", group = GRP_VISUAL,
+     tooltip = "Floating label that follows price in REAL TIME showing the\n" +
+               "directional % move since the current trend started (flip bar\n" +
+               "close), plus a dotted baseline at the trend start price.\n" +
+               "Directional: a bear trend with falling price shows positive %.\n" +
+               "Label turns red when the trend is under water")
+
+showSignalsInput = input.bool(true, "Show Retest Signals", group = GRP_VISUAL,
+     tooltip = "Diamond labels with quality score at retest entries")
+
+showFlipLabelsInput = input.bool(true, "Show Flip Labels", group = GRP_VISUAL,
+     tooltip = "▲/▼ labels at confirmed trend flips")
+
+signalFontSizeInput = input.string("Small", "Signal Label Size",
+     options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = GRP_VISUAL,
+     tooltip = "Font size for retest diamonds, flip labels and\n" +
+               "trade entry markers (Long/Short)")
+
+labelFontSizeInput = input.string("Small", "SL/TP Label Font Size",
+     options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = GRP_VISUAL,
+     tooltip = "Font size for Entry/SL/TP labels")
+
+showWatermarkInput = input.bool(true, "Show Watermark", group = GRP_VISUAL,
+     tooltip = "Display 'WillyAlgoTrader' watermark on chart")
+
+// ── Risk Management ─────────────────────────────────────────
+riskPresetInput = input.string("Balanced", "Risk Preset",
+     options = ["Conservative", "Balanced", "Aggressive", "Scalping", "Custom"],
+     group   = GRP_RISK,
+     tooltip = "Quick risk presets:\n" +
+               "• Conservative: SL 2.5×ATR, TP 1R/2R/4R\n" +
+               "• Balanced: SL 1.5×ATR, TP 1R/2R/3R\n" +
+               "• Aggressive: SL 1.0×ATR, TP 1.5R/2.5R/4R\n" +
+               "• Scalping: SL 0.8×ATR, TP 0.8R/1.5R/2R\n" +
+               "• Custom: use manual multipliers below\n"  +
+               "Note: the SL part applies in ATR mode; Wick-Anchored mode\n" +
+               "places SL from the signal bar wick instead")
+
+slModeInput = input.string("Wick-Anchored", "SL Mode",
+     options = ["Wick-Anchored", "ATR"],
+     group   = GRP_RISK,
+     tooltip = "How the stop-loss is placed at entry:\n" +
+               "• Wick-Anchored: below/above the signal bar's wick + 0.25×ATR buffer\n" +
+               "  (min distance 0.5×ATR enforced). Structure-aware, recommended\n" +
+               "• ATR: fixed SL Multiplier × ATR distance from entry")
+
+atrLenRiskInput = input.int(14, "ATR Length (Risk)", minval = 5, maxval = 50, group = GRP_RISK,
+     tooltip = "ATR period for stop-loss distance calculation.\n" +
+               "• 14 = standard\n" +
+               "• Lower = tighter stops\n" +
+               "• Higher = wider stops")
+
+slMultInput = input.float(1.5, "SL Multiplier (×ATR)", minval = 0.5, maxval = 5.0, step = 0.1,
+     group   = GRP_RISK,
+     tooltip = "Stop-loss distance as multiple of ATR (ATR mode, Custom preset).\n" +
+               "• Scalping: 0.8-1.2\n" +
+               "• Swing: 1.5-2.5")
+
+tp1MultInput = input.float(1.0, "TP1 Multiplier (×Risk)", minval = 0.5, maxval = 5.0, step = 0.1,
+     group   = GRP_RISK,
+     tooltip = "Take-profit 1 as multiple of risk (SL distance).\n1.0 = 1:1 Risk:Reward")
+
+tp2MultInput = input.float(2.0, "TP2 Multiplier (×Risk)", minval = 1.0, maxval = 10.0, step = 0.1,
+     group   = GRP_RISK,
+     tooltip = "Take-profit 2 as multiple of risk.\n2.0 = 1:2 Risk:Reward")
+
+tp3MultInput = input.float(3.0, "TP3 Multiplier (×Risk)", minval = 1.5, maxval = 15.0, step = 0.1,
+     group   = GRP_RISK,
+     tooltip = "Take-profit 3 as multiple of risk.\n3.0 = 1:3 Risk:Reward")
+
+beInput = input.bool(true, "Break-Even After TP1", group = GRP_RISK,
+     tooltip = "Move stop-loss to entry price once TP1 is reached.\n" +
+               "Positions stopped at break-even after TP1 count as wins")
+
+showSlTpInput = input.bool(true, "Show SL/TP Lines", group = GRP_RISK,
+     tooltip = "Draw entry/SL/TP lines on chart after entry.\n" +
+               "Lines persist after the trade closes (as a record)\n" +
+               "and are replaced on the next entry")
+
+showSlTpLabelsInput = input.bool(true, "Show SL/TP Labels", group = GRP_RISK,
+     tooltip = "Show price labels on SL/TP lines")
+
+showPctOnLabelsInput = input.bool(true, "Show % Distance on Labels", group = GRP_RISK,
+     tooltip = "Append % distance from entry to SL/TP labels,\n" +
+               "e.g. 'SL 1.2300 (-0.36%)'")
+
+entryLineStyleInput = input.string("Dotted", "Entry Line Style",
+     options = ["Solid", "Dashed", "Dotted"], group = GRP_RISK,
+     tooltip = "Entry is a reference, not an action level — keep it subtle")
+
+slLineStyleInput = input.string("Solid", "SL Line Style",
+     options = ["Solid", "Dashed", "Dotted"], group = GRP_RISK,
+     tooltip = "Visual style of the stop-loss line")
+
+tpLineStyleInput = input.string("Dashed", "TP Line Style",
+     options = ["Solid", "Dashed", "Dotted"], group = GRP_RISK,
+     tooltip = "Style for TP1/TP2/TP3. On hit, a TP line turns solid teal")
+
+// ── Dashboard ───────────────────────────────────────────────
+showDashInput = input.bool(true, "Show Dashboard", group = GRP_DASH,
+     tooltip = "Sectioned status table: trend, signal, profile levels, risk, stats")
+
+dashPosStr = input.string("Top Right", "Dashboard Position",
+     options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right", "Middle Right"],
+     group   = GRP_DASH,
+     tooltip = "Screen corner where the dashboard is anchored")
+
+dashFontSizeInput = input.string("Small", "Dashboard Font Size",
+     options = ["Small", "Normal", "Large", "Huge"], group = GRP_DASH,
+     tooltip = "Font size for the dashboard table. Section dividers and the\n" +
+               "version footer render one step smaller to preserve hierarchy")
+
+showMarketSecInput = input.bool(true, "  ├ Market section", group = GRP_DASH,
+     tooltip = "Trend, Age, HTF bias, position Signal, Last signal + score")
+
+showProfileSecInput = input.bool(true, "  ├ Profile section", group = GRP_DASH,
+     tooltip = "POC, Value Area High / Low of the current trend segment")
+
+showTradeSecInput = input.bool(true, "  ├ Trade section", group = GRP_DASH,
+     tooltip = "Entry, SL, TP1-3, R:R, SL distance. Collapses to one row when flat")
+
+showStatsSecInput = input.bool(true, "  └ Stats section", group = GRP_DASH,
+     tooltip = "Trades, W/L, Win Rate (+gauge), recent Form")
+
+// ── Alerts ──────────────────────────────────────────────────
+webhookInput = input.bool(false, "Webhook JSON Format", group = GRP_ALERT,
+     tooltip = "Send entry alerts as JSON for webhook/bot integrations.\n" +
+               "Includes action, ticker, tf, price, score, sl, tp1-tp3, rr")
+
+flipAlertInput = input.bool(true, "Alert on Trend Flips", group = GRP_ALERT,
+     tooltip = "Informational flip alerts for flips that did not open or\n" +
+               "reverse a trade (those produce entry alerts instead).\n" +
+               "Consider disabling on low timeframes to reduce noise")
+
+showSlHitAlertInput = input.bool(true, "Alert on SL Hit / Reversal", group = GRP_ALERT,
+     tooltip = "Fire an alert when price hits the active stop-loss\n" +
+               "(with BE STOP-OUT variant when the stop was at break-even)\n" +
+               "or when an opposite signal reverses the position")
+
+alertTpHitInput = input.bool(false, "Alert on TP / Break-Even", group = GRP_ALERT,
+     tooltip = "Fire alerts when TP1/TP2/TP3 are touched and on break-even")
+
+lvnAlertInput = input.bool(false, "Alert on LVN Break", group = GRP_ALERT,
+     tooltip = "Alert when a bar closes across a Low Volume Node —\n" +
+               "price entering a volume vacuum often accelerates.\n" +
+               "LVN levels come from the live segment profile")
+
+// ── Colors ──────────────────────────────────────────────────
+bullColorInput = input.color(#00E676, "Bull", inline = "colors", group = GRP_COLORS,
+     tooltip = "Bullish color: bands, heatmap, signal label backgrounds")
+bearColorInput = input.color(#FF5252, "Bear", inline = "colors", group = GRP_COLORS,
+     tooltip = "Bearish color: bands, heatmap, signal label backgrounds")
+
+// ── Advanced ────────────────────────────────────────────────
+hvnThreshInput = input.float(0.55, "HVN Threshold (×POC volume)", minval = 0.2, maxval = 0.95, step = 0.05,
+     group   = GRP_ADV,
+     tooltip = "A local volume peak qualifies as HVN only if its volume is at least\n" +
+               "this fraction of the POC bin volume. Higher = fewer, stronger nodes")
+
+lvnThreshInput = input.float(0.30, "LVN Threshold (×POC volume)", minval = 0.05, maxval = 0.6, step = 0.05,
+     group   = GRP_ADV,
+     tooltip = "A local volume trough qualifies as LVN only if its volume is at most\n" +
+               "this fraction of the POC bin volume. Lower = only deep vacuums")
+
+// ══════════════════════════════════════════════════════════
+// 4. THEME DETECTION & COLORS
+// ══════════════════════════════════════════════════════════
+isDark = switch themeInput
+    "Dark"  => true
+    "Light" => false
+    =>         color.r(chart.bg_color) < 128
+
+// ── Texts ──
+TEXT_COLOR   = isDark ? #E0E0E0 : #1A1A1A
+TEXT_MUTED   = isDark ? color.new(#9E9E9E, 0) : color.new(#757575, 0)
+
+// ── Adaptive signal text colors ──
+BULL_TEXT    = isDark ? #00E676 : #00A152
+BEAR_TEXT    = isDark ? #FF5252 : #D32F2F
+NEUTRAL_TEXT = isDark ? #FFEB3B : #F57F17
+
+// ── Label text (on colored label backgrounds) ──
+BULL_LABEL_TEXT = #004D25
+BEAR_LABEL_TEXT = #FFFFFF
+
+// ── Dashboard ──
+TABLE_BG       = isDark ? color.new(#131722, 5) : color.new(#FFFFFF, 5)
+TABLE_ROW_ALT  = isDark ? color.new(#1C2030, 0) : color.new(#F0F4F8, 0)
+TABLE_BORDER   = isDark ? color.new(#2A2E39, 0) : color.new(#D0D0D0, 0)
+HEADER_TEXT    = #FFFFFF
+HEADER_BG_BULL = color.new(#0F6E56, 0)
+HEADER_BG_BEAR = color.new(#A32D2D, 0)
+
+// ── Profile colors ──
+POC_COLOR     = isDark ? #FFD54F : #E65100
+VA_COLOR      = isDark ? color.new(#90A4AE, 60) : color.new(#607D8B, 60)
+LVN_COLOR     = isDark ? color.new(#B0BEC5, 30) : color.new(#546E7A, 30)
+LVN_TEXT      = isDark ? #B0BEC5                 : #546E7A
+
+// ── Risk palette (premium, muted, theme-aware) ──
+SL_COLOR       = isDark ? color.new(#E57373, 0)  : color.new(#B71C1C, 0)
+TP1_COLOR      = isDark ? color.new(#66BB6A, 30) : color.new(#388E3C, 30)
+TP2_COLOR      = isDark ? color.new(#66BB6A, 40) : color.new(#388E3C, 40)
+TP3_COLOR      = isDark ? color.new(#66BB6A, 0)  : color.new(#388E3C, 0)
+ENTRY_COLOR    = isDark ? color.new(#5C8AAE, 0)  : color.new(#34495E, 0)
+TP_LABEL_COLOR = isDark ? color.new(#66BB6A, 0)  : color.new(#388E3C, 0)
+TP_HIT_COLOR   = isDark ? color.new(#4DB6AC, 0)  : color.new(#00695C, 0)
+BE_COLOR       = isDark ? color.new(#FFA726, 0)  : color.new(#E65100, 0)
+LABEL_TEXT     = isDark ? #1A1A1A                : #FFFFFF
+FORM_COLOR     = isDark ? #5C8AAE                : #34495E
+
+// ── Watermark ──
+WM_COLOR = isDark ? color.new(#FFFFFF, 80) : color.new(#000000, 80)
+
+// ══════════════════════════════════════════════════════════
+// 5. FUNCTIONS
+// ══════════════════════════════════════════════════════════
+buildGauge(float value, float maxVal, int width) =>
+    string result = ""
+    int filled = maxVal <= 0 ? 0 : math.round(math.min(width, math.max(0.0, value / maxVal * width)))
+    for i = 0 to width - 1
+        result += i < filled ? "▰" : "▱"
+    result
+
+fmtPrice(float v) =>
+    na(v) ? "—" : str.tostring(v, format.mintick)
+
+formatPctFromEntry(float level, float entry) =>
+    string res = ""
+    if showPctOnLabelsInput and not na(level) and not na(entry) and entry != 0
+        float pct  = (level - entry) / entry * 100.0
+        string sign = pct >= 0 ? "+" : ""
+        res := " (" + sign + str.tostring(pct, "#.##") + "%)"
+    res
+
+lineStyleFromString(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+sizeFromString(string s) =>
+    s == "Tiny" ? size.tiny : s == "Small" ? size.small : s == "Normal" ? size.normal : s == "Large" ? size.large : s == "Huge" ? size.huge : size.small
+
+// One step smaller — used for section dividers and the version footer
+sizeDownFromString(string s) =>
+    s == "Tiny" ? size.tiny : s == "Small" ? size.tiny : s == "Normal" ? size.small : s == "Large" ? size.normal : s == "Huge" ? size.large : size.tiny
+
+entryLineStyle  = lineStyleFromString(entryLineStyleInput)
+slLineStyle     = lineStyleFromString(slLineStyleInput)
+tpLineStyle     = lineStyleFromString(tpLineStyleInput)
+labelSize       = sizeFromString(labelFontSizeInput)
+signalSize      = sizeFromString(signalFontSizeInput)
+profLabelSize   = sizeFromString(profLabelSizeInput)
+dashFontSize    = sizeFromString(dashFontSizeInput)
+dashFontSizeSub = sizeDownFromString(dashFontSizeInput)
+
+// ══════════════════════════════════════════════════════════
+// 6. CALCULATIONS — TREND ENGINE
+// ══════════════════════════════════════════════════════════
+
+// ── Effective band geometry (preset or custom) ──
+[effBase, effStep] = switch bandPresetInput
+    "Scalping"   => [2.5, 0.20]
+    "Deep Trend" => [6.0, 0.30]
+    "Custom"     => [baseMultInput, bandStepInput]
+    =>              [4.0, 0.25]
+
+float m1 = effBase
+float m2 = effBase * (1.0 + effStep)
+float m3 = effBase * (1.0 + 2.0 * effStep)
+float m4 = effBase * (1.0 + 3.0 * effStep)
+
+int flipChoice = flipBandStr == "Fast (Band 2)" ? 2 : flipBandStr == "Deep (Band 4)" ? 4 : 3
+
+// ── Core series ──
+float trailAtr = nz(ta.atr(atrLenInput), 0.0)
+float src      = srcInput
+
+int WARMUP_BARS = math.max(atrLenInput * 3, 60)
+bool isWarmedUp = bar_index >= WARMUP_BARS
+
+// ── Band offsets for this bar ──
+float upper1 = src - trailAtr * m1
+float upper2 = src - trailAtr * m2
+float upper3 = src - trailAtr * m3
+float upper4 = src - trailAtr * m4
+
+float lower1 = src + trailAtr * m1
+float lower2 = src + trailAtr * m2
+float lower3 = src + trailAtr * m3
+float lower4 = src + trailAtr * m4
+
+// ── State ──
+var float ts1 = na
+var float ts2 = na
+var float ts3 = na
+var float ts4 = na
+var int   trend = 1
+var int   trendStartBar = 0
+var float trendHigh = na
+var float trendLow  = na
+
+// Flip reference = previous bar's value of the CHOSEN band
+float flipPrev = flipChoice == 2 ? ts2[1] : flipChoice == 3 ? ts3[1] : ts4[1]
+
+bool doFlipDown = trend == 1  and not na(flipPrev) and src < flipPrev
+bool doFlipUp   = trend == -1 and not na(flipPrev) and src > flipPrev
+
+if trend == 1
+    if doFlipDown
+        trend := -1
+        ts1 := lower1
+        ts2 := lower2
+        ts3 := lower3
+        ts4 := lower4
+    else
+        ts1 := math.max(upper1, nz(ts1[1], upper1))
+        ts2 := math.max(upper2, nz(ts2[1], upper2))
+        ts3 := math.max(upper3, nz(ts3[1], upper3))
+        ts4 := math.max(upper4, nz(ts4[1], upper4))
+else
+    if doFlipUp
+        trend := 1
+        ts1 := upper1
+        ts2 := upper2
+        ts3 := upper3
+        ts4 := upper4
+    else
+        ts1 := math.min(lower1, nz(ts1[1], lower1))
+        ts2 := math.min(lower2, nz(ts2[1], lower2))
+        ts3 := math.min(lower3, nz(ts3[1], lower3))
+        ts4 := math.min(lower4, nz(ts4[1], lower4))
+
+int  trendPrev = nz(trend[1], 1)
+bool flipBar   = trend != trendPrev
+
+// ── Segment tracking (exact, no lookback fudge) ──
+if flipBar
+    trendStartBar := bar_index
+    trendHigh := high
+    trendLow  := low
+else
+    trendHigh := math.max(nz(trendHigh, high), high)
+    trendLow  := math.min(nz(trendLow, low), low)
+
+int barsInTrend = bar_index - trendStartBar
+
+// ══════════════════════════════════════════════════════════
+// 6B. HTF BIAS & VOLUME CONTEXT (non-repainting)
+// ══════════════════════════════════════════════════════════
+[htfC, htfE] = request.security(syminfo.tickerid, htfInput, [close[1], ta.ema(close, 50)[1]], barmerge.gaps_off, barmerge.lookahead_on)
+
+int biasDir = na(htfC) or na(htfE) ? 0 : htfC > htfE ? 1 : -1
+
+float volRaw       = nz(volume, 0.0)
+float volSma       = nz(ta.sma(nz(volume, 0.0), 20), 0.0)
+// Spike baseline = previous-bar SMA: a spike must not dampen itself by inflating its own average
+float volBase      = nz(volSma[1], volSma)
+float cumVol       = ta.cum(nz(volume, 0.0))
+bool  symbolHasVol = cumVol > 0
+
+// ══════════════════════════════════════════════════════════
+// 7. SIGNAL LOGIC — SCORED RETESTS + FLIPS
+// ══════════════════════════════════════════════════════════
+
+// ── Flip signals (confirmed, non-repainting) ──
+bool confirmedBullFlip = flipBar and trend == 1  and barstate.isconfirmed and isWarmedUp
+bool confirmedBearFlip = flipBar and trend == -1 and barstate.isconfirmed and isWarmedUp
+
+// ── Retest pending state ──
+var int pendingLong       = 0
+var int pendingLongDepth  = 0
+var int pendingShort      = 0
+var int pendingShortDepth = 0
+var int lastSigBar        = -10000
+
+// Decay pendings each bar
+pendingLong  := math.max(pendingLong - 1, 0)
+pendingShort := math.max(pendingShort - 1, 0)
+if pendingLong == 0
+    pendingLongDepth := 0
+if pendingShort == 0
+    pendingShortDepth := 0
+
+// Reset on flip — pullback context is void in the new trend
+if flipBar
+    pendingLong       := 0
+    pendingLongDepth  := 0
+    pendingShort      := 0
+    pendingShortDepth := 0
+
+// Touch detection: how deep did price pull into the band stack?
+int touchDepthL = trend == 1  and not na(ts1) ? (low <= ts4 ? 4 : low <= ts3 ? 3 : low <= ts2 ? 2 : low <= ts1 ? 1 : 0) : 0
+int touchDepthS = trend == -1 and not na(ts1) ? (high >= ts4 ? 4 : high >= ts3 ? 3 : high >= ts2 ? 2 : high >= ts1 ? 1 : 0) : 0
+
+if touchDepthL > 0
+    pendingLong      := retestWindowInput
+    pendingLongDepth := math.max(pendingLongDepth, touchDepthL)
+
+if touchDepthS > 0
+    pendingShort      := retestWindowInput
+    pendingShortDepth := math.max(pendingShortDepth, touchDepthS)
+
+// Reclaim: close back on the trend side of Band 1 with a directional candle
+bool longReclaim  = pendingLong > 0  and trend == 1  and not na(ts1) and close > ts1 and close > open
+bool shortReclaim = pendingShort > 0 and trend == -1 and not na(ts1) and close < ts1 and close < open
+
+// ── Quality score components (0-100) ──
+float rngBar = high - low
+float clrL   = rngBar > 0 ? (close - low) / rngBar : 0.5
+float clrS   = rngBar > 0 ? (high - close) / rngBar : 0.5
+
+int depthPtsL  = pendingLongDepth == 2 ? 25 : pendingLongDepth == 3 ? 18 : pendingLongDepth == 1 ? 15 : pendingLongDepth == 4 ? 10 : 0
+int depthPtsS  = pendingShortDepth == 2 ? 25 : pendingShortDepth == 3 ? 18 : pendingShortDepth == 1 ? 15 : pendingShortDepth == 4 ? 10 : 0
+int candlePtsL = clrL > 0.7 ? 20 : clrL > 0.5 ? 12 : 5
+int candlePtsS = clrS > 0.7 ? 20 : clrS > 0.5 ? 12 : 5
+int agePts     = barsInTrend >= 10 and barsInTrend <= 150 ? 15 : barsInTrend < 10 ? 8 : 5
+int volPts     = symbolHasVol ? (volRaw > volBase * 1.2 ? 20 : volRaw > volBase ? 12 : 5) : 12
+int biasPtsL   = biasDir == 1 ? 20 : biasDir == 0 ? 10 : 0
+int biasPtsS   = biasDir == -1 ? 20 : biasDir == 0 ? 10 : 0
+
+int longScoreCalc  = depthPtsL + candlePtsL + agePts + volPts + biasPtsL
+int shortScoreCalc = depthPtsS + candlePtsS + agePts + volPts + biasPtsS
+
+bool cooldownOk = bar_index - lastSigBar >= cooldownInput
+
+// ── Confirmed retest signals ──
+bool confirmedLongRetest  = longReclaim  and barstate.isconfirmed and isWarmedUp and cooldownOk and longScoreCalc >= minScoreInput
+bool confirmedShortRetest = shortReclaim and barstate.isconfirmed and isWarmedUp and cooldownOk and shortScoreCalc >= minScoreInput
+
+// ── Last-signal tracking for dashboard ──
+var string lastSignalStr   = "—"
+var int    lastSignalBar   = na
+var int    lastScore       = 0
+var int    lastSignalDepth = 0
+
+if confirmedLongRetest
+    lastSignalStr    := "Long Retest"
+    lastSignalBar    := bar_index
+    lastScore        := longScoreCalc
+    lastSignalDepth  := pendingLongDepth
+    lastSigBar       := bar_index
+    pendingLong      := 0
+    pendingLongDepth := 0
+
+if confirmedShortRetest
+    lastSignalStr     := "Short Retest"
+    lastSignalBar     := bar_index
+    lastScore         := shortScoreCalc
+    lastSignalDepth   := pendingShortDepth
+    lastSigBar        := bar_index
+    pendingShort      := 0
+    pendingShortDepth := 0
+
+if confirmedBullFlip
+    lastSignalStr := "Bull Flip"
+    lastSignalBar := bar_index
+    lastScore     := 0
+
+if confirmedBearFlip
+    lastSignalStr := "Bear Flip"
+    lastSignalBar := bar_index
+    lastScore     := 0
+
+// ══════════════════════════════════════════════════════════
+// 8. RISK MANAGEMENT — TRADE ENGINE (Mirage-grade)
+// ══════════════════════════════════════════════════════════
+
+// ── Effective risk multipliers (presets or Custom) ──
+[effSLMult, effTP1m, effTP2m, effTP3m] = switch riskPresetInput
+    "Conservative" => [2.5, 1.0, 2.0, 4.0]
+    "Aggressive"   => [1.0, 1.5, 2.5, 4.0]
+    "Scalping"     => [0.8, 0.8, 1.5, 2.0]
+    "Custom"       => [slMultInput, tp1MultInput, tp2MultInput, tp3MultInput]
+    =>                [1.5, 1.0, 2.0, 3.0]
+
+float riskAtr    = nz(ta.atr(atrLenRiskInput), 0.0)
+float slDistance = riskAtr * effSLMult
+
+// ── Position state ──
+var float activeEntry = na
+var float activeSL    = na
+var float activeTP1   = na
+var float activeTP2   = na
+var float activeTP3   = na
+var int   activeDir   = 0
+var int   entryBarIdx = na
+var bool  tp1Reached  = false
+var bool  tp2Reached  = false
+var bool  tp3Reached  = false
+var bool  beActive    = false
+
+// ── Session stats (reset on reload — expected) ──
+var int    winCount  = 0
+var int    lossCount = 0
+var string formStr   = ""
+
+// ── Bar-start captures: BE moved THIS bar must not stop THIS bar ──
+bool  beActiveAtBarStart = beActive
+float effectiveSL        = activeSL
+
+// ── Hit detection (entry-bar guard + confirmed bars + SL-first pessimistic) ──
+bool canCheckHit = activeDir != 0 and not na(entryBarIdx) and bar_index > entryBarIdx and barstate.isconfirmed
+
+bool slHitRaw  = canCheckHit and (activeDir == 1 ? low  <= effectiveSL : high >= effectiveSL)
+bool tp1HitRaw = canCheckHit and (activeDir == 1 ? high >= activeTP1   : low  <= activeTP1)
+bool tp2HitRaw = canCheckHit and (activeDir == 1 ? high >= activeTP2   : low  <= activeTP2)
+bool tp3HitRaw = canCheckHit and (activeDir == 1 ? high >= activeTP3   : low  <= activeTP3)
+
+bool tp1FirstTouch = tp1HitRaw and not tp1Reached and not slHitRaw
+bool tp2FirstTouch = tp2HitRaw and not tp2Reached and not slHitRaw
+bool tp3FirstTouch = tp3HitRaw and not tp3Reached and not slHitRaw
+
+if tp1FirstTouch
+    tp1Reached := true
+if tp2FirstTouch
+    tp2Reached := true
+if tp3FirstTouch
+    tp3Reached := true
+
+// ── Break-even after TP1 ──
+bool beJustActivated = false
+if beInput and tp1FirstTouch and not beActive and activeDir != 0
+    activeSL        := activeEntry
+    beActive        := true
+    beJustActivated := true
+
+// ── Snapshots BEFORE closure reset (alerts + label recolor) ──
+var float hitSL    = na
+var float hitEntry = na
+if slHitRaw
+    hitSL    := effectiveSL
+    hitEntry := activeEntry
+
+float exitEntry         = activeEntry
+int   exitDir           = activeDir
+float exitTP1           = activeTP1
+float exitTP2           = activeTP2
+float exitTP3           = activeTP3
+bool  exitBeActive      = beActiveAtBarStart
+bool  displayTp1Reached = tp1Reached
+bool  displayTp2Reached = tp2Reached
+bool  displayTp3Reached = tp3Reached
+
+bool evSlHit = slHitRaw
+
+// ── Closure on SL / BE-stop / TP3 ──
+if (slHitRaw or tp3HitRaw) and activeDir != 0
+    bool tradeWin = tp1Reached
+    if tradeWin
+        winCount += 1
+    else
+        lossCount += 1
+    formStr := formStr + (tradeWin ? "▰" : "▱")
+    if str.length(formStr) > FORM_LEN
+        formStr := str.substring(formStr, str.length(formStr) - FORM_LEN)
+    activeDir   := 0
+    activeEntry := na
+    activeSL    := na
+    activeTP1   := na
+    activeTP2   := na
+    activeTP3   := na
+    entryBarIdx := na
+    tp1Reached  := false
+    tp2Reached  := false
+    tp3Reached  := false
+    beActive    := false
+
+// ── Signal-trade parity: EVERY confirmed signal acts ──
+// The engine reacts to every confirmed signal (retest diamond or flip):
+//   • flat               → open a position in the signal direction
+//   • opposite position  → reverse (close + enter new direction, same bar)
+//   • same-dir position  → ignore (no pyramiding)
+// Long/short signals are mutually exclusive per bar by construction:
+// retests require the matching trend, and on a flip bar pendings are
+// reset, so only the flip signal itself can fire.
+bool longEntrySignal  = confirmedLongRetest  or confirmedBullFlip
+bool shortEntrySignal = confirmedShortRetest or confirmedBearFlip
+
+// Direction of this bar's confirmed signal: 1 = long, -1 = short, 0 = none.
+// Long/short signals are mutually exclusive per bar by construction.
+int sigDir = longEntrySignal ? 1 : shortEntrySignal ? -1 : 0
+
+// Reversal ⇔ signal direction is strictly OPPOSITE to the open position.
+// A SAME-direction signal NEVER closes, replaces or modifies the trade.
+// The only closure paths in this engine are:
+//   1) SL hit   2) BE-stop after TP1   3) TP3 hit   (block above)
+//   4) reversal by an opposite signal  (this block)
+bool reverseToShort = sigDir == -1 and activeDir == 1
+bool reverseToLong  = sigDir == 1  and activeDir == -1
+
+// ── Reversal close ──
+// Closure rules: 1) SL hit  2) BE-stop after TP1  3) TP3 hit  4) reversal.
+// If SL/TP already closed the trade this bar (e.g. a BE stop-out on the
+// flip bar itself), the engine is flat here — the same signal then simply
+// opens the new position via the entry block below. Either way, a
+// confirmed signal always results in a position in its direction.
+bool evReversal = false
+if reverseToShort or reverseToLong
+    evReversal := true
+    bool tradeWin = tp1Reached
+    if tradeWin
+        winCount += 1
+    else
+        lossCount += 1
+    formStr := formStr + (tradeWin ? "▰" : "▱")
+    if str.length(formStr) > FORM_LEN
+        formStr := str.substring(formStr, str.length(formStr) - FORM_LEN)
+    activeDir   := 0
+    activeEntry := na
+    activeSL    := na
+    activeTP1   := na
+    activeTP2   := na
+    activeTP3   := na
+    entryBarIdx := na
+    tp1Reached  := false
+    tp2Reached  := false
+    tp3Reached  := false
+    beActive    := false
+
+// ── Entries (flat here — either genuinely flat or freed by closure/reversal above) ──
+bool evLongEntry  = false
+bool evShortEntry = false
+
+if longEntrySignal and activeDir == 0 and slDistance > 0
+    float slAtrLong  = close - slDistance
+    float slWickLong = math.min(low - riskAtr * 0.25, close - riskAtr * 0.5)
+    float slLong     = slModeInput == "ATR" ? slAtrLong : slWickLong
+    float riskLong   = close - slLong
+    if riskLong > 0
+        activeEntry := close
+        activeSL    := slLong
+        activeTP1   := close + riskLong * effTP1m
+        activeTP2   := close + riskLong * effTP2m
+        activeTP3   := close + riskLong * effTP3m
+        activeDir   := 1
+        entryBarIdx := bar_index
+        tp1Reached  := false
+        tp2Reached  := false
+        tp3Reached  := false
+        beActive    := false
+        evLongEntry := true
+
+if shortEntrySignal and activeDir == 0 and slDistance > 0
+    float slAtrShort  = close + slDistance
+    float slWickShort = math.max(high + riskAtr * 0.25, close + riskAtr * 0.5)
+    float slShort     = slModeInput == "ATR" ? slAtrShort : slWickShort
+    float riskShort   = slShort - close
+    if riskShort > 0
+        activeEntry  := close
+        activeSL     := slShort
+        activeTP1    := close - riskShort * effTP1m
+        activeTP2    := close - riskShort * effTP2m
+        activeTP3    := close - riskShort * effTP3m
+        activeDir    := -1
+        entryBarIdx  := bar_index
+        tp1Reached   := false
+        tp2Reached   := false
+        tp3Reached   := false
+        beActive     := false
+        evShortEntry := true
+
+// ── Dashboard risk metrics ──
+float currentRR = activeDir != 0 ? effTP1m : 0.0
+float riskPct   = activeDir != 0 and not na(activeEntry) and activeEntry != 0 and not na(activeSL) ? math.abs(activeEntry - activeSL) / activeEntry * 100 : 0.0
+
+// ══════════════════════════════════════════════════════════
+// 9. PLOTS & VISUALS — TRAIL BANDS
+// ══════════════════════════════════════════════════════════
+color trendColor = trend == 1 ? bullColorInput : bearColorInput
+
+// Theme-aware transparencies: bright bull/bear hues wash out on white,
+// so the light theme runs each layer noticeably more opaque.
+int B1_T = isDark ? 70 : 55
+int B2_T = isDark ? 50 : 38
+int B3_T = isDark ? 25 : 15
+int H1_T = isDark ? 92 : 88
+int H2_T = isDark ? 82 : 77
+int H3_T = isDark ? 70 : 64
+
+p1 = plot(flipBar ? na : ts1, "Band 1", color = color.new(trendColor, B1_T), linewidth = 1, style = plot.style_linebr, display = showBandsInput ? display.all : display.none)
+p2 = plot(flipBar ? na : ts2, "Band 2", color = color.new(trendColor, B2_T), linewidth = 1, style = plot.style_linebr, display = showBandsInput ? display.all : display.none)
+p3 = plot(flipBar ? na : ts3, "Band 3", color = color.new(trendColor, B3_T), linewidth = 2, style = plot.style_linebr, display = showBandsInput ? display.all : display.none)
+p4 = plot(flipBar ? na : ts4, "Band 4", color = color.new(trendColor, 0),   linewidth = 2, style = plot.style_linebr, display = showBandsInput ? display.all : display.none)
+
+fill(p1, p2, color.new(trendColor, H1_T), title = "Heatmap Inner",  display = showHeatInput ? display.all : display.none)
+fill(p2, p3, color.new(trendColor, H2_T), title = "Heatmap Middle", display = showHeatInput ? display.all : display.none)
+fill(p3, p4, color.new(trendColor, H3_T), title = "Heatmap Outer",  display = showHeatInput ? display.all : display.none)
+
+// ══════════════════════════════════════════════════════════
+// 10. LABELS & SHAPES — SIGNALS
+// ══════════════════════════════════════════════════════════
+if confirmedBullFlip and showFlipLabelsInput
+    label.new(bar_index, ts4, "▲ FLIP",
+         color     = bullColorInput,
+         textcolor = BULL_LABEL_TEXT,
+         style     = label.style_label_up,
+         size      = signalSize,
+         tooltip   = "Bull Flip (confirmed on bar close)\nClose crossed above " + flipBandStr)
+
+if confirmedBearFlip and showFlipLabelsInput
+    label.new(bar_index, ts4, "▼ FLIP",
+         color     = bearColorInput,
+         textcolor = BEAR_LABEL_TEXT,
+         style     = label.style_label_down,
+         size      = signalSize,
+         tooltip   = "Bear Flip (confirmed on bar close)\nClose crossed below " + flipBandStr)
+
+if confirmedLongRetest and showSignalsInput
+    string ttL = "Long Retest | Score " + str.tostring(longScoreCalc) + "/100\nDepth: Band " + str.tostring(lastSignalDepth) + " (" + str.tostring(depthPtsL) + ")\nCandle: " + str.tostring(candlePtsL) + " | Volume: " + str.tostring(volPts) + "\nHTF Bias: " + str.tostring(biasPtsL) + " | Trend Age: " + str.tostring(agePts)
+    label.new(bar_index, low, "◆ " + str.tostring(longScoreCalc),
+         color     = bullColorInput,
+         textcolor = BULL_LABEL_TEXT,
+         style     = label.style_label_up,
+         size      = signalSize,
+         tooltip   = ttL)
+
+if confirmedShortRetest and showSignalsInput
+    string ttS = "Short Retest | Score " + str.tostring(shortScoreCalc) + "/100\nDepth: Band " + str.tostring(lastSignalDepth) + " (" + str.tostring(depthPtsS) + ")\nCandle: " + str.tostring(candlePtsS) + " | Volume: " + str.tostring(volPts) + "\nHTF Bias: " + str.tostring(biasPtsS) + " | Trend Age: " + str.tostring(agePts)
+    label.new(bar_index, high, "◆ " + str.tostring(shortScoreCalc),
+         color     = bearColorInput,
+         textcolor = BEAR_LABEL_TEXT,
+         style     = label.style_label_down,
+         size      = signalSize,
+         tooltip   = ttS)
+
+// ── Trade entry markers ──
+// Printed when a trade opens WITHOUT a retest diamond on the same bar
+// (flip-source entries and flip-driven reversals), so every entry is
+// visibly marked on the chart.
+// label.new (not plotshape): plotshape's size parameter is const-only
+// and cannot honor the Signal Label Size input.
+if showSignalsInput and evLongEntry and not confirmedLongRetest
+    label.new(bar_index, low, "Long ▲",
+         color     = bullColorInput,
+         textcolor = BULL_LABEL_TEXT,
+         style     = label.style_label_up,
+         size      = signalSize,
+         tooltip   = "Trade entry: Long (flip-driven)")
+
+if showSignalsInput and evShortEntry and not confirmedShortRetest
+    label.new(bar_index, high, "Short ▼",
+         color     = bearColorInput,
+         textcolor = BEAR_LABEL_TEXT,
+         style     = label.style_label_down,
+         size      = signalSize,
+         tooltip   = "Trade entry: Short (flip-driven)")
+
+// ── Trend P&L tracker (real-time, anchored at trend start) ──
+// Updates on every tick by design (visual tracker, not a signal):
+// no barstate.isconfirmed gate here.
+var float trendStartPrice = na
+var line  trendPnlLine    = na
+var label trendPnlLabel   = na
+
+if flipBar
+    trendStartPrice := close
+
+if showTrendPnlInput and flipBar
+    line.delete(trendPnlLine)
+    label.delete(trendPnlLabel)
+    trendPnlLine  := line.new(bar_index, close, bar_index + 1, close, color = color.new(trendColor, 60), style = line.style_dotted, width = 1)
+    trendPnlLabel := label.new(bar_index + 2, close, "", color = TP_LABEL_COLOR, textcolor = LABEL_TEXT, style = label.style_label_left, size = signalSize)
+
+if showTrendPnlInput and not na(trendPnlLabel) and not na(trendStartPrice) and trendStartPrice != 0
+    float trendPnlPct = (close - trendStartPrice) / trendStartPrice * 100.0 * trend
+    string tpnlSign = trendPnlPct >= 0 ? "+" : ""
+    line.set_x2(trendPnlLine, bar_index)
+    label.set_xy(trendPnlLabel, bar_index + 2, close)
+    label.set_text(trendPnlLabel, (trend == 1 ? "▲ " : "▼ ") + tpnlSign + str.tostring(trendPnlPct, "#.##") + "%")
+    label.set_color(trendPnlLabel, trendPnlPct >= 0 ? TP_LABEL_COLOR : SL_COLOR)
+
+// ══════════════════════════════════════════════════════════
+// 11. SL/TP LINES & LABELS (persist until next entry)
+// ══════════════════════════════════════════════════════════
+var line slLine    = na
+var line tp1Line   = na
+var line tp2Line   = na
+var line tp3Line   = na
+var line entryLine = na
+
+var label slLabel    = na
+var label tp1Label   = na
+var label tp2Label   = na
+var label tp3Label   = na
+var label entryLabel = na
+
+if (evLongEntry or evShortEntry) and showSlTpInput
+    line.delete(slLine)
+    line.delete(tp1Line)
+    line.delete(tp2Line)
+    line.delete(tp3Line)
+    line.delete(entryLine)
+    label.delete(slLabel)
+    label.delete(tp1Label)
+    label.delete(tp2Label)
+    label.delete(tp3Label)
+    label.delete(entryLabel)
+
+    int x1 = bar_index
+    int x2 = bar_index + LINE_FORWARD_BARS
+
+    entryLine := line.new(x1, activeEntry, x2, activeEntry, color = ENTRY_COLOR, style = entryLineStyle, width = 1)
+    slLine    := line.new(x1, activeSL,    x2, activeSL,    color = SL_COLOR,    style = slLineStyle,    width = 2)
+    tp1Line   := line.new(x1, activeTP1,   x2, activeTP1,   color = TP1_COLOR,   style = tpLineStyle,    width = 1)
+    tp2Line   := line.new(x1, activeTP2,   x2, activeTP2,   color = TP2_COLOR,   style = tpLineStyle,    width = 1)
+    tp3Line   := line.new(x1, activeTP3,   x2, activeTP3,   color = TP3_COLOR,   style = tpLineStyle,    width = 1)
+
+    if showSlTpLabelsInput
+        int lblX = x2 + LABEL_OFFSET_BARS
+        string entryS = str.tostring(activeEntry, format.mintick)
+        string slS    = fmtPrice(activeSL)  + formatPctFromEntry(activeSL,  activeEntry)
+        string tp1S   = fmtPrice(activeTP1) + formatPctFromEntry(activeTP1, activeEntry)
+        string tp2S   = fmtPrice(activeTP2) + formatPctFromEntry(activeTP2, activeEntry)
+        string tp3S   = fmtPrice(activeTP3) + formatPctFromEntry(activeTP3, activeEntry)
+
+        entryLabel := label.new(lblX, activeEntry, "ENTRY " + entryS, color = ENTRY_COLOR, textcolor = LABEL_TEXT, style = label.style_label_left, size = labelSize)
+        slLabel    := label.new(lblX, activeSL,  "SL "  + slS,  color = SL_COLOR,       textcolor = LABEL_TEXT, style = label.style_label_left, size = labelSize)
+        tp1Label   := label.new(lblX, activeTP1, "TP1 " + tp1S, color = TP_LABEL_COLOR, textcolor = LABEL_TEXT, style = label.style_label_left, size = labelSize)
+        tp2Label   := label.new(lblX, activeTP2, "TP2 " + tp2S, color = TP_LABEL_COLOR, textcolor = LABEL_TEXT, style = label.style_label_left, size = labelSize)
+        tp3Label   := label.new(lblX, activeTP3, "TP3 " + tp3S, color = TP_LABEL_COLOR, textcolor = LABEL_TEXT, style = label.style_label_left, size = labelSize)
+
+// ── TP-hit recolor (solid teal + check) ──
+if showSlTpInput and not na(tp1Line) and displayTp1Reached and not (evLongEntry or evShortEntry)
+    line.set_color(tp1Line, TP_HIT_COLOR)
+    line.set_style(tp1Line, line.style_solid)
+    if showSlTpLabelsInput and not na(tp1Label)
+        label.set_text(tp1Label, "TP1 ✓ " + fmtPrice(exitTP1) + formatPctFromEntry(exitTP1, exitEntry))
+        label.set_color(tp1Label, TP_HIT_COLOR)
+if showSlTpInput and not na(tp2Line) and displayTp2Reached and not (evLongEntry or evShortEntry)
+    line.set_color(tp2Line, TP_HIT_COLOR)
+    line.set_style(tp2Line, line.style_solid)
+    if showSlTpLabelsInput and not na(tp2Label)
+        label.set_text(tp2Label, "TP2 ✓ " + fmtPrice(exitTP2) + formatPctFromEntry(exitTP2, exitEntry))
+        label.set_color(tp2Label, TP_HIT_COLOR)
+if showSlTpInput and not na(tp3Line) and displayTp3Reached and not (evLongEntry or evShortEntry)
+    line.set_color(tp3Line, TP_HIT_COLOR)
+    line.set_style(tp3Line, line.style_solid)
+    if showSlTpLabelsInput and not na(tp3Label)
+        label.set_text(tp3Label, "TP3 ✓ " + fmtPrice(exitTP3) + formatPctFromEntry(exitTP3, exitEntry))
+        label.set_color(tp3Label, TP_HIT_COLOR)
+
+// ── Break-even: dim SL line/label, annotate entry ──
+if showSlTpInput and beActive and activeDir != 0
+    if not na(slLine)
+        line.set_color(slLine, color.new(SL_COLOR, BE_DIM_TRANSP))
+    if showSlTpLabelsInput
+        if not na(slLabel)
+            label.set_color(slLabel, color.new(SL_COLOR, BE_DIM_TRANSP))
+        if not na(entryLabel)
+            string entryS = str.tostring(activeEntry, format.mintick)
+            label.set_text(entryLabel, "ENTRY " + entryS + "  → SL (BE)")
+            label.set_color(entryLabel, BE_COLOR)
+
+// ── Extend active lines to current bar ──
+if activeDir != 0 and showSlTpInput and not na(slLine)
+    int newX2   = bar_index + LINE_UPDATE_BARS
+    int newLblX = newX2 + LABEL_OFFSET_BARS
+    line.set_x2(slLine,    newX2)
+    line.set_x2(tp1Line,   newX2)
+    line.set_x2(tp2Line,   newX2)
+    line.set_x2(tp3Line,   newX2)
+    line.set_x2(entryLine, newX2)
+    if showSlTpLabelsInput and not na(slLabel)
+        label.set_x(slLabel,    newLblX)
+        label.set_x(tp1Label,   newLblX)
+        label.set_x(tp2Label,   newLblX)
+        label.set_x(tp3Label,   newLblX)
+        label.set_x(entryLabel, newLblX)
+
+// ══════════════════════════════════════════════════════════
+// 12. VOLUME PROFILE — RANGE-DISTRIBUTED SEGMENT ENGINE
+// ══════════════════════════════════════════════════════════
+// Accuracy notes vs naive close-bin profiles:
+// • Each bar's volume is split across ALL bins its high-low range overlaps,
+//   weighted by overlap fraction — the profile shows where volume traded,
+//   not where bars happened to close.
+// • Window = current trend segment ONLY (from flip bar), capped by
+//   Max Profile Bars. No hidden lookback padding.
+// • Zero-volume symbols (forex/indices CFD): true-range proxy keeps the
+//   profile meaningful instead of crashing on maxVol == 0.
+
+var box[]   pfBoxes  = array.new_box()
+var line[]  pfLines  = array.new_line()
+var label[] pfLabels = array.new_label()
+var float[] lvnLevels = array.new_float()
+
+var float pocPrice = na
+var float vahPrice = na
+var float valPrice = na
+
+int profOffset = profWidthInput + 8
+
+// Skip the whole profile pass when nothing consumes it (visuals, LVN alert, dashboard POC/VA)
+bool profNeeded = showProfileInput or showPocInput or showVaInput or showNodesInput or lvnAlertInput or showDashInput
+
+if barstate.islast and profNeeded
+    // ── Clear previous frame ──
+    for b in pfBoxes
+        box.delete(b)
+    for l in pfLines
+        line.delete(l)
+    for lb in pfLabels
+        label.delete(lb)
+    array.clear(pfBoxes)
+    array.clear(pfLines)
+    array.clear(pfLabels)
+    array.clear(lvnLevels)
+    pocPrice := na
+    vahPrice := na
+    valPrice := na
+
+    int segBars  = barsInTrend + 1
+    int lookback = math.min(math.min(segBars, maxProfBarsInput), bar_index + 1)
+
+    if lookback >= 3
+        // ── Pass 1: exact window range ──
+        float wHi = high
+        float wLo = low
+        for i = 0 to lookback - 1
+            wHi := math.max(wHi, high[i])
+            wLo := math.min(wLo, low[i])
+
+        float binSize = (wHi - wLo) / profRowsInput
+
+        if binSize > 0
+            float[] vols = array.new_float(profRowsInput, 0.0)
+
+            // ── Pass 2: range-distributed accumulation ──
+            for i = 0 to lookback - 1
+                float bH = high[i]
+                float bL = low[i]
+                float w  = symbolHasVol ? nz(volume[i], 0.0) : math.max(bH - bL, syminfo.mintick)
+                if w > 0
+                    float rng = bH - bL
+                    if rng <= 0
+                        int cIdx = math.min(profRowsInput - 1, math.max(0, int(math.floor((close[i] - wLo) / binSize))))
+                        array.set(vols, cIdx, array.get(vols, cIdx) + w)
+                    else
+                        int i0 = math.min(profRowsInput - 1, math.max(0, int(math.floor((bL - wLo) / binSize))))
+                        int i1 = math.min(profRowsInput - 1, math.max(0, int(math.floor((bH - wLo) / binSize))))
+                        for bn = i0 to i1
+                            float bin0 = wLo + binSize * bn
+                            float bin1 = bin0 + binSize
+                            float ov   = math.max(0.0, math.min(bH, bin1) - math.max(bL, bin0))
+                            if ov > 0
+                                array.set(vols, bn, array.get(vols, bn) + w * ov / rng)
+
+            // ── POC & totals ──
+            float maxVol   = 0.0
+            float totalVol = 0.0
+            int   pocIdx   = 0
+            for i = 0 to profRowsInput - 1
+                float v = array.get(vols, i)
+                totalVol += v
+                if v > maxVol
+                    maxVol := v
+                    pocIdx := i
+
+            if maxVol > 0 and totalVol > 0
+                pocPrice := wLo + binSize * (pocIdx + 0.5)
+
+                // ── Value Area 70% (expansion from POC) ──
+                float vaTarget = totalVol * 0.70
+                float vaAcc    = array.get(vols, pocIdx)
+                int   upIdx    = pocIdx + 1
+                int   dnIdx    = pocIdx - 1
+                while vaAcc < vaTarget
+                    float vu = upIdx <= profRowsInput - 1 ? array.get(vols, upIdx) : -1.0
+                    float vd = dnIdx >= 0 ? array.get(vols, dnIdx) : -1.0
+                    if vu < 0 and vd < 0
+                        break
+                    if vu >= vd
+                        vaAcc += math.max(vu, 0.0)
+                        upIdx += 1
+                    else
+                        vaAcc += math.max(vd, 0.0)
+                        dnIdx -= 1
+                int vahIdx = upIdx - 1
+                int valIdx = dnIdx + 1
+                vahPrice := wLo + binSize * (vahIdx + 1)
+                valPrice := wLo + binSize * valIdx
+
+                int segStartX = bar_index - lookback + 1
+
+                // ── Value Area shading ──
+                if showVaInput
+                    box vaBox = box.new(segStartX, vahPrice, bar_index + profOffset, valPrice,
+                         border_color = color.new(color.gray, 100),
+                         bgcolor      = color.new(color.gray, isDark ? 92 : 94))
+                    array.push(pfBoxes, vaBox)
+                    line vahLine = line.new(segStartX, vahPrice, bar_index + profOffset, vahPrice, color = VA_COLOR, style = line.style_dashed, width = 1)
+                    line valLine = line.new(segStartX, valPrice, bar_index + profOffset, valPrice, color = VA_COLOR, style = line.style_dashed, width = 1)
+                    array.push(pfLines, vahLine)
+                    array.push(pfLines, valLine)
+
+                // ── Histogram + HVN/LVN ──
+                for i = 0 to profRowsInput - 1
+                    float v    = array.get(vols, i)
+                    float bTop = wLo + binSize * (i + 1)
+                    float bBot = wLo + binSize * i
+                    float bMid = (bTop + bBot) / 2
+                    int   bw   = int(math.round(v / maxVol * profWidthInput))
+
+                    if showProfileInput and bw > 0
+                        color binCol = color.from_gradient(v, 0, maxVol, color.new(trendColor, 85), color.new(trendColor, 20))
+                        box hb = box.new(bar_index + profOffset - bw, bTop, bar_index + profOffset, bBot,
+                             border_color = color.new(chart.bg_color, 30),
+                             bgcolor      = binCol)
+                        array.push(pfBoxes, hb)
+
+                    bool isLocalMax = i > 0 and i < profRowsInput - 1 and v > array.get(vols, i - 1) and v > array.get(vols, i + 1)
+                    bool isLocalMin = i > 0 and i < profRowsInput - 1 and v < array.get(vols, i - 1) and v < array.get(vols, i + 1)
+                    bool insideVA   = bMid <= vahPrice and bMid >= valPrice
+
+                    // HVN — acceptance shelf
+                    if showNodesInput and isLocalMax and v >= maxVol * hvnThreshInput and i != pocIdx
+                        line hvnLn = line.new(segStartX, bMid, bar_index + profOffset - bw, bMid, color = color.new(trendColor, 35), style = line.style_dotted, width = 1)
+                        array.push(pfLines, hvnLn)
+
+                    // LVN — vacuum inside Value Area
+                    if showNodesInput and isLocalMin and v <= maxVol * lvnThreshInput and insideVA
+                        line lvnLn = line.new(segStartX, bMid, bar_index + profOffset - bw, bMid, color = LVN_COLOR, style = line.style_dotted, width = 1)
+                        array.push(pfLines, lvnLn)
+                        label lvnLb = label.new(bar_index + profOffset + 1, bMid, "LVN", color = color.new(color.black, 100), textcolor = LVN_TEXT, style = label.style_label_left, size = profLabelSize)
+                        array.push(pfLabels, lvnLb)
+                        array.push(lvnLevels, bMid)
+
+                // ── POC line + label ──
+                if showPocInput
+                    line pocLn = line.new(segStartX, pocPrice, bar_index + profOffset, pocPrice, color = POC_COLOR, style = line.style_solid, width = 2)
+                    array.push(pfLines, pocLn)
+                    string pocVolStr = symbolHasVol ? str.tostring(maxVol, format.volume) : "range-wt"
+                    label pocLb = label.new(bar_index + profOffset + 1, pocPrice, "POC " + str.tostring(pocPrice, format.mintick) + " · " + pocVolStr, color = color.new(color.black, 100), textcolor = POC_COLOR, style = label.style_label_left, size = profLabelSize)
+                    array.push(pfLabels, pocLb)
+
+// ── LVN break detection (uses live segment levels) ──
+bool  lvnCross    = false
+float lvnCrossLvl = na
+if lvnAlertInput and barstate.isconfirmed and array.size(lvnLevels) > 0
+    for i = 0 to array.size(lvnLevels) - 1
+        float lvl = array.get(lvnLevels, i)
+        bool crossedUp   = close[1] < lvl and close >= lvl
+        bool crossedDown = close[1] > lvl and close <= lvl
+        if crossedUp or crossedDown
+            lvnCross    := true
+            lvnCrossLvl := lvl
+
+// ══════════════════════════════════════════════════════════
+// 13. DASHBOARD (sectioned, dynamic height, gauge, tooltips)
+// ══════════════════════════════════════════════════════════
+dashPos = switch dashPosStr
+    "Top Left"     => position.top_left
+    "Top Right"    => position.top_right
+    "Bottom Left"  => position.bottom_left
+    "Bottom Right" => position.bottom_right
+    "Middle Right" => position.middle_right
+    =>                position.top_right
+
+var table dashTable = na
+
+if showDashInput and barstate.islast
+    string trendWord = trend == 1 ? "Bullish" : "Bearish"
+    color  trendCol  = trend == 1 ? BULL_TEXT : BEAR_TEXT
+    color  headerBg  = trend == 1 ? HEADER_BG_BULL : HEADER_BG_BEAR
+
+    string biasStr = biasDir == 1 ? "Bullish" : biasDir == -1 ? "Bearish" : "—"
+    color  biasCol = biasDir == 1 ? BULL_TEXT : biasDir == -1 ? BEAR_TEXT : TEXT_MUTED
+
+    string signalStr = activeDir == 1 ? "LONG" : activeDir == -1 ? "SHORT" : "Wait"
+    color  signalCol = activeDir == 1 ? BULL_TEXT : activeDir == -1 ? BEAR_TEXT : TEXT_MUTED
+
+    string sigAgo       = na(lastSignalBar) ? "" : " (" + str.tostring(bar_index - lastSignalBar) + ")"
+    string lastSigStr   = lastSignalStr == "—" ? "—" : lastSignalStr + (lastScore > 0 ? " · " + str.tostring(lastScore) : "") + sigAgo
+    color  lastSigCol   = lastSignalStr == "Long Retest" or lastSignalStr == "Bull Flip" ? BULL_TEXT : lastSignalStr == "—" ? TEXT_MUTED : BEAR_TEXT
+
+    string ageStr = str.tostring(barsInTrend) + " bars"
+
+    string pocStr = na(pocPrice) ? "—" : str.tostring(pocPrice, format.mintick)
+    string vahStr = na(vahPrice) ? "—" : str.tostring(vahPrice, format.mintick)
+    string valStr = na(valPrice) ? "—" : str.tostring(valPrice, format.mintick)
+
+    string dashEntry = activeDir != 0 and not na(activeEntry) ? str.tostring(activeEntry, format.mintick) : "—"
+    string dashSL    = activeDir != 0 and not na(activeSL)  ? (beActive ? "BE @ " : "") + str.tostring(activeSL, format.mintick) : "—"
+    string dashTP1   = activeDir != 0 and not na(activeTP1) ? (tp1Reached ? "✓ " : "") + str.tostring(activeTP1, format.mintick) : "—"
+    string dashTP2   = activeDir != 0 and not na(activeTP2) ? (tp2Reached ? "✓ " : "") + str.tostring(activeTP2, format.mintick) : "—"
+    string dashTP3   = activeDir != 0 and not na(activeTP3) ? (tp3Reached ? "✓ " : "") + str.tostring(activeTP3, format.mintick) : "—"
+    color  dashSlCol  = beActive   ? BE_COLOR     : SL_COLOR
+    color  dashTp1Col = tp1Reached ? TP_HIT_COLOR : TP_LABEL_COLOR
+    color  dashTp2Col = tp2Reached ? TP_HIT_COLOR : TP_LABEL_COLOR
+    color  dashTp3Col = tp3Reached ? TP_HIT_COLOR : TP_LABEL_COLOR
+
+    string dashRR   = str.tostring(currentRR, "#.#") + "R"
+    string dashDist = str.tostring(riskPct, "#.##") + "%"
+    color  rrColor   = currentRR >= 1.5 ? BULL_TEXT : currentRR >= 1.0 ? NEUTRAL_TEXT : BEAR_TEXT
+    color  distColor = riskPct > 3.0 ? BEAR_TEXT : riskPct > 1.0 ? NEUTRAL_TEXT : BULL_TEXT
+
+    int    closedTrades = winCount + lossCount
+    float  winRate      = closedTrades > 0 ? winCount / float(closedTrades) * 100.0 : 0.0
+    string dashWL       = str.tostring(winCount) + " / " + str.tostring(lossCount)
+    string dashWR       = closedTrades > 0 ? str.tostring(winRate, "#.#") + "%  " + buildGauge(winRate, 100, 8) : "—"
+    color  wrCol        = closedTrades == 0 ? TEXT_MUTED : winRate >= 55.0 ? BULL_TEXT : winRate >= 45.0 ? NEUTRAL_TEXT : BEAR_TEXT
+    string dashForm     = formStr == "" ? "—" : formStr
+
+    int marketRows  = showMarketSecInput  ? 6 : 0
+    int profileRows = showProfileSecInput ? 4 : 0
+    int tradeRows   = showTradeSecInput   ? (activeDir != 0 ? 8 : 2) : 0
+    int statsRows   = showStatsSecInput   ? 5 : 0
+    int totalRows   = 2 + marketRows + profileRows + tradeRows + statsRows
+
+    if not na(dashTable)
+        table.delete(dashTable)
+    dashTable := table.new(dashPos, 2, totalRows, bgcolor = TABLE_BG, border_color = TABLE_BORDER, border_width = 1, frame_color = TABLE_BORDER, frame_width = 1)
+
+    int  r   = 0
+    bool zeb = false
+    color rb = TABLE_BG
+
+    table.cell(dashTable, 0, r, "◆ LTM · " + trendWord, text_color = HEADER_TEXT, bgcolor = headerBg, text_size = dashFontSize, text_halign = text.align_center)
+    table.merge_cells(dashTable, 0, r, 1, r)
+    r += 1
+
+    if showMarketSecInput
+        table.cell(dashTable, 0, r, "— Market —", text_color = TEXT_MUTED, bgcolor = TABLE_ROW_ALT, text_size = dashFontSizeSub, text_halign = text.align_center)
+        table.merge_cells(dashTable, 0, r, 1, r)
+        r += 1
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "Trend", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Direction of the trailing band stack.")
+        table.cell(dashTable, 1, r, trendWord, text_color = trendCol, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "Age", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Bars since the last trend flip.")
+        table.cell(dashTable, 1, r, ageStr, text_color = TEXT_COLOR, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "HTF Bias", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Higher-timeframe EMA-50 bias (soft score component).")
+        table.cell(dashTable, 1, r, biasStr, text_color = biasCol, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "Signal", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Current position. Same-direction signals are ignored while open; an opposite signal reverses the position.")
+        table.cell(dashTable, 1, r, signalStr, text_color = signalCol, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "Last signal", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Most recent signal · retest score. Number in () = bars ago.")
+        table.cell(dashTable, 1, r, lastSigStr, text_color = lastSigCol, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+
+    if showProfileSecInput
+        table.cell(dashTable, 0, r, "— Profile —", text_color = TEXT_MUTED, bgcolor = TABLE_ROW_ALT, text_size = dashFontSizeSub, text_halign = text.align_center)
+        table.merge_cells(dashTable, 0, r, 1, r)
+        r += 1
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "POC", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Point of Control of the current trend segment.")
+        table.cell(dashTable, 1, r, pocStr, text_color = POC_COLOR, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "VA High", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Value Area High (70% of segment volume).")
+        table.cell(dashTable, 1, r, vahStr, text_color = TEXT_COLOR, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "VA Low", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Value Area Low (70% of segment volume).")
+        table.cell(dashTable, 1, r, valStr, text_color = TEXT_COLOR, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+
+    if showTradeSecInput
+        table.cell(dashTable, 0, r, "— Trade —", text_color = TEXT_MUTED, bgcolor = TABLE_ROW_ALT, text_size = dashFontSizeSub, text_halign = text.align_center)
+        table.merge_cells(dashTable, 0, r, 1, r)
+        r += 1
+        if activeDir != 0
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "Entry", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb)
+            table.cell(dashTable, 1, r, dashEntry, text_color = ENTRY_COLOR, text_size = dashFontSize, bgcolor = rb)
+            r += 1
+            zeb := not zeb
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "SL", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Active stop. 'BE @' = moved to entry after TP1.")
+            table.cell(dashTable, 1, r, dashSL, text_color = dashSlCol, text_size = dashFontSize, bgcolor = rb)
+            r += 1
+            zeb := not zeb
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "TP1", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "✓ = touched (counts as a win).")
+            table.cell(dashTable, 1, r, dashTP1, text_color = dashTp1Col, text_size = dashFontSize, bgcolor = rb)
+            r += 1
+            zeb := not zeb
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "TP2", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb)
+            table.cell(dashTable, 1, r, dashTP2, text_color = dashTp2Col, text_size = dashFontSize, bgcolor = rb)
+            r += 1
+            zeb := not zeb
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "TP3", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Final target. Touching it closes the trade.")
+            table.cell(dashTable, 1, r, dashTP3, text_color = dashTp3Col, text_size = dashFontSize, bgcolor = rb)
+            r += 1
+            zeb := not zeb
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "R:R (TP1)", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Reward-to-risk at TP1.")
+            table.cell(dashTable, 1, r, dashRR, text_color = rrColor, text_size = dashFontSize, bgcolor = rb)
+            r += 1
+            zeb := not zeb
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "SL Dist %", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Stop distance as % of entry (not position risk).")
+            table.cell(dashTable, 1, r, dashDist, text_color = distColor, text_size = dashFontSize, bgcolor = rb)
+            r += 1
+            zeb := not zeb
+        else
+            rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+            table.cell(dashTable, 0, r, "Flat · waiting for retest", text_color = TEXT_MUTED, text_size = dashFontSize, text_halign = text.align_center, bgcolor = rb)
+            table.merge_cells(dashTable, 0, r, 1, r)
+            r += 1
+            zeb := not zeb
+
+    if showStatsSecInput
+        table.cell(dashTable, 0, r, "— Stats —", text_color = TEXT_MUTED, bgcolor = TABLE_ROW_ALT, text_size = dashFontSizeSub, text_halign = text.align_center)
+        table.merge_cells(dashTable, 0, r, 1, r)
+        r += 1
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "Trades", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Closed trades this session (resets on chart reload).")
+        table.cell(dashTable, 1, r, str.tostring(closedTrades), text_color = TEXT_COLOR, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "W / L", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb)
+        table.cell(dashTable, 1, r, dashWL, text_color = TEXT_COLOR, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "Win rate", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Wins / closed. A trade is a WIN once TP1 is touched.")
+        table.cell(dashTable, 1, r, dashWR, text_color = wrCol, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+        rb := zeb ? TABLE_ROW_ALT : TABLE_BG
+        table.cell(dashTable, 0, r, "Form", text_color = TEXT_MUTED, text_size = dashFontSize, bgcolor = rb, tooltip = "Last " + str.tostring(FORM_LEN) + " closed trades.  ▰ = win · ▱ = loss (newest right).")
+        table.cell(dashTable, 1, r, dashForm, text_color = FORM_COLOR, text_size = dashFontSize, bgcolor = rb)
+        r += 1
+        zeb := not zeb
+
+    table.cell(dashTable, 0, r, "LTM · " + INDICATOR_VERSION, text_color = TEXT_MUTED, text_size = dashFontSizeSub, text_halign = text.align_center)
+    table.merge_cells(dashTable, 0, r, 1, r)
+
+// ══════════════════════════════════════════════════════════
+// 14. WATERMARK — WillyAlgoTrader
+// ══════════════════════════════════════════════════════════
+if barstate.islast and showWatermarkInput
+    var wmTable = table.new(
+         position     = position.bottom_center,
+         columns      = 1,
+         rows         = 1,
+         bgcolor      = color.new(color.black, 100),
+         border_color = color.new(color.black, 100),
+         border_width = 0,
+         frame_color  = color.new(color.black, 100),
+         frame_width  = 0)
+    table.cell(wmTable, 0, 0, "WillyAlgoTrader",
+         text_color  = WM_COLOR,
+         text_size   = size.normal,
+         text_halign = text.align_center,
+         bgcolor     = color.new(color.black, 100))
+
+// ══════════════════════════════════════════════════════════
+// 15. ALERTS (ordered by within-bar chronology:
+//     trade management → closures → reversal → new entries → info)
+// ══════════════════════════════════════════════════════════
+string tick   = syminfo.tickerid
+string tfStr  = timeframe.period
+string aPrice = str.tostring(close, format.mintick)
+
+// ── 1) Intra-trade management ──
+if beJustActivated and alertTpHitInput
+    alert("🛡️ BREAK-EVEN | " + tick + " | SL moved to " + str.tostring(nz(exitEntry), format.mintick), alert.freq_once_per_bar_close)
+
+if tp1FirstTouch and alertTpHitInput
+    alert("🎯 TP1 HIT | " + tick + " | TP1: " + str.tostring(nz(exitTP1), format.mintick), alert.freq_once_per_bar_close)
+
+if tp2FirstTouch and alertTpHitInput
+    alert("🎯🎯 TP2 HIT | " + tick + " | TP2: " + str.tostring(nz(exitTP2), format.mintick), alert.freq_once_per_bar_close)
+
+// ── 2) Closures ──
+if tp3FirstTouch and alertTpHitInput
+    alert("🏆 TP3 HIT | " + tick + " | TP3: " + str.tostring(nz(exitTP3), format.mintick), alert.freq_once_per_bar_close)
+
+if evSlHit and showSlHitAlertInput
+    string slDirStr = exitDir == 1 ? "Long" : "Short"
+    string textSlHit = (exitBeActive ? "🛡️ BE STOP-OUT | " : "🛑 SL HIT | ") + tick + " | " + slDirStr + " | Entry: " + str.tostring(nz(hitEntry), format.mintick) + " | SL: " + str.tostring(nz(hitSL), format.mintick)
+    alert(textSlHit, alert.freq_once_per_bar_close)
+
+if evReversal and showSlHitAlertInput
+    string revDir = exitDir == 1 ? "Long → Short" : "Short → Long"
+    string revRes = displayTp1Reached ? "after TP1 (win)" : "before TP1 (loss)"
+    alert("🔄 REVERSAL | " + tick + " | " + revDir + " | Prev entry: " + str.tostring(nz(exitEntry), format.mintick) + " | Closed " + revRes, alert.freq_once_per_bar_close)
+
+// ── 3) New entries (text + JSON) — actives are valid on the entry bar ──
+if evLongEntry or evShortEntry
+    string aSL    = str.tostring(nz(activeSL),  format.mintick)
+    string aTP1   = str.tostring(nz(activeTP1), format.mintick)
+    string aTP2   = str.tostring(nz(activeTP2), format.mintick)
+    string aTP3   = str.tostring(nz(activeTP3), format.mintick)
+    string aRR    = str.tostring(effTP1m, "#.#")
+    string aScore = str.tostring(lastScore)
+
+    if evLongEntry
+        string jsonLong = '{"action":"buy","ticker":"' + tick + '","tf":"' + tfStr + '","price":' + aPrice + ',"score":' + aScore + ',"sl":' + aSL + ',"tp1":' + aTP1 + ',"tp2":' + aTP2 + ',"tp3":' + aTP3 + ',"rr":' + aRR + '}'
+        string textLong = "🟢 LONG | " + tick + " | TF: " + tfStr + " | Price: " + aPrice + " | Score: " + aScore + " | SL: " + aSL + " | TP1: " + aTP1 + " | TP2: " + aTP2 + " | TP3: " + aTP3 + " | R:R: " + aRR
+        alert(webhookInput ? jsonLong : textLong, alert.freq_once_per_bar_close)
+
+    if evShortEntry
+        string jsonShort = '{"action":"sell","ticker":"' + tick + '","tf":"' + tfStr + '","price":' + aPrice + ',"score":' + aScore + ',"sl":' + aSL + ',"tp1":' + aTP1 + ',"tp2":' + aTP2 + ',"tp3":' + aTP3 + ',"rr":' + aRR + '}'
+        string textShort = "🔴 SHORT | " + tick + " | TF: " + tfStr + " | Price: " + aPrice + " | Score: " + aScore + " | SL: " + aSL + " | TP1: " + aTP1 + " | TP2: " + aTP2 + " | TP3: " + aTP3 + " | R:R: " + aRR
+        alert(webhookInput ? jsonShort : textShort, alert.freq_once_per_bar_close)
+
+// ── 4) Informational flips (did not open or reverse a trade) ──
+if confirmedBullFlip and not evLongEntry and flipAlertInput
+    alert("▲ BULL FLIP | " + tick + " | TF: " + tfStr + " | Price: " + aPrice, alert.freq_once_per_bar_close)
+
+if confirmedBearFlip and not evShortEntry and flipAlertInput
+    alert("▼ BEAR FLIP | " + tick + " | TF: " + tfStr + " | Price: " + aPrice, alert.freq_once_per_bar_close)
+
+// ── 5) LVN break ──
+if lvnCross
+    alert("⚡ LVN BREAK | " + tick + " | TF: " + tfStr + " | Level: " + str.tostring(lvnCrossLvl, format.mintick) + " | Price entering volume vacuum", alert.freq_once_per_bar_close)

@@ -1,0 +1,125 @@
+//@version=6
+strategy(
+    title="CompetitionBot (Pine)",
+    shorttitle="CompetitionBot",
+    overlay=true,
+    initial_capital=100,
+    currency="USDT",
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=1,
+    pyramiding=1,
+    margin_long=0,
+    margin_short=0,
+    calc_on_every_tick=false,
+    process_orders_on_close=false
+)
+
+// ============================================================================
+// INPUTS (mapped to your NinjaScript parameters)
+// ============================================================================
+string GRP_MAIN = "CompetitionBot Inputs"
+int FastEma       = input.int(9, "Fast EMA", minval=1, maxval=50, group=GRP_MAIN)
+int SlowEma       = input.int(21, "Slow EMA", minval=10, maxval=200, group=GRP_MAIN)
+float StopATR     = input.float(1.5, "Stop ATR", minval=1.0, maxval=5.0, step=0.1, group=GRP_MAIN)
+float ProfitATR   = input.float(2.5, "Profit ATR", minval=1.0, maxval=5.0, step=0.1, group=GRP_MAIN)
+int AtrPeriod     = input.int(14, "ATR Periode", minval=5, maxval=30, group=GRP_MAIN)
+float RiskPerTrade = input.float(1.0, "Risiko %", minval=0.1, maxval=2.0, step=0.1, group=GRP_MAIN)
+int StartTime     = input.int(1530, "StartTime (HHMM)", minval=0, maxval=2359, group=GRP_MAIN)
+int EndTime       = input.int(2200, "EndTime (HHMM)", minval=0, maxval=2359, group=GRP_MAIN)
+
+string GRP_EXTRA = "Execution"
+string SessionTimezone = input.string("America/New_York", "Session Timezone", options=["Exchange", "America/New_York", "UTC", "Europe/Berlin"], group=GRP_EXTRA)
+int WarmupBars = input.int(50, "Warmup Bars", minval=10, maxval=500, group=GRP_EXTRA)
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+f_norm_hhmm(int hhmm) =>
+    int h = int(math.floor(hhmm / 100))
+    int m = hhmm % 100
+    h := math.max(0, math.min(23, h))
+    m := math.max(0, math.min(59, m))
+    h * 100 + m
+
+f_in_session(int start_hhmm, int end_hhmm, string tz) =>
+    string effective_tz = tz == "Exchange" ? syminfo.timezone : tz
+    int now_hhmm = hour(time, effective_tz) * 100 + minute(time, effective_tz)
+    bool regular_window = start_hhmm <= end_hhmm
+    regular_window ? (now_hhmm >= start_hhmm and now_hhmm <= end_hhmm) : (now_hhmm >= start_hhmm or now_hhmm <= end_hhmm)
+
+// ============================================================================
+// CORE INDICATORS
+// ============================================================================
+float emaFast = ta.ema(close, FastEma)
+float emaSlow = ta.ema(close, SlowEma)
+float atrVal = ta.atr(AtrPeriod)
+float vwapRaw = ta.vwap(hlc3)
+float vwapSma = ta.sma(vwapRaw, 1)
+
+int start_hhmm = f_norm_hhmm(StartTime)
+int end_hhmm = f_norm_hhmm(EndTime)
+bool session_ok = f_in_session(start_hhmm, end_hhmm, SessionTimezone)
+
+// Ninja parity: only trade on confirmed bars after a warmup.
+bool ready = barstate.isconfirmed and bar_index >= WarmupBars
+
+// ============================================================================
+// ENTRY LOGIC (EMA cross + VWAP filter)
+// ============================================================================
+bool longSetup = ta.crossover(emaFast, emaSlow) and close > vwapSma
+bool shortSetup = ta.crossunder(emaFast, emaSlow) and close < vwapSma
+
+// Position sizing based on ATR stop distance and % equity risk.
+float riskDollars = strategy.equity * (RiskPerTrade / 100.0)
+float stopDistancePoints = atrVal * StopATR
+float riskPerContract = stopDistancePoints * syminfo.pointvalue
+float rawQty = riskPerContract > 0 ? (riskDollars / riskPerContract) : 1.0
+float orderQty = math.max(1.0, math.floor(rawQty))
+
+var float longStop = na
+var float longTarget = na
+var float shortStop = na
+var float shortTarget = na
+
+if ready and session_ok and strategy.position_size == 0
+    if longSetup
+        longStop := close - atrVal * StopATR
+        longTarget := close + atrVal * ProfitATR
+        shortStop := na
+        shortTarget := na
+        strategy.entry("Long", strategy.long, qty=orderQty)
+    if shortSetup
+        shortStop := close + atrVal * StopATR
+        shortTarget := close - atrVal * ProfitATR
+        longStop := na
+        longTarget := na
+        strategy.entry("Short", strategy.short, qty=orderQty)
+
+// Keep bracket exits active while in position.
+if strategy.position_size > 0 and not na(longStop) and not na(longTarget)
+    strategy.exit("Long Exit", "Long", stop=longStop, limit=longTarget)
+
+if strategy.position_size < 0 and not na(shortStop) and not na(shortTarget)
+    strategy.exit("Short Exit", "Short", stop=shortStop, limit=shortTarget)
+
+// Reset stored prices after position is fully closed.
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    longStop := na
+    longTarget := na
+    shortStop := na
+    shortTarget := na
+
+// ============================================================================
+// VISUALS
+// ============================================================================
+plot(emaFast, "EMA Fast", color=color.new(color.green, 0), linewidth=2)
+plot(emaSlow, "EMA Slow", color=color.new(color.red, 0), linewidth=2)
+plot(vwapSma, "VWAP", color=color.new(color.blue, 0), linewidth=2)
+
+plotshape(ready and session_ok and longSetup and strategy.position_size == 0, title="Long Setup", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.tiny, text="L")
+plotshape(ready and session_ok and shortSetup and strategy.position_size == 0, title="Short Setup", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny, text="S")
+
+plot(strategy.position_size > 0 ? longStop : na, "Long Stop", color=color.new(color.red, 0), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? longTarget : na, "Long Target", color=color.new(color.green, 0), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? shortStop : na, "Short Stop", color=color.new(color.red, 0), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? shortTarget : na, "Short Target", color=color.new(color.green, 0), style=plot.style_linebr)

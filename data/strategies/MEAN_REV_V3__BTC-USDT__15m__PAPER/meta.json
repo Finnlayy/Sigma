@@ -1,0 +1,9 @@
+{
+  "bytes": 167,
+  "name": "BTC Mean-Reversion V3",
+  "persisted_at": "2026-09-08T00:22:35Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "MEAN_REV_V3__BTC-USDT__15m__PAPER",
+  "tv_script_id": ""
+}

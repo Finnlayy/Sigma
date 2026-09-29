@@ -1,0 +1,439 @@
+//@version=6
+strategy("BPRC QUANTUM SNIPER PRO", overlay=true, initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     currency=currency.USD, max_labels_count=500, max_boxes_count=100)
+
+// ==========================================
+// 1. INPUTS - QUANTUM CORE (The Intelligence)
+// ==========================================
+group_q = "=== QUANTUM CORE (Filters) ==="
+historyBars       = input.int(72,   "Quantum History Bars", minval=32, group=group_q)
+confThreshold     = input.float(0.54, "Min Confidence",     group=group_q)
+momentumThreshold = input.float(0.08, "Min Momentum",       group=group_q)
+memoryDecay       = input.float(0.88, "Memory Decay",       group=group_q)
+memoryThreshold   = input.float(0.05, "Memory Threshold",   group=group_q)
+sniperMinPct      = input.float(57.0, "Min Sniper Score %", group=group_q)
+
+group_q_filters = "=== QUANTUM FILTERS ==="
+useEMAfilter = input.bool(true,  "EMA Trend Filter",    group=group_q_filters)
+useMTFfilter = input.bool(true,  "MTF Trend Filter",    group=group_q_filters)
+useVolFilter = input.bool(true,  "Volume Filter",       group=group_q_filters)
+useATRfilter = input.bool(true,  "ATR Volatility Filter", group=group_q_filters)
+trendEmaLen  = input.int(34,     "Trend EMA Length",    group=group_q_filters)
+mtfTf        = input.timeframe("5", "MTF Trend TF",     group=group_q_filters)
+
+// ==========================================
+// 2. INPUTS - BPRC CORE (The Execution)
+// ==========================================
+group_bprc  = "=== BPRC CORE (Structure) ==="
+bp_mult     = input.float(1.5, "Breakout ATR Mult",    group=group_bprc)
+r_zone_mult = input.float(1.0, "Pullback ATR Mult",    group=group_bprc)
+c_conf_len  = input.int(5,     "Continuation Lookback", group=group_bprc)
+
+group_risk      = "=== RISK (50/50 RUNNER) ==="
+sl_mult         = input.float(2.0, "Initial SL (ATR Mult)",       group=group_risk)
+tp1_mult        = input.float(2.0, "TP1 - Take 50% (Risk Mult)",  group=group_risk)
+trailing_mult   = input.float(0.5, "Runner Trailing (ATR Mult)",   group=group_risk)
+
+group_visual    = "=== VISUALS ==="
+showDashboard   = input.bool(true, "Show Dashboard",     group=group_visual)
+showTargets     = input.bool(true, "Show Target Lines",  group=group_visual)
+
+// ==========================================
+// 3. INPUTS - PROP FIRM (Monte Carlo)
+// ==========================================
+string GRP_PROP  = "=== PROP FIRM RULES ==="
+prop_target      = input.float(10.0, "Profit Target %",       minval=1.0,  group=GRP_PROP)
+prop_daily_dd    = input.float(5.0,  "Max Daily DD %",         minval=0.1,  group=GRP_PROP)
+prop_max_dd      = input.float(10.0, "Max Overall DD %",       minval=0.1,  group=GRP_PROP)
+prop_consist     = input.float(0.30, "Consistency Rule (max single-day / total profit ratio)", minval=0.01, maxval=1.0, group=GRP_PROP)
+prop_trailing    = input.bool(false, "Trailing Max DD (EOD)",  group=GRP_PROP)
+
+string GRP_MC    = "=== Monte Carlo ==="
+mc_paths         = input.int(500,   "Monte Carlo Paths", minval=100, maxval=5000, group=GRP_MC)
+mc_show          = input.bool(true, "Show Monte Carlo Dashboard", group=GRP_MC)
+
+// ==========================================
+// 4. QUANTUM CALCULATIONS (The Brain)
+// ==========================================
+atrValue  = ta.atr(14)
+ema9      = ta.ema(close, 9)
+ema21     = ta.ema(close, 21)
+vwapValue = ta.vwap(hlc3)
+rsiValue  = ta.rsi(close, 14)
+[macdMain, macdSignal, _] = ta.macd(close, 12, 26, 9)
+[_, _, adxValue] = ta.dmi(14, 14)
+volAvg    = ta.sma(volume, 20)
+
+// Probability Engine
+float upCount   = 0.0
+float downCount = 0.0
+for i = 1 to historyBars
+    if not na(close[i]) and not na(close[i + 1])
+        float chg    = close[i] - close[i + 1]
+        float weight = 1.0 + ((historyBars - i) / historyBars)
+        if chg > 0
+            upCount   += weight
+        else if chg < 0
+            downCount += weight
+
+totalMoves = upCount + downCount
+bullProb   = totalMoves > 0 ? upCount   / totalMoves : 0.0
+bearProb   = totalMoves > 0 ? downCount / totalMoves : 0.0
+confidence = math.max(bullProb, bearProb)
+momentum   = bullProb > bearProb ? (bullProb - bearProb) : (bearProb - bullProb)
+
+// Memory Decay
+var float qMemory   = 0.0
+memoryInput = bullProb > bearProb ? (0.18 + momentum * 0.30) : bearProb > bullProb ? -(0.18 + momentum * 0.30) : 0.0
+qMemory    := math.max(-1.0, math.min(1.0, qMemory * memoryDecay + memoryInput))
+memoryBias  = qMemory > memoryThreshold ? 1 : qMemory < -memoryThreshold ? -1 : 0
+
+// Sniper Scoring
+float bullScoreSniper = 0
+bullScoreSniper += close > vwapValue                       ? 1 : 0
+bullScoreSniper += rsiValue > 50                           ? 1 : 0
+bullScoreSniper += macdMain > macdSignal                   ? 1 : 0
+bullScoreSniper += ema9 > ema21                            ? 1 : 0
+bullScoreSniper += adxValue > 25 and close > ema9          ? 1 : 0
+bullScoreSniper += volume > volAvg and close > open        ? 1 : 0
+bullPct = bullScoreSniper / 6.0 * 100.0
+
+float bearScoreSniper = 0
+bearScoreSniper += close < vwapValue                       ? 1 : 0
+bearScoreSniper += rsiValue < 50                           ? 1 : 0
+bearScoreSniper += macdMain < macdSignal                   ? 1 : 0
+bearScoreSniper += ema9 < ema21                            ? 1 : 0
+bearScoreSniper += adxValue > 25 and close < ema9          ? 1 : 0
+bearScoreSniper += volume > volAvg and close < open        ? 1 : 0
+bearPct = bearScoreSniper / 6.0 * 100.0
+
+// Filters
+trendEma = ta.ema(close, trendEmaLen)
+emaBull  = close > trendEma and trendEma > trendEma[1]
+emaBear  = close < trendEma and trendEma < trendEma[1]
+mtfBull  = request.security(syminfo.tickerid, mtfTf, close > ta.ema(close, trendEmaLen), lookahead=barmerge.lookahead_off)
+mtfBear  = request.security(syminfo.tickerid, mtfTf, close < ta.ema(close, trendEmaLen), lookahead=barmerge.lookahead_off)
+volOK    = volume > volAvg * 1.0
+atrOK    = atrValue > ta.sma(atrValue, 21) * 0.95
+
+// ==========================================
+// 5. BPRC STATE MACHINE (The Discipline)
+// ==========================================
+var int   system_state    = 0
+var float breakout_level  = na
+var float structure_low   = na
+var float structure_high  = na
+
+chan_basis = ta.ema(close, 20)
+chan_upper = chan_basis + (atrValue * 2)
+chan_lower = chan_basis - (atrValue * 2)
+
+bull_bp = ta.crossover(close,  chan_upper + (atrValue * bp_mult))
+bear_bp = ta.crossunder(close, chan_lower - (atrValue * bp_mult))
+
+if (bull_bp or bear_bp) and system_state == 0 and strategy.position_size == 0
+    system_state    := 1
+    breakout_level  := close
+    structure_high  := high
+    structure_low   := low
+
+bull_pullback = system_state == 1 and close < breakout_level and close > (breakout_level - (atrValue * r_zone_mult))
+bear_pullback = system_state == 1 and close > breakout_level and close < (breakout_level + (atrValue * r_zone_mult))
+
+if system_state == 1
+    if (close < structure_low and breakout_level > structure_low) or (close > structure_high and breakout_level < structure_high)
+        system_state := 0
+    else if bull_pullback or bear_pullback
+        system_state := 2
+
+bull_cont = system_state == 2 and close > ta.highest(high[1], c_conf_len) and close > breakout_level
+bear_cont = system_state == 2 and close < ta.lowest(low[1],  c_conf_len)  and close < breakout_level
+
+// ==========================================
+// 6. THE FUSION: A+ SIGNAL GENERATION
+// ==========================================
+long_condition  = bull_cont and bullPct >= sniperMinPct and (not useEMAfilter or emaBull) and (not useMTFfilter or mtfBull) and (not useVolFilter or volOK) and (not useATRfilter or atrOK)
+short_condition = bear_cont and bearPct >= sniperMinPct and (not useEMAfilter or emaBear) and (not useMTFfilter or mtfBear) and (not useVolFilter or volOK) and (not useATRfilter or atrOK)
+
+// ==========================================
+// 7. EXECUTION & RUNNER EXIT
+// ==========================================
+var float target_tp1 = na
+var float initial_sl = na
+var float runner_sl  = na
+var bool  tp1_hit    = false
+
+// Alert/Webhook messages (JSON)
+f_alert_json(side) =>
+    json = '{' +
+      '"signal":"' + side + '",' +
+      '"symbol":"' + syminfo.ticker + '",' +
+      '"time":"' + tostring(time, "yyyy-MM-dd HH:mm:ss") + '",' +
+      '"price":' + tostring(close) +
+    '}'
+    json
+
+if long_condition and strategy.position_size == 0
+    initial_sl  := close - (atrValue * sl_mult)
+    target_tp1  := close + ((close - initial_sl) * tp1_mult)
+    runner_sl   := initial_sl
+    tp1_hit     := false
+    strategy.entry("BPRC_L", strategy.long, comment="A+ LONG")
+    system_state := 0
+    // trigger alert for external execution systems if user creates alert from this condition
+    alert(f_alert_json("buy"), alert.freq_once_per_bar_close)
+
+if short_condition and strategy.position_size == 0
+    initial_sl  := close + (atrValue * sl_mult)
+    target_tp1  := close - ((initial_sl - close) * tp1_mult)
+    runner_sl   := initial_sl
+    tp1_hit     := false
+    strategy.entry("BPRC_S", strategy.short, comment="A+ SHORT")
+    system_state := 0
+    alert(f_alert_json("sell"), alert.freq_once_per_bar_close)
+
+if strategy.position_size > 0
+    if not tp1_hit and high >= target_tp1
+        tp1_hit := true
+    if not tp1_hit
+        strategy.exit("TP1_L", "BPRC_L", qty_percent=50, limit=target_tp1, stop=initial_sl, comment_profit="TP1", comment_loss="SL")
+    else
+        runner_sl := math.max(runner_sl, low - (atrValue * trailing_mult))
+        strategy.exit("Runner_L", "BPRC_L", stop=runner_sl, comment_profit="RUNNER", comment_loss="SL")
+
+if strategy.position_size < 0
+    if not tp1_hit and low <= target_tp1
+        tp1_hit := true
+    if not tp1_hit
+        strategy.exit("TP1_S", "BPRC_S", qty_percent=50, limit=target_tp1, stop=initial_sl, comment_profit="TP1", comment_loss="SL")
+    else
+        runner_sl := math.min(runner_sl, high + (atrValue * trailing_mult))
+        strategy.exit("Runner_S", "BPRC_S", stop=runner_sl, comment_profit="RUNNER", comment_loss="SL")
+
+if strategy.position_size == 0
+    system_state := 0
+    tp1_hit      := false
+    target_tp1   := na
+    initial_sl   := na
+    runner_sl    := na
+
+// ==========================================
+// 8. VISUALS & DASHBOARD
+// ==========================================
+plot(showTargets and strategy.position_size != 0 ? target_tp1 : na, "TP1", color.lime, style=plot.style_linebr)
+plot(showTargets and strategy.position_size != 0 ? (tp1_hit ? runner_sl : initial_sl) : na, "SL", color.red, style=plot.style_linebr)
+
+var table dash = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 20), border_width=1)
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "QUANTUM SCORE", text_color=color.white)
+    table.cell(dash, 1, 0, str.tostring(math.max(bullPct, bearPct), "#") + "%", text_color=color.lime)
+    table.cell(dash, 0, 1, "BIAS",          text_color=color.white)
+    table.cell(dash, 1, 1, bullPct > bearPct ? "BULL" : "BEAR", text_color=bullPct > bearPct ? color.lime : color.red)
+    table.cell(dash, 0, 2, "BPRC STATE",    text_color=color.white)
+    table.cell(dash, 1, 2, system_state == 1 ? "BP" : system_state == 2 ? "R" : "IDLE", text_color=color.yellow)
+    table.cell(dash, 0, 3, "VOLATILITY",    text_color=color.white)
+    table.cell(dash, 1, 3, atrOK ? "OK" : "LOW", text_color=atrOK ? color.lime : color.red)
+    table.cell(dash, 0, 4, "RUNNER",        text_color=color.white)
+    table.cell(dash, 1, 4, tp1_hit ? "ACTIVE" : "WAITING", text_color=tp1_hit ? color.lime : color.orange)
+    table.cell(dash, 0, 5, "POSITION",      text_color=color.white)
+    table.cell(dash, 1, 5, strategy.position_size != 0 ? "IN TRADE" : "FLAT", text_color=strategy.position_size != 0 ? color.lime : color.gray)
+
+plotshape(long_condition  and strategy.position_size == 0, "A+ LONG",  shape.labelup,   location.belowbar, color.lime,    text="A+ BUY",  textcolor=color.black)
+plotshape(short_condition and strategy.position_size == 0, "A+ SHORT", shape.labeldown, location.abovebar, color.fuchsia, text="A+ SELL", textcolor=color.white)
+
+// AlertConditions for user-created alerts (recommended)
+// Use the alert message template above or create a custom webhook payload when creating the TradingView alert.
+alertcondition(long_condition and strategy.position_size == 0, title="BPRC A+ BUY", message=f_alert_json("buy"))
+alertcondition(short_condition and strategy.position_size == 0, title="BPRC A+ SELL", message=f_alert_json("sell"))
+
+// ============================================================================
+// SECTION 15: MONTE CARLO EQUITY CURVE SIMULATION
+// Stats derived from strategy.* built-ins — no GA dependency.
+// Simulates mc_paths equity paths from the strategy's closed-trade statistics.
+// Outputs: P5/P25/P50/P75/P95 final equity, P95 peak balance,
+//          P5 max DD, Prop Pass Rate — rendered bottom_right.
+// Fires ONLY at barstate.islast — zero runtime cost on live bars.
+// ============================================================================
+
+// ── Percentile helper (linear interpolation on sorted array) ─────────────────
+f_percentile_sorted(array<float> a, float p) =>
+    int n = array.size(a)
+    if n == 0
+        float(na)
+    else if n == 1
+        array.get(a, 0)
+    else
+        float pos   = (p / 100.0) * (n - 1)
+        int   idxLo = int(math.floor(pos))
+        int   idxHi = int(math.ceil(pos))
+        float vLo   = array.get(a, idxLo)
+        float vHi   = array.get(a, idxHi)
+        idxLo == idxHi ? vLo : vLo + (vHi - vLo) * (pos - idxLo)
+
+// ── MC Dashboard table ────────────────────────────────────────────────────────
+var table mc_tbl = table.new(position.bottom_right, 2, 9,
+     bgcolor      = color.new(color.black, 80),
+     border_width = 1,
+     border_color = color.new(color.gray, 50))
+
+// ── Main simulation — fires ONLY on last bar ──────────────────────────────────
+if barstate.islast and mc_show
+
+    // ── Derive trade stats from strategy built-ins ────────────────────────────
+    int   total_t  = math.max(strategy.closedtrades, 1)
+    float win_rate = total_t > 0 ? strategy.wintrades / total_t : 0.5
+    int   wins_t   = strategy.wintrades
+    int   loss_t   = math.max(total_t - wins_t, 1)
+
+    float avg_win  = wins_t > 0 ? strategy.grossprofit  / wins_t  : syminfo.mintick
+    float avg_loss = loss_t > 0 ? strategy.grossloss    / loss_t  : syminfo.mintick
+    // grossloss is already positive in PineScript strategy namespace
+    avg_win  := math.max(avg_win,  syminfo.mintick)
+    avg_loss := math.max(avg_loss, syminfo.mintick)
+
+    float start_eq = strategy.initial_capital
+    float target_eq = start_eq * (1.0 + prop_target / 100.0)
+
+    // ── Accumulators ──────────────────────────────────────────────────────────
+    array<float> final_eq_arr = array.new<float>()
+    array<float> peak_eq_arr  = array.new<float>()
+    array<float> maxdd_arr    = array.new<float>()
+    int prop_pass_count = 0
+
+    // ── Path loop ─────────────────────────────────────────────────────────────
+    for _path = 0 to mc_paths - 1
+        float eq          = start_eq
+        float peak_eq     = start_eq
+        float trail_floor = start_eq * (1.0 - prop_max_dd / 100.0)
+        float day_start   = start_eq
+        float day_pnl     = 0.0
+        float max_day_win = 0.0
+        float path_max_dd = 0.0
+        bool  breached    = false
+        bool  hit_target  = false
+
+        for t = 0 to total_t - 1
+
+            // New day every 10 trades
+            if t > 0 and t % 10 == 0
+                max_day_win := math.max(max_day_win, day_pnl)
+                day_start   := eq
+                day_pnl     := 0.0
+
+            // Random trade result
+            float pnl = math.random() < win_rate ? avg_win : -avg_loss
+            eq        += pnl
+            day_pnl   += pnl
+
+            // Update peak & trailing floor
+            peak_eq     := math.max(peak_eq, eq)
+            trail_floor := prop_trailing ? math.max(trail_floor, peak_eq * (1.0 - prop_max_dd / 100.0)) : trail_floor
+
+            // Drawdown this trade
+            float dd_pct = peak_eq > 0.0 ? (peak_eq - eq) / peak_eq * 100.0 : 0.0
+            path_max_dd  := math.max(path_max_dd, dd_pct)
+
+            // Prop breach checks
+            float daily_dd_pct  = day_start > 0.0 ? math.max(0.0, (day_start - eq) / day_start * 100.0) : 0.0
+            float path_net      = eq - start_eq
+            float consist_ratio = path_net > 0.0 ? max_day_win / path_net : 0.0
+
+            bool fail_daily   = daily_dd_pct  > prop_daily_dd
+            bool fail_maxdd   = dd_pct        > prop_max_dd
+            bool fail_trail   = eq            < trail_floor
+            bool fail_consist = consist_ratio > prop_consist
+
+            if fail_daily or fail_maxdd or fail_trail or fail_consist
+                breached := true
+                break
+
+            if eq >= target_eq
+                hit_target := true
+                break
+
+        array.push(final_eq_arr, eq)
+        array.push(peak_eq_arr,  peak_eq)
+        array.push(maxdd_arr,    path_max_dd)
+
+        if hit_target and not breached
+            prop_pass_count += 1
+
+    // ── Sort for percentiles ──────────────────────────────────────────────────
+    array.sort(final_eq_arr, order.ascending)
+    array.sort(peak_eq_arr,  order.ascending)
+    array.sort(maxdd_arr,    order.ascending)
+
+    float p5_eq   = f_percentile_sorted(final_eq_arr,  5)
+    float p25_eq  = f_percentile_sorted(final_eq_arr, 25)
+    float p50_eq  = f_percentile_sorted(final_eq_arr, 50)
+    float p75_eq  = f_percentile_sorted(final_eq_arr, 75)
+    float p95_eq  = f_percentile_sorted(final_eq_arr, 95)
+    float p95_bal = f_percentile_sorted(peak_eq_arr,  95)
+    float p5_dd   = f_percentile_sorted(maxdd_arr,      5)
+    float pass_rt = prop_pass_count / mc_paths * 100.0
+
+    // ── Render dashboard ──────────────────────────────────────────────────────
+    color HDR_BG = color.new(color.navy,  60)
+    color VAL_BG = color.new(color.black, 75)
+    color TXT_W  = color.white
+    color TXT_G  = color.lime
+    color TXT_R  = color.red
+    color TXT_Y  = color.yellow
+
+    // Row 0: Header
+    table.cell(mc_tbl, 0, 0, "⚡ Monte Carlo  |  " + str.tostring(mc_paths) + " Paths",text_color=color.yellow, bgcolor=color.new(color.blue, 55), text_size=size.small)
+    table.merge_cells(mc_tbl, 0, 0, 1, 0)
+
+    // Row 1: Win Rate
+    table.cell(mc_tbl, 0, 1, "Win Rate",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 1, str.tostring(win_rate * 100.0, "#.#") + "%",
+         text_color=TXT_G, bgcolor=VAL_BG, text_size=size.small)
+
+    // Row 2: P5 / P50 / P95 Final Equity
+    table.cell(mc_tbl, 0, 2, "Final Eq  P5 / P50 / P95",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 2,
+         str.tostring(p5_eq,  "#.0") + " / " +
+         str.tostring(p50_eq, "#.0") + " / " +
+         str.tostring(p95_eq, "#.0"),
+         text_color=TXT_G, bgcolor=VAL_BG, text_size=size.small)
+
+    // Row 3: P25 / P75
+    table.cell(mc_tbl, 0, 3, "Final Eq  P25 / P75",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 3,
+         str.tostring(p25_eq, "#.0") + " / " + str.tostring(p75_eq, "#.0"),
+         text_color=TXT_Y, bgcolor=VAL_BG, text_size=size.small)
+
+    // Row 4: P95 Max Balance
+    table.cell(mc_tbl, 0, 4, "P95 Max Balance",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 4, str.tostring(p95_bal, "#.0"),
+         text_color=TXT_G, bgcolor=VAL_BG, text_size=size.small)
+
+    // Row 5: P5 Max DD
+    table.cell(mc_tbl, 0, 5, "P5 Max DD (worst-case)",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 5, str.tostring(p5_dd, "#.##") + "%",
+         text_color=p5_dd > prop_max_dd ? TXT_R : TXT_G, bgcolor=VAL_BG, text_size=size.small)
+
+    // Row 6: Prop Pass Rate
+    table.cell(mc_tbl, 0, 6, "Prop Pass Rate",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 6, str.tostring(pass_rt, "#.#") + "%",
+         text_color=pass_rt >= 50.0 ? TXT_G : TXT_R, bgcolor=VAL_BG, text_size=size.small)
+
+    // Row 7: Avg Win / Avg Loss
+    table.cell(mc_tbl, 0, 7, "Avg Win / Avg Loss",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 7,
+         str.tostring(avg_win, "#.##") + " / " + str.tostring(avg_loss, "#.##"),
+         text_color=TXT_Y, bgcolor=VAL_BG, text_size=size.small)
+
+    // Row 8: Prop Target Equity
+    table.cell(mc_tbl, 0, 8, "Prop Target Equity",
+         text_color=TXT_W, bgcolor=HDR_BG, text_size=size.small)
+    table.cell(mc_tbl, 1, 8, str.tostring(target_eq, "#.0"),
+         text_color=TXT_Y, bgcolor=VAL_BG, text_size=size.small)

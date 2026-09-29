@@ -1,0 +1,377 @@
+//@version=6
+strategy(
+     "BB Trend Breakout Scalper - ZECUSDT 5m Optimized",
+     overlay = true,
+     calc_on_every_tick = true,
+     process_orders_on_close = true,
+     pyramiding = 0,
+     margin_long = 100,
+     margin_short = 100,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 10
+)
+
+// =========================================================================
+// 1. INPUTS & PARAMETER
+// =========================================================================
+
+grp_bb = "Bollinger Bands Setup - ZECUSDT 5m"
+bbLength = input.int(16, title = "BB Length", minval = 1, group = grp_bb)
+bbMult   = input.float(4.0, title = "BB Deviation", step = 0.1, group = grp_bb)
+
+grp_entry = "Entry Logik"
+entryMode = input.string(
+     "Limit wie Original",
+     title = "Order-Modus",
+     options = ["Limit wie Original", "Stop Breakout sauber"],
+     group = grp_entry
+)
+
+grp_risk = "Hard Stop - ZECUSDT 5m"
+slPerc     = input.float(2.0, title = "Hard Stop Loss (%)", step = 0.05, group = grp_risk)
+useAtrStop = input.bool(true, title = "Nutze ATR-basierten Stop Loss", group = grp_risk)
+atrLen     = input.int(14, title = "ATR Length", minval = 1, group = grp_risk)
+atrMult    = input.float(4.5, title = "ATR SL Multiplikator", step = 0.1, group = grp_risk)
+
+grp_exit = "Profit Lock & Tight Trailing - ZECUSDT 5m"
+useProfitLock  = input.bool(true, title = "Profit Lock aktivieren", group = grp_exit)
+lockAfterPerc  = input.float(0.18, title = "Profit Lock aktiv ab Gewinn (%)", step = 0.01, group = grp_exit)
+lockProfitPerc = input.float(0.05, title = "Gesicherter Mindestprofit (%)", step = 0.01, group = grp_exit)
+
+useTightTrail      = input.bool(true, title = "Extrem enger Trailing TP", group = grp_exit)
+tightTrailActPerc  = input.float(0.10, title = "Trailing Aktivierung (%)", step = 0.01, group = grp_exit)
+tightTrailOffPerc  = input.float(0.05, title = "Trailing Abstand (%)", step = 0.01, group = grp_exit)
+
+grp_filters = "Filter - ZECUSDT 5m"
+useRsiFilter = input.bool(true, title = "Nutze RSI Momentum Filter", group = grp_filters)
+rsiLen       = input.int(25, title = "RSI Length", minval = 1, group = grp_filters)
+rsiWeak      = input.float(40.0, title = "RSI Schwäche-Level für Short", step = 1.0, group = grp_filters)
+rsiStrong    = input.float(60.0, title = "RSI Stärke-Level für Long", step = 1.0, group = grp_filters)
+
+useAdxFilter = input.bool(false, title = "Nutze ADX Regime-Filter", group = grp_filters)
+adxLen       = input.int(6, title = "ADX Length", minval = 1, group = grp_filters)
+adxMax       = input.float(25.0, title = "ADX muss kleiner sein als", step = 0.5, group = grp_filters)
+
+grp_timing = "MACD Timing & Trade Frequency - ZECUSDT 5m"
+useMacdTiming = input.bool(true, title = "Nutze MACD Crossing Timing", group = grp_timing)
+macdFast      = input.int(8, title = "MACD Fast Length", minval = 1, group = grp_timing)
+macdSlow      = input.int(21, title = "MACD Slow Length", minval = 1, group = grp_timing)
+macdSignalLen = input.int(5, title = "MACD Signal Length", minval = 1, group = grp_timing)
+
+macdValidBars    = input.int(8, title = "MACD Signal gültig für X Kerzen", minval = 1, maxval = 30, group = grp_timing)
+cooldownBars     = input.int(2, title = "Cooldown nach Entry in Kerzen", minval = 0, maxval = 100, group = grp_timing)
+maxTradesPerHour = input.int(3, title = "Max Trades pro Stunde", minval = 1, maxval = 12, group = grp_timing)
+requireMacdSide  = input.bool(true, title = "MACD muss auf richtiger Seite bleiben", group = grp_timing)
+
+grp_visual = "Visualisierung"
+showSignals = input.bool(true, title = "MACD Cross Signale anzeigen", group = grp_visual)
+showDashboard = input.bool(true, title = "Dashboard anzeigen", group = grp_visual)
+
+
+// =========================================================================
+// 2. GLOBALE INDIKATOR-BERECHNUNGEN
+// =========================================================================
+
+bbBasis = ta.sma(close, bbLength)
+bbDev   = bbMult * ta.stdev(close, bbLength)
+
+lowerBand = bbBasis - bbDev
+upperBand = bbBasis + bbDev
+
+rsiValue = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adxValue] = ta.dmi(adxLen, adxLen)
+atrValue = ta.atr(atrLen)
+
+[macdLine, macdSignal, macdHist] = ta.macd(close, macdFast, macdSlow, macdSignalLen)
+
+
+// =========================================================================
+// 3. FILTER-LOGIK
+// =========================================================================
+//
+// Trend-Interpretation:
+// Long = Stärke / Breakout über oberes Band
+// Short = Schwäche / Breakdown unter unteres Band
+
+bool weakMomentumOk = useRsiFilter ? not na(rsiValue[1]) and rsiValue[1] < rsiWeak : true
+bool strongMomentumOk = useRsiFilter ? not na(rsiValue[1]) and rsiValue[1] > rsiStrong : true
+bool adxOk = useAdxFilter ? not na(adxValue[1]) and adxValue[1] < adxMax : true
+
+bool isLong  = strategy.position_size > 0
+bool isShort = strategy.position_size < 0
+bool flat    = strategy.position_size == 0
+
+
+// =========================================================================
+// 4. MACD ARMING-LOGIK
+// =========================================================================
+//
+// Optimierung für ZECUSDT 5m:
+// MACD bleibt nach Crossing 8 Kerzen gültig.
+// Dadurch werden nicht alle guten Trendimpulse weggefiltert.
+
+bool macdBullCross = ta.crossover(macdLine, macdSignal)
+bool macdBearCross = ta.crossunder(macdLine, macdSignal)
+
+var int lastBullCrossBar = na
+var int lastBearCrossBar = na
+
+if barstate.isconfirmed
+    if macdBullCross
+        lastBullCrossBar := bar_index
+
+    if macdBearCross
+        lastBearCrossBar := bar_index
+
+bool bullMacdFresh = not useMacdTiming or (
+     not na(lastBullCrossBar) and
+     bar_index - lastBullCrossBar <= macdValidBars and
+     (not requireMacdSide or macdLine > macdSignal)
+)
+
+bool bearMacdFresh = not useMacdTiming or (
+     not na(lastBearCrossBar) and
+     bar_index - lastBearCrossBar <= macdValidBars and
+     (not requireMacdSide or macdLine < macdSignal)
+)
+
+
+// =========================================================================
+// 5. TRADE-FREQUENZ LIMITER
+// =========================================================================
+//
+// Ziel für ZECUSDT 5m:
+// Maximal 3 Trades pro Stunde, aber nicht zu stark kastrieren.
+// Cooldown nur 2 Kerzen, weil ZEC-Impulse schnell laufen.
+
+var int tradesThisHour = 0
+var int lastEntryBar = na
+
+int hourStamp = time("60")
+bool newHour = ta.change(hourStamp) != 0
+
+if barstate.isconfirmed and newHour
+    tradesThisHour := 0
+
+bool newPositionOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
+
+if barstate.isconfirmed and newPositionOpened
+    tradesThisHour += 1
+    lastEntryBar := bar_index
+
+bool cooldownOk = na(lastEntryBar) or bar_index - lastEntryBar >= cooldownBars
+bool hourlyLimitOk = tradesThisHour < maxTradesPerHour
+bool frequencyOk = cooldownOk and hourlyLimitOk
+
+
+// =========================================================================
+// 6. ENTRY-LOGIK MIT OCA
+// =========================================================================
+//
+// Original profitable Trendrichtung bleibt erhalten:
+// Long am oberen Band
+// Short am unteren Band
+//
+// OCA:
+// Wird eine Seite gefüllt, wird die Gegenseite gelöscht.
+
+string ocaEntryGroup = "BB_Trend_ZEC_5M_OCA"
+
+bool shortSetup = adxOk and weakMomentumOk and bearMacdFresh and frequencyOk and flat
+bool longSetup  = adxOk and strongMomentumOk and bullMacdFresh and frequencyOk and flat
+
+bool useOriginalLimit = entryMode == "Limit wie Original"
+bool useCleanStop     = entryMode == "Stop Breakout sauber"
+
+float longLimitPrice  = useOriginalLimit ? upperBand : na
+float shortLimitPrice = useOriginalLimit ? lowerBand : na
+
+float longStopPrice   = useCleanStop ? upperBand : na
+float shortStopPrice  = useCleanStop ? lowerBand : na
+
+if barstate.isconfirmed
+    if shortSetup
+        strategy.entry(
+             id = "Short",
+             direction = strategy.short,
+             limit = shortLimitPrice,
+             stop = shortStopPrice,
+             oca_name = ocaEntryGroup,
+             oca_type = strategy.oca.cancel
+        )
+    else
+        strategy.cancel("Short")
+
+    if longSetup
+        strategy.entry(
+             id = "Long",
+             direction = strategy.long,
+             limit = longLimitPrice,
+             stop = longStopPrice,
+             oca_name = ocaEntryGroup,
+             oca_type = strategy.oca.cancel
+        )
+    else
+        strategy.cancel("Long")
+
+    if not flat or not adxOk or not frequencyOk
+        strategy.cancel("Long")
+        strategy.cancel("Short")
+
+
+// =========================================================================
+// 7. RISIKOMANAGEMENT: ATR HARD SL + PROFIT LOCK + TIGHT TRAILING
+// =========================================================================
+//
+// ZECUSDT 5m Optimierung:
+// ATR Stop ist aktiv, weil fixe 0.5 % Stops zu eng waren.
+// Profit-Lock bleibt eng, damit schnelle Impulse gesichert werden.
+
+float minTick = syminfo.mintick > 0 ? syminfo.mintick : 0.01
+float posPrice = strategy.position_avg_price > 0 ? strategy.position_avg_price : close
+
+float longHardStop = useAtrStop ? posPrice - atrValue * atrMult : posPrice * (1 - slPerc / 100)
+float shortHardStop = useAtrStop ? posPrice + atrValue * atrMult : posPrice * (1 + slPerc / 100)
+
+float longLockStop = posPrice * (1 + lockProfitPerc / 100)
+float shortLockStop = posPrice * (1 - lockProfitPerc / 100)
+
+var bool longLockArmed = false
+var bool shortLockArmed = false
+
+if barstate.isconfirmed
+    if flat
+        longLockArmed := false
+        shortLockArmed := false
+
+    if isLong
+        shortLockArmed := false
+
+        if useProfitLock and high >= posPrice * (1 + lockAfterPerc / 100)
+            longLockArmed := true
+
+    if isShort
+        longLockArmed := false
+
+        if useProfitLock and low <= posPrice * (1 - lockAfterPerc / 100)
+            shortLockArmed := true
+
+float finalLongStop = longLockArmed ? math.max(longHardStop, longLockStop) : longHardStop
+float finalShortStop = shortLockArmed ? math.min(shortHardStop, shortLockStop) : shortHardStop
+
+int trailActTicks = int(math.max(1.0, math.round((posPrice * (tightTrailActPerc / 100)) / minTick)))
+int trailOffTicks = int(math.max(1.0, math.round((posPrice * (tightTrailOffPerc / 100)) / minTick)))
+
+if isLong
+    strategy.exit(
+         id = "Exit Long",
+         from_entry = "Long",
+         stop = finalLongStop,
+         trail_points = useTightTrail ? trailActTicks : na,
+         trail_offset = useTightTrail ? trailOffTicks : na
+    )
+
+if isShort
+    strategy.exit(
+         id = "Exit Short",
+         from_entry = "Short",
+         stop = finalShortStop,
+         trail_points = useTightTrail ? trailActTicks : na,
+         trail_offset = useTightTrail ? trailOffTicks : na
+    )
+
+
+// =========================================================================
+// 8. DASHBOARD
+// =========================================================================
+
+var table dashTable = table.new(
+     position.top_right,
+     2,
+     11,
+     bgcolor = color.new(color.black, 70),
+     border_width = 1,
+     border_color = color.gray
+)
+
+bool tfOk = timeframe.isminutes and timeframe.multiplier == 5
+
+if barstate.islast and showDashboard
+    int totalClosed = strategy.closedtrades
+    int totalWins   = strategy.wintrades
+
+    float winRate = totalClosed > 0 ? totalWins / totalClosed * 100 : 0.0
+
+    float grossProf = strategy.grossprofit
+    float grossLoss = strategy.grossloss
+    float profitFactor = grossLoss > 0 ? grossProf / grossLoss : grossProf > 0 ? 99.99 : 0.0
+
+    float netPnL = strategy.netprofit
+
+    string bullAgeText = na(lastBullCrossBar) ? "n/a" : str.tostring(bar_index - lastBullCrossBar)
+    string bearAgeText = na(lastBearCrossBar) ? "n/a" : str.tostring(bar_index - lastBearCrossBar)
+
+    table.cell(dashTable, 0, 0, "ZECUSDT 5m Trend", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 0, "Optimized", text_color = color.white, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 1, "Timeframe", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 1, tfOk ? "5m OK" : "Nicht 5m", text_color = tfOk ? color.green : color.orange, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 2, "Win Rate", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 2, str.tostring(winRate, "#.##") + " %", text_color = winRate > 60 ? color.green : winRate > 50 ? color.orange : color.red, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 3, "Profit Factor", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 3, str.tostring(profitFactor, "#.##"), text_color = profitFactor >= 2.0 ? color.green : profitFactor >= 1.2 ? color.orange : color.red, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 4, "Net Profit", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 4, str.tostring(netPnL, "#.##"), text_color = netPnL >= 0 ? color.green : color.red, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 5, "Closed Trades", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 5, str.tostring(totalClosed), text_color = color.white, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 6, "Trades diese Stunde", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 6, str.tostring(tradesThisHour) + " / " + str.tostring(maxTradesPerHour), text_color = tradesThisHour < maxTradesPerHour ? color.green : color.red, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 7, "Bull MACD Age", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 7, bullAgeText, text_color = bullMacdFresh ? color.green : color.gray, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 8, "Bear MACD Age", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 8, bearAgeText, text_color = bearMacdFresh ? color.red : color.gray, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 9, "ATR Stop", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 9, useAtrStop ? "On x" + str.tostring(atrMult, "#.#") : "Off", text_color = useAtrStop ? color.green : color.orange, text_halign = text.align_right)
+
+    table.cell(dashTable, 0, 10, "Order Modus", text_color = color.white, text_halign = text.align_left)
+    table.cell(dashTable, 1, 10, entryMode, text_color = color.white, text_halign = text.align_right)
+
+
+// =========================================================================
+// 9. VISUALISIERUNG
+// =========================================================================
+
+plot(bbBasis, color = color.new(color.blue, 0), title = "BB Basis")
+
+pLower = plot(lowerBand, color = color.new(color.green, 50), title = "BB Lower")
+pUpper = plot(upperBand, color = color.new(color.red, 50), title = "BB Upper")
+
+fill(pUpper, pLower, color = color.new(color.blue, 95), title = "BB Background")
+
+plotshape(
+     showSignals and macdBullCross,
+     title = "MACD Bull Cross",
+     style = shape.triangleup,
+     location = location.belowbar,
+     color = color.new(color.green, 0),
+     size = size.tiny,
+     text = "MACD+"
+)
+
+plotshape(
+     showSignals and macdBearCross,
+     title = "MACD Bear Cross",
+     style = shape.triangledown,
+     location = location.abovebar,
+     color = color.new(color.red, 0),
+     size = size.tiny,
+     text = "MACD-"
+)

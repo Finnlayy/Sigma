@@ -1,0 +1,754 @@
+// Datei:     MTF_CISD_OB_FVG_v2.pine
+// Zweck:     MTF CISD + OB/FVG Hybrid Indicator mit Pionex Signal Bot Webhook
+// Erstellt:  2026-04-08 | Version: 2.0
+// Abhaengig: Pine Script v6, TradingView, Pionex Signal Bot
+
+//@version=6
+strategy(title="MTF CISD + OB/FVG — Pionex Signal Bot [v2.0]", shorttitle="CISD+OB/FVG v2", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, slippage=3, process_orders_on_close=true)
+
+// ============================================================================
+// GRUPPE 1: Core Settings — Multi-Timeframe
+// ============================================================================
+string GRP_MTF = "Multi-Timeframe Settings"
+int tf_h4  = input.int(240, "TF 1 — H4 (Richtung)", minval=1, group=GRP_MTF)
+int tf_h1  = input.int(60,  "TF 2 — H1 (Trend)", minval=1, group=GRP_MTF)
+int tf_m15 = input.int(15,  "TF 3 — M15 (Kontext)", minval=1, group=GRP_MTF)
+int tf_m5  = input.int(5,   "TF 4 — M5 (Fein)", minval=1, group=GRP_MTF)
+bool en_h4  = input.bool(true,  "H4 aktiviert", group=GRP_MTF)
+bool en_h1  = input.bool(true,  "H1 aktiviert", group=GRP_MTF)
+bool en_m15 = input.bool(true,  "M15 aktiviert", group=GRP_MTF)
+bool en_m5  = input.bool(false, "M5 aktiviert", group=GRP_MTF)
+int min_alignment = input.int(3, "Mindest-TF-Alignment", minval=1, maxval=4, group=GRP_MTF)
+
+// ============================================================================
+// GRUPPE 2: Core Settings — OB / FVG
+// ============================================================================
+string GRP_OB = "Order Block / FVG Settings"
+float ob_atr_mul  = input.float(1.6, "OB ATR Multiplikator", minval=0.5, maxval=5.0, step=0.1, group=GRP_OB)
+int ob_pivot      = input.int(6, "OB Pivot Lookback", minval=2, maxval=20, group=GRP_OB)
+int max_ob_boxes  = input.int(25, "Max OB Boxen", minval=5, maxval=100, group=GRP_OB)
+int max_fvg_boxes = input.int(25, "Max FVG Boxen", minval=5, maxval=100, group=GRP_OB)
+
+// ============================================================================
+// GRUPPE 3: Risk Management
+// ============================================================================
+string GRP_RISK = "Risk Management"
+float sl_atr_mul  = input.float(1.4, "SL ATR Multiplikator", minval=0.5, maxval=5.0, step=0.1, group=GRP_RISK, tooltip="Sharpe-Optimum: 1.4")
+float tp_atr_mul  = input.float(2.8, "TP ATR Multiplikator", minval=1.0, maxval=8.0, step=0.1, group=GRP_RISK, tooltip="Sharpe-Optimum: 2.8")
+bool use_trail    = input.bool(false, "Trailing Stop aktivieren", group=GRP_RISK)
+float trail_atr   = input.float(1.2, "Trailing Stop ATR Mult", minval=0.3, maxval=3.0, step=0.1, group=GRP_RISK)
+bool use_max_dd   = input.bool(true, "Max Drawdown Breaker", group=GRP_RISK)
+float max_dd_pct  = input.float(8.0, "Max Drawdown %", minval=1.0, maxval=30.0, step=0.5, group=GRP_RISK)
+bool use_max_bars = input.bool(false, "Max Bars Held Exit", group=GRP_RISK)
+int max_bars_held = input.int(48, "Max Bars in Position", minval=6, maxval=500, group=GRP_RISK)
+
+// ============================================================================
+// GRUPPE 4: Filter
+// ============================================================================
+string GRP_FILTER = "Signal Filter"
+int min_conf      = input.int(11, "Min. Confidence Score", minval=1, maxval=17, group=GRP_FILTER, tooltip="Sharpe-Optimum: 11")
+bool use_vol      = input.bool(true, "Volumen-Filter", group=GRP_FILTER)
+float vol_mult    = input.float(1.05, "Volumen-Multiplikator", minval=1.0, maxval=3.0, step=0.05, group=GRP_FILTER, tooltip="Sharpe-Optimum: 1.05")
+int vol_period    = input.int(20, "Volumen SMA Perioden", minval=5, maxval=100, group=GRP_FILTER)
+bool use_time     = input.bool(false, "Session-Zeitfilter", group=GRP_FILTER)
+int sess_start    = input.int(7, "Session Start (UTC)", minval=0, maxval=23, group=GRP_FILTER)
+int sess_end      = input.int(22, "Session Ende (UTC)", minval=0, maxval=23, group=GRP_FILTER)
+bool use_daily    = input.bool(true, "Daily Loss Limit", group=GRP_FILTER)
+float daily_lim   = input.float(3.0, "Daily Loss Limit %", minval=0.5, maxval=15.0, step=0.5, group=GRP_FILTER)
+bool use_ema_filter = input.bool(true, "EMA 200 Trendfilter", group=GRP_FILTER)
+int ema_len       = input.int(200, "EMA Laenge", minval=10, maxval=500, group=GRP_FILTER)
+bool use_rsi_filter = input.bool(true, "RSI Extremzonen-Filter", group=GRP_FILTER)
+int rsi_len       = input.int(14, "RSI Laenge", minval=5, maxval=50, group=GRP_FILTER)
+float rsi_ob      = input.float(78.0, "RSI Overbought", minval=60.0, maxval=95.0, step=1.0, group=GRP_FILTER, tooltip="Sharpe-Optimum: 78")
+float rsi_os      = input.float(22.0, "RSI Oversold", minval=5.0, maxval=40.0, step=1.0, group=GRP_FILTER)
+bool use_atr_filter = input.bool(true, "ATR Volatilitaets-Filter", group=GRP_FILTER)
+float atr_min_pct = input.float(0.15, "ATR Min % vom Preis", minval=0.01, maxval=1.0, step=0.01, group=GRP_FILTER, tooltip="Sharpe-Optimum: 0.15")
+bool allow_short  = input.bool(false, "Shorts erlauben (Futures)", group=GRP_FILTER, tooltip="Spot: IMMER false! Nur fuer Futures-Account.")
+
+// ============================================================================
+// GRUPPE 5: Pionex Signal Bot
+// ============================================================================
+string GRP_PIONEX = "Pionex Signal Bot"
+string signal_type = input.string("YOUR_PIONEX_SIGNAL_TOKEN_HERE", "Signal Token (UUID)", group=GRP_PIONEX)
+string contracts   = input.string("0.001", "Contracts (BTC Menge)", group=GRP_PIONEX)
+bool send_close    = input.bool(true, "Close-Alerts senden", group=GRP_PIONEX)
+bool debug_mode    = input.bool(false, "Debug Labels anzeigen", group=GRP_PIONEX)
+
+// ============================================================================
+// GRUPPE 6: Telegram Intelligence
+// ============================================================================
+string GRP_INTEL = "Telegram Intelligence"
+bool use_glint_news = input.bool(true, "GLINT News aktivieren", group=GRP_INTEL, tooltip="Der Relay Server kann die Confidence um bis zu 25% anheben, wenn News und Signalrichtung zusammenpassen.")
+bool use_manus_advisor = input.bool(true, "Manus Advisor Widget", group=GRP_INTEL, tooltip="Zeigt den Manus-Advisor-Status im Dashboard.")
+// ============================================================================
+// GRUPPE 7: Kelly Analytics
+// ============================================================================
+string GRP_KELLY = "Kelly Analytics"
+bool use_live_kelly = input.bool(true, "Live Trade-History verwenden", group=GRP_KELLY)
+float kelly_equity_usdt = input.float(1000.0, "Account Equity (USDT)", minval=0.0, step=10.0, group=GRP_KELLY, tooltip="Nur fuer die $-Risikowerte und Positionsgroesse")
+float kelly_fallback_winrate = input.float(55.0, "Fallback Winrate %", minval=0.0, maxval=100.0, step=0.1, group=GRP_KELLY)
+float kelly_fallback_rr = input.float(2.0, "Fallback Avg R:R", minval=0.1, maxval=20.0, step=0.1, group=GRP_KELLY)
+float your_risk_pct = input.float(1.0, "Your Risk %", minval=0.01, maxval=100.0, step=0.1, group=GRP_KELLY)
+float kelly_cap_pct = input.float(100.0, "Kelly Cap %", minval=1.0, maxval=100.0, step=1.0, group=GRP_KELLY)
+
+// ============================================================================
+// CORE CALCULATIONS
+// ============================================================================
+
+// ATR fuer SL/TP
+float atr_val = ta.atr(14)
+
+// EMA 200
+float ema200 = ta.ema(close, ema_len)
+
+// RSI
+float rsi_val = ta.rsi(close, rsi_len)
+
+// Volumen SMA
+float vol_sma = ta.sma(volume, vol_period)
+
+f_safe_div(float numerator, float denominator) =>
+    denominator != 0.0 ? numerator / denominator : na
+
+f_fmt_pct(float value) =>
+    na(value) ? "---" : str.tostring(value, "#.##") + "%"
+
+f_fmt_signed(float value, string fmt) =>
+    na(value) ? "---" : (value > 0 ? "+" : "") + str.tostring(value, fmt)
+
+f_fmt_money(float value) =>
+    na(value) ? "---" : "$" + str.tostring(value, "#.##")
+
+f_fmt_signed_money(float value) =>
+    na(value) ? "---" : (value > 0 ? "+$" : value < 0 ? "-$" : "$") + str.tostring(math.abs(value), "#.##")
+
+f_kelly_growth(float win_rate, float avg_win_r, float avg_loss_r, float risk_fraction) =>
+    float win_term = 1.0 + (risk_fraction * avg_win_r)
+    float loss_term = 1.0 - (risk_fraction * avg_loss_r)
+    win_term > 0 and loss_term > 0 ? (win_rate * math.log(win_term) + (1.0 - win_rate) * math.log(loss_term)) * 100.0 : na
+
+// ============================================================================
+// CISD FUNCTION — Change In State of Delivery
+// ============================================================================
+f_cisd(float src_open, float src_close, float src_high, float src_low) =>
+    var int state = 0
+    bool is_bull_candle = src_close > src_open
+    bool is_bear_candle = src_close < src_open
+    bool bull_cisd = false
+    bool bear_cisd = false
+    if is_bear_candle and state != -1
+        if src_close < src_open[1] and not (src_high < src_high[1] and src_low > src_low[1])
+            state := -1
+            bear_cisd := true
+    if is_bull_candle and state != 1
+        if src_close > src_open[1] and not (src_high < src_high[1] and src_low > src_low[1])
+            state := 1
+            bull_cisd := true
+    [state, bull_cisd, bear_cisd]
+
+// ============================================================================
+// MTF CISD STATES via request.security
+// ============================================================================
+f_htf_cisd(int tf_minutes) =>
+    string tf_str = str.tostring(tf_minutes)
+    [htf_o, htf_c, htf_h, htf_l] = request.security(syminfo.tickerid, tf_str, [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+    [state, bull_trigger, bear_trigger] = f_cisd(htf_o, htf_c, htf_h, htf_l)
+    state
+
+int state_h4  = en_h4  ? f_htf_cisd(tf_h4)  : 0
+int state_h1  = en_h1  ? f_htf_cisd(tf_h1)  : 0
+int state_m15 = en_m15 ? f_htf_cisd(tf_m15) : 0
+int state_m5  = en_m5  ? f_htf_cisd(tf_m5)  : 0
+
+// Local CISD (chart timeframe)
+[local_state, local_bull_cisd, local_bear_cisd] = f_cisd(open, close, high, low)
+
+// ============================================================================
+// MTF ALIGNMENT CALCULATION
+// ============================================================================
+int bull_count = 0
+bull_count += (en_h4  and state_h4  == 1) ? 1 : 0
+bull_count += (en_h1  and state_h1  == 1) ? 1 : 0
+bull_count += (en_m15 and state_m15 == 1) ? 1 : 0
+bull_count += (en_m5  and state_m5  == 1) ? 1 : 0
+
+int bear_count = 0
+bear_count += (en_h4  and state_h4  == -1) ? 1 : 0
+bear_count += (en_h1  and state_h1  == -1) ? 1 : 0
+bear_count += (en_m15 and state_m15 == -1) ? 1 : 0
+bear_count += (en_m5  and state_m5  == -1) ? 1 : 0
+
+int active_tfs = (en_h4 ? 1 : 0) + (en_h1 ? 1 : 0) + (en_m15 ? 1 : 0) + (en_m5 ? 1 : 0)
+
+bool bull_aligned = bull_count >= min_alignment
+bool bear_aligned = bear_count >= min_alignment
+
+// ============================================================================
+// ORDER BLOCK DETECTION
+// ============================================================================
+var array<box> bull_ob_boxes = array.new<box>()
+var array<box> bear_ob_boxes = array.new<box>()
+
+float pivot_high = ta.pivothigh(high, ob_pivot, ob_pivot)
+float pivot_low  = ta.pivotlow(low, ob_pivot, ob_pivot)
+float ob_atr     = ta.atr(14) * ob_atr_mul
+
+// Bullish OB: pivot low detected, mark the bearish candle before the swing low
+if not na(pivot_low)
+    int ob_bar = bar_index - ob_pivot
+    if ob_bar >= 0
+        float ob_top = high[ob_pivot]
+        float ob_bot = low[ob_pivot]
+        if (ob_top - ob_bot) <= ob_atr
+            box new_box = box.new(ob_bar, ob_top, bar_index, ob_bot, border_color=color.new(color.green, 60), bgcolor=color.new(color.green, 85))
+            array.push(bull_ob_boxes, new_box)
+            if array.size(bull_ob_boxes) > max_ob_boxes
+                box.delete(array.shift(bull_ob_boxes))
+
+// Bearish OB: pivot high detected
+if not na(pivot_high)
+    int ob_bar = bar_index - ob_pivot
+    if ob_bar >= 0
+        float ob_top = high[ob_pivot]
+        float ob_bot = low[ob_pivot]
+        if (ob_top - ob_bot) <= ob_atr
+            box new_box = box.new(ob_bar, ob_top, bar_index, ob_bot, border_color=color.new(color.red, 60), bgcolor=color.new(color.red, 85))
+            array.push(bear_ob_boxes, new_box)
+            if array.size(bear_ob_boxes) > max_ob_boxes
+                box.delete(array.shift(bear_ob_boxes))
+
+// ============================================================================
+// FVG DETECTION (Fair Value Gap)
+// ============================================================================
+var array<box> bull_fvg_boxes = array.new<box>()
+var array<box> bear_fvg_boxes = array.new<box>()
+
+// Bullish FVG: gap between bar[2] high and bar[0] low
+bool bull_fvg = low > high[2] and close[1] > open[1]
+bool bear_fvg = high < low[2] and close[1] < open[1]
+
+if bull_fvg
+    box new_box = box.new(bar_index - 2, low, bar_index, high[2], border_color=color.new(color.teal, 70), bgcolor=color.new(color.teal, 90))
+    array.push(bull_fvg_boxes, new_box)
+    if array.size(bull_fvg_boxes) > max_fvg_boxes
+        box.delete(array.shift(bull_fvg_boxes))
+
+if bear_fvg
+    box new_box = box.new(bar_index - 2, low[2], bar_index, high, border_color=color.new(color.orange, 70), bgcolor=color.new(color.orange, 90))
+    array.push(bear_fvg_boxes, new_box)
+    if array.size(bear_fvg_boxes) > max_fvg_boxes
+        box.delete(array.shift(bear_fvg_boxes))
+
+// ============================================================================
+// OB/FVG TOUCH DETECTION
+// ============================================================================
+int bull_ob_size = array.size(bull_ob_boxes)
+bool bull_ob_touch = false
+if bull_ob_size > 0
+    for idx = bull_ob_size - 1 to math.max(0, bull_ob_size - 5)
+        box b = array.get(bull_ob_boxes, idx)
+        if low <= box.get_top(b) and high >= box.get_bottom(b)
+            bull_ob_touch := true
+            break
+
+int bear_ob_size = array.size(bear_ob_boxes)
+bool bear_ob_touch = false
+if bear_ob_size > 0
+    for idx = bear_ob_size - 1 to math.max(0, bear_ob_size - 5)
+        box b = array.get(bear_ob_boxes, idx)
+        if high >= box.get_bottom(b) and low <= box.get_top(b)
+            bear_ob_touch := true
+            break
+
+int bull_fvg_size = array.size(bull_fvg_boxes)
+bool bull_fvg_touch = false
+if bull_fvg_size > 0
+    for idx = bull_fvg_size - 1 to math.max(0, bull_fvg_size - 5)
+        box b = array.get(bull_fvg_boxes, idx)
+        if low <= box.get_top(b) and high >= box.get_bottom(b)
+            bull_fvg_touch := true
+            break
+
+int bear_fvg_size = array.size(bear_fvg_boxes)
+bool bear_fvg_touch = false
+if bear_fvg_size > 0
+    for idx = bear_fvg_size - 1 to math.max(0, bear_fvg_size - 5)
+        box b = array.get(bear_fvg_boxes, idx)
+        if high >= box.get_bottom(b) and low <= box.get_top(b)
+            bear_fvg_touch := true
+            break
+
+// ============================================================================
+// CONFIDENCE SCORING (0-17 Punkte)
+// ============================================================================
+int bull_conf = 0
+bull_conf += (bull_count == active_tfs and active_tfs >= 3) ? 4 : (bull_count >= min_alignment ? 2 : 0)
+bull_conf += local_bull_cisd ? 3 : 0
+bull_conf += bull_ob_touch ? 3 : 0
+bull_conf += bull_fvg_touch ? 3 : 0
+bull_conf += (use_vol and volume > vol_sma * vol_mult) ? 2 : (not use_vol ? 2 : 0)
+bull_conf += (close > open and (close - open) > atr_val * 0.5) ? 2 : 0
+
+int bear_conf = 0
+bear_conf += (bear_count == active_tfs and active_tfs >= 3) ? 4 : (bear_count >= min_alignment ? 2 : 0)
+bear_conf += local_bear_cisd ? 3 : 0
+bear_conf += bear_ob_touch ? 3 : 0
+bear_conf += bear_fvg_touch ? 3 : 0
+bear_conf += (use_vol and volume > vol_sma * vol_mult) ? 2 : (not use_vol ? 2 : 0)
+bear_conf += (open > close and (open - close) > atr_val * 0.5) ? 2 : 0
+
+// ============================================================================
+// FILTER CHECKS
+// ============================================================================
+
+// Session-Zeitfilter (UTC)
+int current_hour = hour(time, "UTC")
+bool time_ok = use_time ? (sess_start < sess_end ? (current_hour >= sess_start and current_hour < sess_end) : (current_hour >= sess_start or current_hour < sess_end)) : true
+
+// EMA 200 Trendfilter
+bool ema_long_ok  = use_ema_filter ? (close > ema200) : true
+bool ema_short_ok = use_ema_filter ? (close < ema200) : true
+
+// RSI Filter
+bool rsi_long_ok  = use_rsi_filter ? (rsi_val < rsi_ob) : true
+bool rsi_short_ok = use_rsi_filter ? (rsi_val > rsi_os) : true
+
+// ATR Volatilitaets-Filter
+float atr_pct = (atr_val / close) * 100
+bool atr_ok = use_atr_filter ? (atr_pct >= atr_min_pct) : true
+
+// Volumen-Filter (standalone check)
+bool vol_ok = use_vol ? (volume > vol_sma * vol_mult) : true
+
+// ============================================================================
+// DAILY LOSS LIMIT (approximiert fuer indicator)
+// ============================================================================
+var float daily_start_price = close
+var float daily_pnl_pct = 0.0
+var int daily_loss_count = 0
+
+bool is_new_day = ta.change(time("D")) != 0
+if is_new_day
+    daily_start_price := close
+    daily_pnl_pct := 0.0
+    daily_loss_count := 0
+
+daily_pnl_pct := ((close - daily_start_price) / daily_start_price) * 100
+bool daily_limit_ok = use_daily ? (daily_pnl_pct > -daily_lim) : true
+
+// ============================================================================
+// MAX DRAWDOWN CIRCUIT BREAKER
+// ============================================================================
+var float equity_peak = close
+var float current_dd_pct = 0.0
+
+equity_peak := math.max(equity_peak, close)
+current_dd_pct := ((equity_peak - close) / equity_peak) * 100
+bool dd_ok = use_max_dd ? (current_dd_pct < max_dd_pct) : true
+
+if is_new_day
+    equity_peak := close
+    current_dd_pct := 0.0
+
+// ============================================================================
+// POSITION TRACKING (indicator-level)
+// ============================================================================
+var int position = 0       // 0=flat, 1=long, -1=short
+var float entry_price = na
+var float sl_price = na
+var float tp_price = na
+var float trail_price = na
+var float active_trade_risk = na
+var int bars_in_pos = 0
+var int kelly_closed_trades = 0
+var int kelly_win_trades = 0
+var int kelly_loss_trades = 0
+var float kelly_sum_win_r = 0.0
+var float kelly_sum_loss_r = 0.0
+
+if position != 0
+    bars_in_pos += 1
+else
+    bars_in_pos := 0
+
+// ============================================================================
+// SIGNAL GENERATION
+// ============================================================================
+bool all_filters_long = time_ok and ema_long_ok and rsi_long_ok and atr_ok and vol_ok and daily_limit_ok and dd_ok
+bool all_filters_short = time_ok and ema_short_ok and rsi_short_ok and atr_ok and vol_ok and daily_limit_ok and dd_ok
+
+bool long_setup = bull_aligned and local_bull_cisd and bull_conf >= min_conf and all_filters_long
+bool short_setup = allow_short and bear_aligned and local_bear_cisd and bear_conf >= min_conf and all_filters_short
+
+// Fire only on confirmed bars, no position overlap
+bool long_signal = long_setup and barstate.isconfirmed and position <= 0
+bool short_signal = short_setup and barstate.isconfirmed and position >= 0
+
+// ============================================================================
+// SL / TP CALCULATION
+// ============================================================================
+float long_sl = close - atr_val * sl_atr_mul
+float long_tp = close + atr_val * tp_atr_mul
+float short_sl = close + atr_val * sl_atr_mul
+float short_tp = close - atr_val * tp_atr_mul
+
+// ============================================================================
+// EXIT CONDITIONS
+// ============================================================================
+bool sl_hit_long  = position == 1 and not na(sl_price) and low <= sl_price
+bool tp_hit_long  = position == 1 and not na(tp_price) and high >= tp_price
+bool sl_hit_short = position == -1 and not na(sl_price) and high >= sl_price
+bool tp_hit_short = position == -1 and not na(tp_price) and low <= tp_price
+
+// Trailing Stop Logic
+if use_trail and position == 1 and not na(trail_price)
+    float new_trail = high - atr_val * trail_atr
+    if new_trail > trail_price
+        trail_price := new_trail
+
+if use_trail and position == -1 and not na(trail_price)
+    float new_trail = low + atr_val * trail_atr
+    if new_trail < trail_price
+        trail_price := new_trail
+
+bool trail_hit_long  = use_trail and position == 1 and not na(trail_price) and low <= trail_price
+bool trail_hit_short = use_trail and position == -1 and not na(trail_price) and high >= trail_price
+
+// Max Bars Exit
+bool max_bars_exit = use_max_bars and bars_in_pos >= max_bars_held
+
+// Alignment Loss Exit
+bool alignment_loss_long  = position == 1 and not bull_aligned
+bool alignment_loss_short = position == -1 and not bear_aligned
+
+// Combined exit
+bool exit_long = (sl_hit_long or tp_hit_long or trail_hit_long or max_bars_exit or alignment_loss_long) and barstate.isconfirmed
+bool exit_short = (sl_hit_short or tp_hit_short or trail_hit_short or max_bars_exit or alignment_loss_short) and barstate.isconfirmed
+
+// Determine exit reason
+string exit_reason_long = sl_hit_long ? "stop_loss" : tp_hit_long ? "take_profit" : trail_hit_long ? "trailing_stop" : max_bars_exit ? "max_bars" : alignment_loss_long ? "alignment_loss" : "unknown"
+string exit_reason_short = sl_hit_short ? "stop_loss" : tp_hit_short ? "take_profit" : trail_hit_short ? "trailing_stop" : max_bars_exit ? "max_bars" : alignment_loss_short ? "alignment_loss" : "unknown"
+
+// ============================================================================
+// PIONEX WEBHOOK PAYLOAD GENERATOR
+// ============================================================================
+f_pionexPayload(string tv_action, string pos_size) =>
+    "{\"data\":{\"action\":\"" + tv_action + "\",\"contracts\":\"" + contracts + "\",\"position_size\":\"" + pos_size + "\"},\"price\":\"" + str.tostring(close, format.mintick) + "\",\"signal_param\":\"{}\",\"signal_type\":\"" + signal_type + "\",\"symbol\":\"" + syminfo.ticker + "\",\"time\":\"" + str.tostring(timenow) + "\"}"
+
+// Extended payload with metadata for the relay server
+f_relayPayload(string tv_action, string pos_size, string side, float stop, float target, int conf_score, string reason) =>
+    "{\"data\":{\"action\":\"" + tv_action + "\",\"contracts\":\"" + contracts + "\",\"position_size\":\"" + pos_size + "\"},\"price\":\"" + str.tostring(close, format.mintick) + "\",\"signal_param\":\"{\\\"side\\\":\\\"" + side + "\\\",\\\"stop\\\":\\\"" + str.tostring(stop, format.mintick) + "\\\",\\\"target\\\":\\\"" + str.tostring(target, format.mintick) + "\\\",\\\"conf\\\":\\\"" + str.tostring(conf_score) + "\\\",\\\"reason\\\":\\\"" + reason + "\\\",\\\"tf\\\":\\\"" + timeframe.period + "\\\",\\\"glint_news_enabled\\\":\\\"" + (use_glint_news ? "true" : "false") + "\\\",\\\"manus_advisor_enabled\\\":\\\"" + (use_manus_advisor ? "true" : "false") + "\\\"}\",\"signal_type\":\"" + signal_type + "\",\"symbol\":\"" + syminfo.ticker + "\",\"time\":\"" + str.tostring(timenow) + "\"}"
+
+// ============================================================================
+// POSITION STATE MACHINE + ALERT FIRING
+// ============================================================================
+
+// Close existing position first if needed
+if exit_long and position == 1
+    float exit_price_long = sl_hit_long ? sl_price : tp_hit_long ? tp_price : trail_hit_long ? trail_price : close
+    float trade_r_long = not na(active_trade_risk) and active_trade_risk > 0 and not na(entry_price) ? (exit_price_long - entry_price) / active_trade_risk : na
+    if not na(trade_r_long)
+        kelly_closed_trades += 1
+        if trade_r_long > 0
+            kelly_win_trades += 1
+            kelly_sum_win_r += trade_r_long
+        else
+            kelly_loss_trades += 1
+            kelly_sum_loss_r += math.abs(trade_r_long)
+    position := 0
+    if send_close
+        alert(f_relayPayload("sell", "0", "long", sl_price, tp_price, bull_conf, exit_reason_long), alert.freq_once_per_bar_close)
+    entry_price := na
+    sl_price := na
+    tp_price := na
+    trail_price := na
+    active_trade_risk := na
+    bars_in_pos := 0
+
+if exit_short and position == -1
+    float exit_price_short = sl_hit_short ? sl_price : tp_hit_short ? tp_price : trail_hit_short ? trail_price : close
+    float trade_r_short = not na(active_trade_risk) and active_trade_risk > 0 and not na(entry_price) ? (entry_price - exit_price_short) / active_trade_risk : na
+    if not na(trade_r_short)
+        kelly_closed_trades += 1
+        if trade_r_short > 0
+            kelly_win_trades += 1
+            kelly_sum_win_r += trade_r_short
+        else
+            kelly_loss_trades += 1
+            kelly_sum_loss_r += math.abs(trade_r_short)
+    position := 0
+    if send_close
+        alert(f_relayPayload("buy", "0", "short", sl_price, tp_price, bear_conf, exit_reason_short), alert.freq_once_per_bar_close)
+    entry_price := na
+    sl_price := na
+    tp_price := na
+    trail_price := na
+    active_trade_risk := na
+    bars_in_pos := 0
+
+// Open new positions
+if long_signal and position == 0
+    position := 1
+    entry_price := close
+    sl_price := long_sl
+    tp_price := long_tp
+    trail_price := use_trail ? long_sl : na
+    active_trade_risk := math.max(entry_price - sl_price, syminfo.mintick)
+    bars_in_pos := 0
+    alert(f_relayPayload("buy", "1", "long", long_sl, long_tp, bull_conf, "entry"), alert.freq_once_per_bar_close)
+
+if short_signal and position == 0
+    position := -1
+    entry_price := close
+    sl_price := short_sl
+    tp_price := short_tp
+    trail_price := use_trail ? short_sl : na
+    active_trade_risk := math.max(sl_price - entry_price, syminfo.mintick)
+    bars_in_pos := 0
+    alert(f_relayPayload("sell", "-1", "short", short_sl, short_tp, bear_conf, "entry"), alert.freq_once_per_bar_close)
+
+// ============================================================================
+// VISUALIZATION — Chart Overlays
+// ============================================================================
+
+// Background color for alignment
+bgcolor(bull_aligned ? color.new(color.green, 92) : bear_aligned ? color.new(color.red, 92) : na)
+
+// Entry signals — Strategy Tester
+if long_signal and position == 1
+    strategy.entry("Long", strategy.long)
+if short_signal and position == -1
+    strategy.entry("Short", strategy.short)
+
+// Exit signals — Strategy Tester
+if exit_long
+    strategy.close("Long")
+if exit_short
+    strategy.close("Short")
+
+// SL / TP lines
+plot(position == 1 ? sl_price : na, title="Long SL", color=color.red, linewidth=1, style=plot.style_linebr)
+plot(position == 1 ? tp_price : na, title="Long TP", color=color.green, linewidth=1, style=plot.style_linebr)
+plot(position == -1 ? sl_price : na, title="Short SL", color=color.red, linewidth=1, style=plot.style_linebr)
+plot(position == -1 ? tp_price : na, title="Short TP", color=color.green, linewidth=1, style=plot.style_linebr)
+
+// Trailing Stop line
+plot(use_trail and position != 0 ? trail_price : na, title="Trailing Stop", color=color.yellow, linewidth=1, style=plot.style_linebr)
+
+// EMA 200
+plot(use_ema_filter ? ema200 : na, title="EMA 200", color=color.new(color.blue, 50), linewidth=2)
+
+// ============================================================================
+// KELLY ANALYTICS
+// ============================================================================
+bool kelly_has_live_stats = use_live_kelly and kelly_closed_trades > 0 and kelly_win_trades > 0 and kelly_loss_trades > 0
+
+float kelly_live_winrate = kelly_closed_trades > 0 ? f_safe_div(kelly_win_trades * 1.0, kelly_closed_trades * 1.0) : na
+float kelly_live_avg_win_r = kelly_win_trades > 0 ? f_safe_div(kelly_sum_win_r, kelly_win_trades * 1.0) : na
+float kelly_live_avg_loss_r = kelly_loss_trades > 0 ? f_safe_div(kelly_sum_loss_r, kelly_loss_trades * 1.0) : na
+
+float kelly_winrate = kelly_has_live_stats ? kelly_live_winrate : kelly_fallback_winrate / 100.0
+float kelly_avg_win_r = kelly_has_live_stats ? kelly_live_avg_win_r : kelly_fallback_rr
+float kelly_avg_loss_r = kelly_has_live_stats ? kelly_live_avg_loss_r : 1.0
+float kelly_avg_rr = not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) and kelly_avg_loss_r > 0 ? f_safe_div(kelly_avg_win_r, kelly_avg_loss_r) : na
+
+float kelly_be_winrate = not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) and (kelly_avg_win_r + kelly_avg_loss_r) > 0 ? kelly_avg_loss_r / (kelly_avg_win_r + kelly_avg_loss_r) : na
+float kelly_edge_per_r = not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) ? (kelly_winrate * kelly_avg_win_r - (1.0 - kelly_winrate) * kelly_avg_loss_r) : na
+float kelly_full_fraction_raw = not na(kelly_edge_per_r) and not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) and kelly_avg_win_r > 0 and kelly_avg_loss_r > 0 ? kelly_edge_per_r / (kelly_avg_win_r * kelly_avg_loss_r) : na
+float kelly_full_pct = not na(kelly_full_fraction_raw) ? math.max(0.0, math.min(kelly_cap_pct, kelly_full_fraction_raw * 100.0)) : na
+float kelly_half_pct = not na(kelly_full_pct) ? kelly_full_pct * 0.5 : na
+float kelly_quarter_pct = not na(kelly_full_pct) ? kelly_full_pct * 0.25 : na
+float kelly_risk_fraction = not na(kelly_full_pct) ? kelly_full_pct / 100.0 : na
+float your_risk_fraction = your_risk_pct / 100.0
+
+float kelly_growth_at_full = not na(kelly_risk_fraction) ? f_kelly_growth(kelly_winrate, kelly_avg_win_r, kelly_avg_loss_r, kelly_risk_fraction) : na
+float kelly_growth_at_your = f_kelly_growth(kelly_winrate, kelly_avg_win_r, kelly_avg_loss_r, your_risk_fraction)
+
+float active_stop_pct = position == 1 and not na(entry_price) and not na(sl_price) ? math.abs(entry_price - sl_price) / entry_price : position == -1 and not na(entry_price) and not na(sl_price) ? math.abs(sl_price - entry_price) / entry_price : long_setup ? math.abs(close - long_sl) / close : short_setup ? math.abs(short_sl - close) / close : na
+float kelly_risk_amt = not na(kelly_full_pct) ? kelly_equity_usdt * (kelly_full_pct / 100.0) : na
+float kelly_position_value = not na(kelly_risk_amt) and not na(active_stop_pct) and active_stop_pct > 0 ? kelly_risk_amt / active_stop_pct : na
+
+string kelly_status = na(kelly_full_pct) or kelly_full_pct <= 0.0 ? "No Edge" : your_risk_pct <= kelly_full_pct * 0.25 ? "Conservative" : your_risk_pct < kelly_full_pct ? "Near Kelly" : "Aggressive"
+color kelly_status_color = kelly_status == "Conservative" ? color.yellow : kelly_status == "Near Kelly" ? color.orange : kelly_status == "Aggressive" ? color.red : color.gray
+string kelly_source = kelly_has_live_stats ? "LIVE" : "MANUAL"
+color kelly_source_color = kelly_has_live_stats ? color.lime : color.orange
+
+// ============================================================================
+// DASHBOARD TABLE (oben rechts)
+// ============================================================================
+var table dash = table.new(position.top_right, 2, 40, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.new(color.gray, 60))
+
+if barstate.islast
+    // Row 0: Title
+    table.cell(dash, 0, 0, "MTF CISD + OB/FVG v2.0", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small)
+
+    // Row 1: H4 State
+    table.cell(dash, 0, 1, "H4", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 1, en_h4 ? (state_h4 == 1 ? "BULL" : state_h4 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_h4 ? (state_h4 == 1 ? color.green : state_h4 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+
+    // Row 2: H1 State
+    table.cell(dash, 0, 2, "H1", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 2, en_h1 ? (state_h1 == 1 ? "BULL" : state_h1 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_h1 ? (state_h1 == 1 ? color.green : state_h1 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+
+    // Row 3: M15 State
+    table.cell(dash, 0, 3, "M15", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 3, en_m15 ? (state_m15 == 1 ? "BULL" : state_m15 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_m15 ? (state_m15 == 1 ? color.green : state_m15 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+
+    // Row 4: M5 State
+    table.cell(dash, 0, 4, "M5", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 4, en_m5 ? (state_m5 == 1 ? "BULL" : state_m5 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_m5 ? (state_m5 == 1 ? color.green : state_m5 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+
+    // Row 5: Local CISD
+    table.cell(dash, 0, 5, "Local CISD", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 5, local_state == 1 ? "BULL" : local_state == -1 ? "BEAR" : "FLAT", text_color=local_state == 1 ? color.green : local_state == -1 ? color.red : color.gray, text_size=size.tiny)
+
+    // Row 6: Alignment
+    table.cell(dash, 0, 6, "Alignment", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 6, str.tostring(math.max(bull_count, bear_count)) + "/" + str.tostring(active_tfs), text_color=bull_aligned or bear_aligned ? color.green : color.gray, text_size=size.tiny)
+
+    // Row 7: Confidence
+    table.cell(dash, 0, 7, "Confidence", text_color=color.white, text_size=size.tiny)
+    int display_conf = math.max(bull_conf, bear_conf)
+    table.cell(dash, 1, 7, str.tostring(display_conf) + "/17", text_color=display_conf >= min_conf ? color.green : color.orange, text_size=size.tiny)
+
+    // Row 8: Position
+    table.cell(dash, 0, 8, "Position", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 8, position == 1 ? "LONG" : position == -1 ? "SHORT" : "FLAT", text_color=position == 1 ? color.green : position == -1 ? color.red : color.gray, text_size=size.tiny)
+
+    // Row 9: Entry Price
+    table.cell(dash, 0, 9, "Entry", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 9, not na(entry_price) ? str.tostring(entry_price, format.mintick) : "---", text_color=color.white, text_size=size.tiny)
+
+    // Row 10: Stop Loss
+    table.cell(dash, 0, 10, "Stop Loss", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 10, not na(sl_price) ? str.tostring(sl_price, format.mintick) : "---", text_color=color.red, text_size=size.tiny)
+
+    // Row 11: Take Profit
+    table.cell(dash, 0, 11, "Take Profit", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 11, not na(tp_price) ? str.tostring(tp_price, format.mintick) : "---", text_color=color.green, text_size=size.tiny)
+
+    // Row 12: R:R Ratio
+    float rr_ratio = not na(entry_price) and not na(sl_price) and not na(tp_price) and position == 1 ? (tp_price - entry_price) / math.max(entry_price - sl_price, 0.01) : not na(entry_price) and not na(sl_price) and not na(tp_price) and position == -1 ? (entry_price - tp_price) / math.max(sl_price - entry_price, 0.01) : 0.0
+    table.cell(dash, 0, 12, "R:R", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 12, rr_ratio > 0 ? "1:" + str.tostring(rr_ratio, "#.##") : "---", text_color=color.white, text_size=size.tiny)
+
+    // Row 13: Bars in Position
+    table.cell(dash, 0, 13, "Bars Held", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 13, position != 0 ? str.tostring(bars_in_pos) : "---", text_color=color.white, text_size=size.tiny)
+
+    // Row 14: ATR
+    table.cell(dash, 0, 14, "ATR(14)", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 14, str.tostring(atr_val, format.mintick), text_color=color.white, text_size=size.tiny)
+
+    // Row 15: RSI
+    table.cell(dash, 0, 15, "RSI(14)", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 15, str.tostring(rsi_val, "#.#"), text_color=rsi_val > rsi_ob ? color.red : rsi_val < rsi_os ? color.green : color.white, text_size=size.tiny)
+
+    // Row 16: Daily PnL
+    table.cell(dash, 0, 16, "Daily PnL", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 16, str.tostring(daily_pnl_pct, "#.##") + "%", text_color=daily_pnl_pct >= 0 ? color.green : color.red, text_size=size.tiny)
+
+    // Row 17: Session
+    table.cell(dash, 0, 17, "Session", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 17, time_ok ? "ACTIVE" : "CLOSED", text_color=time_ok ? color.green : color.red, text_size=size.tiny)
+
+    // Row 18: DD Breaker
+    table.cell(dash, 0, 18, "Max DD", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 18, str.tostring(current_dd_pct, "#.##") + "% / " + str.tostring(max_dd_pct, "#.#") + "%", text_color=dd_ok ? color.green : color.red, text_size=size.tiny)
+
+    // Row 19: Shorts
+    table.cell(dash, 0, 19, "Shorts", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 19, allow_short ? "ON (Futures)" : "OFF (Spot)", text_color=allow_short ? color.yellow : color.gray, text_size=size.tiny)
+
+    // Row 20: Kelly Header
+    table.cell(dash, 0, 20, "KELLY", text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 0))
+    table.cell(dash, 1, 20, kelly_source, text_color=kelly_source_color, text_size=size.small, bgcolor=color.new(color.purple, 0))
+
+    // Row 21: Winrate
+    table.cell(dash, 0, 21, "Winrate", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 21, f_fmt_pct(kelly_winrate * 100.0), text_color=color.white, text_size=size.tiny)
+
+    // Row 22: Avg R:R
+    table.cell(dash, 0, 22, "Avg R:R", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 22, not na(kelly_avg_rr) ? "1 : " + str.tostring(kelly_avg_rr, "#.##") : "---", text_color=color.white, text_size=size.tiny)
+
+    // Row 23: Break-even Winrate
+    table.cell(dash, 0, 23, "BE Winrate", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 23, f_fmt_pct(kelly_be_winrate * 100.0), text_color=color.white, text_size=size.tiny)
+
+    // Row 24: Edge per $1
+    table.cell(dash, 0, 24, "Edge / $1", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 24, f_fmt_signed_money(kelly_edge_per_r), text_color=na(kelly_edge_per_r) ? color.gray : kelly_edge_per_r >= 0 ? color.lime : color.red, text_size=size.tiny)
+
+    // Row 25: Full Kelly
+    table.cell(dash, 0, 25, "Full Kelly", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 25, f_fmt_pct(kelly_full_pct), text_color=na(kelly_full_pct) ? color.gray : color.lime, text_size=size.tiny)
+
+    // Row 26: Half Kelly
+    table.cell(dash, 0, 26, "Half Kelly", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 26, f_fmt_pct(kelly_half_pct), text_color=na(kelly_half_pct) ? color.gray : color.lime, text_size=size.tiny)
+
+    // Row 27: Quarter Kelly
+    table.cell(dash, 0, 27, "Quarter Kelly", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 27, f_fmt_pct(kelly_quarter_pct), text_color=na(kelly_quarter_pct) ? color.gray : color.lime, text_size=size.tiny)
+
+    // Row 28: Your Risk
+    table.cell(dash, 0, 28, "Your Risk", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 28, f_fmt_pct(your_risk_pct), text_color=color.aqua, text_size=size.tiny)
+
+    // Row 29: Status
+    table.cell(dash, 0, 29, "Status", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 29, kelly_status, text_color=kelly_status_color, text_size=size.tiny)
+
+    // Row 30: Risk Amount if Kelly
+    table.cell(dash, 0, 30, "Risk Amt", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 30, f_fmt_money(kelly_risk_amt), text_color=na(kelly_risk_amt) ? color.gray : color.aqua, text_size=size.tiny)
+
+    // Row 31: Position Value if Kelly
+    table.cell(dash, 0, 31, "Position", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 31, f_fmt_money(kelly_position_value), text_color=na(kelly_position_value) ? color.gray : color.aqua, text_size=size.tiny)
+
+    // Row 32: Growth Rate at Kelly
+    table.cell(dash, 0, 32, "Growth @ Kelly", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 32, f_fmt_signed(kelly_growth_at_full, "#.##") + "% /trade", text_color=na(kelly_growth_at_full) ? color.gray : kelly_growth_at_full >= 0 ? color.lime : color.red, text_size=size.tiny)
+
+    // Row 33: Growth Rate at Your Risk
+    table.cell(dash, 0, 33, "Growth @ Your", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 33, f_fmt_signed(kelly_growth_at_your, "#.##") + "% /trade", text_color=na(kelly_growth_at_your) ? color.gray : kelly_growth_at_your >= 0 ? color.lime : color.red, text_size=size.tiny)
+
+    // Row 34: Sample Size
+    table.cell(dash, 0, 34, "Trades", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 34, str.tostring(kelly_closed_trades), text_color=color.white, text_size=size.tiny)
+
+    // Row 35: Telegram Intelligence Header
+    table.cell(dash, 0, 35, "TELEGRAM", text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 0))
+    table.cell(dash, 1, 35, "INTEL", text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 0))
+
+    // Row 36: GLINT News
+    table.cell(dash, 0, 36, "GLINT News", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 36, use_glint_news ? "ON" : "OFF", text_color=use_glint_news ? color.lime : color.gray, text_size=size.tiny)
+
+    // Row 37: Manus Advisor Widget
+    table.cell(dash, 0, 37, "Manus Advisor", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 37, use_manus_advisor ? "ON" : "OFF", text_color=use_manus_advisor ? color.aqua : color.gray, text_size=size.tiny)
+
+    // Row 38: Boost Cap
+    table.cell(dash, 0, 38, "Boost Cap", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 38, "25%", text_color=color.lime, text_size=size.tiny)
+
+    // Row 39: Relay Link
+    table.cell(dash, 0, 39, "Relay Link", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 39, "Telegram webhook", text_color=color.white, text_size=size.tiny)
+
+// ============================================================================
+// DEBUG LABELS
+// ============================================================================
+if debug_mode and barstate.isconfirmed
+    int show_conf = math.max(bull_conf, bear_conf)
+    if show_conf >= min_conf - 2
+        label.new(bar_index, high + atr_val * 0.5, str.tostring(show_conf), style=label.style_label_down, color=show_conf >= min_conf ? color.green : color.orange, textcolor=color.white, size=size.tiny)
+
+// ============================================================================
+// END OF SCRIPT
+// ============================================================================

@@ -1,0 +1,112 @@
+//@version=5
+strategy("Unified 4-in-1 Strategy", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.05, pyramiding=0)
+
+// -----------------------------
+// Inputs
+// -----------------------------
+trendLenFast   = input.int(50,  "Trend Fast EMA", minval=1)
+trendLenSlow   = input.int(200, "Trend Slow EMA", minval=1)
+rsiLen         = input.int(14,  "RSI Length", minval=2)
+rsiBull        = input.int(55,  "RSI Bull Threshold", minval=1, maxval=99)
+rsiBear        = input.int(45,  "RSI Bear Threshold", minval=1, maxval=99)
+bbLen          = input.int(20,  "Bollinger Length", minval=5)
+bbMult         = input.float(2.0, "Bollinger Mult", minval=0.1)
+donLen         = input.int(20,  "Breakout Length", minval=2)
+minVotes       = input.int(2,   "Min Votes to Enter (1-4)", minval=1, maxval=4)
+
+// -----------------------------
+// Core indicators
+// -----------------------------
+emaFast = ta.ema(close, trendLenFast)
+emaSlow = ta.ema(close, trendLenSlow)
+rsi     = ta.rsi(close, rsiLen)
+// Fixed risk model requested:
+// SL 0.3%, TP1 1.5% (80%), TP2 2.0% (20%)
+slPct    = 0.003
+tp1Pct   = 0.015
+tp2Pct   = 0.02
+
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+donHigh = ta.highest(high, donLen)
+donLow  = ta.lowest(low, donLen)
+
+// -----------------------------
+// Version 1: Trend following (EMA regime)
+// -----------------------------
+v1Long  = emaFast > emaSlow
+v1Short = emaFast < emaSlow
+
+// -----------------------------
+// Version 2: Momentum filter (RSI)
+// -----------------------------
+v2Long  = rsi > rsiBull
+v2Short = rsi < rsiBear
+
+// -----------------------------
+// Version 3: Mean reversion (Bollinger touch + recovery)
+// -----------------------------
+v3Long  = close[1] < bbLower[1] and close > bbLower
+v3Short = close[1] > bbUpper[1] and close < bbUpper
+
+// -----------------------------
+// Version 4: Breakout confirmation (Donchian)
+// -----------------------------
+v4Long  = close > donHigh[1]
+v4Short = close < donLow[1]
+
+// Vote aggregation
+longVotes  = (v1Long ? 1 : 0) + (v2Long ? 1 : 0) + (v3Long ? 1 : 0) + (v4Long ? 1 : 0)
+shortVotes = (v1Short ? 1 : 0) + (v2Short ? 1 : 0) + (v3Short ? 1 : 0) + (v4Short ? 1 : 0)
+
+enterLong  = longVotes  >= minVotes and longVotes > shortVotes
+enterShort = shortVotes >= minVotes and shortVotes > longVotes
+
+// Enforce minimum of 1 new position per minute (when flat)
+isFlat = strategy.position_size == 0
+minuteKey = int(math.floor(time / 60000))
+var int lastEntryMinute = na
+canOpenThisMinute = isFlat and (na(lastEntryMinute) or minuteKey > lastEntryMinute)
+
+// Direction: use vote majority, fallback to EMA trend if tied/neutral
+preferLong = longVotes > shortVotes or (longVotes == shortVotes and emaFast >= emaSlow)
+
+if canOpenThisMinute
+    if preferLong
+        strategy.entry("Long", strategy.long)
+    else
+        strategy.entry("Short", strategy.short)
+    lastEntryMinute := minuteKey
+
+// Fixed-percentage exits with scale-out
+longStop  = strategy.position_avg_price * (1 - slPct)
+longTp1   = strategy.position_avg_price * (1 + tp1Pct)
+longTp2   = strategy.position_avg_price * (1 + tp2Pct)
+
+shortStop = strategy.position_avg_price * (1 + slPct)
+shortTp1  = strategy.position_avg_price * (1 - tp1Pct)
+shortTp2  = strategy.position_avg_price * (1 - tp2Pct)
+
+strategy.exit("Long TP1",   from_entry="Long",  stop=longStop,  limit=longTp1,  qty_percent=80)
+strategy.exit("Long TP2",   from_entry="Long",  stop=longStop,  limit=longTp2,  qty_percent=20)
+strategy.exit("Short TP1",  from_entry="Short", stop=shortStop, limit=shortTp1, qty_percent=80)
+strategy.exit("Short TP2",  from_entry="Short", stop=shortStop, limit=shortTp2, qty_percent=20)
+
+// -----------------------------
+// Visuals
+// -----------------------------
+plot(emaFast, "EMA Fast", color=color.teal)
+plot(emaSlow, "EMA Slow", color=color.orange)
+plot(bbUpper, "BB Upper", color=color.new(color.gray, 70))
+plot(bbBasis, "BB Basis", color=color.new(color.gray, 80))
+plot(bbLower, "BB Lower", color=color.new(color.gray, 70))
+
+plotshape(enterLong,  title="Long Signal",  style=shape.triangleup,   location=location.belowbar, color=color.lime, size=size.tiny, text="L")
+plotshape(enterShort, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.tiny, text="S")
+
+// Debug values in Data Window
+plot(longVotes,  "Long Votes",  display=display.data_window)
+plot(shortVotes, "Short Votes", display=display.data_window)

@@ -1,0 +1,341 @@
+//@version=6
+strategy("BPRC PRO - A+ SIGNAL ENGINE V6", 
+     shorttitle="BPRC PRO",
+     overlay=true, 
+     initial_capital=100000, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=100, 
+     pyramiding=0, 
+     calc_on_every_tick=false, 
+     process_orders_on_close=true,
+     close_entries_rule="ANY",
+     margin_long=0, 
+     margin_short=0)
+
+// =========================================================================
+// 1. INSTITUTIONAL TYPES (UDTs)
+// =========================================================================
+type BPRC_State
+    int   state       // 0 = Idle, 1 = BP (Breakout), 2 = R (Reload), 3 = C (Triggered)
+    int   bars_in_state
+    float bp_level
+    int   direction   // 1 = Bull, -1 = Bear
+    bool  is_a_plus
+
+type TradeExecution
+    bool  active
+    float entry_px
+    float sl_px
+    float tp1_px
+    float tp2_px
+    float tp3_px
+    float tp4_px
+    float tp5_px
+    float qty_total
+
+// =========================================================================
+// 2. INPUT CONFIGURATION & SETTINGS
+// =========================================================================
+string G_BPRC = "1. BPRC Logic (Breakout, Pullback, Continuation)"
+float inp_bp_thresh = input.float(1.5, "Breakout Thrust Min (ATR Mult)", group=G_BPRC, step=0.1)
+int   inp_max_r_bars= input.int(15, "Max Bars for Reload (R)", group=G_BPRC)
+float inp_c_trigger = input.float(0.5, "Continuation Confirmation (ATR Mult)", group=G_BPRC, step=0.1)
+
+string G_CHAN = "2. Adaptive Step Channel"
+int   inp_chan_len  = input.int(20, "Channel Baseline Length", group=G_CHAN)
+float inp_chan_dev  = input.float(2.0, "Channel StdDev Multiplier", group=G_CHAN, step=0.1)
+float inp_chan_atr  = input.float(1.5, "Channel ATR Multiplier", group=G_CHAN, step=0.1)
+
+string G_MTF  = "3. MTF Bias Alignment (A+ Gate)"
+int   inp_aplus_thr = input.int(80, "A+ Signal Min Alignment (%)", group=G_MTF, minval=50, maxval=100)
+bool  inp_use_mtf   = input.bool(true, "Enforce MTF Bias for Entries", group=G_MTF)
+
+string G_PLAN = "4. Built-In Trade Plan (TP & SL)"
+float inp_sl_atr    = input.float(2.0, "Initial Stop Loss (ATR)", group=G_PLAN, step=0.1)
+float inp_tp_step   = input.float(1.0, "Take Profit Step (RR per TP)", group=G_PLAN, step=0.1)
+bool  inp_trail_on  = input.bool(true, "Trail Stop after TP3", group=G_PLAN)
+
+string G_UI   = "5. Visuals & Dashboard"
+bool  inp_show_dash = input.bool(true, "Show Bias Dashboard", group=G_UI)
+bool  inp_show_chan = input.bool(true, "Show Step Channel", group=G_UI)
+bool  inp_show_mrk  = input.bool(true, "Show BPRC Markers", group=G_UI)
+color col_bull      = input.color(color.rgb(0, 230, 119), "Bull Color", group=G_UI)
+color col_bear      = input.color(color.rgb(255, 23, 68), "Bear Color", group=G_UI)
+
+// =========================================================================
+// 3. CORE VOLATILITY & NORMALIZATION
+// =========================================================================
+float atr = ta.atr(14)
+float dev = ta.stdev(close, inp_chan_len)
+float sma = ta.sma(close, inp_chan_len)
+
+// Normalization Vector
+float price_thrust = atr > 0 ? (close - nz(close[1])) / atr : 0.0
+
+// =========================================================================
+// 4. ADAPTIVE STEP CHANNEL ENGINE
+// =========================================================================
+float raw_upper = sma + (atr * inp_chan_atr) + (dev * inp_chan_dev)
+float raw_lower = sma - (atr * inp_chan_atr) - (dev * inp_chan_dev)
+
+var float step_upper = na
+var float step_lower = na
+var int   chan_trend = 0
+
+if na(step_upper)
+    step_upper := raw_upper
+    step_lower := raw_lower
+
+if close > nz(step_upper[1])
+    chan_trend := 1
+else if close < nz(step_lower[1])
+    chan_trend := -1
+
+if chan_trend == 1
+    step_lower := math.max(nz(step_lower[1]), raw_lower)
+    step_upper := raw_upper 
+else if chan_trend == -1
+    step_upper := math.min(nz(step_upper[1]), raw_upper)
+    step_lower := raw_lower 
+else
+    step_upper := nz(step_upper[1])
+    step_lower := nz(step_lower[1])
+
+// =========================================================================
+// 5. MULTI-TIMEFRAME BIAS ENGINE (STRICT NON-REPAINTING)
+// =========================================================================
+// Institutional Bias Logic explicitly fetching closed bar data [1]
+f_bias_closed() =>
+    float _vwap = nz(ta.vwap[1], close[1]) // Fallback if no volume data
+    float _fast = ta.ema(close, 9)[1]
+    float _slow = ta.ema(close, 21)[1]
+    
+    int _score = 0
+    _score += (close[1] > _vwap ? 1 : -1)
+    _score += (close[1] > _fast ? 1 : -1)
+    _score += (_fast > _slow ? 1 : -1)
+    
+    int _bias = _score > 0 ? 1 : (_score < 0 ? -1 : 0)
+    _bias
+
+// Safe Security Calls (lookahead_on combined with [1] inside the function = Zero Future Leak, exact closed bar)
+int bias_1m  = request.security(syminfo.tickerid, "1",   f_bias_closed(), lookahead=barmerge.lookahead_on)
+int bias_5m  = request.security(syminfo.tickerid, "5",   f_bias_closed(), lookahead=barmerge.lookahead_on)
+int bias_15m = request.security(syminfo.tickerid, "15",  f_bias_closed(), lookahead=barmerge.lookahead_on)
+int bias_30m = request.security(syminfo.tickerid, "30",  f_bias_closed(), lookahead=barmerge.lookahead_on)
+int bias_60m = request.security(syminfo.tickerid, "60",  f_bias_closed(), lookahead=barmerge.lookahead_on)
+int bias_4h  = request.security(syminfo.tickerid, "240", f_bias_closed(), lookahead=barmerge.lookahead_on)
+int bias_1d  = request.security(syminfo.tickerid, "D",   f_bias_closed(), lookahead=barmerge.lookahead_on)
+
+// Calculate Active Bar Count dynamically on the current timeframe
+var int count_1m = 0, var int count_5m = 0, var int count_15m = 0, var int count_30m = 0
+var int count_60m = 0, var int count_4h = 0, var int count_1d = 0
+
+count_1m  := (bias_1m == nz(bias_1m[1])) ? count_1m + 1 : 1
+count_5m  := (bias_5m == nz(bias_5m[1])) ? count_5m + 1 : 1
+count_15m := (bias_15m == nz(bias_15m[1])) ? count_15m + 1 : 1
+count_30m := (bias_30m == nz(bias_30m[1])) ? count_30m + 1 : 1
+count_60m := (bias_60m == nz(bias_60m[1])) ? count_60m + 1 : 1
+count_4h  := (bias_4h == nz(bias_4h[1])) ? count_4h + 1 : 1
+count_1d  := (bias_1d == nz(bias_1d[1])) ? count_1d + 1 : 1
+
+// Alignment Calculator
+int total_tfs = 7
+int bull_votes = (bias_1m==1?1:0) + (bias_5m==1?1:0) + (bias_15m==1?1:0) + (bias_30m==1?1:0) + (bias_60m==1?1:0) + (bias_4h==1?1:0) + (bias_1d==1?1:0)
+int bear_votes = (bias_1m==-1?1:0) + (bias_5m==-1?1:0) + (bias_15m==-1?1:0) + (bias_30m==-1?1:0) + (bias_60m==-1?1:0) + (bias_4h==-1?1:0) + (bias_1d==-1?1:0)
+
+float bull_align_pct = (bull_votes / total_tfs) * 100.0
+float bear_align_pct = (bear_votes / total_tfs) * 100.0
+
+bool is_bull_aplus = bull_align_pct >= inp_aplus_thr
+bool is_bear_aplus = bear_align_pct >= inp_aplus_thr
+
+// =========================================================================
+// 6. BPRC STATE MACHINE (FINITE AUTOMATON)
+// =========================================================================
+var BPRC_State fsm = BPRC_State.new(0, 0, float(na), 0, false)
+
+bool cond_bp_bull = (close > step_upper) and (price_thrust >= inp_bp_thresh)
+bool cond_bp_bear = (close < step_lower) and (price_thrust <= -inp_bp_thresh)
+
+bool trigger_long  = false
+bool trigger_short = false
+
+if fsm.state != 0
+    fsm.bars_in_state += 1
+
+if fsm.bars_in_state > inp_max_r_bars or (fsm.direction == 1 and close < sma) or (fsm.direction == -1 and close > sma)
+    fsm.state := 0
+    fsm.bars_in_state := 0
+
+if fsm.state == 0
+    if cond_bp_bull
+        fsm.state         := 1
+        fsm.direction     := 1
+        fsm.bp_level      := close
+        fsm.bars_in_state := 0
+    else if cond_bp_bear
+        fsm.state         := 1
+        fsm.direction     := -1
+        fsm.bp_level      := close
+        fsm.bars_in_state := 0
+
+else if fsm.state == 1
+    if fsm.direction == 1 and low <= step_upper and close < open
+        fsm.state := 2
+    else if fsm.direction == -1 and high >= step_lower and close > open
+        fsm.state := 2
+
+else if fsm.state == 2
+    if fsm.direction == 1
+        bool c_bull = close > open and (close - nz(low[1])) > (atr * inp_c_trigger)
+        bool mtf_ok = inp_use_mtf ? bull_align_pct > 50.0 : true
+        if c_bull and mtf_ok
+            fsm.state     := 3
+            fsm.is_a_plus := is_bull_aplus
+            trigger_long  := true
+            
+    else if fsm.direction == -1
+        bool c_bear = close < open and (nz(high[1]) - close) > (atr * inp_c_trigger)
+        bool mtf_ok = inp_use_mtf ? bear_align_pct > 50.0 : true
+        if c_bear and mtf_ok
+            fsm.state     := 3
+            fsm.is_a_plus := is_bear_aplus
+            trigger_short := true
+
+if fsm.state == 3
+    fsm.state := 0
+    fsm.bars_in_state := 0
+
+// =========================================================================
+// 7. EXECUTION & BUILT-IN TRADE PLAN
+// =========================================================================
+var TradeExecution t_plan = TradeExecution.new(false, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+bool is_flat = strategy.position_size == 0
+
+f_calc_qty(float _sl_dist, float _eq) =>
+    float _risk_amt = _eq * 0.01 // Fixed 1% risk
+    float _qty = _sl_dist > 0 ? _risk_amt / _sl_dist : 0.0
+    _qty
+
+if trigger_long and is_flat
+    float sl_dist = atr * inp_sl_atr
+    float entry_px = close
+    float sl_px = entry_px - sl_dist
+    
+    t_plan.active   := true
+    t_plan.entry_px := entry_px
+    t_plan.sl_px    := sl_px
+    t_plan.tp1_px   := entry_px + (sl_dist * inp_tp_step * 1)
+    t_plan.tp2_px   := entry_px + (sl_dist * inp_tp_step * 2)
+    t_plan.tp3_px   := entry_px + (sl_dist * inp_tp_step * 3)
+    t_plan.tp4_px   := entry_px + (sl_dist * inp_tp_step * 4)
+    t_plan.tp5_px   := entry_px + (sl_dist * inp_tp_step * 5)
+    t_plan.qty_total:= f_calc_qty(sl_dist, strategy.equity)
+    
+    if t_plan.qty_total > 0
+        strategy.entry("BP_LONG", strategy.long, qty=t_plan.qty_total)
+        alert("BPRC PRO: LONG A+ SIGNAL TRIGGERED", alert.freq_once_per_bar_close)
+
+if trigger_short and is_flat
+    float sl_dist = atr * inp_sl_atr
+    float entry_px = close
+    float sl_px = entry_px + sl_dist
+    
+    t_plan.active   := true
+    t_plan.entry_px := entry_px
+    t_plan.sl_px    := sl_px
+    t_plan.tp1_px   := entry_px - (sl_dist * inp_tp_step * 1)
+    t_plan.tp2_px   := entry_px - (sl_dist * inp_tp_step * 2)
+    t_plan.tp3_px   := entry_px - (sl_dist * inp_tp_step * 3)
+    t_plan.tp4_px   := entry_px - (sl_dist * inp_tp_step * 4)
+    t_plan.tp5_px   := entry_px - (sl_dist * inp_tp_step * 5)
+    t_plan.qty_total:= f_calc_qty(sl_dist, strategy.equity)
+    
+    if t_plan.qty_total > 0
+        strategy.entry("BP_SHORT", strategy.short, qty=t_plan.qty_total)
+        alert("BPRC PRO: SHORT A+ SIGNAL TRIGGERED", alert.freq_once_per_bar_close)
+
+if is_flat and t_plan.active
+    t_plan.active := false
+
+if not is_flat
+    if inp_trail_on
+        if strategy.position_size > 0 and high >= t_plan.tp3_px
+            float _trail = close - (atr * 1.5)
+            if _trail > t_plan.sl_px
+                t_plan.sl_px := _trail
+        else if strategy.position_size < 0 and low <= t_plan.tp3_px
+            float _trail = close + (atr * 1.5)
+            if _trail < t_plan.sl_px
+                t_plan.sl_px := _trail
+
+    // 5-Tier Scale-Out Exit System
+    if strategy.position_size > 0
+        strategy.exit("TP1", "BP_LONG", qty_percent=20, limit=t_plan.tp1_px, stop=t_plan.sl_px)
+        strategy.exit("TP2", "BP_LONG", qty_percent=25, limit=t_plan.tp2_px, stop=t_plan.sl_px)
+        strategy.exit("TP3", "BP_LONG", qty_percent=33, limit=t_plan.tp3_px, stop=t_plan.sl_px)
+        strategy.exit("TP4", "BP_LONG", qty_percent=50, limit=t_plan.tp4_px, stop=t_plan.sl_px)
+        strategy.exit("TP5", "BP_LONG", limit=t_plan.tp5_px, stop=t_plan.sl_px)
+
+    if strategy.position_size < 0
+        strategy.exit("TP1", "BP_SHORT", qty_percent=20, limit=t_plan.tp1_px, stop=t_plan.sl_px)
+        strategy.exit("TP2", "BP_SHORT", qty_percent=25, limit=t_plan.tp2_px, stop=t_plan.sl_px)
+        strategy.exit("TP3", "BP_SHORT", qty_percent=33, limit=t_plan.tp3_px, stop=t_plan.sl_px)
+        strategy.exit("TP4", "BP_SHORT", qty_percent=50, limit=t_plan.tp4_px, stop=t_plan.sl_px)
+        strategy.exit("TP5", "BP_SHORT", limit=t_plan.tp5_px, stop=t_plan.sl_px)
+
+// =========================================================================
+// 8. VISUALS & PLOTTING
+// =========================================================================
+plot(inp_show_chan ? step_upper : na, "Step Upper", color=color.new(col_bull, 20), style=plot.style_stepline, linewidth=2)
+plot(inp_show_chan ? step_lower : na, "Step Lower", color=color.new(col_bear, 20), style=plot.style_stepline, linewidth=2)
+plot(inp_show_chan ? sma : na, "Baseline", color=color.new(color.gray, 60), style=plot.style_line, linewidth=1)
+
+plotshape(inp_show_mrk and trigger_long,  "C - Long Trigger",  shape.triangleup,   location.belowbar, color=fsm.is_a_plus ? col_bull : color.blue, size=size.normal, text="C")
+plotshape(inp_show_mrk and trigger_short, "C - Short Trigger", shape.triangledown, location.abovebar, color=fsm.is_a_plus ? col_bear : color.orange, size=size.normal, text="C")
+
+plotshape(inp_show_mrk and fsm.state == 1 and nz(fsm.state[1]) == 0, "BP - Breakout", shape.circle, location.absolute, color=color.new(color.yellow, 0), size=size.tiny)
+plotshape(inp_show_mrk and fsm.state == 2 and nz(fsm.state[1]) == 1, "R - Reload",    shape.cross,  location.absolute, color=color.new(color.fuchsia, 0), size=size.small)
+
+// =========================================================================
+// 9. PRO DASHBOARD (MTF BIAS TABLE)
+// =========================================================================
+var table dash = table.new(position.top_right, 4, 10, bgcolor=color.new(#1e1e1e, 5), border_width=1, border_color=color.new(color.gray, 70))
+
+// Helper Function for Table rows (Explicit passing of table object)
+f_fill_row(table _tbl, int _row, string _tf_str, int _bias, int _count) =>
+    color _c = _bias == 1 ? col_bull : (_bias == -1 ? col_bear : color.gray)
+    string _s = _bias == 1 ? "BULL" : (_bias == -1 ? "BEAR" : "FLAT")
+    table.cell(_tbl, 0, _row, _tf_str, text_color=color.white, text_size=size.small)
+    table.cell(_tbl, 1, _row, _s, text_color=_c, text_size=size.small)
+    table.cell(_tbl, 2, _row, "ACTIVE", text_color=_c, text_size=size.small)
+    table.cell(_tbl, 3, _row, str.tostring(_count), text_color=color.white, text_size=size.small)
+
+if barstate.islast and inp_show_dash
+    table.cell(dash, 0, 0, "BPRC PRO - BIAS ENGINE", text_color=color.white, text_size=size.small, text_halign=text.align_center, bgcolor=color.new(color.blue, 60))
+    table.merge_cells(dash, 0, 0, 3, 0)
+    
+    table.cell(dash, 0, 1, "TF", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 1, "BIAS", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 2, 1, "STATE", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 3, 1, "BARS ACTIVE", text_color=color.gray, text_size=size.small)
+
+    f_fill_row(dash, 2, "1m", bias_1m, count_1m)
+    f_fill_row(dash, 3, "5m", bias_5m, count_5m)
+    f_fill_row(dash, 4, "15m", bias_15m, count_15m)
+    f_fill_row(dash, 5, "30m", bias_30m, count_30m)
+    f_fill_row(dash, 6, "1H", bias_60m, count_60m)
+    f_fill_row(dash, 7, "4H", bias_4h, count_4h)
+    f_fill_row(dash, 8, "1D", bias_1d, count_1d)
+
+    table.cell(dash, 0, 9, "BULL %", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 9, str.tostring(bull_align_pct, "#.#") + "%", text_color=bull_align_pct >= inp_aplus_thr ? col_bull : color.white, text_size=size.small)
+    
+    table.cell(dash, 2, 9, "BEAR %", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 3, 9, str.tostring(bear_align_pct, "#.#") + "%", text_color=bear_align_pct >= inp_aplus_thr ? col_bear : color.white, text_size=size.small)
+
+// =========================================================================
+// END OF BPRC PRO CODE
+// =========================================================================

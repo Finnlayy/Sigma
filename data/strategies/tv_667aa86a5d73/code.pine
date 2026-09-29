@@ -1,0 +1,101 @@
+//@version=6
+strategy("Fable 5 OS - YT Sweep Scalper v3", overlay = true, pyramiding = 0, initial_capital = 1000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// =========================================================================
+// 1. PARAMETER
+// =========================================================================
+int   liqLength = input.int(20, "Liquidity Lookback (Bars)", minval=5, tooltip="Sucht das Tief der letzten X Kerzen für den Sweep")
+float rrRatio   = input.float(2.0, "Risk/Reward Ratio")
+color obColor   = input.color(color.new(color.blue, 80), "Orderblock Farbe")
+
+// =========================================================================
+// 2. STATE MACHINE VARIABLEN
+// =========================================================================
+// 0 = Suche Sweep
+// 1 = Sweep aktiv (tracke Tiefpunkt, warte auf bullische Kerze)
+// 2 = OB gezeichnet (warte auf Ausbruch nach oben)
+// 3 = Breakout erfolgt (warte auf Retest & bullischen Close)
+// 4 = Im Trade
+var int state = 0 
+
+var float sweepLow  = na
+var float sweepHigh = na
+var float obBot     = na
+var float obTop     = na
+var float slLevel   = na
+var box   obBox     = na
+
+// =========================================================================
+// 3. KONDITIONEN & LEVEL
+// =========================================================================
+bool isBullish = close > open
+float liqLevel = ta.lowest(low, liqLength)[1] // Das markante Tief (ohne aktuelle Kerze)
+bool inTrade   = strategy.position_size > 0
+
+// =========================================================================
+// 4. SEQUENTIELLE LOGIK PIPELINE
+// =========================================================================
+
+// Reset der State-Machine, sobald der Trade geschlossen wurde (ermöglicht consecutive Trades)
+if not inTrade and state == 4
+    state := 0
+
+if not inTrade
+    // --- STATE 0: Warten auf Durchbruch des Liquiditäts-Tiefs ---
+    if state == 0
+        if low < liqLevel
+            state := 1
+            sweepLow := low
+            sweepHigh := high
+
+    // --- STATE 1: Sweep Phase - Tracken des absoluten Tiefs & Warten auf Reversal ---
+    else if state == 1
+        // Tracke den tiefsten Punkt und das Hoch der Kerze, die dieses Tief gebildet hat
+        if low < sweepLow
+            sweepLow := low
+            sweepHigh := high
+        
+        // Sobald die erste bullische Kerze schließt, ist der Boden (Orderblock) bestätigt
+        if isBullish
+            obBot := sweepLow
+            obTop := sweepHigh
+            
+            // Box zeichnen (für visuelles Debugging)
+            obBox := box.new(left = bar_index[1], top = obTop, right = bar_index + 2, bottom = obBot, bgcolor = obColor, border_color = color.blue)
+            state := 2
+
+    // --- STATE 2: Warten auf Breakout aus dem Orderblock ---
+    else if state == 2
+        box.set_right(obBox, bar_index)
+        
+        if close > obTop
+            state := 3 // Breakout bestätigt
+            
+        else if close < obBot
+            // Invalidierung: Preis fällt unter das absolute Tief, Setup bricht ab
+            state := 0
+            box.set_bgcolor(obBox, color.new(color.red, 80))
+
+    // --- STATE 3: Warten auf Retest und Rejection (Entry) ---
+    else if state == 3
+        box.set_right(obBox, bar_index)
+        
+        bool touchesBox = low <= obTop
+        
+        // Entry-Trigger: Preis war in der Box, Kerze schließt bullisch und NICHT unter der Box
+        if touchesBox and isBullish and close > obBot
+            slLevel := obBot
+            float risk = close - slLevel
+            
+            if risk > 0 // Verhindert Division by Zero bei flachen Kerzen
+                float tpLevel = close + (risk * rrRatio)
+                
+                strategy.entry("Long_Entry", strategy.long)
+                strategy.exit("Long_Exit", "Long_Entry", stop = slLevel, limit = tpLevel)
+                
+                state := 4 // Sperre die Pipeline, bis der Trade geschlossen ist
+                
+        else if close < obBot
+            // Invalidierung: Kerze schließt unter dem Orderblock
+            state := 0
+            box.set_bgcolor(obBox, color.new(color.red, 80))

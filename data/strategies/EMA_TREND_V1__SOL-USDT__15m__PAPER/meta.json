@@ -1,0 +1,9 @@
+{
+  "bytes": 162,
+  "name": "SOL EMA Trend Rider",
+  "persisted_at": "2026-09-08T00:22:35Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "EMA_TREND_V1__SOL-USDT__15m__PAPER",
+  "tv_script_id": ""
+}

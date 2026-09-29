@@ -1,0 +1,76 @@
+//@version=5
+strategy("TradingLab PRO - Strict Zones & Visual RRR", overlay=true, initial_capital=10000)
+
+// --- Inputs ---
+lookback = input.int(5, "Structure Lookback", minval=1, tooltip="Zeitraum für Hochs/Tiefs")
+impulse_mult = input.float(2.0, "Impulse Strength", minval=1.0, tooltip="Wie viel stärker muss die Kerze sein als der Schnitt?")
+rr_ratio = input.float(2.5, "Min Risk:Reward", minval=1.0)
+
+// --- Marktstruktur (Video Min 01:43) ---
+var float valid_low = na
+var float valid_high = na
+var bool is_uptrend = false
+
+high_point = ta.highest(high, lookback)
+low_point = ta.lowest(low, lookback)
+
+if (high > ta.valuewhen(high > high_point[1], high, 0))
+    valid_low := low_point
+    is_uptrend := true
+
+if (low < ta.valuewhen(low < low_point[1], low, 0))
+    valid_high := high_point
+    is_uptrend := false
+
+// --- Strikte Zonen-Erkennung (Video Min 05:23) ---
+avg_body = ta.sma(math.abs(close - open), 20)
+current_body = math.abs(close - open)
+is_strict_impulse_up = close > open and current_body > (avg_body * impulse_mult)
+is_strict_impulse_down = close < open and current_body > (avg_body * impulse_mult)
+
+var float d_zone_low = na
+var float d_zone_high = na
+var float s_zone_low = na
+var float s_zone_high = na
+
+if is_strict_impulse_up and is_uptrend
+    d_zone_low := low[1]
+    d_zone_high := high[1]
+
+if is_strict_impulse_down and not is_uptrend
+    s_zone_low := low[1]
+    s_zone_high := high[1]
+
+// --- Visualisierung ---
+plot(d_zone_high, color=color.new(color.teal, 50), style=plot.style_linebr, title="Demand Top")
+plot(d_zone_low, color=color.new(color.teal, 50), style=plot.style_linebr, title="Demand Bottom")
+plot(s_zone_high, color=color.new(color.maroon, 50), style=plot.style_linebr, title="Supply Top")
+plot(s_zone_low, color=color.new(color.maroon, 50), style=plot.style_linebr, title="Supply Bottom")
+
+// --- Trade Ausführung & Alerts ---
+long_condition = is_uptrend and low <= d_zone_high and low >= d_zone_low
+short_condition = not is_uptrend and high >= s_zone_low and high <= s_zone_high
+
+if (long_condition and strategy.position_size == 0)
+    sl = d_zone_low
+    tp = close + (close - sl) * rr_ratio
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Exit Long", "Long", stop=sl, limit=tp)
+    alert("Long Signal: Demand Zone erreicht!", alert.freq_once_per_bar)
+    
+    line.new(bar_index, close, bar_index + 5, close, color=color.blue, width=2)
+    line.new(bar_index, sl, bar_index + 5, sl, color=color.red, width=2)
+    line.new(bar_index, tp, bar_index + 5, tp, color=color.green, width=2)
+
+if (short_condition and strategy.position_size == 0)
+    sl = s_zone_high
+    tp = close - (sl - close) * rr_ratio
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Exit Short", "Short", stop=sl, limit=tp)
+    alert("Short Signal: Supply Zone erreicht!", alert.freq_once_per_bar)
+    
+    line.new(bar_index, close, bar_index + 5, close, color=color.blue, width=2)
+    line.new(bar_index, sl, bar_index + 5, sl, color=color.red, width=2)
+    line.new(bar_index, tp, bar_index + 5, tp, color=color.green, width=2)
+
+bgcolor(is_uptrend ? color.new(color.green, 96) : color.new(color.red, 96))

@@ -1,0 +1,705 @@
+//@version=6
+// XRP 5-minute iteration based on the 2026-05-25 to 2026-05-27 v6.1 backtest.
+// This short sample supports bug fixes, but not a claim of parameter validation.
+strategy("Manas: Ciel - Ultimate Apex Quant Engine v6.2 (XRP 5m)",
+  overlay=true,
+  pyramiding=0,
+  calc_on_every_tick=false,
+  calc_on_order_fills=false,
+  process_orders_on_close=false,
+  default_qty_type=strategy.percent_of_equity,
+  default_qty_value=15,
+  initial_capital=10000,
+  margin_long=10,
+  margin_short=10,
+  commission_type=strategy.commission.percent,
+  commission_value=0.05,
+  slippage=2,
+  max_labels_count=500,
+  max_lines_count=500,
+  max_boxes_count=500,
+  max_bars_back=5000)
+
+// ============================================================================
+// 1. INPUT PARAMETERS & CONFIGURATION GROUPS
+// ============================================================================
+const string G_KNN    = "=== 1. Machine Learning (KNN Synthesizer) ==="
+const string G_ATX    = "=== 2. ATX Volatility & Deviation Model ==="
+const string G_KDE    = "=== 3. KDE Volume Clusters & Liquidity ==="
+const string G_SMC    = "=== 4. Smart Money Concepts (OB / FVG / CISD) ==="
+const string G_REG    = "=== 5. Hurst & Chop Regime Guard ==="
+const string G_SCORE  = "=== 6. Confluence Cluster & Scoring Gate ==="
+const string G_RISK   = "=== 7. Dynamic Risk & Staged Partial Exits ==="
+
+const string G_ALERT  = "=== 9. Webhook & Strategy Alerts ==="
+const string G_DASH   = "=== 10. Dashboard & Visuals ==="
+
+// --- KNN Inputs ---
+int i_kNeighbors       = input.int(7, "KNN: K Neighbors", minval=1, maxval=25, group=G_KNN)
+int i_knnWindow        = input.int(120, "KNN: Training Window (Bars)", minval=30, maxval=500, group=G_KNN)
+int i_knnHorizon       = input.int(3, "KNN: Prediction Horizon (Bars)", minval=1, maxval=20, group=G_KNN)
+float i_knnThreshold   = input.float(0.24, "KNN: Signal Threshold", minval=0.02, maxval=0.80, step=0.02, group=G_KNN)
+
+// --- ATX Inputs ---
+int i_atxPeriod        = input.int(24, "ATX: Baseline Period (VWMA)", minval=5, maxval=100, group=G_ATX)
+float i_atxDevMult     = input.float(1.6, "ATX: Band Multiplier (ATR)", minval=0.8, maxval=4.0, step=0.1, group=G_ATX)
+
+// --- KDE Volume Inputs ---
+int i_kdeWindow        = input.int(40, "KDE: Lookback Window", minval=10, maxval=100, group=G_KDE)
+float i_kdeBandwidth   = input.float(1.0, "KDE: Bandwidth Smoothing (h)", minval=0.2, maxval=3.0, step=0.1, group=G_KDE)
+float i_kdeZThreshold  = input.float(0.35, "KDE: Volume Cluster Z-Threshold", minval=0.0, maxval=3.0, step=0.05, group=G_KDE)
+
+// --- SMC Inputs ---
+bool i_useOB           = input.bool(true, "Use Order Block Filter", group=G_SMC)
+bool i_useFVG          = input.bool(true, "Use Fair Value Gap (FVG) Filter", group=G_SMC)
+bool i_useCISD         = input.bool(true, "Use Change in State of Delivery (CISD)", group=G_SMC)
+int i_obPivotLen       = input.int(5, "OB Pivot Lookback", minval=2, maxval=20, group=G_SMC)
+int i_obMaxBars        = input.int(30, "OB Max Lifetime (Bars)", minval=5, maxval=100, group=G_SMC)
+
+// --- Hurst & Chop Regime Inputs ---
+bool i_useHurst        = input.bool(false, "Use Hurst Exponent Regime Filter", group=G_REG)
+int i_hurstLen         = input.int(100, "Hurst Lookback Length", minval=30, maxval=300, group=G_REG)
+bool i_useChopFilter   = input.bool(true, "Block Entries in Detected Chop Regime", group=G_REG)
+float i_chopAdxMax     = input.float(20.0, "Chop ADX Max", minval=5.0, maxval=40.0, step=0.5, group=G_REG)
+int i_vwapCrossLookback= input.int(12, "VWAP Cross Lookback", minval=3, maxval=50, group=G_REG)
+float i_vwapCrossMin   = input.float(4.0, "Min VWAP Crosses for Chop", minval=1.0, maxval=20.0, step=1.0, group=G_REG)
+bool i_requireTrend    = input.bool(true, "Require EMA Trend Alignment", group=G_REG)
+bool i_requireFresh    = input.bool(true, "Require Fresh Structure/Reclaim Trigger", group=G_REG)
+float i_minAtrPct      = input.float(0.15, "Minimum ATR % of Price", minval=0.05, maxval=1.00, step=0.05, group=G_REG)
+
+// --- Scoring Inputs ---
+int i_minScore         = input.int(7, "Minimum Confluence Score", minval=1, maxval=25, group=G_SCORE)
+int i_minScoreEdge     = input.int(3, "Minimum Score Edge", minval=0, maxval=10, group=G_SCORE)
+int i_minTradeGap      = input.int(12, "Min Bars After Exit", minval=1, maxval=100, group=G_SCORE)
+int i_entryDelay = input.int(2, "Entry Confirmation Delay (Bars)", minval=0, maxval=10, group=G_SCORE)
+
+// --- Risk Inputs ---
+float i_riskPerTrade   = input.float(0.5, "Risk Per Trade % Equity", minval=0.1, maxval=5.0, step=0.1, group=G_RISK)
+float i_leverage       = input.float(3.0, "Leverage Multiplier", minval=1.0, maxval=10.0, step=1.0, group=G_RISK)
+float i_maxMargin      = input.float(20.0, "Max Margin % Equity", minval=5.0, maxval=100.0, step=5.0, group=G_RISK)
+float i_rrRatio        = input.float(2.2, "Risk/Reward Ratio (TP2 Multiplier)", minval=1.0, maxval=6.0, step=0.1, group=G_RISK)
+float i_slAtrMult      = input.float(1.4, "SL ATR Multiplier", minval=0.3, maxval=3.0, step=0.1, group=G_RISK)
+float i_tp1Mult        = input.float(1.0, "TP1 ATR Multiplier (Partial)", minval=0.3, maxval=3.0, step=0.1, group=G_RISK)
+float i_tp1ClosePct    = input.float(50.0, "TP1 Partial Close %", minval=10.0, maxval=90.0, step=5.0, group=G_RISK)
+bool i_useBreakEven    = input.bool(true, "Enable Break-Even Stop at TP1", group=G_RISK)
+float i_breakEvenBufferPct = input.float(0.12, "Break-Even Cost Buffer %", minval=0.05, maxval=0.50, step=0.01, group=G_RISK)
+bool i_useTrailing     = input.bool(true, "Enable Evasive ATR Trailing Stop", group=G_RISK)
+bool i_usePctTrailing  = input.bool(true, "Enable % Trailing Stop (not ATR)", group=G_RISK)
+float i_trailAtrOffset = input.float(1.8, "Trailing Stop ATR Offset", minval=0.5, maxval=4.0, step=0.1, group=G_RISK)
+float i_trailPct       = input.float(4.2, "Trailing Stop % (of entry)", minval=0.5, maxval=10.0, step=0.1, group=G_RISK)
+
+// --- Alert & Webhook Inputs ---
+bool i_enableAlerts    = input.bool(true, "Enable Simultaneous Webhook & Strategy Alerts", group=G_ALERT)
+string i_botSecret     = input.string("", "Bot Secret / Token", group=G_ALERT)
+
+// --- Dashboard Inputs ---
+bool i_showDashboard   = input.bool(true, "Show Performance Dashboard", group=G_DASH)
+bool i_showTargets     = input.bool(true, "Show Visual SL/TP Lines & Labels", group=G_DASH)
+int  i_labelOffset     = input.int(3, "Label Offset Bars (Visible on Right)", minval=1, maxval=10, group=G_DASH)
+
+// ============================================================================
+// 2. CORE INDICATORS & VOLATILITY BASELINE
+// ============================================================================
+f_atr   = ta.atr(14)
+vwapVal = ta.vwap(hlc3)
+ema200  = ta.ema(close, 200)
+ema50   = ta.ema(close, 50)
+ema21   = ta.ema(close, 21)
+ema9    = ta.ema(close, 9)
+[macdMain, macdSignal, _] = ta.macd(close, 12, 26, 9)
+[_, _, adxVal]            = ta.dmi(14, 14)
+
+// ============================================================================
+// 3. HURST EXPONENT & REGIME GUARD ENGINE
+// ============================================================================
+fn_hurst(int len) =>
+    int halfLen = int(len / 2)
+    float hi1 = ta.highest(high, halfLen)
+    float lo1 = ta.lowest(low, halfLen)
+    float n2 = (hi1 - lo1) / halfLen
+    float hi2 = ta.highest(high, halfLen)[halfLen]
+    float lo2 = ta.lowest(low, halfLen)[halfLen]
+    float n1 = (hi2 - lo2) / halfLen
+    float hiFull = ta.highest(high, len)
+    float loFull = ta.lowest(low, len)
+    float n3 = (hiFull - loFull) / len
+    float D = 1.0
+    if (n1 + n2) > 0 and n3 > 0
+        D := (math.log(math.max(1e-8, n1 + n2)) - math.log(math.max(1e-8, n3))) / math.log(2.0)
+    float H = math.max(0.0, math.min(1.0, 2.0 - D))
+    H
+
+hurstVal = fn_hurst(i_hurstLen)
+isTrendingRegime   = hurstVal > 0.52
+isMeanRevertRegime = hurstVal < 0.48
+
+vwap_cross_count = math.sum(ta.cross(close, vwapVal) ? 1.0 : 0.0, i_vwapCrossLookback)
+ema_slope_flat   = f_atr > 0 ? math.abs(ema21 - ema21[1]) <= (f_atr * 0.02) : false
+chop_regime      = adxVal <= i_chopAdxMax and ema_slope_flat and vwap_cross_count >= i_vwapCrossMin
+
+hurst_regime_ok = not i_useHurst or isTrendingRegime
+chop_regime_ok  = not i_useChopFilter or not chop_regime
+regime_ok       = hurst_regime_ok and chop_regime_ok
+
+// ============================================================================
+// 4. ATX DEVIATION MODEL (VOLATILITY ENVELOPE)
+// ============================================================================
+atx_mean  = ta.vwma(close, i_atxPeriod)
+atx_upper = atx_mean + (f_atr * i_atxDevMult)
+atx_lower = atx_mean - (f_atr * i_atxDevMult)
+
+atx_bull_sweep   = low < atx_lower
+atx_bull_reclaim = ta.crossover(close, atx_lower)
+atx_bear_sweep   = high > atx_upper
+atx_bear_reclaim = ta.crossunder(close, atx_upper)
+
+f_atx_ratio = f_atr > 0 ? (close - atx_mean) / (f_atr * i_atxDevMult) : 0.0
+
+plot(atx_mean, "ATX Baseline", color=color.blue, linewidth=2)
+p_up = plot(atx_upper, "ATX Upper", color=color.red, linewidth=1)
+p_lo = plot(atx_lower, "ATX Lower", color=color.green, linewidth=1)
+fill(p_up, p_lo, color=color.new(color.blue, 96), title="ATX Value Band")
+
+// ============================================================================
+// 5. KERNEL DENSITY ESTIMATION (KDE) & VOLUME CLUSTERING
+// ============================================================================
+fn_gaussian_kernel(float u) =>
+    math.exp(-0.5 * math.pow(u, 2)) / math.sqrt(2 * math.pi)
+
+fn_kde_density(int window, float h) =>
+    float density = 0.0
+    float total_vol = 0.0
+    float scale = h * (f_atr > 0 ? f_atr : 1.0)
+
+    if bar_index > window and scale > 0
+        for i = 0 to window - 1
+            float dist_p = (close - close[i]) / scale
+            float k_w = fn_gaussian_kernel(dist_p)
+            float v_w = volume[i]
+            density += k_w * v_w
+            total_vol += v_w
+
+    total_vol > 0 ? density / total_vol : 0.0
+
+kde_density     = fn_kde_density(i_kdeWindow, i_kdeBandwidth)
+kde_sma_density = ta.sma(kde_density, 20)
+kde_std_density = ta.stdev(kde_density, 20)
+kde_z_score     = kde_std_density > 0 ? (kde_density - kde_sma_density) / kde_std_density : 0.0
+
+in_volume_cluster = kde_z_score >= i_kdeZThreshold
+
+// ============================================================================
+// 6. KNN MACHINE LEARNING PATTERN SYNTHESIZER
+// ============================================================================
+f_rsi = (ta.rsi(close, 14) - 50.0) / 50.0
+f_dev = math.max(-2.0, math.min(2.0, f_atx_ratio)) / 2.0
+f_kde = math.max(-2.0, math.min(2.0, kde_z_score)) / 2.0
+
+fn_knn_predict() =>
+    float score = 0.0
+    if bar_index > i_knnWindow + i_knnHorizon + 5
+        var float[] distances = array.new_float(0)
+        var float[] direction = array.new_float(0)
+        array.clear(distances)
+        array.clear(direction)
+
+        float cur_f1 = f_rsi
+        float cur_f2 = f_dev
+        float cur_f3 = f_kde
+
+        for i = i_knnHorizon to i_knnWindow + i_knnHorizon
+            float h_f1 = f_rsi[i]
+            float h_f2 = f_dev[i]
+            float h_f3 = f_kde[i]
+
+            int target_bar = math.max(0, i - i_knnHorizon)
+            float future_return = close[i] != 0 ? (close[target_bar] - close[i]) / close[i] : 0.0
+            float dist = math.sqrt(math.pow(cur_f1 - h_f1, 2) + math.pow(cur_f2 - h_f2, 2) + math.pow(cur_f3 - h_f3, 2))
+
+            array.push(distances, dist)
+            array.push(direction, future_return > 0 ? 1.0 : (future_return < 0 ? -1.0 : 0.0))
+
+        if array.size(distances) >= i_kNeighbors
+            float sum_weights = 0.0
+            float weighted_signal = 0.0
+
+            for k = 0 to i_kNeighbors - 1
+                int min_idx = array.indexof(distances, array.min(distances))
+                if min_idx >= 0
+                    float d = array.get(distances, min_idx)
+                    float w = 1.0 / (d + 0.0001)
+                    weighted_signal += array.get(direction, min_idx) * w
+                    sum_weights += w
+                    array.set(distances, min_idx, 10e10)
+
+            if sum_weights > 0
+                score := weighted_signal / sum_weights
+    score
+
+knn_score = fn_knn_predict()
+
+// ============================================================================
+// 7. SMART MONEY CONCEPTS (SMC: OB, FVG, CISD)
+// ============================================================================
+ph = ta.pivothigh(high, i_obPivotLen, i_obPivotLen)
+pl = ta.pivotlow(low, i_obPivotLen, i_obPivotLen)
+
+var float last_ph = na
+var float last_pl = na
+
+if not na(ph)
+    last_ph := ph
+if not na(pl)
+    last_pl := pl
+
+bullish_bos = ta.crossover(close, last_ph)
+bearish_bos = ta.crossunder(close, last_pl)
+
+var float bull_ob_top = na
+var float bull_ob_bottom = na
+var int   bull_ob_bar = 0
+
+var float bear_ob_top = na
+var float bear_ob_bottom = na
+var int   bear_ob_bar = 0
+
+if bullish_bos or atx_bull_reclaim or atx_bull_sweep
+    for i = 1 to 10
+        if open[i] > close[i]
+            bull_ob_top := high[i]
+            bull_ob_bottom := low[i]
+            bull_ob_bar := bar_index[i]
+            break
+
+if bearish_bos or atx_bear_reclaim or atx_bear_sweep
+    for i = 1 to 10
+        if close[i] > open[i]
+            bear_ob_top := high[i]
+            bear_ob_bottom := low[i]
+            bear_ob_bar := bar_index[i]
+            break
+
+if not na(bull_ob_bottom) and (close < bull_ob_bottom or (bar_index - bull_ob_bar > i_obMaxBars))
+    bull_ob_top := na
+    bull_ob_bottom := na
+
+if not na(bear_ob_top) and (close > bear_ob_top or (bar_index - bear_ob_bar > i_obMaxBars))
+    bear_ob_top := na
+    bear_ob_bottom := na
+
+in_bull_ob = not na(bull_ob_bottom) and (low <= bull_ob_top and high >= bull_ob_bottom)
+in_bear_ob = not na(bear_ob_top) and (high >= bear_ob_bottom and low <= bear_ob_top)
+
+bull_fvg = low > high[2] and close[1] > open[1]
+bear_fvg = high < low[2] and close[1] < open[1]
+
+var float cisd_bull_target = na
+var float cisd_bear_target = na
+
+if close < open
+    cisd_bull_target := open
+else if close > open
+    cisd_bear_target := open
+
+cisd_bullish = not na(cisd_bull_target) and close > cisd_bull_target and close[1] <= cisd_bull_target
+cisd_bearish = not na(cisd_bear_target) and close < cisd_bear_target and close[1] >= cisd_bear_target
+
+// ============================================================================
+// 8. MULTI-LAYER CONFLUENCE SCORING ENGINE
+// ============================================================================
+int bull_score = 0
+int bear_score = 0
+
+if knn_score > i_knnThreshold
+    bull_score += 3
+else if knn_score < -i_knnThreshold
+    bear_score += 3
+
+if atx_bull_reclaim or atx_bull_sweep
+    bull_score += 2
+if atx_bear_reclaim or atx_bear_sweep
+    bear_score += 2
+
+if (in_bull_ob and i_useOB) or (bull_fvg and i_useFVG)
+    bull_score += 2
+if (in_bear_ob and i_useOB) or (bear_fvg and i_useFVG)
+    bear_score += 2
+
+if cisd_bullish and i_useCISD
+    bull_score += 2
+if cisd_bearish and i_useCISD
+    bear_score += 2
+
+if in_volume_cluster
+    if close > atx_mean
+        bull_score += 1
+    else
+        bear_score += 1
+
+if close > vwapVal
+    bull_score += 1
+else
+    bear_score += 1
+
+if macdMain > macdSignal
+    bull_score += 1
+else
+    bear_score += 1
+
+if close > ema200
+    bull_score += 1
+else
+    bear_score += 1
+
+long_score_ok  = bull_score >= i_minScore and (bull_score - bear_score) >= i_minScoreEdge
+short_score_ok = bear_score >= i_minScore and (bear_score - bull_score) >= i_minScoreEdge
+
+// ============================================================================
+// 10. DYNAMIC RISK POSITION SIZING & JSON ALERT BUILDER
+// ============================================================================
+fn_calc_qty(float entry_p, float stop_p) =>
+    float risk_cash = strategy.equity * (i_riskPerTrade / 100.0)
+    float point_value = math.max(nz(syminfo.pointvalue, 1.0), 0.0000001)
+    float risk_per_unit = math.abs(entry_p - stop_p) * point_value
+    float qty_by_risk = risk_per_unit > 0 ? risk_cash / risk_per_unit : 0.0
+    float max_margin_cash = strategy.equity * (i_maxMargin / 100.0)
+    float max_notional = max_margin_cash * i_leverage
+    float qty_by_margin = entry_p > 0 ? max_notional / (entry_p * point_value) : 0.0
+    math.max(0.0, math.min(qty_by_risk, qty_by_margin))
+
+fn_build_alert_payload(string action, float order_price, float sl_p, float tp1_p, float tp2_p) =>
+    '{"action":"' + action + '","symbol":"' + syminfo.ticker + '","price":' + str.tostring(order_price, format.mintick) + ',"stop_loss":' + str.tostring(sl_p, format.mintick) + ',"take_profit_1":' + str.tostring(tp1_p, format.mintick) + ',"take_profit_2":' + str.tostring(tp2_p, format.mintick) + ',"token":"' + i_botSecret + '"}'
+
+// ============================================================================
+// 11. TRADING SIGNALS, SIMULTANEOUS ALERTS & STAGED EXITS MANAGEMENT
+// ============================================================================
+var float entry_price = na
+var float stop_price  = na
+var float tp1_price   = na
+var float tp2_price   = na
+var float planned_risk_dist = na
+var float planned_tp1_dist = na
+var float initial_position_qty = na
+var bool  tp1_hit     = false
+var float trail_stop  = na
+var int   active_dir  = 0
+var int   entry_bar_idx = na
+var bool  order_pending = false
+var int   order_submit_bar = na
+var int   last_exit_bar = na
+var bool pending_long_signal = false
+var bool pending_short_signal = false
+var int  pending_signal_bar = na
+var float pending_signal_price = na
+
+bool position_opened = strategy.position_size != 0 and strategy.position_size[1] == 0
+bool position_closed = strategy.position_size == 0 and (strategy.position_size[1] != 0 or ta.change(strategy.closedtrades) > 0)
+
+if position_closed
+    last_exit_bar := bar_index
+    pending_long_signal := false
+    pending_short_signal := false
+    pending_signal_bar := na
+    pending_signal_price := na
+
+bool bar_gap_ok = na(last_exit_bar) or (bar_index - last_exit_bar) >= i_minTradeGap
+bool entry_slot_free = strategy.position_size == 0 and not order_pending
+float atr_pct = close > 0 ? (f_atr / close) * 100.0 : 0.0
+bool volatility_ok = atr_pct >= i_minAtrPct
+bool bull_trend_aligned = close > ema200 and ema9 > ema21 and ema21 > ema50
+bool bear_trend_aligned = close < ema200 and ema9 < ema21 and ema21 < ema50
+bool long_trend_ok = not i_requireTrend or bull_trend_aligned
+bool short_trend_ok = not i_requireTrend or bear_trend_aligned
+bool fresh_bull_trigger = bullish_bos or atx_bull_reclaim or (i_useCISD and cisd_bullish) or (i_useFVG and bull_fvg)
+bool fresh_bear_trigger = bearish_bos or atx_bear_reclaim or (i_useCISD and cisd_bearish) or (i_useFVG and bear_fvg)
+bool long_fresh_ok = not i_requireFresh or fresh_bull_trigger
+bool short_fresh_ok = not i_requireFresh or fresh_bear_trigger
+
+long_condition  = barstate.isconfirmed and bar_gap_ok and regime_ok and volatility_ok and long_score_ok and long_trend_ok and long_fresh_ok
+short_condition = barstate.isconfirmed and bar_gap_ok and regime_ok and volatility_ok and short_score_ok and short_trend_ok and short_fresh_ok
+
+if position_opened
+    order_pending := false
+    pending_long_signal := false
+    pending_short_signal := false
+    pending_signal_bar := na
+    pending_signal_price := na
+    entry_price := strategy.position_avg_price
+    entry_bar_idx := bar_index
+    float filled_risk = nz(planned_risk_dist, f_atr * i_slAtrMult)
+    float filled_tp1_dist = nz(planned_tp1_dist, f_atr * i_tp1Mult)
+    if strategy.position_size > 0
+        stop_price := entry_price - filled_risk
+        tp1_price := entry_price + filled_tp1_dist
+        tp2_price := entry_price + (filled_risk * i_rrRatio)
+        active_dir := 1
+    else
+        stop_price := entry_price + filled_risk
+        tp1_price := entry_price - filled_tp1_dist
+        tp2_price := entry_price - (filled_risk * i_rrRatio)
+        active_dir := -1
+
+// A rejected order must not block the strategy forever.
+if order_pending and strategy.position_size == 0 and bar_index - order_submit_bar > 2
+    strategy.cancel_all()
+    order_pending := false
+    order_submit_bar := na
+    entry_price := na
+    stop_price := na
+    tp1_price := na
+    tp2_price := na
+    planned_risk_dist := na
+    planned_tp1_dist := na
+    initial_position_qty := na
+    active_dir := 0
+
+// --- Entry Confirmation Delay: wait N bars, only enter if price confirms in the money ---
+if long_condition and entry_slot_free and not pending_long_signal and not pending_short_signal
+    if i_entryDelay <= 0
+        // no delay configured: enter immediately (original behavior)
+        pending_long_signal := false
+        pending_short_signal := false
+        pending_signal_bar := na
+        pending_signal_price := na
+    else
+        // arm the pending signal and record the trigger bar/price
+        pending_long_signal := true
+        pending_short_signal := false
+        pending_signal_bar := bar_index
+        pending_signal_price := close
+
+if short_condition and entry_slot_free and not pending_short_signal and not pending_long_signal
+    if i_entryDelay <= 0
+        pending_long_signal := false
+        pending_short_signal := false
+        pending_signal_bar := na
+        pending_signal_price := na
+    else
+        pending_long_signal := false
+        pending_short_signal := true
+        pending_signal_bar := bar_index
+        pending_signal_price := close
+
+// After the delay elapses, the signal only becomes a real entry if price confirms in the money.
+bool delay_elapsed_long = pending_long_signal and not na(pending_signal_bar) and (bar_index - pending_signal_bar) >= i_entryDelay
+bool delay_elapsed_short = pending_short_signal and not na(pending_signal_bar) and (bar_index - pending_signal_bar) >= i_entryDelay
+
+bool long_confirmed = delay_elapsed_long and close >= pending_signal_price + (f_atr * 0.5)
+bool short_confirmed = delay_elapsed_short and close <= pending_signal_price - (f_atr * 0.5)
+
+// If the delay elapsed but price did NOT confirm (went against the signal), discard the pending signal (whipsaw filter).
+if delay_elapsed_long and not long_confirmed
+    pending_long_signal := false
+    pending_short_signal := false
+    pending_signal_bar := na
+    pending_signal_price := na
+
+if delay_elapsed_short and not short_confirmed
+    pending_long_signal := false
+    pending_short_signal := false
+    pending_signal_bar := na
+    pending_signal_price := na
+
+bool long_entry_signal = (i_entryDelay <= 0 and long_condition) or long_confirmed
+bool short_entry_signal = (i_entryDelay <= 0 and short_condition) or short_confirmed
+
+if long_entry_signal
+    float sl_candidate = not na(bull_ob_bottom) ? math.min(bull_ob_bottom, low) - (f_atr * i_slAtrMult) : close - (f_atr * i_slAtrMult)
+    float sl = math.min(close - (f_atr * 0.5), math.max(sl_candidate, close - (f_atr * 2.5)))
+    float risk = close - sl
+    if risk > 0
+        entry_price   := close
+        stop_price    := sl
+        tp1_price     := close + (f_atr * i_tp1Mult)
+        tp2_price     := close + (risk * i_rrRatio)
+        planned_risk_dist := risk
+        planned_tp1_dist := f_atr * i_tp1Mult
+        tp1_hit       := false
+        trail_stop    := na
+        active_dir    := 1
+        entry_bar_idx := bar_index
+
+        float qty_long = fn_calc_qty(close, sl)
+        if qty_long > 0
+            int risk_ticks = int(math.max(1, math.round(risk / syminfo.mintick)))
+            int tp1_ticks = int(math.max(1, math.round(planned_tp1_dist / syminfo.mintick)))
+            int tp2_ticks = int(math.max(1, math.round((risk * i_rrRatio) / syminfo.mintick)))
+            string payload = fn_build_alert_payload("BUY_LONG", close, sl, tp1_price, tp2_price)
+            strategy.entry("Long Quant", strategy.long, qty=qty_long, alert_message=payload)
+            strategy.exit("TP1 Long", "Long Quant", qty_percent=i_tp1ClosePct, profit=tp1_ticks, loss=risk_ticks, comment_profit="TP1 Long", comment_loss="SL Long")
+            strategy.exit("TP2/Trail Long", "Long Quant", profit=tp2_ticks, loss=risk_ticks, comment_profit="TP2 Long", comment_loss="SL Long")
+            if i_enableAlerts
+                alert(payload, alert.freq_once_per_bar_close)
+            initial_position_qty := qty_long
+            order_pending := true
+            order_submit_bar := bar_index
+
+else if short_entry_signal
+    float sl_candidate = not na(bear_ob_top) ? math.max(bear_ob_top, high) + (f_atr * i_slAtrMult) : close + (f_atr * i_slAtrMult)
+    float sl = math.max(close + (f_atr * 0.5), math.min(sl_candidate, close + (f_atr * 2.5)))
+    float risk = sl - close
+    if risk > 0
+        entry_price   := close
+        stop_price    := sl
+        tp1_price     := close - (f_atr * i_tp1Mult)
+        tp2_price     := close - (risk * i_rrRatio)
+        planned_risk_dist := risk
+        planned_tp1_dist := f_atr * i_tp1Mult
+        tp1_hit       := false
+        trail_stop    := na
+        active_dir    := -1
+        entry_bar_idx := bar_index
+
+        float qty_short = fn_calc_qty(close, sl)
+        if qty_short > 0
+            int risk_ticks = int(math.max(1, math.round(risk / syminfo.mintick)))
+            int tp1_ticks = int(math.max(1, math.round(planned_tp1_dist / syminfo.mintick)))
+            int tp2_ticks = int(math.max(1, math.round((risk * i_rrRatio) / syminfo.mintick)))
+            string payload = fn_build_alert_payload("SELL_SHORT", close, sl, tp1_price, tp2_price)
+            strategy.entry("Short Quant", strategy.short, qty=qty_short, alert_message=payload)
+            strategy.exit("TP1 Short", "Short Quant", qty_percent=i_tp1ClosePct, profit=tp1_ticks, loss=risk_ticks, comment_profit="TP1 Short", comment_loss="SL Short")
+            strategy.exit("TP2/Trail Short", "Short Quant", profit=tp2_ticks, loss=risk_ticks, comment_profit="TP2 Short", comment_loss="SL Short")
+            if i_enableAlerts
+                alert(payload, alert.freq_once_per_bar_close)
+            initial_position_qty := qty_short
+            order_pending := true
+            order_submit_bar := bar_index
+
+// Explicit Alertconditions for TradingView Alert Manager UI
+alertcondition(long_entry_signal, title="Apex Long Entry Alert", message="BULLISH ENTRY TRIGGERED")
+alertcondition(short_entry_signal, title="Apex Short Entry Alert", message="BEARISH ENTRY TRIGGERED")
+
+// Dynamic Break-Even & Trailing Stop Execution
+float partial_fill_threshold = not na(initial_position_qty) ? initial_position_qty * (1.0 - i_tp1ClosePct / 200.0) : na
+bool tp1_fill_detected = strategy.position_size != 0 and not na(partial_fill_threshold) and math.abs(strategy.position_size) < partial_fill_threshold
+
+if strategy.position_size > 0 and not na(entry_price) and not na(stop_price) and not na(tp1_price) and not na(tp2_price)
+    if not tp1_hit and tp1_fill_detected
+        tp1_hit := true
+        if i_useBreakEven
+            stop_price := math.max(stop_price, entry_price * (1.0 + i_breakEvenBufferPct / 100.0))
+
+    if tp1_hit and i_useTrailing
+        float new_trail = i_usePctTrailing ? high - (entry_price * (i_trailPct / 100.0)) : high - (f_atr * i_trailAtrOffset)
+        trail_stop := na(trail_stop) ? new_trail : math.max(trail_stop, new_trail)
+        stop_price := math.max(stop_price, trail_stop)
+
+    if not tp1_hit
+        strategy.exit("TP1 Long", "Long Quant", qty_percent=i_tp1ClosePct, limit=tp1_price, stop=stop_price, comment_profit="TP1 Long", comment_loss="SL Long")
+    strategy.exit("TP2/Trail Long", "Long Quant", limit=tp2_price, stop=stop_price, comment_profit="TP2 Long", comment_loss=tp1_hit ? "BE/Trail Long" : "SL Long")
+
+if strategy.position_size < 0 and not na(entry_price) and not na(stop_price) and not na(tp1_price) and not na(tp2_price)
+    if not tp1_hit and tp1_fill_detected
+        tp1_hit := true
+        if i_useBreakEven
+            stop_price := math.min(stop_price, entry_price * (1.0 - i_breakEvenBufferPct / 100.0))
+
+    if tp1_hit and i_useTrailing
+        float new_trail = i_usePctTrailing ? low + (entry_price * (i_trailPct / 100.0)) : low + (f_atr * i_trailAtrOffset)
+        trail_stop := na(trail_stop) ? new_trail : math.min(trail_stop, new_trail)
+        stop_price := math.min(stop_price, trail_stop)
+
+    if not tp1_hit
+        strategy.exit("TP1 Short", "Short Quant", qty_percent=i_tp1ClosePct, limit=tp1_price, stop=stop_price, comment_profit="TP1 Short", comment_loss="SL Short")
+    strategy.exit("TP2/Trail Short", "Short Quant", limit=tp2_price, stop=stop_price, comment_profit="TP2 Short", comment_loss=tp1_hit ? "BE/Trail Short" : "SL Short")
+
+if position_closed
+    entry_price   := na
+    stop_price    := na
+    tp1_price     := na
+    tp2_price     := na
+    planned_risk_dist := na
+    planned_tp1_dist := na
+    initial_position_qty := na
+    tp1_hit       := false
+    trail_stop    := na
+    active_dir    := 0
+    entry_bar_idx := na
+    order_pending := false
+    order_submit_bar := na
+    pending_long_signal := false
+    pending_short_signal := false
+    pending_signal_bar := na
+    pending_signal_price := na
+
+// ============================================================================
+// 12. REALTIME ON-CHART VISUAL SUITE (GUARANTEED LAST-BAR REDRAW)
+// ============================================================================
+plotshape(long_entry_signal, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.normal, text="BUY", textcolor=color.white)
+plotshape(short_entry_signal, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.normal, text="SELL", textcolor=color.white)
+plotshape(position_opened and strategy.position_size > 0, "Long Filled", shape.circle, location.belowbar, color=color.blue, size=size.tiny, text="IN", textcolor=color.white)
+plotshape(position_opened and strategy.position_size < 0, "Short Filled", shape.circle, location.abovebar, color=color.blue, size=size.tiny, text="IN", textcolor=color.white)
+plotshape(position_closed, "Position Exit", shape.xcross, location.abovebar, color=color.orange, size=size.small, text="OUT", textcolor=color.white)
+
+var line line_entry = na
+var line line_sl    = na
+var line line_tp1   = na
+var line line_tp2   = na
+var line line_guide = na
+
+var label lbl_entry = na
+var label lbl_sl    = na
+var label lbl_tp1   = na
+var label lbl_tp2   = na
+
+if barstate.islast
+    line.delete(line_entry), line.delete(line_sl), line.delete(line_tp1), line.delete(line_tp2), line.delete(line_guide)
+    label.delete(lbl_entry), label.delete(lbl_sl), label.delete(lbl_tp1), label.delete(lbl_tp2)
+    line_entry := na, line_sl := na, line_tp1 := na, line_tp2 := na, line_guide := na
+    lbl_entry := na, lbl_sl := na, lbl_tp1 := na, lbl_tp2 := na
+
+    bool is_trade_active = i_showTargets and strategy.position_size != 0 and not na(entry_price) and not na(stop_price)
+
+    if is_trade_active
+        int x1 = not na(entry_bar_idx) ? entry_bar_idx : bar_index - 10
+        int x2 = bar_index + 4
+        int lbl_x = bar_index + i_labelOffset
+
+        line_entry := line.new(x1, entry_price, x2, entry_price, color=color.blue, width=2)
+        line_sl    := line.new(x1, stop_price, x2, stop_price, color=color.red, width=2)
+        line_tp1   := line.new(x1, tp1_price, x2, tp1_price, color=color.green, style=line.style_dashed, width=1)
+        line_tp2   := line.new(x1, tp2_price, x2, tp2_price, color=color.rgb(0, 150, 0), width=2)
+        line_guide := line.new(bar_index, stop_price, bar_index, entry_price, color=color.new(color.blue, 50), width=1)
+
+        string sl_text = not na(trail_stop) ? "TRAIL SL: " + str.tostring(stop_price, format.mintick) : "SL: " + str.tostring(stop_price, format.mintick)
+        string tp1_text = "TP1: " + str.tostring(tp1_price, format.mintick) + (tp1_hit ? " (HIT)" : "")
+
+        lbl_entry := label.new(lbl_x, entry_price, "ENTRY: " + str.tostring(entry_price, format.mintick), color=color.blue, textcolor=color.white, style=label.style_label_left, size=size.small)
+        lbl_sl    := label.new(lbl_x, stop_price, sl_text, color=color.red, textcolor=color.white, style=label.style_label_left, size=size.small)
+        lbl_tp1   := label.new(lbl_x, tp1_price, tp1_text, color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+        lbl_tp2   := label.new(lbl_x, tp2_price, "TP2: " + str.tostring(tp2_price, format.mintick), color=color.rgb(0, 150, 0), textcolor=color.white, style=label.style_label_left, size=size.small)
+
+// Realtime Dashboard
+var table dash = table.new(position.top_right, 2, 12, bgcolor=color.new(#131722, 10), border_width=1, border_color=color.gray)
+
+if i_showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "CIEL APEX QUANT", text_color=color.white, bgcolor=color.blue)
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=color.white, bgcolor=color.blue)
+
+    table.cell(dash, 0, 1, "KNN Bias Score", text_color=color.white)
+    table.cell(dash, 1, 1, str.tostring(knn_score, "#.##"), text_color=knn_score > 0 ? color.green : color.red)
+
+    table.cell(dash, 0, 2, "Hurst Exponent", text_color=color.white)
+    table.cell(dash, 1, 2, str.tostring(hurstVal, "0.00"), text_color=isTrendingRegime ? color.green : isMeanRevertRegime ? color.blue : color.gray)
+
+    table.cell(dash, 0, 3, "Regime State", text_color=color.white)
+    table.cell(dash, 1, 3, chop_regime ? "CHOP / RANGE" : isTrendingRegime ? "TRENDING" : "NEUTRAL", text_color=chop_regime ? color.red : color.green)
+
+    table.cell(dash, 0, 4, "Confluence Score", text_color=color.white)
+    table.cell(dash, 1, 4, str.tostring(bull_score) + "L / " + str.tostring(bear_score) + "S (Min: " + str.tostring(i_minScore) + ")", text_color=color.yellow)
+
+    table.cell(dash, 0, 8, "Position State", text_color=color.white)
+    table.cell(dash, 1, 8, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray)
+
+    table.cell(dash, 0, 9, "Trades", text_color=color.white)
+    table.cell(dash, 1, 9, str.tostring(strategy.closedtrades) + " (" + str.tostring(strategy.wintrades) + "W/" + str.tostring(strategy.losstrades) + "L)", text_color=strategy.wintrades >= strategy.losstrades ? color.green : color.red)
+
+    bool any_score_ok = long_score_ok or short_score_ok
+    bool any_trend_ok = (long_score_ok and long_trend_ok) or (short_score_ok and short_trend_ok)
+    bool any_fresh_ok = (long_score_ok and long_trend_ok and long_fresh_ok) or (short_score_ok and short_trend_ok and short_fresh_ok)
+    string gate_state = not regime_ok ? "BLOCK: REGIME" : not volatility_ok ? "WAIT: ATR" : not bar_gap_ok ? "BLOCK: COOLDOWN" : strategy.position_size != 0 ? "BLOCK: IN POSITION" : order_pending ? "BLOCK: ORDER PENDING" : not any_score_ok ? "WAIT: SCORE" : not any_trend_ok ? "WAIT: TREND" : not any_fresh_ok ? "WAIT: FRESH TRIGGER" : "READY"
+    table.cell(dash, 0, 10, "Entry Gate", text_color=color.white)
+    table.cell(dash, 1, 10, gate_state, text_color=gate_state == "READY" ? color.green : color.orange)
+
+    table.cell(dash, 0, 11, "Risk / Leverage", text_color=color.white)
+    table.cell(dash, 1, 11, str.tostring(i_riskPerTrade, "#.##") + "% / " + str.tostring(i_leverage, "#.##") + "x", text_color=color.white)

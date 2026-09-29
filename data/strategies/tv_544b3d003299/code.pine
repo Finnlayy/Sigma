@@ -1,0 +1,34 @@
+//@version=6
+strategy('Recovery Center Alpha', overlay = true, initial_capital = 10000)
+
+// Optimization Parameters - Updated with Optimized Defaults
+sl_atr_mult = input.float(0.8333481992785516, 'SL ATR Multiplier', minval = 0.1, step = 0.1)
+tp_atr_mult = input.float(5.214022062261031, 'TP ATR Multiplier', minval = 0.1, step = 0.1)
+conf_threshold = input.int(15, 'Confidence Threshold', minval = 0)
+vol_mult = input.float(1.2625594750147968, 'Volume Multiplier', minval = 0.1)
+
+// Indicators
+sma_200 = ta.sma(open, 200)
+atr_val = ta.atr(14)
+
+// Logic: Recovery Check
+is_recovery_active = open > sma_200
+
+// Strategy Entry
+if is_recovery_active and strategy.position_size == 0
+    strategy.entry('Long', strategy.long, qty = conf_threshold * vol_mult)
+
+// Strategy Exit: Stop Loss and Take Profit
+if strategy.position_size > 0
+    // Stop Loss logic based on original script structure
+    sl_price = strategy.position_avg_price - atr_val * sl_atr_mult
+    if close < sl_price
+        strategy.close('Long', comment = 'SL Hit')
+
+    // Take Profit logic to incorporate optimized TP ATR Multiplier
+    tp_price = strategy.position_avg_price + atr_val * tp_atr_mult
+    if close > tp_price
+        strategy.close('Long', comment = 'TP Hit')
+
+// Visuals for SMA
+plot(sma_200, color = color.blue, title = 'SMA 200')

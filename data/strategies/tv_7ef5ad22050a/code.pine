@@ -1,0 +1,99 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Quant
+
+//@version=6
+strategy("Advanced Mathematical Order Blocks Strategy", overlay = true, max_boxes_count = 500, max_lines_count = 500, initial_capital = 1000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// --- Inputs ---
+var string G_OB = "Order Block Parameters"
+int lengthInput = input.int(20, "Lookback Length", group = G_OB)
+float multiplierInput = input.float(2.0, "Impulse Multiplier (StDev)", group = G_OB)
+bool useVolumeInput = input.bool(true, "Require Volume Confirmation", group = G_OB)
+
+var string G_RISK = "Risk Management"
+float slAtrMultiplier = input.float(1.5, "SL ATR Multiplier", group = G_RISK)
+float tpAtrMultiplier = input.float(3.0, "TP ATR Multiplier", group = G_RISK)
+
+// --- Mathematical Concepts: Volumetric & ATR-based Impulse Detection ---
+// We define an impulsive move as a price change that exceeds the mean change by X standard deviations.
+float bodySize = math.abs(close - open)
+float meanBody = ta.sma(bodySize, lengthInput)
+float stdevBody = ta.stdev(bodySize, lengthInput)
+float thresholdBody = meanBody + (stdevBody * multiplierInput)
+
+float meanVolume = ta.sma(nz(volume), lengthInput)
+bool volumeCondition = useVolumeInput ? (nz(volume) > meanVolume) : true
+
+bool isBullishImpulse = (close > open) and (bodySize > thresholdBody) and volumeCondition
+bool isBearishImpulse = (close < open) and (bodySize > thresholdBody) and volumeCondition
+
+// --- Order Block Tracking ---
+type OrderBlock
+    float top
+    float bottom
+    int startIndex
+    bool isBullish
+    box visualBox
+
+var array<OrderBlock> obArray = array.new<OrderBlock>()
+
+// Identify Bullish OB (Last bearish candle before bullish impulse)
+if isBullishImpulse
+    // Find the last bearish candle within a small window
+    int obIndex = 1
+    for i = 1 to 5
+        if close[i] < open[i]
+            obIndex := i
+            break
+    
+    if close[obIndex] < open[obIndex]
+        float top = math.max(open[obIndex], close[obIndex])
+        float bottom = low[obIndex]
+        box b = box.new(bar_index[obIndex], top, bar_index, bottom, border_color = color.new(#089981, 0), bgcolor = color.new(#089981, 80))
+        array.push(obArray, OrderBlock.new(top, bottom, bar_index[obIndex], true, b))
+
+// Identify Bearish OB (Last bullish candle before bearish impulse)
+if isBearishImpulse
+    int obIndex = 1
+    for i = 1 to 5
+        if close[i] > open[i]
+            obIndex := i
+            break
+            
+    if close[obIndex] > open[obIndex]
+        float top = high[obIndex]
+        float bottom = math.min(open[obIndex], close[obIndex])
+        box b = box.new(bar_index[obIndex], top, bar_index, bottom, border_color = color.new(#f23645, 0), bgcolor = color.new(#f23645, 80))
+        array.push(obArray, OrderBlock.new(top, bottom, bar_index[obIndex], false, b))
+
+// --- Mitigation & Strategy Logic ---
+float atr = ta.atr(14)
+
+// Clean up mitigated OBs and extend unmitigated ones
+for i = array.size(obArray) 0 to 0
+    OrderBlock ob = array.get(obArray, i)
+    bool mitigated = false
+    
+    if ob.isBullish
+        if low <= ob.top and bar_index > ob.startIndex // Reached the OB
+            mitigated := true
+            if strategy.position_size <= 0
+                strategy.entry("Long", strategy.long)
+                strategy.exit("Exit Long", "Long", stop = ob.bottom - (atr * slAtrMultiplier), limit = close + (atr * tpAtrMultiplier))
+    else
+        if high >= ob.bottom and bar_index > ob.startIndex // Reached the OB
+            mitigated := true
+            if strategy.position_size >= 0
+                strategy.entry("Short", strategy.short)
+                strategy.exit("Exit Short", "Short", stop = ob.top + (atr * slAtrMultiplier), limit = close - (atr * tpAtrMultiplier))
+                
+    if mitigated
+        array.remove(obArray, i)
+    else
+        // Extend box
+        box.set_right(ob.visualBox, bar_index)
+
+// Max boxes cleanup
+if array.size(obArray) > 50
+    OrderBlock oldOb = array.shift(obArray)
+    box.delete(oldOb.visualBox)

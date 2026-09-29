@@ -1,0 +1,7 @@
+Parameter,Value
+atrPeriod,14
+atrStopMultiplier,1.5
+rsiPeriod,14
+takeProfitMultiplier,3.0
+trendFastEma,12
+trendSlowEma,60

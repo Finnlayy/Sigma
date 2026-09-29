@@ -1,0 +1,251 @@
+//@version=6
+strategy('ZEC/USDT.P 5m — Adaptive Liquidity Sweep Scalper', 
+     overlay=true, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=10.0,
+     commission_type=strategy.commission.percent,
+     commission_value=0.04,
+     slippage=2,
+     max_lines_count=500,
+     max_labels_count=500,
+     max_bars_back=500,
+     process_orders_on_close=true,
+     calc_on_every_tick=false)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+grpTrend = "Trend & Regime"
+i_htfRes   = input.timeframe("60", "Higher TF Trend (1h)", group=grpTrend)
+i_htfFast  = input.int(9,  "HTF Fast EMA", group=grpTrend)
+i_htfSlow  = input.int(21, "HTF Slow EMA", group=grpTrend)
+i_regimeLen= input.int(50, "Regime Lookback", group=grpTrend)
+
+grpEMA = "Adaptive EMA Fan"
+i_fast = input.int(8,  "Fast EMA", group=grpEMA)
+i_med  = input.int(21, "Medium EMA", group=grpEMA)
+i_slow = input.int(55, "Slow EMA", group=grpEMA)
+
+grpSweep = "Liquidity Sweep & Pin Bar"
+i_sweepMult = input.float(0.3, "Sweep Depth (x ATR)", step=0.1, group=grpSweep)
+i_pinWickMin= input.float(2.0, "Min Wick/Body Ratio", step=0.1, group=grpSweep)
+i_pinBodyMax= input.float(0.3, "Max Body/Range Ratio", step=0.05, group=grpSweep)
+i_rvolMin   = input.float(1.8, "Min Relative Volume", step=0.1, group=grpSweep)
+
+grpRisk = "Risk Management"
+i_riskPct      = input.float(2.0, "Base Risk per Trade (%)", step=0.1, group=grpRisk)
+i_atrSlMult    = input.float(1.5, "ATR SL Multiplier", step=0.1, group=grpRisk)
+i_tpRatio      = input.float(1.8, "TP Ratio (x Risk)", step=0.1, group=grpRisk)
+i_chandelierMult=input.float(2.0, "Chandelier ATR Mult", step=0.1, group=grpRisk)
+i_timeStop     = input.int(12, "Time Stop (Bars)", group=grpRisk)
+
+grpCrypto = "Crypto Specific (Perp)"
+i_avoidFunding = input.bool(true, "Avoid Funding Times", group=grpCrypto)
+i_fundingWindow= input.int(5, "Funding Avoidance (min)", group=grpCrypto)
+
+// ============================================================================
+// HIGHER TIMEFRAME TREND (Repainting-safe)
+// ============================================================================
+htfClose = request.security(syminfo.tickerid, i_htfRes, close[1], lookahead=barmerge.lookahead_off)
+htfFast  = request.security(syminfo.tickerid, i_htfRes, ta.ema(close, i_htfFast)[1], lookahead=barmerge.lookahead_off)
+htfSlow  = request.security(syminfo.tickerid, i_htfRes, ta.ema(close, i_htfSlow)[1], lookahead=barmerge.lookahead_off)
+htfBull  = htfFast > htfSlow
+htfBear  = htfFast < htfSlow
+
+// ============================================================================
+// VOLATILITY REGIME FILTER (ATR(14) vs ATR(50))
+// ============================================================================
+atr14 = ta.atr(14)
+atr50 = ta.sma(atr14, i_regimeLen)
+isHighVol = atr14 > atr50 * 1.2
+isLowVol  = atr14 < atr50 * 0.8
+
+// Visual Feedback
+bgColor = isHighVol ? color.new(color.red, 90) : isLowVol ? color.new(color.blue, 90) : color.new(color.gray, 95)
+bgcolor(bgColor, title="Volatility Regime")
+
+// ============================================================================
+// EMA FAN & RELATIVE VOLUME
+// ============================================================================
+emaFast = ta.ema(close, i_fast)
+emaMed  = ta.ema(close, i_med)
+emaSlow = ta.ema(close, i_slow)
+rvol    = volume / ta.sma(volume, 20)
+
+// ============================================================================
+// LIQUIDITY SWEEP DETECTION (ATR-basierte Tiefe)
+// ============================================================================
+sweepDepth = atr14 * i_sweepMult
+
+// Long: Wick unter EMA, Close über EMA, Tiefe > ATR-Mult
+bullSweepFast = low < emaFast and close > emaFast and (emaFast - low) > sweepDepth
+bullSweepMed  = low < emaMed  and close > emaMed  and (emaMed  - low) > sweepDepth
+bullSweepSlow = low < emaSlow and close > emaSlow and (emaSlow - low) > sweepDepth
+bullSweep     = bullSweepFast or bullSweepMed or bullSweepSlow
+
+// Short: Wick über EMA, Close unter EMA, Tiefe > ATR-Mult
+bearSweepFast = high > emaFast and close < emaFast and (high - emaFast) > sweepDepth
+bearSweepMed  = high > emaMed  and close < emaMed  and (high - emaMed)  > sweepDepth
+bearSweepSlow = high > emaSlow and close < emaSlow and (high - emaSlow) > sweepDepth
+bearSweep     = bearSweepFast or bearSweepMed or bearSweepSlow
+
+// ============================================================================
+// PIN BAR (ATR-ADAPTIVE) – Optimiert für ZEC-Volatilität
+// ============================================================================
+barRange = high - low
+body    = math.abs(close - open)
+wickTop = high - math.max(open, close)
+wickBot = math.min(open, close) - low
+
+// Adaptive: In High-Vol müssen Wicks proportional größer sein
+wickMult = isHighVol ? i_pinWickMin * 1.2 : i_pinWickMin
+
+isBullPin = (wickBot > body * wickMult) and (body < barRange * i_pinBodyMax) and (close > open)
+isBearPin = (wickTop > body * wickMult) and (body < barRange * i_pinBodyMax) and (close < open)
+
+// ============================================================================
+// FUNDING AVOIDANCE (Binance: 00:00 / 08:00 / 16:00 UTC)
+// ============================================================================
+hourUTC   = hour(time, "UTC")
+minuteUTC = minute(time, "UTC")
+minsOfDay = hourUTC * 60 + minuteUTC
+
+distTo00 = math.min(math.abs(minsOfDay - 0), math.abs(minsOfDay - 1440))
+distTo08 = math.abs(minsOfDay - 480)
+distTo16 = math.abs(minsOfDay - 960)
+
+isNearFunding = i_avoidFunding and (distTo00 < i_fundingWindow or distTo08 < i_fundingWindow or distTo16 < i_fundingWindow)
+
+// ============================================================================
+// ENTRY CONDITIONS
+// ============================================================================
+// Trend: HTF aligned + EMA Fan aligned + Preis über/unter Slow EMA
+trendUp  = htfBull and emaFast > emaMed and emaMed > emaSlow and close > emaSlow
+trendDown= htfBear and emaFast < emaMed and emaMed < emaSlow and close < emaSlow
+
+// Adaptive RVOL-Threshold: Höher bei High-Vol (mehr Noise-Filterung)
+rvolThreshold = isHighVol ? i_rvolMin * 1.3 : i_rvolMin
+
+longCond  = trendUp and bullSweep and isBullPin and rvol > rvolThreshold and not isNearFunding
+shortCond = trendDown and bearSweep and isBearPin and rvol > rvolThreshold and not isNearFunding
+
+// ============================================================================
+// TRADE STATE (var = persistiert über Bars)
+// ============================================================================
+var float entrySL   = na
+var float entryTP   = na
+var float trailStop = na
+var int   entryBar  = na
+
+// ============================================================================
+// EXECUTION
+// ============================================================================
+// LONG
+if longCond and strategy.opentrades == 0
+    slDist = atr14 * i_atrSlMult * (isHighVol ? 1.3 : 1.0)
+    sl     = close - slDist
+    tp     = close + slDist * i_tpRatio
+
+    strategy.entry("Long", strategy.long)
+    entrySL   := sl
+    entryTP   := tp
+    trailStop := sl
+    entryBar  := bar_index
+    log.info("LONG ENTRY: close={0}, sl={1}, tp={2}", close, sl, tp)
+
+// SHORT
+if shortCond and strategy.opentrades == 0
+    slDist = atr14 * i_atrSlMult * (isHighVol ? 1.3 : 1.0)
+    sl     = close + slDist
+    tp     = close - slDist * i_tpRatio
+
+    strategy.entry("Short", strategy.short)
+    entrySL   := sl
+    entryTP   := tp
+    trailStop := sl
+    entryBar  := bar_index
+    log.info("SHORT ENTRY: close={0}, sl={1}, tp={2}", close, sl, tp)
+
+// ============================================================================
+// EXITS: CHANDELIER TRAILING + HARD SL/TP + TIME STOP
+// ============================================================================
+// LONG EXITS
+if strategy.position_size > 0
+    // Chandelier: Highest High der letzten N Bars minus ATR-Mult
+    chandelier = ta.highest(high, i_timeStop) - atr14 * i_chandelierMult
+    // Trail Stop bewegt sich nur nach oben
+    trailStop := math.max(trailStop, chandelier)
+    // Final SL ist das Maximum von Entry-SL und Trail-Stop
+    finalSL = math.max(entrySL, trailStop)
+
+    if not na(finalSL) and not na(entryTP)
+        strategy.exit("XL", "Long", stop=finalSL, limit=entryTP)
+
+    // Time Stop: Close nach X Bars unabhängig vom PnL (Scalping-Disziplin)
+    if bar_index - entryBar >= i_timeStop
+        strategy.close("Long", comment="Time Stop")
+
+// SHORT EXITS
+if strategy.position_size < 0
+    chandelier = ta.lowest(low, i_timeStop) + atr14 * i_chandelierMult
+    trailStop := math.min(trailStop, chandelier)
+    finalSL = math.min(entrySL, trailStop)
+
+    if not na(finalSL) and not na(entryTP)
+        strategy.exit("XS", "Short", stop=finalSL, limit=entryTP)
+
+    if bar_index - entryBar >= i_timeStop
+        strategy.close("Short", comment="Time Stop")
+
+// ============================================================================
+// PLOTTING
+// ============================================================================
+plot(emaFast, "Fast EMA", color=color.new(color.orange, 0), linewidth=1)
+plot(emaMed,  "Med EMA",  color=color.new(color.blue, 0), linewidth=2)
+plot(emaSlow, "Slow EMA", color=color.new(color.purple, 0), linewidth=2)
+
+// Sweep-Indikatoren (kleine Dreiecke)
+plotshape(bullSweep, "Bull Sweep", style=shape.triangleup, location=location.belowbar, 
+     color=color.new(color.green, 50), size=size.small, offset=-1)
+plotshape(bearSweep, "Bear Sweep", style=shape.triangledown, location=location.abovebar, 
+     color=color.new(color.red, 50), size=size.small, offset=-1)
+
+// Pin-Bar-Marker (nur wenn nicht bereits Sweep)
+plotshape(isBullPin and not bullSweep, "Bull Pin", style=shape.labelup, location=location.belowbar, 
+     color=color.new(color.green, 70), text="PB", textcolor=color.white, size=size.tiny)
+plotshape(isBearPin and not bearSweep, "Bear Pin", style=shape.labeldown, location=location.abovebar, 
+     color=color.new(color.red, 70), text="PB", textcolor=color.white, size=size.tiny)
+
+// Entry-Signale (große Labels)
+plotshape(longCond,  "LONG",  style=shape.labelup,   location=location.belowbar, 
+     color=color.green, text="LONG",  textcolor=color.white, size=size.normal)
+plotshape(shortCond, "SHORT", style=shape.labeldown, location=location.abovebar, 
+     color=color.red,   text="SHORT", textcolor=color.white, size=size.normal)
+
+// HTF-Trend-Label (statisch rechts)
+var label htfLabel = na
+if barstate.islast
+    label.delete(htfLabel)
+    htfText = htfBull ? "HTF: BULL ▲" : "HTF: BEAR ▼"
+    htfCol  = htfBull ? color.green : color.red
+    htfLabel:= label.new(bar_index, high, htfText, color=htfCol, textcolor=color.white, 
+                 style=label.style_label_lower_right, size=size.small, yloc=yloc.price)
+
+// ============================================================================
+// INFO-TABLE (Datenfenster)
+// ============================================================================
+var table infoTable = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 80), 
+     frame_color=color.gray, frame_width=1, border_color=color.gray)
+
+if barstate.islast
+    regimeText = isHighVol ? "HIGH VOL 🔥" : isLowVol ? "LOW VOL ❄️" : "NORMAL ⚖️"
+    table.cell(infoTable, 0, 0, "Regime", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, regimeText, text_color=isHighVol?color.red:isLowVol?color.blue:color.gray, text_size=size.small)
+    table.cell(infoTable, 0, 1, "RVOL", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(rvol, "#.##"), text_color=rvol>rvolThreshold?color.green:color.gray, text_size=size.small)
+    table.cell(infoTable, 0, 2, "ATR", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(atr14, "#.###"), text_color=color.orange, text_size=size.small)
+    table.cell(infoTable, 0, 3, "Funding", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 3, isNearFunding?"AVOID 🚫":"SAFE ✅", text_color=isNearFunding?color.red:color.green, text_size=size.small)
+    table.cell(infoTable, 0, 4, "Risk%", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(i_riskPct, "#.##")+"%", text_color=color.yellow, text_size=size.small)

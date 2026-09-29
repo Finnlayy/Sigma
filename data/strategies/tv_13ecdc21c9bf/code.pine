@@ -1,0 +1,100 @@
+//@version=6
+strategy('Recovery Center Alpha x Pin Bar HFT', overlay = true, default_qty_type = strategy.percent_of_equity, default_qty_value = 100)
+
+// Risk Management: Max Drawdown 15%
+strategy.risk.max_drawdown(15, strategy.percent_of_equity)
+
+// User Input
+usr_risk = input.float(title = 'Equity Risk (%)', minval = 0.1, maxval = 100, step = 0.1, defval = 1.0)
+atr_mult = input.float(title = 'Stop Loss (x*ATR)', minval = 0.1, maxval = 100, step = 0.1, defval = 0.5)
+slPoints = input.int(title = 'Stop Loss Trail Points (Ticks)', minval = 1, maxval = 1000, step = 1, defval = 10)
+slOffset = input.int(title = 'Stop Loss Trail Offset (Ticks)', minval = 1, maxval = 1000, step = 1, defval = 5)
+sma_slow = input.int(title = 'Slow EMA (Period)', minval = 1, maxval = 500, step = 1, defval = 50)
+ema_medm = input.int(title = 'Medm EMA (Period)', minval = 1, maxval = 500, step = 1, defval = 18)
+ema_fast = input.int(title = 'Fast EMA (Period)', minval = 1, maxval = 500, step = 1, defval = 6)
+atr_valu = input.int(title = 'ATR (Period)', minval = 1, maxval = 500, step = 1, defval = 14)
+ent_canc = input.int(title = 'Cancel Entry After X Bars', minval = 1, maxval = 500, step = 1, defval = 3)
+vol_mult = input.float(title = 'Volume Spike Exit Multiplier', minval = 1.0, step = 0.5, defval = 3.0)
+
+// High-Frequency / Low-Latency Indicators (Using EMAs over SMAs)
+slowEMA = ta.ema(close, sma_slow)
+medmEMA = ta.ema(close, ema_medm)
+fastEMA = ta.ema(close, ema_fast)
+ema200  = ta.ema(close, 200) // Base Strategy Trend Filter
+volEMA  = ta.ema(volume, 20)
+atr     = ta.atr(atr_valu)
+
+// Specify Trend Conditions
+fanUpTrend = fastEMA > medmEMA and medmEMA > slowEMA and close > ema200
+fanDnTrend = fastEMA < medmEMA and medmEMA < slowEMA and close < ema200
+
+// Specify Piercing Conditions
+bullPierce = (low < fastEMA and open > fastEMA and close > fastEMA) or (low < medmEMA and open > medmEMA and close > medmEMA) or (low < slowEMA and open > slowEMA and close > slowEMA)
+bearPierce = (high > fastEMA and open < fastEMA and close < fastEMA) or (high > medmEMA and open < medmEMA and close < medmEMA) or (high > slowEMA and open < slowEMA and close < slowEMA)
+
+// Pin Bar Conditions
+bullishPinBar = (close > open and open - low > 0.66 * (high - low)) or (close < open and close - low > 0.66 * (high - low))
+bearishPinBar = (close > open and high - close > 0.66 * (high - low)) or (close < open and high - open > 0.66 * (high - low))
+
+// Entry Conditions
+longEntry = fanUpTrend and bullishPinBar and bullPierce
+shortEntry = fanDnTrend and bearishPinBar and bearPierce
+
+// Trade Execution Variables
+var float slLevel = na
+
+// Execute Long Entry
+if longEntry and strategy.position_size == 0
+    risk = usr_risk * 0.01 * strategy.equity
+    rawSL = low - atr * atr_mult
+    maxSL = high * 0.99 // Tight max 1% stop-loss enforcement
+    slLevel := math.max(rawSL, maxSL)
+    qtyLong = risk / math.max(high - slLevel, syminfo.mintick)
+    strategy.entry('long', strategy.long, qty = qtyLong, stop = high)
+
+// Execute Short Entry
+if shortEntry and strategy.position_size == 0
+    risk = usr_risk * 0.01 * strategy.equity
+    rawSL = high + atr * atr_mult
+    maxSL = low * 1.01 // Tight max 1% stop-loss enforcement
+    slLevel := math.min(rawSL, maxSL)
+    qtyShort = risk / math.max(slLevel - low, syminfo.mintick)
+    strategy.entry('short', strategy.short, qty = qtyShort, stop = low)
+
+// Stop Loss & Trailing
+if strategy.position_size > 0
+    strategy.exit('exit long', from_entry = 'long', stop = slLevel, trail_points = slPoints, trail_offset = slOffset)
+
+if strategy.position_size < 0
+    strategy.exit('exit short', from_entry = 'short', stop = slLevel, trail_points = slPoints, trail_offset = slOffset)
+
+// Cancel pending orders if time window exceeded
+if nz(ta.barssince(longEntry)) > ent_canc
+    strategy.cancel('long')
+if nz(ta.barssince(shortEntry)) > ent_canc
+    strategy.cancel('short')
+
+// Rapid Exit based on Volume Spikes
+if volume > volEMA * vol_mult
+    strategy.close_all(comment = 'Exit All: Volume Spike')
+
+// Force Close Conditions
+if hour == 16 and dayofweek == dayofweek.friday
+    strategy.close_all(comment = 'Exit All: Market Close')
+if ta.crossunder(fastEMA, medmEMA)
+    strategy.close('long', comment = 'Exit Long: Re-cross')
+if ta.crossover(fastEMA, medmEMA)
+    strategy.close('short', comment = 'Exit Short: Re-cross')
+
+// Plotting Base & Moving Averages
+plot(ema200, color = color.white, title = "Trend Filter (EMA 200)")
+plot(fastEMA, color = color.red, title = "Fast EMA")
+plot(medmEMA, color = color.blue, title = "Medium EMA")
+plot(slowEMA, color = color.green, title = "Slow EMA")
+
+// Plotting Pin Bars
+plotshape(bullishPinBar, text = 'Bull PB', style = shape.labeldown, location = location.abovebar, color = color.green, textcolor = color.white)
+plotshape(bearishPinBar, text = 'Bear PB', style = shape.labelup, location = location.belowbar, color = color.red, textcolor = color.white)
+plotshape(longEntry,  text = 'LONG',  style = shape.triangleup,   location = location.belowbar, color = color.lime,  size = size.small)
+plotshape(shortEntry, text = 'SHORT', style = shape.triangledown, location = location.abovebar, color = color.red,   size = size.small)
+bgcolor(longEntry ? color.new(color.green, 85) : shortEntry ? color.new(color.red, 85) : na)

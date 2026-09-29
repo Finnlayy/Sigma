@@ -1,0 +1,644 @@
+//@version=6
+strategy("MOS Ultimate Retest & Al Brooks System v4.1 FIXED", overlay = true, max_boxes_count = 500, max_labels_count = 500, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100, margin_long = 20, margin_short = 20, pyramiding = 0, calc_on_every_tick = false, calc_on_order_fills = false, process_orders_on_close = true)
+
+//--------------------------------------------------------------------------------------------------
+// Inputs & Gruppen-Deklarationen (Als Compile-Time Constants deklariert)
+//--------------------------------------------------------------------------------------------------
+const string GROUP_DISPLAY   = "═══ Display & Visualization ═══"
+const string GROUP_SWING     = "═══ Swing Detection & Height ═══"
+const string GROUP_STRENGTH  = "═══ Strength Scoring (0–10) ═══"
+const string GROUP_M2        = "═══ Al Brooks M2B & M2S Engine ═══"
+const string GROUP_FILTERS   = "═══ Strategy Execution & Filters ═══"
+const string GROUP_RISK      = "═══ Risk & Split Exit System ═══"
+
+string zoneMode           = input.string("Bullish AND Bearish", "Zone Side", options = ["Bullish OR Bearish", "Bullish AND Bearish", "Bearish", "Bullish"], group = GROUP_DISPLAY)
+string markerMode         = input.string("All", "Touch Markers", options = ["All", "Last", "None"], group = GROUP_DISPLAY)
+bool showStrength         = input.bool(true, "Show Strength Labels", group = GROUP_DISPLAY)
+string strengthLabelSize  = input.string("Small", "Label Size", options = ["Tiny", "Small", "Normal", "Large"], group = GROUP_DISPLAY)
+bool offsetLabels         = input.bool(false, "Offset S/R Labels to Pivot", group = GROUP_DISPLAY)
+int lookbackBars          = input.int(2000, "Lookback (bars, 0 = all)", minval = 0, group = GROUP_DISPLAY)
+int maxZones              = input.int(60, "Max Archived Zones", minval = 1, maxval = 200, group = GROUP_DISPLAY)
+bool hideOverlap          = input.bool(true, "Hide Overlapping Zones", group = GROUP_DISPLAY)
+int overlapThreshold      = input.int(10, "Overlap Threshold (%)", minval = 1, maxval = 100, group = GROUP_DISPLAY)
+bool showDashboard        = input.bool(true, "Show Performance Dashboard", group = GROUP_DISPLAY)
+
+int leftBars              = input.int(10, "Pivot Left", minval = 1, maxval = 200, group = GROUP_SWING)
+int rightBars             = input.int(5, "Pivot Right", minval = 1, maxval = 200, group = GROUP_SWING)
+int maxZoneLife           = input.int(500, "Max Zone Life (bars)", minval = 10, maxval = 5000, group = GROUP_SWING)
+int touchCooldown         = input.int(10, "Retest Cooldown (bars)", minval = 1, maxval = 200, group = GROUP_SWING)
+bool normalizeHeight      = input.bool(true, "Center Zones on Pivot", group = GROUP_SWING)
+string heightMode         = input.string("ATR Based", "Height Method", options = ["ATR Based", "Fixed Percentage"], group = GROUP_SWING)
+float heightAtrMultiplier = input.float(0.50, "Zone Height (ATR Mult)", minval = 0.05, maxval = 10.0, step = 0.05, group = GROUP_SWING)
+float heightPercent       = input.float(0.30, "Zone Height (% of Pivot)", minval = 0.01, maxval = 5.0, step = 0.05, group = GROUP_SWING)
+int zoneAtrLength         = input.int(200, "ATR Length (Zone Height)", minval = 1, maxval = 500, group = GROUP_SWING)
+
+bool onlyShowStrong       = input.bool(false, "Show Only Strong Retest Markers", group = GROUP_STRENGTH)
+float strongThreshold     = input.float(5.0, "Strong Threshold", minval = 0.0, maxval = 10.0, step = 0.5, group = GROUP_STRENGTH)
+bool onlyTradeStrong      = input.bool(false, "Only Trade Strong Zones", group = GROUP_STRENGTH)
+int volumeLength          = input.int(20, "Volume Baseline Length", minval = 1, maxval = 500, group = GROUP_STRENGTH)
+float touchesForFullScore = input.float(4.0, "Touches For Full Score", minval = 1.0, step = 0.5, group = GROUP_STRENGTH)
+float weightTouches       = input.float(0.40, "Weight: Retests", minval = 0.0, maxval = 1.0, step = 0.05, group = GROUP_STRENGTH)
+float weightVolume        = input.float(0.30, "Weight: Volume", minval = 0.0, maxval = 1.0, step = 0.05, group = GROUP_STRENGTH)
+float weightWick          = input.float(0.30, "Weight: Rejection Wick", minval = 0.0, maxval = 1.0, step = 0.05, group = GROUP_STRENGTH)
+bool useStrengthDecay     = input.bool(true, "Decay Strength While Idle", group = GROUP_STRENGTH)
+int decayBars             = input.int(300, "Full Decay Over (idle bars)", minval = 20, maxval = 5000, group = GROUP_STRENGTH)
+float decayFloor          = input.float(0.65, "Decay Floor", minval = 0.10, maxval = 1.0, step = 0.05, group = GROUP_STRENGTH)
+
+bool useM2Engine          = input.bool(true, "Enable M2B/M2S Second-Entry Proxy", group = GROUP_M2, tooltip = "Uses a deterministic EMA-pullback proxy; it is not a discretionary Al Brooks pattern classifier.")
+int m2EmaLength           = input.int(20, "M2 EMA Length", minval = 1, maxval = 500, group = GROUP_M2)
+int m2TrendLookback       = input.int(5, "Trend Lookback", minval = 1, maxval = 100, group = GROUP_M2)
+int m2MaxPullbackBars     = input.int(10, "Max Pullback Bars", minval = 2, maxval = 100, group = GROUP_M2)
+
+bool useRegimeFilter      = input.bool(true, "Use Hurst Regime Filter for M2", group = GROUP_FILTERS, tooltip = "M2 trend entries require H > 0.52. Zone entries retain their own strength filter.")
+int hurstLength           = input.int(100, "Hurst Length", minval = 20, maxval = 500, step = 2, group = GROUP_FILTERS)
+bool useDerFilter         = input.bool(false, "Use DER Trend Energy Filter", group = GROUP_FILTERS)
+int derLookback           = input.int(20, "DER Lookback", minval = 2, maxval = 500, group = GROUP_FILTERS)
+int derSmoothing          = input.int(5, "DER Smoothing", minval = 1, maxval = 100, group = GROUP_FILTERS)
+
+string sizingMode         = input.string("Kelly Risk Parity", "Position Sizing Mode", options = ["Leverage", "Kelly Risk Parity", "Fixed Percent"], group = GROUP_RISK)
+float leveragePercent     = input.float(500.0, "Exposure (% of Equity)", minval = 1.0, maxval = 5000.0, group = GROUP_RISK)
+float fixedPositionPercent= input.float(25.0, "Fixed Position (% of Equity)", minval = 0.1, maxval = 1000.0, step = 0.1, group = GROUP_RISK)
+bool scaleRiskByScore     = input.bool(true, "Scale Kelly Risk by Signal Score", group = GROUP_RISK)
+bool useDynamicKelly      = input.bool(true, "Use Dynamic Kelly", group = GROUP_RISK)
+float kellyMultiplier     = input.float(0.50, "Kelly Multiplier", minval = 0.10, maxval = 1.0, step = 0.10, group = GROUP_RISK)
+int kellyMinTrades        = input.int(20, "Kelly Minimum Closed Trades", minval = 5, maxval = 100, group = GROUP_RISK)
+float baseRiskPercent     = input.float(1.50, "Base Risk (%)", minval = 0.10, maxval = 10.0, step = 0.10, group = GROUP_RISK)
+float maxRiskPercent      = input.float(5.00, "Maximum Kelly Risk (%)", minval = 0.25, maxval = 20.0, step = 0.25, group = GROUP_RISK)
+int strategyAtrLength     = input.int(14, "ATR Length (SL/TP)", minval = 1, maxval = 500, group = GROUP_RISK)
+float stopAtrMultiplier   = input.float(1.14, "Initial SL (ATR Mult)", minval = 0.05, maxval = 20.0, step = 0.01, group = GROUP_RISK)
+float tp1AtrMultiplier    = input.float(2.00, "TP1 (ATR Mult)", minval = 0.05, maxval = 50.0, step = 0.05, group = GROUP_RISK)
+float tp1QuantityPercent  = input.float(30.0, "TP1 Exit Quantity (%)", minval = 1.0, maxval = 99.0, step = 1.0, group = GROUP_RISK)
+float tightTrailAtrMultiplier = input.float(0.50, "Runner Trail after TP1 (ATR Mult)", minval = 0.05, maxval = 20.0, step = 0.05, group = GROUP_RISK)
+bool useInitialTrail      = input.bool(false, "Trail Before TP1", group = GROUP_RISK)
+
+//--------------------------------------------------------------------------------------------------
+// Types and Object Lifecycle
+//--------------------------------------------------------------------------------------------------
+type SwingZone
+    box setupBox = na
+    box breakBox = na
+    label strengthTag = na
+    array<label> marks = na
+    int phase = 0
+    float top = na
+    float bottom = na
+    float middle = na
+    int pivotBar = na
+    int bornBar = na
+    int lastTouchBar = na
+    int observedBars = 0
+    int touches = 0
+    float volumeSum = 0.0
+    float wickSum = 0.0
+    int wickCount = 0
+    float score = 0.0
+
+type ZoneRecord
+    box setupBox = na
+    box breakBox = na
+    label strengthTag = na
+    array<label> marks = na
+    float top = na
+    float bottom = na
+    int direction = 0
+
+// Verwendung von v6-konformer Array-Initialisierung
+var array<ZoneRecord> historyPool = array.new<ZoneRecord>(0)
+
+f_labelSize(string value) =>
+    switch value
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        => size.small
+
+f_stars(float score) => score >= 8.0 ? "★★★★" : score >= 6.5 ? "★★★" : score >= 5.0 ? "★★" : score >= 3.0 ? "★" : "·"
+f_tier(float score) => score >= 8.0 ? "ELITE" : score >= 6.5 ? "STRONG" : score >= 5.0 ? "MODERATE" : score >= 3.0 ? "WEAK" : "FORMING"
+f_clamp(float value, float minimum, float maximum) => math.max(minimum, math.min(maximum, value))
+
+f_deleteRecord(ZoneRecord record) =>
+    if not na(record.setupBox)
+        box.delete(record.setupBox)
+    if not na(record.breakBox)
+        box.delete(record.breakBox)
+    if not na(record.strengthTag)
+        label.delete(record.strengthTag)
+    if not na(record.marks)
+        int markCount = array.size(record.marks)
+        if markCount > 0
+            for i = 0 to markCount - 1
+                label.delete(array.get(record.marks, i))
+        array.clear(record.marks)
+
+f_overlap(float topA, float bottomA, float topB, float bottomB) =>
+    float overlap = math.min(topA, topB) - math.max(bottomA, bottomB)
+    float smallerHeight = math.min(topA - bottomA, topB - bottomB)
+    overlap > 0.0 and smallerHeight > 0.0 and overlap / smallerHeight >= overlapThreshold / 100.0
+
+f_overlapsHistory(float top, float bottom) =>
+    bool found = false
+    int recordCount = array.size(historyPool)
+    if recordCount > 0
+        for i = 0 to recordCount - 1
+            ZoneRecord record = array.get(historyPool, i)
+            if f_overlap(top, bottom, record.top, record.bottom)
+                found := true
+                break
+    found
+
+method isActive(SwingZone self) => self.phase > 0
+method overlaps(SwingZone self, float top, float bottom) => self.isActive() and f_overlap(top, bottom, self.top, self.bottom)
+
+method resetForNewCycle(SwingZone self) =>
+    self.setupBox := na
+    self.breakBox := na
+    self.strengthTag := na
+    self.marks := array.new<label>(0)
+    self.phase := 0
+    self.top := na
+    self.bottom := na
+    self.middle := na
+    self.pivotBar := na
+    self.bornBar := na
+    self.lastTouchBar := na
+    self.observedBars := 0
+    self.touches := 0
+    self.volumeSum := 0.0
+    self.wickSum := 0.0
+    self.wickCount := 0
+    self.score := 0.0
+
+method archive(SwingZone self, int direction) =>
+    if not na(self.setupBox)
+        array.push(historyPool, ZoneRecord.new(self.setupBox, self.breakBox, self.strengthTag, self.marks, self.top, self.bottom, direction))
+    while array.size(historyPool) > maxZones
+        f_deleteRecord(array.shift(historyPool))
+    self.resetForNewCycle()
+
+f_ageFactor(int idleBars) =>
+    if not useStrengthDecay
+        1.0
+    else
+        float decayProgress = math.min(float(idleBars) / math.max(float(decayBars), 1.0), 1.0)
+        math.max(1.0 - (1.0 - decayFloor) * decayProgress, decayFloor)
+
+f_zoneHeight(float pivotPrice, float atrValue) =>
+    heightMode == "ATR Based" ? atrValue * heightAtrMultiplier : pivotPrice * heightPercent / 100.0
+
+f_score(int touches, float volumeSum, float wickSum, int wickCount, int observedBars, int idleBars, float volumeBaseline, float atrValue) =>
+    float touchFactor = math.min(float(touches) / math.max(touchesForFullScore, 1.0), 1.0)
+    float volumeFactor = volumeBaseline > 0.0 and observedBars > 0 ? math.min((volumeSum / observedBars) / volumeBaseline, 1.0) : 0.0
+    float wickFactor = atrValue > 0.0 and wickCount > 0 ? math.min((wickSum / wickCount) / atrValue, 1.0) : 0.0
+    float weightSum = weightTouches + weightVolume + weightWick
+    float rawScore = weightSum > 0.0 ? (touchFactor * weightTouches + volumeFactor * weightVolume + wickFactor * weightWick) / weightSum : 0.0
+    f_clamp(rawScore * 10.0 * f_ageFactor(idleBars), 0.0, 10.0)
+
+method updateTag(SwingZone self, float currentScore, color tagColor) =>
+    self.score := currentScore
+    if showStrength
+        int labelX = offsetLabels ? self.pivotBar : bar_index
+        string labelText = f_tier(currentScore) + " " + f_stars(currentScore) + "\n" + str.tostring(currentScore, "#.0")
+        if na(self.strengthTag)
+            self.strengthTag := label.new(labelX, self.middle, labelText, style = label.style_label_left, color = color.new(color.black, 25), textcolor = tagColor, size = f_labelSize(strengthLabelSize))
+        else
+            label.set_x(self.strengthTag, labelX)
+            label.set_y(self.strengthTag, self.middle)
+            label.set_text(self.strengthTag, labelText)
+            label.set_textcolor(self.strengthTag, tagColor)
+            label.set_size(self.strengthTag, f_labelSize(strengthLabelSize))
+            self.strengthTag
+    self
+
+method canRegisterTouch(SwingZone self) => na(self.lastTouchBar) or bar_index - self.lastTouchBar >= touchCooldown
+
+method registerTouch(SwingZone self, float wick) =>
+    self.touches += 1
+    self.wickSum += math.max(wick, 0.0)
+    self.wickCount += 1
+    self.lastTouchBar := bar_index
+
+method addMarker(SwingZone self, color markerColor, bool markerUp, string glyph) =>
+    if markerMode != "None"
+        string markerStyle = markerUp ? label.style_label_up : label.style_label_down
+        float markerY = markerUp ? self.bottom : self.top
+        label marker = label.new(bar_index, markerY, glyph, style = markerStyle, color = color.new(color.black, 100), textcolor = markerColor, size = size.tiny)
+        array.unshift(self.marks, marker)
+        int markerCap = math.max(1, int(math.floor(450.0 / (maxZones + 2.0))) - (showStrength ? 1 : 0))
+        int effectiveCap = markerMode == "Last" ? 1 : math.min(20, markerCap)
+        while array.size(self.marks) > effectiveCap
+            label.delete(array.pop(self.marks))
+
+//--------------------------------------------------------------------------------------------------
+// Mathematische Filter
+//--------------------------------------------------------------------------------------------------
+f_hurst(int length) =>
+    int halfLength = int(math.floor(length / 2.0))
+    float currentRange = ta.highest(high, halfLength) - ta.lowest(low, halfLength)
+    float previousRange = ta.highest(high, halfLength)[halfLength] - ta.lowest(low, halfLength)[halfLength]
+    float fullRange = ta.highest(high, length) - ta.lowest(low, length)
+    float n1 = halfLength > 0 ? currentRange / halfLength : na
+    float n2 = halfLength > 0 ? previousRange / halfLength : na
+    float n3 = length > 0 ? fullRange / length : na
+    float result = na
+    bool ready = bar_index >= length and not na(n1) and not na(n2) and not na(n3)
+    if ready and n1 + n2 > 0.0 and n3 > 0.0
+        float dimension = (math.log(n1 + n2) - math.log(n3)) / math.log(2.0)
+        result := f_clamp(2.0 - dimension, 0.0, 1.0)
+    result
+
+f_der(int length, int smoothing) =>
+    float safeVolume = na(volume) or volume <= 0.0 ? 1.0 : volume
+    float halfRange = (ta.highest(high, 2) - ta.lowest(low, 2)) / 2.0
+    float previousClose = nz(close[1], close)
+    float signedRange = halfRange > 0.0 ? (close - previousClose) / halfRange : 0.0
+    float contribution = f_clamp(signedRange, -1.0, 1.0) * safeVolume
+    float positive = math.max(contribution, 0.0)
+    float negative = -math.min(contribution, 0.0)
+    float averageVolume = ta.wma(safeVolume, length)
+    float demand = averageVolume > 0.0 ? ta.wma(positive, length) / averageVolume : 0.0
+    float supply = averageVolume > 0.0 ? ta.wma(negative, length) / averageVolume : 0.0
+    float smoothedDemand = ta.wma(demand, smoothing)
+    float smoothedSupply = ta.wma(supply, smoothing)
+    [(smoothedDemand - smoothedSupply) * 100.0, smoothedDemand * 100.0, smoothedSupply * 100.0]
+
+f_kellyRisk(float multiplier, float fallbackRisk) =>
+    int totalTrades = strategy.closedtrades
+    int scanRange = math.min(100, totalTrades)
+    int wins = 0
+    int losses = 0
+    float sumWins = 0.0
+    float sumLosses = 0.0
+    if scanRange > 0
+        for i = 0 to scanRange - 1
+            float profit = strategy.closedtrades.profit(totalTrades - 1 - i)
+            if profit > 0.0
+                wins += 1
+                sumWins += profit
+            else if profit < 0.0
+                losses += 1
+                sumLosses += math.abs(profit)
+    int resolvedTrades = wins + losses
+    float winRate = resolvedTrades > 0 ? wins * 1.0 / resolvedTrades : 0.5
+    float averageWin = wins > 0 ? sumWins / wins : 0.0
+    float averageLoss = losses > 0 ? sumLosses / losses : 0.0
+    float payoffRatio = averageLoss > 0.0 ? averageWin / averageLoss : 1.0
+    float rawKelly = payoffRatio > 0.0 ? winRate - (1.0 - winRate) / payoffRatio : 0.0
+    float kellyRisk = resolvedTrades >= kellyMinTrades ? f_clamp(math.max(rawKelly, 0.0) * multiplier * 100.0, 0.25, maxRiskPercent) : fallbackRisk
+    [kellyRisk, winRate, payoffRatio]
+
+//--------------------------------------------------------------------------------------------------
+// M2B/M2S Closed-Bar Proxy (Al Brooks)
+//--------------------------------------------------------------------------------------------------
+float m2Ema = ta.ema(close, m2EmaLength)
+float m2EmaPast = m2Ema[m2TrendLookback]
+bool m2TrendReady = not na(m2Ema) and not na(m2EmaPast)
+bool m2BullTrend = m2TrendReady and m2Ema > m2EmaPast
+bool m2BearTrend = m2TrendReady and m2Ema < m2EmaPast
+
+var int m2bPullbackBars = 0
+var int m2sPullbackBars = 0
+
+if not useM2Engine or not m2BullTrend
+    m2bPullbackBars := 0
+else if low <= m2Ema
+    m2bPullbackBars := 1
+else if m2bPullbackBars > 0
+    m2bPullbackBars += 1
+
+if m2bPullbackBars > m2MaxPullbackBars
+    m2bPullbackBars := 0
+
+if not useM2Engine or not m2BearTrend
+    m2sPullbackBars := 0
+else if high >= m2Ema
+    m2sPullbackBars := 1
+else if m2sPullbackBars > 0
+    m2sPullbackBars += 1
+
+if m2sPullbackBars > m2MaxPullbackBars
+    m2sPullbackBars := 0
+
+bool previousBarReady = not na(high[1]) and not na(low[1])
+bool m2bTrigger = useM2Engine and barstate.isconfirmed and previousBarReady and m2bPullbackBars > 1 and close > high[1] and close > m2Ema
+bool m2sTrigger = useM2Engine and barstate.isconfirmed and previousBarReady and m2sPullbackBars > 1 and close < low[1] and close < m2Ema
+
+if m2bTrigger
+    m2bPullbackBars := 0
+if m2sTrigger
+    m2sPullbackBars := 0
+
+plot(useM2Engine ? m2Ema : na, title = "M2 EMA", color = color.new(color.orange, 30), linewidth = 2)
+plotshape(m2bTrigger, title = "M2B Signal", location = location.belowbar, color = color.green, style = shape.triangleup, size = size.small)
+plotshape(m2sTrigger, title = "M2S Signal", location = location.abovebar, color = color.red, style = shape.triangledown, size = size.small)
+
+//--------------------------------------------------------------------------------------------------
+// Zonen-Erkennung & Retest-Modul
+//--------------------------------------------------------------------------------------------------
+int currentBar = bar_index
+float zoneAtr = ta.atr(zoneAtrLength)
+float safeZoneAtr = nz(zoneAtr, ta.tr(true))
+float volumeBaseline = nz(ta.sma(volume, volumeLength), 0.0)
+
+float pivotHigh = ta.pivothigh(leftBars, rightBars)
+float pivotLow = ta.pivotlow(leftBars, rightBars)
+
+bool inWindow = lookbackBars <= 0 or last_bar_index - currentBar <= lookbackBars
+
+color bullFill = color.new(#089981, 80)
+color bearFill = color.new(#f23645, 80)
+color bullBorder = color.new(#089981, 35)
+color bearBorder = color.new(#f23645, 35)
+
+var SwingZone bullZone = SwingZone.new()
+var SwingZone bearZone = SwingZone.new()
+
+if barstate.isfirst
+    bullZone.resetForNewCycle()
+    bearZone.resetForNewCycle()
+
+bool bullEnabled = zoneMode == "Bullish" or zoneMode == "Bullish AND Bearish" or (zoneMode == "Bullish OR Bearish" and not bearZone.isActive())
+bool zoneBuySignal = false
+bool zoneSellSignal = false
+float zoneBuyScore = 0.0
+float zoneSellScore = 0.0
+
+if bullEnabled
+    switch bullZone.phase
+        0 =>
+            if not na(pivotLow) and inWindow
+                float pivotAtr = nz(safeZoneAtr[rightBars], safeZoneAtr)
+                float height = math.max(f_zoneHeight(pivotLow, pivotAtr), syminfo.mintick)
+                float newTop = normalizeHeight ? pivotLow + height / 2.0 : pivotLow + height
+                float newBottom = normalizeHeight ? pivotLow - height / 2.0 : pivotLow
+                bool overlapsExisting = hideOverlap and (f_overlapsHistory(newTop, newBottom) or bearZone.overlaps(newTop, newBottom))
+                if not overlapsExisting
+                    bullZone.resetForNewCycle()
+                    bullZone.top := newTop
+                    bullZone.bottom := newBottom
+                    bullZone.middle := (newTop + newBottom) / 2.0
+                    bullZone.pivotBar := currentBar - rightBars
+                    bullZone.bornBar := currentBar
+                    bullZone.observedBars := 1
+                    bullZone.volumeSum := nz(volume)
+                    bullZone.setupBox := box.new(bullZone.pivotBar, newTop, currentBar, newBottom, bgcolor = bullFill, border_color = bullBorder)
+                    bullZone.phase := 1
+                    bullZone.updateTag(0.0, #089981)
+        1 =>
+            if currentBar - bullZone.bornBar >= maxZoneLife
+                bullZone.archive(1)
+            else
+                box.set_right(bullZone.setupBox, currentBar)
+                bullZone.observedBars += 1
+                bullZone.volumeSum += nz(volume)
+                if close < bullZone.bottom
+                    float breakScore = f_score(bullZone.touches, bullZone.volumeSum, bullZone.wickSum, bullZone.wickCount, bullZone.observedBars, nz(currentBar - bullZone.lastTouchBar, 0), volumeBaseline, safeZoneAtr)
+                    bullZone.breakBox := box.new(currentBar, bullZone.top, currentBar, bullZone.bottom, bgcolor = bearFill, border_color = bearBorder)
+                    bullZone.phase := 2
+                    bullZone.updateTag(breakScore, #f23645)
+                    zoneSellSignal := true
+                    zoneSellScore := math.max(zoneSellScore, breakScore)
+                else if low <= bullZone.top and close > bullZone.bottom and bullZone.canRegisterTouch()
+                    bullZone.registerTouch(bullZone.top - low)
+                    float touchScore = f_score(bullZone.touches, bullZone.volumeSum, bullZone.wickSum, bullZone.wickCount, bullZone.observedBars, 0, volumeBaseline, safeZoneAtr)
+                    bullZone.updateTag(touchScore, #089981)
+                    if not onlyShowStrong or touchScore >= strongThreshold
+                        bullZone.addMarker(#089981, true, "▲")
+                    zoneBuySignal := true
+                    zoneBuyScore := math.max(zoneBuyScore, touchScore)
+        2 =>
+            if currentBar - bullZone.bornBar >= maxZoneLife
+                bullZone.archive(-1)
+            else
+                box.set_right(bullZone.breakBox, currentBar)
+                bullZone.observedBars += 1
+                bullZone.volumeSum += nz(volume)
+                if close > bullZone.top
+                    bullZone.archive(-1)
+                else if high >= bullZone.bottom and close < bullZone.top and bullZone.canRegisterTouch()
+                    bullZone.registerTouch(high - bullZone.bottom)
+                    float touchScore = f_score(bullZone.touches, bullZone.volumeSum, bullZone.wickSum, bullZone.wickCount, bullZone.observedBars, 0, volumeBaseline, safeZoneAtr)
+                    bullZone.updateTag(touchScore, #f23645)
+                    if not onlyShowStrong or touchScore >= strongThreshold
+                        bullZone.addMarker(#f23645, false, "▽")
+                    zoneSellSignal := true
+                    zoneSellScore := math.max(zoneSellScore, touchScore)
+
+// Bewertung der Bärenzone
+bool bearEnabled = zoneMode == "Bearish" or zoneMode == "Bullish AND Bearish" or (zoneMode == "Bullish OR Bearish" and not bullZone.isActive())
+if bearEnabled
+    switch bearZone.phase
+        0 =>
+            if not na(pivotHigh) and inWindow
+                float pivotAtr = nz(safeZoneAtr[rightBars], safeZoneAtr)
+                float height = math.max(f_zoneHeight(pivotHigh, pivotAtr), syminfo.mintick)
+                float newTop = normalizeHeight ? pivotHigh + height / 2.0 : pivotHigh
+                float newBottom = normalizeHeight ? pivotHigh - height / 2.0 : pivotHigh - height
+                bool overlapsExisting = hideOverlap and (f_overlapsHistory(newTop, newBottom) or bullZone.overlaps(newTop, newBottom))
+                if not overlapsExisting
+                    bearZone.resetForNewCycle()
+                    bearZone.top := newTop
+                    bearZone.bottom := newBottom
+                    bearZone.middle := (newTop + newBottom) / 2.0
+                    bearZone.pivotBar := currentBar - rightBars
+                    bearZone.bornBar := currentBar
+                    bearZone.observedBars := 1
+                    bearZone.volumeSum := nz(volume)
+                    bearZone.setupBox := box.new(bearZone.pivotBar, newTop, currentBar, newBottom, bgcolor = bearFill, border_color = bearBorder)
+                    bearZone.phase := 1
+                    bearZone.updateTag(0.0, #f23645)
+        1 =>
+            if currentBar - bearZone.bornBar >= maxZoneLife
+                bearZone.archive(-1)
+            else
+                box.set_right(bearZone.setupBox, currentBar)
+                bearZone.observedBars += 1
+                bearZone.volumeSum += nz(volume)
+                if close > bearZone.top
+                    float breakScore = f_score(bearZone.touches, bearZone.volumeSum, bearZone.wickSum, bearZone.wickCount, bearZone.observedBars, nz(currentBar - bearZone.lastTouchBar, 0), volumeBaseline, safeZoneAtr)
+                    bearZone.breakBox := box.new(currentBar, bearZone.top, currentBar, bearZone.bottom, bgcolor = bullFill, border_color = bullBorder)
+                    bearZone.phase := 2
+                    bearZone.updateTag(breakScore, #089981)
+                    zoneBuySignal := true
+                    zoneBuyScore := math.max(zoneBuyScore, breakScore)
+                else if high >= bearZone.bottom and close < bearZone.top and bearZone.canRegisterTouch()
+                    bearZone.registerTouch(high - bearZone.bottom)
+                    float touchScore = f_score(bearZone.touches, bearZone.volumeSum, bearZone.wickSum, bearZone.wickCount, bearZone.observedBars, 0, volumeBaseline, safeZoneAtr)
+                    bearZone.updateTag(touchScore, #f23645)
+                    if not onlyShowStrong or touchScore >= strongThreshold
+                        bearZone.addMarker(#f23645, false, "▼")
+                    zoneSellSignal := true
+                    zoneSellScore := math.max(zoneSellScore, touchScore)
+        2 =>
+            if currentBar - bearZone.bornBar >= maxZoneLife
+                bearZone.archive(1)
+            else
+                box.set_right(bearZone.breakBox, currentBar)
+                bearZone.observedBars += 1
+                bearZone.volumeSum += nz(volume)
+                if close < bearZone.bottom
+                    bearZone.archive(1)
+                else if low <= bearZone.top and close > bearZone.bottom and bearZone.canRegisterTouch()
+                    bearZone.registerTouch(bearZone.top - low)
+                    float touchScore = f_score(bearZone.touches, bearZone.volumeSum, bearZone.wickSum, bearZone.wickCount, bearZone.observedBars, 0, volumeBaseline, safeZoneAtr)
+                    bearZone.updateTag(touchScore, #089981)
+                    if not onlyShowStrong or touchScore >= strongThreshold
+                        bearZone.addMarker(#089981, true, "△")
+                    zoneBuySignal := true
+                    zoneBuyScore := math.max(zoneBuyScore, touchScore)
+
+//--------------------------------------------------------------------------------------------------
+// Filterung, Positionsgrößen-Bestimmung & Ausführung
+//--------------------------------------------------------------------------------------------------
+float hurstValue = f_hurst(hurstLength)
+[derNet, derBull, derBear] = f_der(derLookback, derSmoothing)
+[kellyRiskPercent, winRate, winLossRatio] = f_kellyRisk(kellyMultiplier, baseRiskPercent)
+
+bool trendingRegime = not na(hurstValue) and hurstValue > 0.52
+bool trendAllowed = not useRegimeFilter or na(hurstValue) or trendingRegime
+
+bool bullEnergyAllowed = not useDerFilter or derNet > 0.0
+bool bearEnergyAllowed = not useDerFilter or derNet < 0.0
+
+bool strongLongZone = zoneBuySignal and (not onlyTradeStrong or zoneBuyScore >= strongThreshold)
+bool strongShortZone = zoneSellSignal and (not onlyTradeStrong or zoneSellScore >= strongThreshold)
+
+bool longCandidate = bullEnergyAllowed and (strongLongZone or (m2bTrigger and trendAllowed))
+bool shortCandidate = bearEnergyAllowed and (strongShortZone or (m2sTrigger and trendAllowed))
+
+float longSignalScore = m2bTrigger ? math.max(zoneBuyScore, 10.0) : zoneBuyScore
+float shortSignalScore = m2sTrigger ? math.max(zoneSellScore, 10.0) : zoneSellScore
+
+// Kontradiktorische Signale auflösen
+bool finalLongSignal = longCandidate and (not shortCandidate or longSignalScore > shortSignalScore)
+bool finalShortSignal = shortCandidate and (not longCandidate or shortSignalScore > longSignalScore)
+float activeSignalScore = finalLongSignal ? longSignalScore : finalShortSignal ? shortSignalScore : 0.0
+
+float strategyAtr = ta.atr(strategyAtrLength)
+float pointValue = math.max(nz(syminfo.pointvalue, 1.0), 0.0000001)
+float positionUnits = na
+
+if not na(strategyAtr) and strategyAtr > 0.0 and close > 0.0 and strategy.equity > 0.0
+    if sizingMode == "Leverage"
+        float exposureCurrency = strategy.equity * leveragePercent / 100.0
+        positionUnits := exposureCurrency / (close * pointValue)
+    else if sizingMode == "Fixed Percent"
+        float exposureCurrency = strategy.equity * fixedPositionPercent / 100.0
+        positionUnits := exposureCurrency / (close * pointValue)
+    else
+        float selectedRiskPercent = useDynamicKelly ? kellyRiskPercent : baseRiskPercent
+        if scaleRiskByScore
+            selectedRiskPercent := selectedRiskPercent * f_clamp(activeSignalScore / 10.0, 0.10, 1.0)
+        float stopDistance = strategyAtr * stopAtrMultiplier
+        float riskCurrency = strategy.equity * selectedRiskPercent / 100.0
+        positionUnits := stopDistance > 0.0 ? riskCurrency / (stopDistance * pointValue) : na
+
+var float longStop = na
+var float longTp1 = na
+var float longTrail = na
+var bool longTp1Hit = false
+
+var float shortStop = na
+var float shortTp1 = na
+var float shortTrail = na
+var bool shortTp1Hit = false
+
+bool justClosedPosition = strategy.position_size == 0 and strategy.position_size[1] != 0
+if justClosedPosition
+    longStop := na
+    longTp1 := na
+    longTrail := na
+    longTp1Hit := false
+    shortStop := na
+    shortTp1 := na
+    shortTrail := na
+    shortTp1Hit := false
+
+bool canEnter = strategy.position_size == 0 and not na(positionUnits) and positionUnits > 0.0
+
+if finalLongSignal and canEnter
+    longStop := math.round_to_mintick(close - strategyAtr * stopAtrMultiplier)
+    longTp1 := math.round_to_mintick(close + strategyAtr * tp1AtrMultiplier)
+    longTrail := longStop
+    longTp1Hit := false
+    strategy.entry("Long", strategy.long, qty = positionUnits, alert_message = "MOS LONG")
+    strategy.exit("L-TP1", "Long", qty_percent = tp1QuantityPercent, limit = longTp1, stop = longTrail, alert_message = "MOS LONG TP1/SL")
+    strategy.exit("L-Runner", "Long", stop = longTrail, alert_message = "MOS LONG RUNNER EXIT")
+
+if finalShortSignal and canEnter
+    shortStop := math.round_to_mintick(close + strategyAtr * stopAtrMultiplier)
+    shortTp1 := math.round_to_mintick(close - strategyAtr * tp1AtrMultiplier)
+    shortTrail := shortStop
+    shortTp1Hit := false
+    strategy.entry("Short", strategy.short, qty = positionUnits, alert_message = "MOS SHORT")
+    strategy.exit("S-TP1", "Short", qty_percent = tp1QuantityPercent, limit = shortTp1, stop = shortTrail, alert_message = "MOS SHORT TP1/SL")
+    strategy.exit("S-Runner", "Short", stop = shortTrail, alert_message = "MOS SHORT RUNNER EXIT")
+
+if strategy.position_size > 0 and not na(longStop) and not na(longTp1)
+    bool partialLongExit = (strategy.position_size[1] > 0 and strategy.position_size < strategy.position_size[1]) or high >= longTp1
+    if partialLongExit
+        longTp1Hit := true
+    if longTp1Hit
+        longTrail := math.max(longTrail, close - strategyAtr * tightTrailAtrMultiplier)
+    else if useInitialTrail
+        longTrail := math.max(longTrail, close - strategyAtr * stopAtrMultiplier)
+    longTrail := math.round_to_mintick(longTrail)
+    strategy.exit("L-TP1", "Long", qty_percent = tp1QuantityPercent, limit = longTp1, stop = longTrail, alert_message = "MOS LONG TP1/SL")
+    strategy.exit("L-Runner", "Long", stop = longTrail, alert_message = "MOS LONG RUNNER EXIT")
+
+if strategy.position_size < 0 and not na(shortStop) and not na(shortTp1)
+    bool partialShortExit = (strategy.position_size[1] < 0 and math.abs(strategy.position_size) < math.abs(strategy.position_size[1])) or low <= shortTp1
+    if partialShortExit
+        shortTp1Hit := true
+    if shortTp1Hit
+        shortTrail := math.min(shortTrail, close + strategyAtr * tightTrailAtrMultiplier)
+    else if useInitialTrail
+        shortTrail := math.min(shortTrail, close + strategyAtr * stopAtrMultiplier)
+    shortTrail := math.round_to_mintick(shortTrail)
+    strategy.exit("S-TP1", "Short", qty_percent = tp1QuantityPercent, limit = shortTp1, stop = shortTrail, alert_message = "MOS SHORT TP1/SL")
+    strategy.exit("S-Runner", "Short", stop = shortTrail, alert_message = "MOS SHORT RUNNER EXIT")
+
+//--------------------------------------------------------------------------------------------------
+// Dashboard-Visualisierung
+//--------------------------------------------------------------------------------------------------
+var table dashboard = table.new(position.top_right, 3, 9, bgcolor = color.new(color.black, 15), border_color = color.new(#2a2e39, 10), border_width = 1)
+
+if barstate.isfirst
+    table.merge_cells(dashboard, 0, 0, 2, 0)
+    table.merge_cells(dashboard, 1, 4, 2, 4)
+    table.merge_cells(dashboard, 1, 5, 2, 5)
+    table.merge_cells(dashboard, 1, 6, 2, 6)
+    table.merge_cells(dashboard, 1, 7, 2, 7)
+    table.merge_cells(dashboard, 1, 8, 2, 8)
+
+if showDashboard and barstate.islast
+    float profitFactor = strategy.closedtrades > 0 and strategy.grossloss != 0.0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    float netProfitPercent = strategy.netprofit / strategy.initial_capital * 100.0
+    float maxDrawdownPercent = strategy.max_drawdown / strategy.initial_capital * 100.0
+    string hurstState = na(hurstValue) ? "Warming up" : hurstValue > 0.52 ? "Trending" : hurstValue < 0.48 ? "Mean reverting" : "Random/chop"
+    color hurstColor = na(hurstValue) ? color.gray : hurstValue > 0.52 ? color.green : hurstValue < 0.48 ? color.blue : color.gray
+    string positionText = strategy.position_size == 0 ? "None" : strategy.position_size > 0 ? "LONG" : "SHORT"
+    color positionColor = strategy.position_size == 0 ? color.gray : strategy.position_size > 0 ? color.green : color.red
+    bool trailActive = (strategy.position_size > 0 and longTp1Hit) or (strategy.position_size < 0 and shortTp1Hit)
+    
+    table.cell(dashboard, 0, 0, "MOS ULTIMATE + M2 v4.1", text_color = color.white, bgcolor = #131722, text_halign = text.align_center)
+    table.cell(dashboard, 0, 1, "Net PnL: " + str.tostring(netProfitPercent, "#.##") + "%", text_color = netProfitPercent >= 0.0 ? color.green : color.red)
+    table.cell(dashboard, 1, 1, "Win: " + str.tostring(winRate * 100.0, "#.#") + "%", text_color = color.white, text_halign = text.align_center)
+    table.cell(dashboard, 2, 1, "PF: " + (na(profitFactor) ? "n/a" : str.tostring(profitFactor, "#.##")), text_color = na(profitFactor) ? color.gray : profitFactor >= 1.0 ? color.green : color.red, text_halign = text.align_right)
+    table.cell(dashboard, 0, 2, "Hurst Regime", text_color = color.white)
+    table.cell(dashboard, 1, 2, na(hurstValue) ? "n/a" : str.tostring(hurstValue, "0.00"), text_color = hurstColor, text_halign = text.align_center)
+    table.cell(dashboard, 2, 2, hurstState, text_color = hurstColor, text_halign = text.align_right)
+    table.cell(dashboard, 0, 3, "M2 Proxy", text_color = color.white)
+    table.cell(dashboard, 1, 3, m2BullTrend ? "Bull bias" : m2BearTrend ? "Bear bias" : "Flat", text_color = m2BullTrend ? color.green : m2BearTrend ? color.red : color.gray, text_halign = text.align_center)
+    table.cell(dashboard, 2, 3, useM2Engine ? "ACTIVE" : "OFF", text_color = useM2Engine ? color.green : color.gray, text_halign = text.align_right)
+    string derState = derNet > 5.0 ? "Bull demand" : derNet < -5.0 ? "Bear supply" : "Neutral"
+    table.cell(dashboard, 0, 4, "DER Energy", text_color = color.white)
+    table.cell(dashboard, 1, 4, derState + " (" + str.tostring(derNet, "#.##") + ")", text_color = color.white, text_halign = text.align_right)
+    table.cell(dashboard, 0, 5, "Kelly Risk", text_color = color.white)
+    table.cell(dashboard, 1, 5, str.tostring(kellyRiskPercent, "0.00") + "%", text_color = color.blue, text_halign = text.align_right)
+    table.cell(dashboard, 0, 6, "Active Order", text_color = color.white)
+    table.cell(dashboard, 1, 6, positionText + " (" + str.tostring(math.abs(strategy.position_size), "0.##") + ")", text_color = positionColor, text_halign = text.align_right)
+    table.cell(dashboard, 0, 7, "Trail Phase", text_color = color.white)
+    table.cell(dashboard, 1, 7, trailActive ? "TIGHT TRAIL" : "Phase 1 / Flat", text_color = trailActive ? color.orange : color.gray, text_halign = text.align_right)
+    table.cell(dashboard, 0, 8, "Max Drawdown", text_color = color.white)
+    table.cell(dashboard, 1, 8, str.tostring(maxDrawdownPercent, "#.##") + "%", text_color = color.orange, text_halign = text.align_right)

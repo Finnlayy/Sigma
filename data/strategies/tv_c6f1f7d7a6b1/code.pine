@@ -1,0 +1,1173 @@
+//@version=6
+strategy("QuantumForexTrader_HYPEUSDT_GovClusterReEntry_1m_STRATEGY", 
+     overlay=true, 
+     pyramiding=0, 
+     calc_on_every_tick=true, 
+     process_orders_on_close=false, 
+     default_qty_type=strategy.cash, 
+     default_qty_value=100, 
+     initial_capital=100, 
+     commission_type=strategy.commission.percent, 
+     commission_value=0.05, 
+     max_labels_count=500, 
+     max_boxes_count=100, 
+     max_bars_back=5000)
+
+// === Inputs ===
+group_analysis = "=== Quantum Core ==="
+historyBars = input.int(48, "History bars for analysis", group=group_analysis, minval=32, maxval=4096)
+confThreshold = input.float(0.55, "Minimum confidence", group=group_analysis, step=0.01)
+momentumThreshold = input.float(0.08, "Minimum momentum", group=group_analysis, step=0.01)
+memoryDecay = input.float(0.86, "Memory decay", group=group_analysis, minval=0.50, maxval=0.99, step=0.01)
+memoryThreshold = input.float(0.05, "Memory threshold", group=group_analysis, minval=0.01, maxval=1.00, step=0.01)
+
+group_filters = "=== Trend Filters ==="
+useEMAfilter = input.bool(true, "Use EMA Trend Filter", group=group_filters)
+useMTFfilter = input.bool(true, "Use higher timeframe trend filter", group=group_filters)
+useVolFilter = input.bool(true, "Use Volume Filter", group=group_filters)
+useATRfilter = input.bool(true, "Use ATR Volatility Filter", group=group_filters)
+useCandleFilter = input.bool(true, "Use Candle Body Filter", group=group_filters)
+trendEmaLen = input.int(34, "Trend EMA Length", group=group_filters)
+mtfTf = input.timeframe("5", "MTF Trend TF", group=group_filters)
+volLookback = input.int(30, "Volume SMA Length", group=group_filters)
+volMultiplier = input.float(1.00, "Min Relative Volume", group=group_filters, step=0.05)
+atrLen = input.int(14, "ATR Length", group=group_filters)
+atrMaLen = input.int(21, "ATR SMA Length", group=group_filters)
+atrMultiplier = input.float(0.95, "Min ATR vs ATR-SMA", group=group_filters, step=0.05)
+bodyRatioMin = input.float(0.35, "Min Candle Body Ratio", group=group_filters, step=0.05)
+
+group_sniper = "=== Sniper Logic ==="
+useSniperBiasFilter = input.bool(true, "Require sniper bias alignment", group=group_sniper)
+sniperMinPct = input.float(58.0, "Minimum sniper score %", group=group_sniper, minval=40, maxval=100, step=1)
+useSniperCrossTrigger = input.bool(true, "Allow EMA 9/21 cross trigger", group=group_sniper)
+strongBiasDiff = input.float(45.0, "Strong bias difference", group=group_sniper, minval=10, maxval=100, step=5)
+
+group_cluster = "=== Signal Cluster ==="
+useSignalCluster = input.bool(true, "Use signal cluster gate", group=group_cluster)
+clusterConsensusMin = input.float(0.55, "Cluster consensus threshold", group=group_cluster, minval=0.50, maxval=1.00, step=0.05)
+minClusterStrength = input.float(54.0, "Min cluster strength", group=group_cluster, minval=40.0, maxval=100.0, step=1.0)
+maxClusterConflict = input.float(30.0, "Max cluster conflict", group=group_cluster, minval=0.0, maxval=100.0, step=1.0)
+clusterBonusScore = input.int(2, "Cluster score bonus", group=group_cluster, minval=0, maxval=5)
+
+group_signal = "=== Signal Generation ==="
+signalIntervalMin = input.int(1, "Signal interval (minutes)", group=group_signal, minval=1, maxval=240)
+signalScoreMin = input.int(7, "Minimum total score", group=group_signal, minval=1, maxval=20)
+signalEdgeMin = input.int(2, "Minimum score edge", group=group_signal, minval=0, maxval=20)
+minMoveAtr = input.float(0.25, "Min move from last signal (ATR)", group=group_signal, step=0.05)
+entryQtyValue = input.float(100.0, "Entry qty (% of equity)", group=group_signal, minval=1.0, maxval=100.0, step=1.0)
+useCloseActionForExit = input.bool(true, "Use close instead of reverse-open", group=group_signal)
+
+group_hft = "=== HFT Turbo Layer ==="
+useHftTurboLayer = input.bool(true, "Use HFT turbo layer", group=group_hft)
+hftSignalScoreMin = input.int(4, "HFT min score", minval=1, maxval=20, group=group_hft)
+hftSignalEdgeMin = input.int(1, "HFT min edge", minval=0, maxval=20, group=group_hft)
+hftMinMoveAtr = input.float(0.05, "HFT min move from last signal (ATR)", minval=0.0, step=0.05, group=group_hft)
+useHftKamaPositionFilter = input.bool(true, "HFT KAMA position filter", group=group_hft)
+hftKamaLen = input.int(8, "HFT KAMA reaction", minval=2, group=group_hft)
+useHftFastExit = input.bool(true, "HFT fast exit on flip", group=group_hft)
+useHftCisdGate = input.bool(false, "HFT needs CISD alignment", group=group_hft)
+useHftTmaGate = input.bool(false, "HFT needs TMA trend", group=group_hft)
+useHftCooldownGate = input.bool(false, "HFT uses signal cooldown", group=group_hft)
+showHftKama = input.bool(false, "Show HFT KAMA", group=group_hft)
+
+group_cisd = "=== CISD Entry Layer ==="
+useCisdEntryLayer = input.bool(true, "Use CISD MTF entry layer", group=group_cisd)
+cisdTf15 = input.timeframe("15", "CISD timeframe 15m", group=group_cisd)
+cisdTf5 = input.timeframe("5", "CISD timeframe 5m", group=group_cisd)
+cisdAlignmentConfirmBars = input.int(1, "CISD alignment confirm bars", group=group_cisd, minval=1, maxval=5)
+
+group_ut = "=== UT Final Trigger ==="
+useUtFinalTrigger = input.bool(true, "Use UT Bot as final entry trigger", group=group_ut)
+utKeyValue = input.float(0.9, "UT key value", group=group_ut, minval=0.1, step=0.1)
+utAtrPeriod = input.int(10, "UT ATR period", group=group_ut, minval=1)
+utUseHeikinAshi = input.bool(false, "UT source from Heikin Ashi", group=group_ut)
+
+group_kama = "=== KAMA Filter ==="
+useKamaFilter = input.bool(true, "Use KAMA filter for opens/closes", group=group_kama)
+kamaSourceInput = input.source(close, "KAMA source", group=group_kama)
+kamaErLenInput = input.int(8, "KAMA ER length", minval=1, group=group_kama)
+kamaFastLenInput = input.int(2, "KAMA fast length", minval=1, group=group_kama)
+kamaSlowLenInput = input.int(24, "KAMA slow length", minval=1, group=group_kama)
+kamaRequireSlope = input.bool(true, "Require KAMA slope direction for entries", group=group_kama)
+showKama = input.bool(true, "Show KAMA", group=group_kama)
+
+group_tma = "=== TMA Context ==="
+useTmaTrendFilter = input.bool(true, "Use TMA trend context", group=group_tma)
+useTmaPatternBoost = input.bool(true, "Use TMA pattern score boost", group=group_tma)
+tmaPatternBonusScore = input.int(1, "TMA pattern bonus score", group=group_tma, minval=0, maxval=5)
+showTmaTrend = input.bool(false, "Show TMA SMMA lines", group=group_tma)
+
+group_ote = "=== Smart Money OTE ==="
+useOteFilter = input.bool(true, "Require OTE Zone Entry", group=group_ote)
+pivotLen = input.int(10, "Pivot Length", minval=1, group=group_ote)
+oteHighInput = input.float(0.786, "OTE Upper Level", step=0.001, group=group_ote)
+oteLowInput = input.float(0.618, "OTE Lower Level", step=0.001, group=group_ote)
+
+group_reentry = "=== Re-Entry Logic ==="
+enableReEntry = input.bool(true, "Enable delayed re-entry after reversal close", group=group_reentry)
+reEntryCooldownBars = input.int(2, "Re-entry cooldown bars", group=group_reentry, minval=1, maxval=50)
+reEntryExpiryBars = input.int(7, "Re-entry expiry bars", group=group_reentry, minval=2, maxval=100)
+requireStrongerReEntry = input.bool(true, "Require stronger re-entry signal", group=group_reentry)
+reEntryScoreBoost = input.int(2, "Re-entry score boost", group=group_reentry, minval=0, maxval=5)
+allowIntrabarReEntryOpen = input.bool(false, "Allow intrabar re-entry opens", group=group_reentry)
+
+group_governance = "=== Governance ==="
+useGovernance = input.bool(true, "Enable governance gates", group=group_governance)
+maxHoldingBars = input.int(4, "Max holding bars", group=group_governance, minval=1, maxval=200)
+useDynamicCooldown = input.bool(true, "Use ATR-based dynamic cooldown", group=group_governance)
+
+group_risk = "=== Risk Management ==="
+stopMode = input.string("Combined", "Stop-loss mode", options=["ATR", "Structure", "Combined"], group=group_risk)
+slAtrMultiplier = input.float(1.8, "SL ATR Multiplier", group=group_risk, minval=0.1, step=0.1)
+swingStopLen = input.int(6, "Swing stop length", group=group_risk, minval=3, maxval=30)
+swingStopBufferAtr = input.float(0.20, "Swing stop buffer (ATR)", group=group_risk, minval=0.0, step=0.05)
+stopSlippageTicks = input.float(2.0, "Stop slippage (ticks)", group=group_risk, minval=0.0, step=0.25)
+tpRiskCapAtr = input.float(0.50, "TP risk cap (ATR)", group=group_risk, minval=0.25, step=0.05)
+tp1Mult = input.float(0.42, "TP1 multiple", group=group_risk, minval=0.10, step=0.05)
+tp1PartialClosePct = input.float(45.0, "TP1 partial close %", group=group_risk, minval=0.0, maxval=100.0, step=5.0)
+trailAfterTp1Pct = input.float(0.035, "Trailing stop after TP1 (%)", group=group_risk, minval=0.001, step=0.005)
+
+group_visual = "=== Visuals ==="
+showDashboard = input.bool(true, "Show dashboard", group=group_visual)
+showRibbon = input.bool(true, "Show EMA ribbon", group=group_visual)
+showTargets = input.bool(true, "Show ATR targets", group=group_visual)
+showSignalLabels = input.bool(true, "Show entry/exit markers", group=group_visual)
+showVwap = input.bool(true, "Show VWAP", group=group_visual)
+ribbonOpacity = input.int(75, "EMA Ribbon Opacity", group=group_visual, minval=0, maxval=100)
+dashTextSizeStr = input.string("small", "Dashboard font size", options=["tiny", "small", "normal", "large", "huge"], group=group_visual)
+tradeTextSizeStr = input.string("small", "Trade label size", options=["tiny", "small", "normal", "large", "huge"], group=group_visual)
+labelOffset = input.int(12, "Label right offset (bars)", minval=1, group=group_visual)
+
+group_time = "=== Trading Schedule ==="
+useTimeFilter = input.bool(false, "Use time filter", group=group_time)
+startHour = input.int(7, "Start trading hour", group=group_time, minval=0, maxval=23)
+endHour = input.int(23, "End trading hour", group=group_time, minval=0, maxval=23)
+
+// === Functions ===
+getTextSize(string s) =>
+    switch s
+        "tiny"   => size.tiny
+        "normal" => size.normal
+        "large"  => size.large
+        "huge"   => size.huge
+        => size.small
+
+inSession() =>
+    if not useTimeFilter
+        true
+    else
+        int h = hour(time, syminfo.timezone)
+        startHour <= endHour ? (h >= startHour and h < endHour) : (h >= startHour or h < endHour)
+
+f_alignmentConfirmed(bool condition, int barsRequired) =>
+    condition and nz(ta.barssince(not condition), 100000) >= barsRequired - 1
+
+f_cisdLogic() =>
+    var float bullTarget = na
+    var float bearTarget = na
+    var string lastState = "Neutral"
+
+    bool isInside  = high < high[1] and low > low[1]
+    bool isBearish = close < open
+    bool isBullish = close > open
+
+    bool bullishCisd = not na(bullTarget) and close > bullTarget and close[1] <= bullTarget
+    bool bearishCisd = not na(bearTarget) and close < bearTarget and close[1] >= bearTarget
+
+    if barstate.isconfirmed
+        if bullishCisd
+            lastState := "Bullish"
+        if bearishCisd
+            lastState := "Bearish"
+
+    if isBearish and not isInside
+        bullTarget := open
+    if isBullish and not isInside
+        bearTarget := open
+
+    [lastState, bullishCisd, bearishCisd]
+
+f_cisdStateOnly() =>
+    [stateValue, _, _] = f_cisdLogic()
+    stateValue
+
+f_manualKama(float src, int len) =>
+    float diff = math.abs(src - src[len])
+    float volatility = math.sum(math.abs(src - src[1]), len)
+    float er = volatility != 0 ? diff / volatility : 0.0
+    float fastAlpha = 2.0 / (2.0 + 1.0)
+    float slowAlpha = 2.0 / (30.0 + 1.0)
+    float sc = math.pow(er * (fastAlpha - slowAlpha) + slowAlpha, 2)
+    float kama = na
+    kama := nz(kama[1], src) + sc * (src - nz(kama[1], src))
+    kama
+
+f_addDashRow(_table, _row, _title, _value, _textColor, _size) =>
+    table.cell(_table, 0, _row, _title, text_color=color.black, text_halign=text.align_left, text_size=_size)
+    table.cell(_table, 1, _row, _value, text_color=_textColor, text_halign=text.align_right, text_size=_size)
+
+buildEntryAlert(string action, string orderId, float orderPrice) =>
+    '{"action":"' + action + '","symbol":"' + syminfo.ticker + '","price":' + str.tostring(orderPrice, format.mintick) + ',"order_id":"' + orderId + '"}'
+
+buildCloseAlert(string orderId, float orderPrice) =>
+    '{"action":"close","symbol":"' + syminfo.ticker + '","price":' + str.tostring(orderPrice, format.mintick) + ',"order_id":"' + orderId + '"}'
+
+buildPartialCloseAlert(string orderId, float orderPrice, float sizePct) =>
+    '{"action":"close","symbol":"' + syminfo.ticker + '","price":' + str.tostring(orderPrice, format.mintick) + ',"order_id":"' + orderId + '","size_pct":' + str.tostring(sizePct, "#.##") + '}'
+
+// === Session ===
+sessionOK = inSession()
+var bool cisdPendingLong = false
+var bool cisdPendingShort = false
+var bool prevCisdBullAlignConfirmed = false
+var bool prevCisdBearAlignConfirmed = false
+
+// === Shared indicators ===
+ema9 = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+vwapValue = ta.vwap(hlc3)
+atrValue = ta.atr(atrLen)
+rsiValue = ta.rsi(close, 14)
+rsi5m = request.security(syminfo.tickerid, "5", ta.rsi(close, 14))
+[macdMain, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+[dmiPlus, dmiMinus, adxValue] = ta.dmi(14, 14)
+volAvg = ta.sma(volume, 20)
+
+// === KAMA filter ===
+kamaValue = f_manualKama(kamaSourceInput, kamaErLenInput)
+kamaRising = kamaValue > kamaValue[1]
+kamaFalling = kamaValue < kamaValue[1]
+
+// === TMA context ===
+tmaSmma21 = ta.rma(close, 21)
+tmaSmma50 = ta.rma(close, 50)
+tmaSmma100 = ta.rma(close, 100)
+tmaSmma200 = ta.rma(close, 200)
+
+tmaBullTrend = close > tmaSmma50 and tmaSmma21 > tmaSmma50 and tmaSmma50 > tmaSmma200
+tmaBearTrend = close < tmaSmma50 and tmaSmma21 < tmaSmma50 and tmaSmma50 < tmaSmma200
+
+tmaBullStrike = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
+tmaBearStrike = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
+tmaBullEngulfing = open <= close[1] and open < open[1] and close > open[1]
+tmaBearEngulfing = open >= close[1] and open > open[1] and close < open[1]
+
+tmaBullPattern = tmaBullStrike or tmaBullEngulfing
+tmaBearPattern = tmaBearStrike or tmaBearEngulfing
+tmaLongTrendOK = not useTmaTrendFilter or tmaBullTrend
+tmaShortTrendOK = not useTmaTrendFilter or tmaBearTrend
+longTmaPatternBonus = useTmaPatternBoost and tmaBullPattern ? tmaPatternBonusScore : 0
+shortTmaPatternBonus = useTmaPatternBoost and tmaBearPattern ? tmaPatternBonusScore : 0
+
+// === HFT turbo layer ===
+hftKamaValue = f_manualKama(close, hftKamaLen)
+hftKamaLongOK = not useHftKamaPositionFilter or close > hftKamaValue
+hftKamaShortOK = not useHftKamaPositionFilter or close < hftKamaValue
+
+// === Smart Money Fibonacci OTE Engine ===
+pvtHi = ta.pivothigh(high, pivotLen, pivotLen)
+pvtLo = ta.pivotlow(low,   pivotLen, pivotLen)
+
+var float lastSwingHigh    = na
+var float lastSwingLow     = na
+var int   lastSwingHighBar = na
+var int   lastSwingLowBar  = na
+var float prevSwingHigh    = na
+var float prevSwingLow     = na
+var int   trendState       = 0
+var float fibAnchorHigh    = na
+var float fibAnchorLow     = na
+var int   fibAnchorHighBar = na
+var int   fibAnchorLowBar  = na
+
+if not na(pvtHi)
+    prevSwingHigh    := lastSwingHigh
+    lastSwingHigh    := pvtHi
+    lastSwingHighBar := bar_index - pivotLen
+
+if not na(pvtLo)
+    prevSwingLow    := lastSwingLow
+    lastSwingLow     := pvtLo
+    lastSwingLowBar  := bar_index - pivotLen
+
+bool bullShift = false
+bool bearShift = false
+
+if not na(pvtHi) and not na(prevSwingHigh)
+    if pvtHi > prevSwingHigh and trendState <= 0
+        bullShift        := true
+        trendState       := 1
+        fibAnchorLow     := lastSwingLow
+        fibAnchorLowBar  := lastSwingLowBar
+        fibAnchorHigh    := pvtHi
+        fibAnchorHighBar := bar_index - pivotLen
+
+if not na(pvtLo) and not na(prevSwingLow)
+    if pvtLo < prevSwingLow and trendState >= 0
+        bearShift        := true
+        trendState       := -1
+        fibAnchorHigh    := lastSwingHigh
+        fibAnchorHighBar := lastSwingHighBar
+        fibAnchorLow     := pvtLo
+        fibAnchorLowBar  := bar_index - pivotLen
+
+if trendState == 1 and not bullShift and not na(pvtHi)
+    if not na(fibAnchorHigh) and pvtHi > fibAnchorHigh
+        fibAnchorHigh    := pvtHi
+        fibAnchorHighBar := bar_index - pivotLen
+
+if trendState == -1 and not bearShift and not na(pvtLo)
+    if not na(fibAnchorLow) and pvtLo < fibAnchorLow
+        fibAnchorLow    := pvtLo
+        fibAnchorLowBar := bar_index - pivotLen
+
+fibPrice(float level, float anchorHigh, float anchorLow, bool isBull) =>
+    isBull ? anchorHigh - (anchorHigh - anchorLow) * level : anchorLow + (anchorHigh - anchorLow) * level
+
+oteUpperPrice = not na(fibAnchorHigh) and not na(fibAnchorLow) ? fibPrice(oteHighInput, fibAnchorHigh, fibAnchorLow, trendState == 1) : na
+oteLowerPrice = not na(fibAnchorHigh) and not na(fibAnchorLow) ? fibPrice(oteLowInput,  fibAnchorHigh, fibAnchorLow, trendState == 1) : na
+
+// Low-latency OTE engine filtering: entries must be in the OTE range
+inOteZone = false
+if not na(oteUpperPrice) and not na(oteLowerPrice)
+    float highThresh = math.max(oteUpperPrice, oteLowerPrice)
+    float lowThresh = math.min(oteUpperPrice, oteLowerPrice)
+    inOteZone := close >= lowThresh and close <= highThresh
+
+oteLongOK  = not useOteFilter or (trendState == 1 and inOteZone)
+oteShortOK = not useOteFilter or (trendState == -1 and inOteZone)
+
+// === UT final trigger ===
+utAtrValue = ta.atr(utAtrPeriod)
+utLoss = utKeyValue * utAtrValue
+utSrc = utUseHeikinAshi ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, close, lookahead=barmerge.lookahead_off) : close
+
+float utTrailingStop = na
+utTrailingPrev = nz(utTrailingStop[1], 0.0)
+utTrailingStop :=
+     utSrc > utTrailingPrev and utSrc[1] > utTrailingPrev ? math.max(utTrailingPrev, utSrc - utLoss) :
+     utSrc < utTrailingPrev and utSrc[1] < utTrailingPrev ? math.min(utTrailingPrev, utSrc + utLoss) :
+     utSrc > utTrailingPrev ? utSrc - utLoss :
+     utSrc + utLoss
+
+utFast = ta.ema(utSrc, 1)
+utLongTrigger = utSrc > utTrailingStop and ta.crossover(utFast, utTrailingStop)
+utShortTrigger = utSrc < utTrailingStop and ta.crossunder(utFast, utTrailingStop)
+
+// === CISD entry layer ===
+[localCisdState, localBullCisd, localBearCisd] = f_cisdLogic()
+string cisdState15 = request.security(syminfo.tickerid, cisdTf15, f_cisdStateOnly(), lookahead=barmerge.lookahead_on)
+string cisdState5 = request.security(syminfo.tickerid, cisdTf5, f_cisdStateOnly(), lookahead=barmerge.lookahead_on)
+
+bool allCisdBullish = cisdState15 == "Bullish" and cisdState5 == "Bullish" and localCisdState == "Bullish"
+bool allCisdBearish = cisdState15 == "Bearish" and cisdState5 == "Bearish" and localCisdState == "Bearish"
+bool cisdBullishAlignmentConfirmed = f_alignmentConfirmed(allCisdBullish, cisdAlignmentConfirmBars)
+bool cisdBearishAlignmentConfirmed = f_alignmentConfirmed(allCisdBearish, cisdAlignmentConfirmBars)
+
+bool newCisdBullAlign = cisdBullishAlignmentConfirmed and not prevCisdBullAlignConfirmed
+bool newCisdBearAlign = cisdBearishAlignmentConfirmed and not prevCisdBearAlignConfirmed
+
+prevCisdBullAlignConfirmed := cisdBullishAlignmentConfirmed
+prevCisdBearAlignConfirmed := cisdBearishAlignmentConfirmed
+
+if newCisdBullAlign
+    cisdPendingLong := true
+    cisdPendingShort := false
+
+if newCisdBearAlign
+    cisdPendingShort := true
+    cisdPendingLong := false
+
+if not allCisdBullish
+    cisdPendingLong := false
+if not allCisdBearish
+    cisdPendingShort := false
+
+bool cisdLongTrigger = cisdPendingLong and localBullCisd and barstate.isconfirmed
+bool cisdShortTrigger = cisdPendingShort and localBearCisd and barstate.isconfirmed
+
+if cisdLongTrigger
+    cisdPendingLong := false
+if cisdShortTrigger
+    cisdPendingShort := false
+
+// === Quantum Analysis ===
+int maxHist = 4096
+int histLen = historyBars > maxHist ? maxHist : historyBars
+
+float upCount = 0.0
+float downCount = 0.0
+
+for i = 1 to histLen
+    if not na(close[i]) and not na(close[i + 1])
+        float chg = close[i] - close[i + 1]
+        float weight = 1.0 + ((histLen - i) / histLen)
+        if chg > 0
+            upCount += weight
+        else if chg < 0
+            downCount += weight
+
+totalMoves = upCount + downCount
+bullProb = totalMoves > 0 ? upCount / totalMoves : 0.0
+bearProb = totalMoves > 0 ? downCount / totalMoves : 0.0
+
+trendDir =
+     bullProb > bearProb ? 1 :
+     bearProb > bullProb ? -1 : 0
+
+stateMomentum =
+     bullProb > bearProb ? (bullProb - bearProb) :
+     bearProb > bullProb ? (bearProb - bullProb) : 0.0
+
+confidence = math.max(bullProb, bearProb)
+confidenceScore = confidence >= confThreshold ? 1 : 0
+momentumScore = stateMomentum >= momentumThreshold ? 1 : 0
+
+// === Quantum filters ===
+trendEmaValue = ta.ema(close, trendEmaLen)
+trendEmaSlope = trendEmaValue - trendEmaValue[1]
+emaBull = close > trendEmaValue and trendEmaSlope > 0
+emaBear = close < trendEmaValue and trendEmaSlope < 0
+
+mtfBull = request.security(syminfo.tickerid, mtfTf, close > ta.ema(close, trendEmaLen) and ta.ema(close, trendEmaLen) > ta.ema(close, trendEmaLen)[1])
+mtfBear = request.security(syminfo.tickerid, mtfTf, close < ta.ema(close, trendEmaLen) and ta.ema(close, trendEmaLen) < ta.ema(close, trendEmaLen)[1])
+
+volSMA = ta.sma(volume, volLookback)
+volOK = not na(volSMA) and volume > volSMA * volMultiplier
+
+atrBase = ta.sma(atrValue, atrMaLen)
+atrOK = not useATRfilter or (not na(atrBase) and atrValue >= atrBase * atrMultiplier)
+
+candleRange = math.max(high - low, syminfo.mintick)
+bodyRatio = math.abs(close - open) / candleRange
+bullCandle = close > open and bodyRatio >= bodyRatioMin
+bearCandle = close < open and bodyRatio >= bodyRatioMin
+
+// === Sniper dual-score logic ===
+float bullScoreSniper = 0.0
+bullScoreSniper += close > vwapValue ? 1 : 0
+bullScoreSniper += rsiValue > 50 ? 1 : 0
+bullScoreSniper += macdMain > macdSignal ? 1 : 0
+bullScoreSniper += ema9 > ema21 ? 1 : 0
+bullScoreSniper += adxValue > 25 and close > ema9 ? 1 : 0
+bullScoreSniper += volume > volAvg and close > open ? 1 : 0
+bullScoreSniper += rsi5m > 50 ? 1 : 0
+bullPct = bullScoreSniper / 7.0 * 100.0
+
+float bearScoreSniper = 0.0
+bearScoreSniper += close < vwapValue ? 1 : 0
+bearScoreSniper += rsiValue < 50 ? 1 : 0
+bearScoreSniper += macdMain < macdSignal ? 1 : 0
+bearScoreSniper += ema9 < ema21 ? 1 : 0
+bearScoreSniper += adxValue > 25 and close < ema9 ? 1 : 0
+bearScoreSniper += volume > volAvg and close < open ? 1 : 0
+bearScoreSniper += rsi5m < 50 ? 1 : 0
+bearPct = bearScoreSniper / 7.0 * 100.0
+
+biasDiff = bullPct - bearPct
+biasText =
+     biasDiff >= strongBiasDiff ? "STRONG BULL" :
+     -biasDiff >= strongBiasDiff ? "STRONG BEAR" :
+     bullPct > bearPct ? "MILD BULL" :
+     bearPct > bullPct ? "MILD BEAR" : "NEUTRAL"
+
+biasColor =
+     biasText == "STRONG BULL" ? color.green :
+     biasText == "STRONG BEAR" ? color.red :
+     color.gray
+
+sniperLongBias = bullPct > bearPct and bullPct >= sniperMinPct
+sniperShortBias = bearPct > bullPct and bearPct >= sniperMinPct
+
+sniperLongTrigger = useSniperCrossTrigger and ta.crossover(ema9, ema21) and sniperLongBias and close > vwapValue and macdMain > macdSignal and rsi5m > 50
+sniperShortTrigger = useSniperCrossTrigger and ta.crossunder(ema9, ema21) and sniperShortBias and close < vwapValue and macdMain < macdSignal and rsi5m < 50
+
+// === Persistent state ===
+varip int lastSignalBarIndex = na
+varip int lastSignalType = 0
+varip float lastSignalPrice = na
+varip float qMemory = 0.0
+varip int orderSeq = 0
+varip string openLongOrderId = ""
+varip string openShortOrderId = ""
+varip bool closedThisBar = false
+varip bool closeShortFiredThisBar = false
+varip bool closeLongFiredThisBar = false
+varip bool buyFiredThisBar = false
+varip bool sellFiredThisBar = false
+varip float prevPositionSize = 0.0
+varip bool awaitingHandledCloseFill = false
+
+var int activeTradeDir = 0
+var int activeTradeEntryBar = na
+var float entryPrice = na
+var float stopPrice = na
+var string activeStopMode = "Flat"
+var float tp1Price = na
+var float tp2Price = na
+var float tp3Price = na
+var float tp4Price = na
+var float tp5Price = na
+var bool tp1Hit = false
+var bool tp2Hit = false
+var bool tp3Hit = false
+var bool tp4Hit = false
+var bool tp5Hit = false
+var bool tp1PartialTaken = false
+var bool trailActive = false
+var float trailStopPrice = na
+var float trailExtremePrice = na
+var int trailActivationBar = na
+
+var line entryLine = na
+var line stopLine = na
+var line tp1Line = na
+var line tp2Line = na
+var line tp3Line = na
+var line tp4Line = na
+var line tp5Line = na
+var line guideLine = na
+
+var label entryLabel = na
+var label tp1Label = na
+var label tp2Label = na
+var label tp3Label = na
+var label tp4Label = na
+var label tp5Label = na
+
+var bool governanceKillSwitch = false
+var string governanceStatus = "HOLD-ONLY"
+
+var bool reEntryPending = false
+var int reEntryDirection = 0
+var int reEntryAnchorBar = na
+var string reEntryReasonText = ""
+
+if barstate.isnew
+    closedThisBar := false
+    closeShortFiredThisBar := false
+    closeLongFiredThisBar := false
+    buyFiredThisBar := false
+    sellFiredThisBar := false
+
+bool positionJustClosed = prevPositionSize != 0 and strategy.position_size == 0
+
+if positionJustClosed
+    closedThisBar := true
+    lastSignalBarIndex := bar_index
+    lastSignalPrice := close
+
+    if not awaitingHandledCloseFill
+        activeTradeDir := 0
+        activeTradeEntryBar := na
+        entryPrice := na
+        stopPrice := na
+        activeStopMode := "Flat"
+        tp1Price := na
+        tp2Price := na
+        tp3Price := na
+        tp4Price := na
+        tp5Price := na
+        tp1Hit := false
+        tp2Hit := false
+        tp3Hit := false
+        tp4Hit := false
+        tp5Hit := false
+        tp1PartialTaken := false
+        trailActive := false
+        trailStopPrice := na
+        trailExtremePrice := na
+        trailActivationBar := na
+        reEntryPending := false
+        reEntryDirection := 0
+        reEntryAnchorBar := na
+        reEntryReasonText := ""
+        openLongOrderId := ""
+        openShortOrderId := ""
+
+    awaitingHandledCloseFill := false
+
+if awaitingHandledCloseFill and strategy.position_size == 0
+    awaitingHandledCloseFill := false
+
+governanceKillSwitch := false
+governanceStatus := useGovernance ? "HOLD-ONLY" : "OFF"
+governanceOpenAllowed = true
+
+// === Memory ===
+memoryInput =
+     trendDir == 1 ? (0.18 + stateMomentum * 0.30) :
+     trendDir == -1 ? -(0.18 + stateMomentum * 0.30) : 0.0
+
+qMemory := math.max(-1.0, math.min(1.0, qMemory * memoryDecay + memoryInput))
+memoryBias =
+     qMemory > memoryThreshold ? 1 :
+     qMemory < -memoryThreshold ? -1 : 0
+
+preferredDir = trendDir != 0 ? trendDir : memoryBias
+
+// === Structure swings for stop placement ===
+var float lastSwingHighStop = na
+var float lastSwingLowStop = na
+
+if not na(pvtHi)
+    lastSwingHighStop := pvtHi
+if not na(pvtLo)
+    lastSwingLowStop := pvtLo
+
+// === Signal cluster ===
+float bullClusterWeight = 0.0
+float bearClusterWeight = 0.0
+int bullClusterVotes = 0
+int bearClusterVotes = 0
+float clusterPossibleWeight = 92.0
+
+if trendDir == 1
+    bullClusterWeight += 12
+    bullClusterVotes += 1
+else if trendDir == -1
+    bearClusterWeight += 12
+    bearClusterVotes += 1
+
+if memoryBias == 1
+    bullClusterWeight += 8
+    bullClusterVotes += 1
+else if memoryBias == -1
+    bearClusterWeight += 8
+    bearClusterVotes += 1
+
+if emaBull
+    bullClusterWeight += 8
+    bullClusterVotes += 1
+if emaBear
+    bearClusterWeight += 8
+    bearClusterVotes += 1
+
+if mtfBull
+    bullClusterWeight += 10
+    bullClusterVotes += 1
+if mtfBear
+    bearClusterWeight += 10
+    bearClusterVotes += 1
+
+if close > vwapValue
+    bullClusterWeight += 8
+    bullClusterVotes += 1
+if close < vwapValue
+    bearClusterWeight += 8
+    bearClusterVotes += 1
+
+if macdMain > macdSignal
+    bullClusterWeight += 8
+    bullClusterVotes += 1
+if macdMain < macdSignal
+    bearClusterWeight += 8
+    bearClusterVotes += 1
+
+if adxValue > 20 and ema9 > ema21
+    bullClusterWeight += 6
+    bullClusterVotes += 1
+if adxValue > 20 and ema9 < ema21
+    bearClusterWeight += 6
+    bearClusterVotes += 1
+
+if bullCandle
+    bullClusterWeight += 6
+    bullClusterVotes += 1
+if bearCandle
+    bearClusterWeight += 6
+    bearClusterVotes += 1
+
+if volOK and close > open
+    bullClusterWeight += 6
+    bullClusterVotes += 1
+if volOK and close < open
+    bearClusterWeight += 6
+    bearClusterVotes += 1
+
+if sniperLongBias
+    bullClusterWeight += 10
+    bullClusterVotes += 1
+if sniperShortBias
+    bearClusterWeight += 10
+    bearClusterVotes += 1
+
+if sniperLongTrigger
+    bullClusterWeight += 10
+    bullClusterVotes += 1
+if sniperShortTrigger
+    bearClusterWeight += 10
+    bearClusterVotes += 1
+
+int totalClusterVotes = bullClusterVotes + bearClusterVotes
+bullConsensus = totalClusterVotes > 0 ? bullClusterVotes / totalClusterVotes : 0.0
+bearConsensus = totalClusterVotes > 0 ? bearClusterVotes / totalClusterVotes : 0.0
+clusterDirection =
+     bullConsensus >= clusterConsensusMin ? 1 :
+     bearConsensus >= clusterConsensusMin ? -1 : 0
+clusterStrength = totalClusterVotes > 0 ? math.max(bullClusterWeight, bearClusterWeight) / clusterPossibleWeight * 100.0 : 0.0
+clusterConflict = totalClusterVotes > 0 ? math.min(bullClusterVotes, bearClusterVotes) / totalClusterVotes * 100.0 : 0.0
+clusterConsensusPct = clusterDirection == 1 ? bullConsensus * 100.0 : clusterDirection == -1 ? bearConsensus * 100.0 : 0.0
+
+clusterLongOK = not useSignalCluster or (clusterDirection == 1 and clusterStrength >= minClusterStrength and clusterConflict <= maxClusterConflict)
+clusterShortOK = not useSignalCluster or (clusterDirection == -1 and clusterStrength >= minClusterStrength and clusterConflict <= maxClusterConflict)
+
+// === Dynamic cooldown ===
+chartSecondsRaw = timeframe.in_seconds(timeframe.period)
+chartSeconds = na(chartSecondsRaw) ? 60 : chartSecondsRaw
+baseIntervalBars = math.max(1, int(math.ceil(signalIntervalMin * 60.0 / chartSeconds)))
+atrRatio = not na(atrBase) and atrBase > 0 ? atrValue / atrBase : 1.0
+cooldownFactor =
+     not useDynamicCooldown ? 1.0 :
+     atrRatio >= 1.8 ? 2.0 :
+     atrRatio >= 1.2 ? 1.5 :
+     1.0
+requiredIntervalBars = math.max(1, int(math.ceil(baseIntervalBars * cooldownFactor)))
+newCheck = na(lastSignalBarIndex) ? true : (bar_index - lastSignalBarIndex >= requiredIntervalBars)
+
+// === Hybrid score ===
+longScore =
+     (preferredDir == 1 ? 2 : 0) +
+     (trendDir == 1 ? 1 : 0) +
+     (memoryBias == 1 ? 1 : 0) +
+     confidenceScore +
+     momentumScore +
+     ((not useEMAfilter or emaBull) ? 1 : 0) +
+     ((not useMTFfilter or mtfBull) ? 1 : 0) +
+     ((not useVolFilter or volOK) ? 1 : 0) +
+     (atrOK ? 1 : 0) +
+     ((not useCandleFilter or bullCandle) ? 1 : 0) +
+     (bullPct > bearPct ? 2 : 0) +
+     (biasDiff >= strongBiasDiff ? 1 : 0) +
+     (close > vwapValue ? 1 : 0) +
+     (macdMain > macdSignal ? 1 : 0) +
+     (adxValue > 25 ? 1 : 0) +
+     (rsi5m > 50 ? 1 : 0) +
+     longTmaPatternBonus +
+     (clusterDirection == 1 ? clusterBonusScore : 0)
+
+shortScore =
+     (preferredDir == -1 ? 2 : 0) +
+     (trendDir == -1 ? 1 : 0) +
+     (memoryBias == -1 ? 1 : 0) +
+     confidenceScore +
+     momentumScore +
+     ((not useEMAfilter or emaBear) ? 1 : 0) +
+     ((not useMTFfilter or mtfBear) ? 1 : 0) +
+     ((not useVolFilter or volOK) ? 1 : 0) +
+     (atrOK ? 1 : 0) +
+     ((not useCandleFilter or bearCandle) ? 1 : 0) +
+     (bearPct > bullPct ? 2 : 0) +
+     (-biasDiff >= strongBiasDiff ? 1 : 0) +
+     (close < vwapValue ? 1 : 0) +
+     (macdMain < macdSignal ? 1 : 0) +
+     (adxValue > 25 ? 1 : 0) +
+     (rsi5m < 50 ? 1 : 0) +
+     shortTmaPatternBonus +
+     (clusterDirection == -1 ? clusterBonusScore : 0)
+
+longEdge = longScore - shortScore
+shortEdge = shortScore - longScore
+
+longRearmOK = na(lastSignalPrice) or lastSignalType != 1 or close >= lastSignalPrice + atrValue * minMoveAtr
+shortRearmOK = na(lastSignalPrice) or lastSignalType != -1 or close <= lastSignalPrice - atrValue * minMoveAtr
+hftLongRearmOK = na(lastSignalPrice) or lastSignalType != 1 or close >= lastSignalPrice + atrValue * hftMinMoveAtr
+hftShortRearmOK = na(lastSignalPrice) or lastSignalType != -1 or close <= lastSignalPrice - atrValue * hftMinMoveAtr
+
+longBiasGate = not useSniperBiasFilter or sniperLongBias or biasText == "STRONG BULL"
+shortBiasGate = not useSniperBiasFilter or sniperShortBias or biasText == "STRONG BEAR"
+
+float hftLongScore = 0.0
+float hftShortScore = 0.0
+
+hftLongScore += close > ema9 ? 1 : 0
+hftLongScore += ema9 > ema21 ? 1 : 0
+hftLongScore += close > vwapValue ? 1 : 0
+hftLongScore += macdMain > macdSignal ? 1 : 0
+hftLongScore += bullProb > confThreshold ? 2 : 0
+
+hftShortScore += close < ema9 ? 1 : 0
+hftShortScore += ema9 < ema21 ? 1 : 0
+hftShortScore += close < vwapValue ? 1 : 0
+hftShortScore += macdMain < macdSignal ? 1 : 0
+hftShortScore += bearProb > confThreshold ? 2 : 0
+
+hftLongCondition = hftLongScore >= hftSignalScoreMin and (hftLongScore - hftShortScore) >= hftSignalEdgeMin and hftKamaLongOK
+hftShortCondition = hftShortScore >= hftSignalScoreMin and (hftShortScore - hftLongScore) >= hftSignalEdgeMin and hftKamaShortOK
+hftLongCisdOK = not useHftCisdGate or not useCisdEntryLayer or allCisdBullish
+hftShortCisdOK = not useHftCisdGate or not useCisdEntryLayer or allCisdBearish
+hftLongTmaOK = not useHftTmaGate or tmaLongTrendOK
+hftShortTmaOK = not useHftTmaGate or tmaShortTrendOK
+hftNewCheckOK = not useHftCooldownGate or newCheck
+hftLongContextOK = sessionOK and hftNewCheckOK and governanceOpenAllowed and hftLongRearmOK and hftLongCisdOK and hftLongTmaOK
+hftShortContextOK = sessionOK and hftNewCheckOK and governanceOpenAllowed and hftShortRearmOK and hftShortCisdOK and hftShortTmaOK
+hftLongSignal = useHftTurboLayer and hftLongCondition and hftLongContextOK
+hftShortSignal = useHftTurboLayer and hftShortCondition and hftShortContextOK
+
+cisdLongEntryOK = not useCisdEntryLayer or cisdLongTrigger
+cisdShortEntryOK = not useCisdEntryLayer or cisdShortTrigger
+cisdLongReEntryOK = not useCisdEntryLayer or allCisdBullish
+cisdShortReEntryOK = not useCisdEntryLayer or allCisdBearish
+utLongEntryOK = not useUtFinalTrigger or utLongTrigger
+utShortEntryOK = not useUtFinalTrigger or utShortTrigger
+kamaLongEntryOK = not useKamaFilter or (kamaSourceInput > kamaValue and (not kamaRequireSlope or kamaRising))
+kamaShortEntryOK = not useKamaFilter or (kamaSourceInput < kamaValue and (not kamaRequireSlope or kamaFalling))
+
+bool rawLongSignal = sessionOK and newCheck and governanceOpenAllowed and longRearmOK and longBiasGate and clusterLongOK and cisdLongEntryOK and utLongEntryOK and kamaLongEntryOK and tmaLongTrendOK and oteLongOK and longScore >= signalScoreMin and longEdge >= signalEdgeMin
+bool rawShortSignal = sessionOK and newCheck and governanceOpenAllowed and shortRearmOK and shortBiasGate and clusterShortOK and cisdShortEntryOK and utShortEntryOK and kamaShortEntryOK and tmaShortTrendOK and oteShortOK and shortScore >= signalScoreMin and shortEdge >= signalEdgeMin
+
+rawLongSignal := rawLongSignal or (governanceOpenAllowed and sessionOK and clusterLongOK and cisdLongEntryOK and utLongEntryOK and kamaLongEntryOK and tmaLongTrendOK and oteLongOK and sniperLongTrigger)
+rawShortSignal := rawShortSignal or (governanceOpenAllowed and sessionOK and clusterShortOK and cisdShortEntryOK and utShortEntryOK and kamaShortEntryOK and tmaShortTrendOK and oteShortOK and sniperShortTrigger)
+rawLongSignal := rawLongSignal or hftLongSignal
+rawShortSignal := rawShortSignal or hftShortSignal
+
+if rawLongSignal and rawShortSignal
+    if bullPct >= bearPct
+        rawShortSignal := false
+    else
+        rawLongSignal := false
+
+// === Re-entry management ===
+if reEntryPending and not na(reEntryAnchorBar) and bar_index - reEntryAnchorBar > reEntryExpiryBars
+    reEntryPending := false
+    reEntryDirection := 0
+    reEntryAnchorBar := na
+    reEntryReasonText := ""
+
+hasTrackedLong = strategy.position_size > 0
+hasTrackedShort = strategy.position_size < 0
+entryFlatAndClean = strategy.position_size == 0 and strategy.opentrades == 0 and activeTradeDir == 0 and not awaitingHandledCloseFill
+
+reEntryBarsOK = not na(reEntryAnchorBar) and bar_index - reEntryAnchorBar >= reEntryCooldownBars
+reEntryLongReady = enableReEntry and reEntryPending and reEntryDirection == 1 and entryFlatAndClean and reEntryBarsOK and sessionOK and governanceOpenAllowed and clusterLongOK and cisdLongReEntryOK and kamaLongEntryOK and tmaLongTrendOK and oteLongOK and longBiasGate and longScore >= signalScoreMin + (requireStrongerReEntry ? reEntryScoreBoost : 0) and longEdge >= signalEdgeMin and (preferredDir == 1 or sniperLongBias or emaBull)
+reEntryShortReady = enableReEntry and reEntryPending and reEntryDirection == -1 and entryFlatAndClean and reEntryBarsOK and sessionOK and governanceOpenAllowed and clusterShortOK and cisdShortReEntryOK and kamaShortEntryOK and tmaShortTrendOK and oteShortOK and shortBiasGate and shortScore >= signalScoreMin + (requireStrongerReEntry ? reEntryScoreBoost : 0) and shortEdge >= signalEdgeMin and (preferredDir == -1 or sniperShortBias or emaBear)
+
+// === Rapid Exit Logic (HFT & High Volatility Spike Focus) ===
+volumeSpikeExit = volume > ta.sma(volume, 20) * 2.5
+rapidExitLong = volumeSpikeExit and close < open
+rapidExitShort = volumeSpikeExit and close > open
+
+// === Close logic ===
+holdingBarsExceeded = useGovernance and activeTradeDir != 0 and not na(activeTradeEntryBar) and (bar_index - activeTradeEntryBar >= maxHoldingBars)
+governanceForceCloseLong = activeTradeDir == 1 and holdingBarsExceeded
+governanceForceCloseShort = activeTradeDir == -1 and holdingBarsExceeded
+
+closeShortOnReversal = useCloseActionForExit and hasTrackedShort and rawLongSignal
+closeLongOnReversal = useCloseActionForExit and hasTrackedLong and rawShortSignal
+closeShortOnKama = useKamaFilter and hasTrackedShort and ta.crossover(kamaSourceInput, kamaValue)
+closeLongOnKama = useKamaFilter and hasTrackedLong and ta.crossunder(kamaSourceInput, kamaValue)
+closeShortOnHftFlip = useHftFastExit and hasTrackedShort and (hftLongCondition or close > hftKamaValue)
+closeLongOnHftFlip = useHftFastExit and hasTrackedLong and (hftShortCondition or close < hftKamaValue)
+closeShortOnTrail = hasTrackedShort and trailActive and not na(trailStopPrice) and not na(trailActivationBar) and bar_index > trailActivationBar and high >= trailStopPrice
+closeLongOnTrail = hasTrackedLong and trailActive and not na(trailStopPrice) and not na(trailActivationBar) and bar_index > trailActivationBar and low <= trailStopPrice
+closeShortOnGovernance = hasTrackedShort and governanceForceCloseShort
+closeLongOnGovernance = hasTrackedLong and governanceForceCloseLong
+
+closeShortSignal = closeShortOnReversal or closeShortOnKama or closeShortOnHftFlip or closeShortOnTrail or closeShortOnGovernance or rapidExitShort
+closeLongSignal = closeLongOnReversal or closeLongOnKama or closeLongOnHftFlip or closeLongOnTrail or closeLongOnGovernance or rapidExitLong
+buySignal = (rawLongSignal or reEntryLongReady) and entryFlatAndClean and not closedThisBar
+sellSignal = (rawShortSignal or reEntryShortReady) and entryFlatAndClean and not closedThisBar
+
+fireCloseShort = closeShortSignal and not closeShortFiredThisBar
+fireCloseLong = closeLongSignal and not closeLongFiredThisBar
+buyOpenTimingOK = (reEntryLongReady and allowIntrabarReEntryOpen) or hftLongSignal or barstate.isconfirmed
+sellOpenTimingOK = (reEntryShortReady and allowIntrabarReEntryOpen) or hftShortSignal or barstate.isconfirmed
+fireBuy = buySignal and buyOpenTimingOK and not buyFiredThisBar
+fireSell = sellSignal and sellOpenTimingOK and not sellFiredThisBar
+
+showCloseShortMarker = fireCloseShort and (closeShortOnReversal or closeShortOnKama or closeShortOnGovernance)
+showCloseLongMarker = fireCloseLong and (closeLongOnReversal or closeLongOnKama or closeLongOnGovernance)
+showCloseShortMarker := showCloseShortMarker or (fireCloseShort and (closeShortOnHftFlip or rapidExitShort))
+showCloseLongMarker := showCloseLongMarker or (fireCloseLong and (closeLongOnHftFlip or rapidExitLong))
+closeShortComment = closeShortOnTrail ? "Trail Short" : closeShortOnHftFlip ? "HFT Short" : closeShortOnKama ? "KAMA Short" : rapidExitShort ? "Spike Short" : "Close Short"
+closeLongComment = closeLongOnTrail ? "Trail Long" : closeLongOnHftFlip ? "HFT Long" : closeLongOnKama ? "KAMA Long" : rapidExitLong ? "Spike Long" : "Close Long"
+
+sellGovernanceBlocked = not governanceOpenAllowed
+sellCooldownBlocked = not newCheck
+sellClusterBlocked = not clusterShortOK
+string sellBlockText = ""
+if sellGovernanceBlocked
+    sellBlockText += "GOV"
+if sellCooldownBlocked
+    sellBlockText += (str.length(sellBlockText) > 0 ? "|" : "") + "COOLDOWN"
+if sellClusterBlocked
+    sellBlockText += (str.length(sellBlockText) > 0 ? "|" : "") + "CLUSTER"
+sellBlockText := str.length(sellBlockText) > 0 ? sellBlockText : "NONE"
+sellBlockColor =
+     sellBlockText == "NONE" ? color.green :
+     str.contains(sellBlockText, "GOV") ? color.red :
+     color.orange
+
+if fireCloseShort
+    closeShortFiredThisBar := true
+if fireCloseLong
+    closeLongFiredThisBar := true
+if fireBuy
+    buyFiredThisBar := true
+if fireSell
+    sellFiredThisBar := true
+
+if fireCloseShort or fireCloseLong
+    awaitingHandledCloseFill := true
+
+if fireBuy or fireSell
+    awaitingHandledCloseFill := false
+
+if fireBuy or fireSell or fireCloseShort or fireCloseLong
+    lastSignalBarIndex := bar_index
+    lastSignalType := fireBuy or fireCloseShort ? 1 : fireSell or fireCloseLong ? -1 : lastSignalType
+    lastSignalPrice := close
+
+queueReEntryLong = fireCloseShort and closeShortOnReversal and enableReEntry
+queueReEntryShort = fireCloseLong and closeLongOnReversal and enableReEntry
+
+if fireCloseShort or fireCloseLong
+    activeTradeDir := 0
+    activeTradeEntryBar := na
+    entryPrice := na
+    stopPrice := na
+    activeStopMode := "Flat"
+    tp1Price := na
+    tp2Price := na
+    tp3Price := na
+    tp4Price := na
+    tp5Price := na
+    tp1Hit := false
+    tp2Hit := false
+    tp3Hit := false
+    tp4Hit := false
+    tp5Hit := false
+    tp1PartialTaken := false
+    trailActive := false
+    trailStopPrice := na
+    trailExtremePrice := na
+    trailActivationBar := na
+
+    if queueReEntryLong
+        reEntryPending := true
+        reEntryDirection := 1
+        reEntryAnchorBar := bar_index
+        reEntryReasonText := "REV-LONG"
+    else if queueReEntryShort
+        reEntryPending := true
+        reEntryDirection := -1
+        reEntryAnchorBar := bar_index
+        reEntryReasonText := "REV-SHORT"
+    else
+        reEntryPending := false
+        reEntryDirection := 0
+        reEntryAnchorBar := na
+        reEntryReasonText := ""
+
+if fireBuy or fireSell
+    float atrStopPrice = fireBuy ? close - atrValue * slAtrMultiplier : close + atrValue * slAtrMultiplier
+    float structureStopPrice = fireBuy ? lastSwingLowStop - atrValue * swingStopBufferAtr : lastSwingHighStop + atrValue * swingStopBufferAtr
+    bool validStructureStop = fireBuy ? (not na(structureStopPrice) and structureStopPrice < close) : (not na(structureStopPrice) and structureStopPrice > close)
+    bool useAtrOnly = stopMode == "ATR" or not validStructureStop
+    bool useStructureOnly = stopMode == "Structure" and validStructureStop
+    float resolvedStopPrice =
+         useAtrOnly ? atrStopPrice :
+         useStructureOnly ? structureStopPrice :
+         fireBuy ? math.min(atrStopPrice, structureStopPrice) : math.max(atrStopPrice, structureStopPrice)
+    float stopSlippageOffset = syminfo.mintick * stopSlippageTicks
+    resolvedStopPrice := fireBuy ? resolvedStopPrice - stopSlippageOffset : resolvedStopPrice + stopSlippageOffset
+    
+    // Tight risk limit enforcement: Strict hard stop capped at maximum 1.0%
+    float maxPctLimit = 0.01
+    float absoluteHardLimitPrice = fireBuy ? close * (1.0 - maxPctLimit) : close * (1.0 + maxPctLimit)
+    resolvedStopPrice := fireBuy ? math.max(resolvedStopPrice, absoluteHardLimitPrice) : math.min(resolvedStopPrice, absoluteHardLimitPrice)
+    
+    string resolvedStopMode =
+         useAtrOnly ? "ATR" :
+         useStructureOnly ? "Structure" :
+         "Combined"
+    float risk = math.abs(close - resolvedStopPrice)
+    float tpRiskBasis = math.min(risk, atrValue * tpRiskCapAtr)
+
+    activeTradeDir := fireBuy ? 1 : -1
+    activeTradeEntryBar := bar_index
+    entryPrice := close
+    stopPrice := resolvedStopPrice
+    activeStopMode := resolvedStopMode
+    tp1Price := fireBuy ? entryPrice + tpRiskBasis * tp1Mult : entryPrice - tpRiskBasis * tp1Mult
+    tp1Hit := false
+    tp1PartialTaken := false
+    trailActive := false
+    trailStopPrice := na
+    trailExtremePrice := na
+    trailActivationBar := na
+    reEntryPending := false
+    reEntryDirection := 0
+    reEntryAnchorBar := na
+    reEntryReasonText := ""
+
+canEvaluateTargets = activeTradeDir != 0 and not na(activeTradeEntryBar) and bar_index > activeTradeEntryBar
+
+if canEvaluateTargets and activeTradeDir == 1
+    tp1Hit := tp1Hit or high >= tp1Price
+else if canEvaluateTargets and activeTradeDir == -1
+    tp1Hit := tp1Hit or low <= tp1Price
+
+bool fireTp1PartialLong = false
+bool fireTp1PartialShort = false
+
+if activeTradeDir == 1
+    if tp1Hit and not tp1PartialTaken
+        tp1PartialTaken := true
+        trailActive := true
+        trailActivationBar := bar_index
+        trailExtremePrice := high
+        trailStopPrice := trailExtremePrice * (1.0 - trailAfterTp1Pct / 100.0)
+        stopPrice := math.max(stopPrice, trailStopPrice)
+        fireTp1PartialLong := hasTrackedLong
+    else if trailActive
+        trailExtremePrice := math.max(nz(trailExtremePrice, high), high)
+        trailStopPrice := trailExtremePrice * (1.0 - trailAfterTp1Pct / 100.0)
+        stopPrice := math.max(stopPrice, trailStopPrice)
+else if activeTradeDir == -1
+    if tp1Hit and not tp1PartialTaken
+        tp1PartialTaken := true
+        trailActive := true
+        trailActivationBar := bar_index
+        trailExtremePrice := low
+        trailStopPrice := trailExtremePrice * (1.0 + trailAfterTp1Pct / 100.0)
+        stopPrice := math.min(stopPrice, trailStopPrice)
+        fireTp1PartialShort := hasTrackedShort
+    else if trailActive
+        trailExtremePrice := math.min(nz(trailExtremePrice, low), low)
+        trailStopPrice := trailExtremePrice * (1.0 + trailAfterTp1Pct / 100.0)
+        stopPrice := math.min(stopPrice, trailStopPrice)
+
+// === Visuals ===
+dashTextSize = getTextSize(dashTextSizeStr)
+tradeTextSize = getTextSize(tradeTextSizeStr)
+
+pFast = plot(showRibbon ? ema9 : na, color=color.new(color.green, 20), title="EMA 9")
+pSlow = plot(showRibbon ? ema21 : na, color=color.new(color.red, 20), title="EMA 21")
+fill(pFast, pSlow, color = ema9 > ema21 ? color.new(color.green, 100 - ribbonOpacity) : color.new(color.red, 100 - ribbonOpacity))
+plot(showVwap ? vwapValue : na, color=close > vwapValue ? color.green : color.red, linewidth=2, title="VWAP")
+plot(showKama ? kamaValue : na, color=kamaSourceInput >= kamaValue ? color.aqua : color.fuchsia, linewidth=2, title="KAMA")
+plot(showHftKama ? hftKamaValue : na, color=color.orange, linewidth=2, title="HFT KAMA")
+plot(showTmaTrend ? tmaSmma21 : na, color=color.white, linewidth=2, title="TMA 21 SMMA")
+plot(showTmaTrend ? tmaSmma50 : na, color=color.new(#6aff00, 0), linewidth=2, title="TMA 50 SMMA")
+plot(showTmaTrend ? tmaSmma100 : na, color=color.new(color.yellow, 0), linewidth=2, title="TMA 100 SMMA")
+plot(showTmaTrend ? tmaSmma200 : na, color=color.new(#ff0500, 0), linewidth=2, title="TMA 200 SMMA")
+
+plotshape(showSignalLabels and buyFiredThisBar and not reEntryLongReady, title="Buy Open", style=shape.arrowup, location=location.belowbar, color=color.new(color.green, 0), size=size.large)
+plotshape(showSignalLabels and buyFiredThisBar and reEntryLongReady, title="Re-Buy Open", style=shape.arrowup, location=location.belowbar, color=color.new(color.teal, 0), size=size.large)
+plotshape(showSignalLabels and sellFiredThisBar and not reEntryShortReady, title="Sell Open", style=shape.arrowdown, location=location.abovebar, color=color.new(color.red, 0), size=size.large)
+plotshape(showSignalLabels and sellFiredThisBar and reEntryShortReady, title="Re-Sell Open", style=shape.arrowdown, location=location.abovebar, color=color.new(color.maroon, 0), size=size.large)
+plotshape(showSignalLabels and showCloseShortMarker, title="Close Short", style=shape.arrowup, location=location.belowbar, color=color.new(color.orange, 0), size=size.small)
+plotshape(showSignalLabels and showCloseLongMarker, title="Close Long", style=shape.arrowdown, location=location.abovebar, color=color.new(color.orange, 0), size=size.small)
+
+isRetest = (activeTradeDir == 1 and low <= ema9 and low > ema21) or (activeTradeDir == -1 and high >= ema9 and high < ema21)
+barcolor(isRetest ? color.orange : na)
+
+if fireCloseShort or fireCloseLong or positionJustClosed or not showTargets
+    line.delete(entryLine), line.delete(stopLine), line.delete(tp1Line), line.delete(guideLine)
+    label.delete(entryLabel), label.delete(tp1Label)
+    entryLine := na, stopLine := na, tp1Line := na, guideLine := na
+    entryLabel := na, tp1Label := na
+
+if (fireBuy or fireSell) and showTargets
+    line.delete(entryLine), line.delete(stopLine), line.delete(tp1Line), line.delete(guideLine)
+    label.delete(entryLabel), label.delete(tp1Label)
+
+    entryLine := line.new(bar_index, entryPrice, bar_index + 20, entryPrice, color=color.blue, width=2, extend=extend.right)
+    stopLine := line.new(bar_index, stopPrice, bar_index + 20, stopPrice, color=color.red, width=2, extend=extend.right)
+    tp1Line := line.new(bar_index, tp1Price, bar_index + 20, tp1Price, color=color.green, style=line.style_dashed, extend=extend.right)
+    guideLine := line.new(bar_index, fireBuy ? stopPrice : entryPrice, bar_index, fireBuy ? entryPrice : stopPrice, extend=extend.none, color=color.new(color.blue, 50), width=1)
+
+    entryLabel := label.new(bar_index + labelOffset, entryPrice, "", color=color.blue, textcolor=color.white, style=label.style_label_left, size=tradeTextSize)
+    tp1Label := label.new(bar_index + labelOffset, tp1Price, "", color=color.green, textcolor=color.white, style=label.style_label_left, size=tradeTextSize)
+
+if showTargets and activeTradeDir != 0 and not na(entryLine)
+    int labelX = bar_index + labelOffset
+
+    line.set_y1(stopLine, stopPrice)
+    line.set_y2(stopLine, stopPrice)
+    line.set_x2(guideLine, bar_index)
+    line.set_color(tp1Line, tp1Hit ? #40E0D0 : color.green)
+
+    if activeTradeDir == 1
+        line.set_y1(guideLine, stopPrice)
+        line.set_y2(guideLine, entryPrice)
+    else
+        line.set_y1(guideLine, entryPrice)
+        line.set_y2(guideLine, stopPrice)
+
+    label.set_xy(entryLabel, labelX, entryPrice)
+    label.set_xy(tp1Label, labelX, tp1Price)
+
+    label.set_text(entryLabel, "ENTRY: " + str.tostring(entryPrice, format.mintick))
+    label.set_text(tp1Label, "TP1: " + str.tostring(tp1Price, format.mintick) + (tp1Hit ? " hit" : ""))
+
+// === Dashboard ===
+var table dash = table.new(position.middle_left, 2, 22, bgcolor=color.new(#FFF9C4, 10), border_width=1, border_color=color.new(color.gray, 60))
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "BULL SCORE", text_color=color.white, bgcolor=color.green, text_size=dashTextSize)
+    table.cell(dash, 1, 0, str.tostring(bullPct, "#") + "%", text_color=color.white, bgcolor=color.green, text_size=dashTextSize)
+    table.cell(dash, 0, 1, "BEAR SCORE", text_color=color.white, bgcolor=color.red, text_size=dashTextSize)
+    table.cell(dash, 1, 1, str.tostring(bearPct, "#") + "%", text_color=color.white, bgcolor=color.red, text_size=dashTextSize)
+    table.cell(dash, 0, 2, "MARKET BIAS", text_color=color.white, bgcolor=color.black, text_size=dashTextSize)
+    table.cell(dash, 1, 2, biasText, text_color=color.white, bgcolor=biasColor, text_size=dashTextSize)
+    f_addDashRow(dash, 3, "Quantum", preferredDir == 1 ? "LONG" : preferredDir == -1 ? "SHORT" : "NEUTRAL", preferredDir == 1 ? color.green : preferredDir == -1 ? color.red : color.gray, dashTextSize)
+    f_addDashRow(dash, 4, "Cluster", clusterDirection == 1 ? "BULL" : clusterDirection == -1 ? "BEAR" : "NEUTRAL", clusterDirection == 1 ? color.green : clusterDirection == -1 ? color.red : color.gray, dashTextSize)
+    f_addDashRow(dash, 5, "Cluster C%", str.tostring(clusterConsensusPct, "#") + " / " + str.tostring(clusterStrength, "#"), clusterConflict <= maxClusterConflict ? color.green : color.orange, dashTextSize)
+    f_addDashRow(dash, 6, "Conflict", str.tostring(clusterConflict, "#.#"), clusterConflict <= maxClusterConflict ? color.green : color.red, dashTextSize)
+    f_addDashRow(dash, 7, "VWAP", close > vwapValue ? "ABOVE" : "BELOW", close > vwapValue ? color.green : color.red, dashTextSize)
+    f_addDashRow(dash, 8, "RSI 14", str.tostring(rsiValue, "#.#"), rsiValue > 50 ? color.green : color.red, dashTextSize)
+    f_addDashRow(dash, 9, "MACD", macdMain > macdSignal ? "BULL" : "BEAR", macdMain > macdSignal ? color.green : color.red, dashTextSize)
+    f_addDashRow(dash, 10, "Signal", buyFiredThisBar ? "BUY" : sellFiredThisBar ? "SELL" : closeShortFiredThisBar or closeLongFiredThisBar ? "CLOSE" : "WAIT", buyFiredThisBar ? color.green : sellFiredThisBar ? color.red : closeShortFiredThisBar or closeLongFiredThisBar ? color.orange : color.gray, dashTextSize)
+    f_addDashRow(dash, 11, "Position", activeTradeDir == 1 ? "LONG" : activeTradeDir == -1 ? "SHORT" : "FLAT", activeTradeDir == 1 ? color.green : activeTradeDir == -1 ? color.red : color.gray, dashTextSize)
+    f_addDashRow(dash, 12, "Gov", governanceStatus, governanceStatus == "OFF" ? color.gray : color.blue, dashTextSize)
+    f_addDashRow(dash, 13, "Max Hold", str.tostring(maxHoldingBars, "#"), color.black, dashTextSize)
+    f_addDashRow(dash, 14, "Dyn Cooldown", useDynamicCooldown ? "ON" : "OFF", useDynamicCooldown ? color.green : color.gray, dashTextSize)
+    f_addDashRow(dash, 15, "Re-Entry", reEntryPending ? (reEntryDirection == 1 ? "LONG " : "SHORT ") + reEntryReasonText : "NONE", reEntryPending ? color.orange : color.gray, dashTextSize)
+    f_addDashRow(dash, 16, "Stop Mode", activeStopMode, activeStopMode == "Combined" ? color.blue : activeStopMode == "Structure" ? color.orange : color.black, dashTextSize)
+    f_addDashRow(dash, 17, "reEntry S", reEntryShortReady ? "TRUE" : "FALSE", reEntryShortReady ? color.green : color.red, dashTextSize)
+    f_addDashRow(dash, 18, "sellTiming", sellOpenTimingOK ? "TRUE" : "FALSE", sellOpenTimingOK ? color.green : color.red, dashTextSize)
+    f_addDashRow(dash, 19, "fireSell", fireSell ? "TRUE" : "FALSE", fireSell ? color.green : color.red, dashTextSize)
+    f_addDashRow(dash, 20, "Sell Block", sellBlockText, sellBlockColor, dashTextSize)
+    f_addDashRow(dash, 21, "Trail", trailActive ? str.tostring(trailStopPrice, format.mintick) : "OFF", trailActive ? color.orange : color.gray, dashTextSize)
+
+// === Strategy Execution & JSON Alert Calls ===
+if fireCloseShort
+    closedThisBar := true
+    closeShortFiredThisBar := true
+    strategy.close("Short", comment=closeShortComment, alert_message=buildCloseAlert(openShortOrderId, close))
+    alert(buildCloseAlert(openShortOrderId, close), alert.freq_once_per_bar)
+
+if fireCloseLong
+    closedThisBar := true
+    closeLongFiredThisBar := true
+    strategy.close("Long", comment=closeLongComment, alert_message=buildCloseAlert(openLongOrderId, close))
+    alert(buildCloseAlert(openLongOrderId, close), alert.freq_once_per_bar)
+
+if fireBuy
+    orderSeq += 1
+    openLongOrderId := "Long_" + str.tostring(orderSeq)
+    strategy.entry("Long", strategy.long, qty=entryQtyValue, comment="Buy Long", alert_message=buildEntryAlert("buy", openLongOrderId, close))
+    alert(buildEntryAlert("buy", openLongOrderId, close), alert.freq_once_per_bar)
+
+if fireSell
+    orderSeq += 1
+    openShortOrderId := "Short_" + str.tostring(orderSeq)
+    strategy.entry("Short", strategy.short, qty=entryQtyValue, comment="Sell Short", alert_message=buildEntryAlert("sell", openShortOrderId, close))
+    alert(buildEntryAlert("sell", openShortOrderId, close), alert.freq_once_per_bar)
+
+if strategy.position_size > 0 and not na(stopPrice) and not na(tp1Price)
+    if not tp1PartialTaken
+        strategy.exit("Long_TP1", from_entry="Long", limit=tp1Price, stop=stopPrice, qty_percent=tp1PartialClosePct, comment_profit="TP1 Long", comment_loss="SL Long", alert_message=buildPartialCloseAlert(openLongOrderId, tp1Price, tp1PartialClosePct))
+        strategy.exit("Long_Rest", from_entry="Long", stop=stopPrice, qty_percent=100 - tp1PartialClosePct, comment_loss="SL Long Rest")
+    else
+        strategy.exit("Long_Rest", from_entry="Long", stop=trailActive and not na(trailStopPrice) ? trailStopPrice : stopPrice, qty_percent=100 - tp1PartialClosePct, comment_profit="Trail Long", comment_loss="Trail Long")
+
+if strategy.position_size < 0 and not na(stopPrice) and not na(tp1Price)
+    if not tp1PartialTaken
+        strategy.exit("Short_TP1", from_entry="Short", limit=tp1Price, stop=stopPrice, qty_percent=tp1PartialClosePct, comment_profit="TP1 Short", comment_loss="SL Short", alert_message=buildPartialCloseAlert(openShortOrderId, tp1Price, tp1PartialClosePct))
+        strategy.exit("Short_Rest", from_entry="Short", stop=stopPrice, qty_percent=100 - tp1PartialClosePct, comment_loss="SL Short Rest")
+    else
+        strategy.exit("Short_Rest", from_entry="Short", stop=trailActive and not na(trailStopPrice) ? trailStopPrice : stopPrice, qty_percent=100 - tp1PartialClosePct, comment_profit="Trail Short", comment_loss="Trail Short")
+
+prevPositionSize := strategy.position_size

@@ -1,0 +1,128 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Shivam_Mandrai
+// Original code by @Shivam_Mandrai on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+//@version=6
+indicator("IU Liquidity Sweep indicator", overlay = true, max_boxes_count = 500)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+
+swingLength         = input.int(20, "Swing Length"              , group = "Indicator Settings")
+maxActiveSweepBull  = input.int(5, "Maximum Bullish Active Sweeps", group = "Indicator Settings")
+maxActiveSweepBear  = input.int(5, "Maximum Bearish Active Sweeps", group = "Indicator Settings")
+
+bullishZoneCol      = input.color(#089981, "Bullish Zone Color", group = "Color Settings")
+bearishZoneCol      = input.color(#f23645, "Bearish Zone Color", group = "Color Settings")
+bullZoneCandleCol   = input.color(#089981, "Bull Zone Candle Color", group = "Color Settings")
+bearZoneCandleCol   = input.color(#f23645, "Bear Zone Candle Color", group = "Color Settings")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Pivot Detection & Variables
+//---------------------------------------------------------------------------------------------------------------------{
+
+ph = ta.pivothigh(swingLength, swingLength)
+pl = ta.pivotlow(swingLength, swingLength)
+
+var float bullLow   = na
+var float bullBody  = na
+
+var float bearHigh  = na
+var float bearBody  = na
+
+var box bullBox     = na
+var box bearBox     = na
+
+var bullBoxArray    = array.new<box>()
+var bearBoxArray    = array.new<box>()
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Liquidity Creation
+//---------------------------------------------------------------------------------------------------------------------{
+
+// Create Supply Zone From Pivot High
+if not na(ph)
+    bearHigh     := high[swingLength]
+    bearBody     := close[swingLength] > open[swingLength] ? close[swingLength] : open[swingLength]
+    bearBox      := box.new(bar_index[swingLength], bearHigh, bar_index, bearBody, color.new(bearishZoneCol, 0), 1, line.style_dotted, extend = extend.none, bgcolor = color.new(bearishZoneCol, 90))
+    bearBoxArray.push(bearBox)
+    
+    if bearBoxArray.size() > maxActiveSweepBear
+        bearBoxArray.remove(0)
+
+// Create Demand Zone From Pivot Low
+if not na(pl)
+    bullLow      := low[swingLength]
+    bullBody     := close[swingLength] > open[swingLength] ? open[swingLength] : close[swingLength]
+    bullBox      := box.new(bar_index[swingLength], bullBody, bar_index, bullLow, color.new(bullishZoneCol, 0), 1, line.style_dotted, extend = extend.none, bgcolor = color.new(bullishZoneCol, 90))
+    bullBoxArray.push(bullBox)
+
+    if bullBoxArray.size() > maxActiveSweepBull
+        bullBoxArray.remove(0)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Zone Interaction Logic
+//---------------------------------------------------------------------------------------------------------------------{
+
+inSideBullZone = false
+bullBounce     = false
+
+i = 0
+for boxes in bullBoxArray
+    if close > boxes.get_bottom() and close < boxes.get_top()
+        inSideBullZone := true
+    
+    if close > boxes.get_bottom() and low < boxes.get_bottom()
+        bullBounce := true
+
+    if close < boxes.get_bottom()
+        bullBoxArray.remove(i)
+    else
+        boxes.set_right(bar_index)
+        
+    i += 1
+
+inSideBearZone = false
+bearBounce     = false
+
+u = 0
+for boxes in bearBoxArray
+    if close > boxes.get_bottom() and close < boxes.get_top()
+        inSideBearZone := true
+    
+    if close < boxes.get_top() and high > boxes.get_top()
+        bearBounce := true
+
+    if close > boxes.get_top()
+        bearBoxArray.remove(u)
+    else
+        boxes.set_right(bar_index)
+        
+    u += 1
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Plotting & Coloring
+//---------------------------------------------------------------------------------------------------------------------{
+
+plotshape(bullBounce, "Bullish Sweep", shape.labelup, location = location.belowbar, color = color.new(bullishZoneCol, 50), textcolor = chart.fg_color, force_overlay = true, text = "B")
+
+plotshape(bearBounce, "Bearish Sweep", shape.labeldown, location = location.abovebar, color = color.new(bearishZoneCol, 50), textcolor = chart.fg_color, force_overlay = true, text = "S")
+
+barcolor(inSideBullZone ? color.new(bullZoneCandleCol, 0) : na)
+barcolor(inSideBearZone ? color.new(bearZoneCandleCol, 0) : na)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+alertcondition(inSideBullZone, "Inside Zone Bull", "Inside Bullish Zone !!")
+alertcondition(bullBounce    , "Bullish Sweep", "Bullish Sweep !!")
+alertcondition(inSideBearZone, "Inside Zone Bear", "Inside Bear Zone !!")
+alertcondition(bearBounce    , "Bearish Sweep", "Bearish Sweep !!")
+
+if bullBounce or bearBounce
+    alert("Liquidity Sweep Detected!", alert.freq_once_per_bar)
+
+//---------------------------------------------------------------------------------------------------------------------}

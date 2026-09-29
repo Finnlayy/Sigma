@@ -1,0 +1,395 @@
+//@version=6
+strategy(
+    title="HYPE/USDT Scalp",
+    shorttitle="HYPE/USDT Scalp",
+    overlay=true,
+    calc_on_every_tick=true,
+    calc_on_order_fills=true,
+    process_orders_on_close=false,
+    default_qty_type=strategy.fixed,
+    default_qty_value=1,
+    commission_type=strategy.commission.percent,
+    commission_value=0.05,
+    slippage=2,
+    margin_long=0,
+    margin_short=0,
+    pyramiding=0
+)
+
+// ============================================================
+// SECTION 1 - INPUTS
+// ============================================================
+var string GRP_MACD   = "MACD Settings"
+var string GRP_RSI    = "RSI Settings"
+var string GRP_RISK   = "Risk Management"
+var string GRP_FILTER = "Filters"
+
+macd_fast = input.int(5, "MACD Fast", minval=2, maxval=20, group=GRP_MACD)
+macd_slow = input.int(13, "MACD Slow", minval=5, maxval=50, group=GRP_MACD)
+macd_sig  = input.int(4, "MACD Signal", minval=2, maxval=20, group=GRP_MACD)
+
+rsi_len = input.int(10, "RSI Length", minval=5, maxval=21, group=GRP_RSI)
+rsi_ob  = input.int(75, "RSI OB", minval=60, maxval=90, group=GRP_RSI)
+rsi_os  = input.int(28, "RSI OS", minval=10, maxval=45, group=GRP_RSI)
+
+leverage_for_sizing   = input.float(10.0, "Leverage (for sizing)", minval=1.0, maxval=50.0, step=0.5, group=GRP_RISK)
+use_margin_sizing     = input.bool(true, "Use Margin-Based Sizing", group=GRP_RISK)
+margin_per_trade_usdt = input.float(50.0, "Margin per Trade (USDT)", minval=1.0, maxval=100000.0, step=1.0, group=GRP_RISK)
+risk_pct_fallback     = input.float(0.5, "Risk % per Trade (fallback)", minval=0.1, maxval=3.0, step=0.1, group=GRP_RISK)
+
+sl_atr_mult = input.float(1.2, "SL ATR Mult", minval=0.5, maxval=5.0, step=0.1, group=GRP_RISK)
+tp_atr_mult = input.float(2.0, "TP ATR Mult", minval=0.5, maxval=10.0, step=0.1, group=GRP_RISK)
+use_hard_tp = input.bool(false, "Use Hard TP (ATR based)", group=GRP_RISK)
+
+use_trailing  = input.bool(true, "Use Trailing Stop", group=GRP_RISK)
+trail_pct     = input.float(0.01, "Trailing Stop %", minval=0.01, maxval=2.0, step=0.01, group=GRP_RISK)
+fail_fast_pct = input.float(0.01, "Immediate Fail Stop %", minval=0.001, maxval=1.0, step=0.001, group=GRP_RISK)
+
+use_break_even = input.bool(true, "Use Break-Even", group=GRP_RISK)
+be_trigger_rr  = input.float(1.0, "Break-Even Trigger (R)", minval=0.1, maxval=10.0, step=0.1, group=GRP_RISK)
+be_offset_ticks = input.int(1, "Break-Even Offset (ticks)", minval=0, maxval=50, group=GRP_RISK)
+
+use_max_bars_hold = input.bool(false, "Use Max Bars in Trade", group=GRP_RISK)
+max_bars_held     = input.int(60, "Max Bars Held", minval=1, maxval=2000, group=GRP_RISK)
+
+max_pos_cap_pct = input.float(60.0, "Max Margin Cap % of Equity", minval=1.0, maxval=100.0, step=0.5, group=GRP_RISK)
+max_daily_dd_pct = input.float(3.0, "Max Daily Drawdown %", minval=0.2, maxval=20.0, step=0.1, group=GRP_RISK)
+flatten_on_dd = input.bool(true, "Flatten Position on DD Breach", group=GRP_RISK)
+
+use_ema_filter = input.bool(true, "Use EMA Trend Filter (EMA7 > EMA25)", group=GRP_FILTER)
+use_ema99_filter = input.bool(false, "Use EMA99 Regime Filter", group=GRP_FILTER)
+use_bb_filter = input.bool(true, "Avoid entry at BB extremes", group=GRP_FILTER)
+use_vol_filter = input.bool(true, "Volume Filter (above avg)", group=GRP_FILTER)
+use_session = input.bool(true, "Session Filter (avoid low-liq hours)", group=GRP_FILTER)
+session_str = input.session("0700-2200", "Active Trading Session (Exchange TZ)", group=GRP_FILTER)
+allow_short = input.bool(true, "Allow Short Trades", group=GRP_FILTER)
+
+// ============================================================
+// SECTION 2 - CORE INDICATORS
+// ============================================================
+float atr_val = ta.atr(14)
+[macd_line, macd_signal, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_sig)
+float rsi_val = ta.rsi(close, rsi_len)
+
+float ema7 = ta.ema(close, 7)
+float ema25 = ta.ema(close, 25)
+float ema99 = ta.ema(close, 99)
+
+[bb_basis, bb_upper, bb_lower] = ta.bb(close, 20, 2.0)
+float vol_ma = ta.sma(volume, 20)
+
+bool bar_confirmed = barstate.isconfirmed == true
+
+// ============================================================
+// SECTION 7 - DAILY DRAWDOWN GUARD
+// ============================================================
+var float daily_open_equity = na
+var float daily_peak_equity = na
+var bool dd_locked = false
+
+bool is_new_day = bar_index == 0 ? true : ta.change(time("D")) != 0
+
+if is_new_day == true
+    daily_open_equity := strategy.equity
+    daily_peak_equity := strategy.equity
+    dd_locked := false
+else
+    daily_peak_equity := math.max(nz(daily_peak_equity, strategy.equity), strategy.equity)
+
+float dd_from_open_pct = daily_open_equity > 0.0 ? ((daily_open_equity - strategy.equity) / daily_open_equity) * 100.0 : 0.0
+float dd_from_peak_pct = daily_peak_equity > 0.0 ? ((daily_peak_equity - strategy.equity) / daily_peak_equity) * 100.0 : 0.0
+float daily_dd_pct = math.max(dd_from_open_pct, dd_from_peak_pct)
+
+if dd_locked == false and daily_dd_pct >= max_daily_dd_pct
+    dd_locked := true
+
+bool dd_ok = dd_locked == false
+
+// ============================================================
+// SECTION 3 - TREND & FILTER CONDITIONS
+// ============================================================
+bool ema_bull = ema7 > ema25
+bool ema_bear = ema7 < ema25
+
+bool bb_ready = na(bb_upper) == false and na(bb_lower) == false
+bool bb_mid_zone_long = bb_ready == true ? close < bb_upper * 0.998 : false
+bool bb_mid_zone_short = bb_ready == true ? close > bb_lower * 1.002 : false
+
+bool vol_ready = na(vol_ma) == false and vol_ma > 0.0
+bool vol_ok = vol_ready == true ? volume > vol_ma * 1.1 : false
+
+bool ema99_long_ok = close > ema99
+bool ema99_short_ok = close < ema99
+
+bool session_active = na(time(timeframe.period, session_str)) == false
+bool in_session = use_session == false ? true : session_active
+
+bool indicators_ready =
+     na(atr_val) == false and
+     na(macd_line) == false and
+     na(macd_signal) == false and
+     na(macd_hist) == false and
+     na(rsi_val) == false and
+     na(ema7) == false and
+     na(ema25) == false and
+     na(ema99) == false and
+     bb_ready == true and
+     vol_ready == true
+
+// ============================================================
+// SECTION 4 - ENTRY SIGNALS
+// ============================================================
+bool long_macd = ta.crossover(macd_line, macd_signal) and macd_hist > 0
+bool short_macd = ta.crossunder(macd_line, macd_signal) and macd_hist < 0
+
+bool long_rsi = rsi_val > rsi_os and rsi_val < 60
+bool short_rsi = rsi_val < rsi_ob and rsi_val > 40
+
+bool long_conf = long_macd == true and long_rsi == true
+bool short_conf = short_macd == true and short_rsi == true
+
+bool long_filters_ok =
+     (use_ema_filter == false ? true : ema_bull == true) and
+     (use_ema99_filter == false ? true : ema99_long_ok == true) and
+     (use_bb_filter == false ? true : bb_mid_zone_long == true) and
+     (use_vol_filter == false ? true : vol_ok == true) and
+     in_session == true
+
+bool short_filters_ok =
+     (use_ema_filter == false ? true : ema_bear == true) and
+     (use_ema99_filter == false ? true : ema99_short_ok == true) and
+     (use_bb_filter == false ? true : bb_mid_zone_short == true) and
+     (use_vol_filter == false ? true : vol_ok == true) and
+     in_session == true and
+     allow_short == true
+
+bool long_entry =
+     bar_confirmed == true and
+     indicators_ready == true and
+     dd_ok == true and
+     strategy.position_size == 0 and
+     long_conf == true and
+     long_filters_ok == true
+
+bool short_entry =
+     bar_confirmed == true and
+     indicators_ready == true and
+     dd_ok == true and
+     strategy.position_size == 0 and
+     short_conf == true and
+     short_filters_ok == true
+
+// ============================================================
+// SECTION 5 - POSITION SIZING
+// ============================================================
+float sl_dist = atr_val * sl_atr_mult
+float risk_usd_fallback = strategy.equity * (risk_pct_fallback / 100.0)
+float qty_from_risk = sl_dist > 0.0 ? risk_usd_fallback / sl_dist : 0.0
+
+float target_notional_usdt = margin_per_trade_usdt * leverage_for_sizing
+float qty_from_margin = close > 0.0 ? target_notional_usdt / close : 0.0
+
+float qty_pre = use_margin_sizing == true ? qty_from_margin : qty_from_risk
+
+float max_margin_usdt = strategy.equity * (max_pos_cap_pct / 100.0)
+float max_notional_usdt = max_margin_usdt * leverage_for_sizing
+float qty_cap = close > 0.0 ? max_notional_usdt / close : 0.0
+
+float qty_capped = math.max(math.min(qty_pre, qty_cap), 0.0)
+
+float qty_step = syminfo.mincontract > 0.0 ? syminfo.mincontract : 0.001
+float qty_floor = math.floor(qty_capped / qty_step) * qty_step
+float qty_final = qty_floor >= qty_step ? qty_floor : 0.0
+bool can_submit_qty = qty_final > 0.0
+
+float next_trade_notional = qty_final * close
+float next_trade_margin = leverage_for_sizing > 0.0 ? next_trade_notional / leverage_for_sizing : na
+
+// ============================================================
+// SECTION 6 - TRADE EXECUTION (Immediate Protection + Trailing)
+// ============================================================
+var float long_stop = na
+var float short_stop = na
+var float hh_since_entry = na
+var float ll_since_entry = na
+var float hard_tp_long = na
+var float hard_tp_short = na
+var float init_risk_long = na
+var float init_risk_short = na
+var int bars_in_trade = 0
+
+if long_entry == true and can_submit_qty == true
+    strategy.entry("Long", strategy.long, qty=qty_final)
+else if short_entry == true and can_submit_qty == true
+    strategy.entry("Short", strategy.short, qty=qty_final)
+
+bool new_long_fill = strategy.position_size > 0 and strategy.position_size[1] <= 0
+bool new_short_fill = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if new_long_fill == true
+    float atr_stop_long = strategy.position_avg_price - (atr_val * sl_atr_mult)
+    float ff_abs_long = math.max(strategy.position_avg_price * (fail_fast_pct * 0.01), syminfo.mintick)
+    float ff_stop_long = strategy.position_avg_price - ff_abs_long
+    long_stop := math.max(atr_stop_long, ff_stop_long)
+    hh_since_entry := high
+    ll_since_entry := na
+    hard_tp_long := strategy.position_avg_price + (atr_val * tp_atr_mult)
+    hard_tp_short := na
+    init_risk_long := math.max(strategy.position_avg_price - long_stop, syminfo.mintick)
+    init_risk_short := na
+    bars_in_trade := 0
+
+if new_short_fill == true
+    float atr_stop_short = strategy.position_avg_price + (atr_val * sl_atr_mult)
+    float ff_abs_short = math.max(strategy.position_avg_price * (fail_fast_pct * 0.01), syminfo.mintick)
+    float ff_stop_short = strategy.position_avg_price + ff_abs_short
+    short_stop := math.min(atr_stop_short, ff_stop_short)
+    ll_since_entry := low
+    hh_since_entry := na
+    hard_tp_short := strategy.position_avg_price - (atr_val * tp_atr_mult)
+    hard_tp_long := na
+    init_risk_short := math.max(short_stop - strategy.position_avg_price, syminfo.mintick)
+    init_risk_long := na
+    bars_in_trade := 0
+
+if strategy.position_size != 0
+    bars_in_trade += 1
+
+if strategy.position_size > 0
+    hh_since_entry := math.max(nz(hh_since_entry, high), high)
+
+    if use_break_even == true
+        float rr_long = init_risk_long > 0.0 ? (close - strategy.position_avg_price) / init_risk_long : 0.0
+        if rr_long >= be_trigger_rr
+            float be_stop_long = strategy.position_avg_price + (be_offset_ticks * syminfo.mintick)
+            long_stop := math.max(nz(long_stop, be_stop_long), be_stop_long)
+
+    if use_trailing == true
+        float trail_abs_long = math.max(strategy.position_avg_price * (trail_pct * 0.01), syminfo.mintick)
+        float trail_candidate_long = hh_since_entry - trail_abs_long
+        long_stop := math.max(nz(long_stop, trail_candidate_long), trail_candidate_long)
+
+    if use_max_bars_hold == true and bars_in_trade >= max_bars_held
+        strategy.close("Long", comment="MaxBars Long")
+    else
+        if use_hard_tp == true and na(hard_tp_long) == false
+            strategy.exit("Long_Exit", from_entry="Long", stop=long_stop, limit=hard_tp_long)
+        else
+            strategy.exit("Long_Exit", from_entry="Long", stop=long_stop)
+
+if strategy.position_size < 0
+    ll_since_entry := math.min(nz(ll_since_entry, low), low)
+
+    if use_break_even == true
+        float rr_short = init_risk_short > 0.0 ? (strategy.position_avg_price - close) / init_risk_short : 0.0
+        if rr_short >= be_trigger_rr
+            float be_stop_short = strategy.position_avg_price - (be_offset_ticks * syminfo.mintick)
+            short_stop := math.min(nz(short_stop, be_stop_short), be_stop_short)
+
+    if use_trailing == true
+        float trail_abs_short = math.max(strategy.position_avg_price * (trail_pct * 0.01), syminfo.mintick)
+        float trail_candidate_short = ll_since_entry + trail_abs_short
+        short_stop := math.min(nz(short_stop, trail_candidate_short), trail_candidate_short)
+
+    if use_max_bars_hold == true and bars_in_trade >= max_bars_held
+        strategy.close("Short", comment="MaxBars Short")
+    else
+        if use_hard_tp == true and na(hard_tp_short) == false
+            strategy.exit("Short_Exit", from_entry="Short", stop=short_stop, limit=hard_tp_short)
+        else
+            strategy.exit("Short_Exit", from_entry="Short", stop=short_stop)
+
+if dd_locked == true and flatten_on_dd == true and strategy.position_size != 0
+    strategy.close_all(comment="Daily DD Lock")
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    long_stop := na
+    short_stop := na
+    hh_since_entry := na
+    ll_since_entry := na
+    hard_tp_long := na
+    hard_tp_short := na
+    init_risk_long := na
+    init_risk_short := na
+    bars_in_trade := 0
+
+// ============================================================
+// SECTION 8 - VISUALS
+// ============================================================
+plot(ema7, "EMA 7", color=color.new(color.yellow, 0), linewidth=1)
+plot(ema25, "EMA 25", color=color.new(color.blue, 0), linewidth=1)
+plot(ema99, "EMA 99", color=color.new(color.gray, 30), linewidth=2)
+plot(bb_upper, "BB Upper", color=color.new(color.red, 60), linewidth=1)
+plot(bb_lower, "BB Lower", color=color.new(color.green, 60), linewidth=1)
+
+plotshape(long_entry == true and can_submit_qty == true, title="Long", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="L", textcolor=color.black, size=size.small)
+plotshape(short_entry == true and can_submit_qty == true, title="Short", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="S", textcolor=color.white, size=size.small)
+
+float active_stop_plot = strategy.position_size > 0 ? long_stop : strategy.position_size < 0 ? short_stop : na
+plot(active_stop_plot, "Active Stop", color=color.new(color.orange, 0), linewidth=2, style=plot.style_linebr)
+
+// ============================================================
+// SECTION 9 - DASHBOARD TABLE
+// ============================================================
+var table dash = table.new(position.top_right, 2, 15, bgcolor=color.new(color.black, 70), border_color=color.gray, border_width=1, frame_color=color.gray, frame_width=1)
+
+if barstate.islast == true
+    color rsi_col = rsi_val > rsi_ob ? color.red : rsi_val < rsi_os ? color.lime : color.white
+    color macd_col = macd_hist >= 0 ? color.lime : color.red
+    color trend_col = ema_bull == true ? color.lime : ema_bear == true ? color.red : color.gray
+    color vol_col = vol_ok == true ? color.lime : color.orange
+    color dd_col = dd_locked == true ? color.red : color.lime
+    color pos_col = strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray
+    color qty_col = can_submit_qty == true ? color.white : color.orange
+
+    table.cell(dash, 0, 0, "HYPE/USDT 1M SCALP", text_color=color.white, text_size=size.small, bgcolor=color.new(color.blue, 60))
+    table.cell(dash, 1, 0, "Production Ready v2", text_color=color.yellow, text_size=size.small, bgcolor=color.new(color.blue, 60))
+
+    table.cell(dash, 0, 1, "RSI", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 1, str.tostring(rsi_val, "#.##"), text_color=rsi_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 2, "MACD Hist", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(macd_hist, "#.####"), text_color=macd_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 3, "EMA Trend", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 3, ema_bull == true ? "BULL" : ema_bear == true ? "BEAR" : "FLAT", text_color=trend_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 4, "Volume", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 4, vol_ok == true ? "OK" : "LOW", text_color=vol_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 5, "Session", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 5, in_session == true ? "ON" : "OFF", text_color=in_session == true ? color.lime : color.orange, text_size=size.tiny)
+
+    table.cell(dash, 0, 6, "Daily DD", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 6, str.tostring(daily_dd_pct, "#.##") + "%", text_color=dd_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 7, "DD Guard", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 7, dd_locked == true ? "LOCKED" : "ACTIVE", text_color=dd_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 8, "Position", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 8, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=pos_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 9, "Next Qty", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 9, str.tostring(qty_final, "#.######"), text_color=qty_col, text_size=size.tiny)
+
+    table.cell(dash, 0, 10, "Next Notional", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 10, "$" + str.tostring(next_trade_notional, "#.##"), text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 11, "Next Margin", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 11, "$" + str.tostring(next_trade_margin, "#.##"), text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 12, "Trail %", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 12, str.tostring(trail_pct, "#.###") + "%", text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 13, "Equity", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 13, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 14, "Net P&L", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 14, "$" + str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.tiny)
+
+// ============================================================
+// SECTION 10 - ALERT CONDITIONS
+// ============================================================
+alertcondition(long_entry == true and can_submit_qty == true, "Long Setup", "Long setup confirmed on closed bar")
+alertcondition(short_entry == true and can_submit_qty == true, "Short Setup", "Short setup confirmed on closed bar")
+alertcondition(dd_locked == true, "Daily DD Lock", "Daily drawdown guard is locked")

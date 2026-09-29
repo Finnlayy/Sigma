@@ -1,0 +1,177 @@
+//@version=6
+strategy("1M OB Scalping Sweep & Chandelier PRO", overlay=true, pyramiding=0, margin_long=100, margin_short=100, calc_on_every_tick=true)
+
+// =========================================================================
+// INPUTS & PARAMETER
+// =========================================================================
+int lookback = input.int(10, "Liquidity Sweep Lookback", minval=3, group="Core Setup")
+int max_bars = input.int(25, "Max Bars bis Pullback", minval=5, group="Core Setup")
+
+bool  use_chandelier = input.bool(true,  "Use Chandelier Trailing", group="Trailing Logic")
+int   ch_len         = input.int(22,     "Chandelier ATR Length", minval=1, group="Trailing Logic")
+float ch_mult        = input.float(0.8,  "Chandelier ATR Multiplier", minval=0.1, step=0.1, group="Trailing Logic")
+
+// =========================================================================
+// GLOBALE INDIKATOREN (Verhindert Intrabar-Recalculation-Bugs)
+// =========================================================================
+float current_atr = ta.atr(ch_len)
+float min_low = ta.lowest(low, lookback)
+float max_high = ta.highest(high, lookback)
+bool confirmed = barstate.isconfirmed
+
+// =========================================================================
+// STATE-MACHINE: SETUP
+// =========================================================================
+var int state_long = 0
+var float ob_top_long = na
+var float ob_bot_long = na
+var int ob_bar_long = na
+var box box_long = na
+
+var int state_short = 0
+var float ob_top_short = na
+var float ob_bot_short = na
+var int ob_bar_short = na
+var box box_short = na
+
+if strategy.position_size != 0
+    state_long := 0
+    state_short := 0
+
+if state_long > 0 and not na(box_long)
+    box.set_right(box_long, bar_index)
+if state_short > 0 and not na(box_short)
+    box.set_right(box_short, bar_index)
+
+bool trigger_long = false
+bool trigger_short = false
+float sl_long_initial = na
+float sl_short_initial = na
+
+if confirmed
+    // --- LONG SETUP ---
+    bool is_green_1 = close[1] > open[1]
+    bool is_green_0 = close > open
+    bool is_sweep_long = low[2] < min_low[3]
+
+    if state_long == 0 and is_green_1 and is_green_0 and is_sweep_long
+        ob_top_long := high[2]
+        ob_bot_long := low[2]
+        ob_bar_long := bar_index[2]
+        box_long := box.new(left=bar_index[2], top=ob_top_long, right=bar_index, bottom=ob_bot_long, border_color=color.green, bgcolor=color.new(color.green, 85))
+        state_long := (close[1] > ob_top_long or close > ob_top_long) ? 2 : 1
+
+    if state_long == 1
+        if close > ob_top_long
+            state_long := 2
+        else if close < ob_bot_long or (bar_index - ob_bar_long) > max_bars
+            state_long := 0
+
+    if state_long == 2
+        if low <= ob_top_long and low >= ob_bot_long and close > open
+            sl_long_initial := low - syminfo.mintick // Offset für Spread-Protection
+            trigger_long := true
+            state_long := 0
+        else if close < ob_bot_long or (bar_index - ob_bar_long) > max_bars
+            state_long := 0
+
+    // --- SHORT SETUP ---
+    bool is_red_1 = close[1] < open[1]
+    bool is_red_0 = close < open
+    bool is_sweep_short = high[2] > max_high[3]
+
+    if state_short == 0 and is_red_1 and is_red_0 and is_sweep_short
+        ob_top_short := high[2]
+        ob_bot_short := low[2]
+        ob_bar_short := bar_index[2]
+        box_short := box.new(left=bar_index[2], top=ob_top_short, right=bar_index, bottom=ob_bot_short, border_color=color.red, bgcolor=color.new(color.red, 85))
+        state_short := (close[1] < ob_bot_short or close < ob_bot_short) ? 2 : 1
+
+    if state_short == 1
+        if close < ob_bot_short
+            state_short := 2
+        else if close > ob_top_short or (bar_index - ob_bar_short) > max_bars
+            state_short := 0
+
+    if state_short == 2
+        if high >= ob_bot_short and high <= ob_top_short and close < open
+            sl_short_initial := high + syminfo.mintick // Offset für Spread-Protection
+            trigger_short := true
+            state_short := 0
+        else if close > ob_top_short or (bar_index - ob_bar_short) > max_bars
+            state_short := 0
+
+// =========================================================================
+// ORDER ROUTING & STRICT TRAILING LOGIK
+// =========================================================================
+var float active_long_sl = na
+var float active_long_tp = na
+var float active_short_sl = na
+var float active_short_tp = na
+
+var float trade_hh = na
+var float trade_ll = na
+
+// State-Resets bei Positionswechsel
+if strategy.position_size == 0
+    trade_hh := na
+    trade_ll := na
+    active_long_sl := na
+    active_long_tp := na
+    active_short_sl := na
+    active_short_tp := na
+
+// 1. Initialer Entry via Backend-JSON
+if confirmed and trigger_long and strategy.position_size == 0
+    float risk = close - sl_long_initial
+    active_long_tp := close + (risk * 2)
+    active_long_sl := sl_long_initial
+    string payload = '{"action":"enter_long", "tp":' + str.tostring(active_long_tp) + ', "sl":' + str.tostring(active_long_sl) + '}'
+    strategy.entry("Long", strategy.long, alert_message=payload)
+
+if confirmed and trigger_short and strategy.position_size == 0
+    float risk = sl_short_initial - close
+    active_short_tp := close - (risk * 2)
+    active_short_sl := sl_short_initial
+    string payload = '{"action":"enter_short", "tp":' + str.tostring(active_short_tp) + ', "sl":' + str.tostring(active_short_sl) + '}'
+    strategy.entry("Short", strategy.short, alert_message=payload)
+
+// 2. Intrabar Trailing (Sichere Extrema-Messung)
+if strategy.position_size > 0
+    // Initialisiere HH exakt beim Fill
+    if strategy.position_size[1] <= 0
+        trade_hh := high
+    else
+        trade_hh := math.max(trade_hh, high)
+        
+    if use_chandelier and not na(active_long_sl)
+        float ch_sl = trade_hh - (current_atr * ch_mult)
+        // Check: SL zieht nur nach und kreuzt niemals den aktuellen Preis
+        if ch_sl > active_long_sl and ch_sl < close
+            active_long_sl := ch_sl
+            
+    strategy.exit("Exit Long", "Long", stop=active_long_sl, limit=active_long_tp)
+
+if strategy.position_size < 0
+    // Initialisiere LL exakt beim Fill
+    if strategy.position_size[1] >= 0
+        trade_ll := low
+    else
+        trade_ll := math.min(trade_ll, low)
+        
+    if use_chandelier and not na(active_short_sl)
+        float ch_sl = trade_ll + (current_atr * ch_mult)
+        // Check: SL sinkt nur und kreuzt niemals den aktuellen Preis
+        if ch_sl < active_short_sl and ch_sl > close
+            active_short_sl := ch_sl
+            
+    strategy.exit("Exit Short", "Short", stop=active_short_sl, limit=active_short_tp)
+
+// =========================================================================
+// UI & DEBUGGING
+// =========================================================================
+color long_sl_color = strategy.position_size > 0 ? color.fuchsia : na
+color short_sl_color = strategy.position_size < 0 ? color.fuchsia : na
+
+plot(use_chandelier ? active_long_sl : na, "Trail Long SL", color=long_sl_color, style=plot.style_stepline, linewidth=2)
+plot(use_chandelier ? active_short_sl : na, "Trail Short SL", color=short_sl_color, style=plot.style_stepline, linewidth=2)

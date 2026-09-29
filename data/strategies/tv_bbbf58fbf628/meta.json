@@ -1,0 +1,9 @@
+{
+  "bytes": 21945,
+  "name": "ATM 1min Zec",
+  "persisted_at": "2026-09-08T00:06:30Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "tv_bbbf58fbf628",
+  "tv_script_id": "USER;d2a92d492d6d44d99a3ec75a600135bb"
+}

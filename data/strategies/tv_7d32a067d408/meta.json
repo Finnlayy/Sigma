@@ -1,0 +1,9 @@
+{
+  "bytes": 25450,
+  "name": "ZECUSDT.P 5m Intraday 1",
+  "persisted_at": "2026-09-08T00:06:30Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "tv_7d32a067d408",
+  "tv_script_id": "USER;258b8dd8bc394c8cb7332a3618a6635b"
+}

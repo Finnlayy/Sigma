@@ -1,0 +1,267 @@
+//@version=6
+indicator("QuantumForexTrader → Lux Signal Bridge", shorttitle="QF Lux Bridge", overlay=false)
+
+// Diese Brücke veröffentlicht Quantum-Signale als 1/0-Quellen für Px Lux Rules.
+// Sie eröffnet keine eigenen Positionen und sendet keine Webhooks oder Alerts.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Eingaben
+// ─────────────────────────────────────────────────────────────────────────────
+string GRP_CORE = "Quantum Core"
+historyBars      = input.int(72, "History bars for analysis", minval=32, maxval=4096, group=GRP_CORE)
+confThreshold    = input.float(0.54, "Minimum confidence", step=0.01, group=GRP_CORE)
+momentumThreshold = input.float(0.08, "Minimum momentum", step=0.01, group=GRP_CORE)
+memoryDecay      = input.float(0.88, "Memory decay", minval=0.50, maxval=0.99, step=0.01, group=GRP_CORE)
+memoryThreshold  = input.float(0.05, "Memory threshold", minval=0.01, maxval=1.00, step=0.01, group=GRP_CORE)
+
+string GRP_FILTER = "Trend Filters"
+useEMAfilter      = input.bool(true, "Use EMA Trend Filter", group=GRP_FILTER)
+useMTFfilter      = input.bool(true, "Use higher timeframe trend filter", group=GRP_FILTER)
+useVolFilter      = input.bool(true, "Use Volume Filter", group=GRP_FILTER)
+useATRfilter      = input.bool(true, "Use ATR Volatility Filter", group=GRP_FILTER)
+useCandleFilter   = input.bool(true, "Use Candle Body Filter", group=GRP_FILTER)
+trendEmaLen       = input.int(34, "Trend EMA Length", group=GRP_FILTER)
+mtfTf             = input.timeframe("5", "MTF Trend TF", group=GRP_FILTER)
+volLookback       = input.int(24, "Volume SMA Length", group=GRP_FILTER)
+volMultiplier     = input.float(1.00, "Min Relative Volume", step=0.05, group=GRP_FILTER)
+atrLen            = input.int(14, "ATR Length", group=GRP_FILTER)
+atrMaLen          = input.int(21, "ATR SMA Length", group=GRP_FILTER)
+atrMultiplier     = input.float(0.95, "Min ATR vs ATR-SMA", step=0.05, group=GRP_FILTER)
+bodyRatioMin      = input.float(0.35, "Min Candle Body Ratio", step=0.05, group=GRP_FILTER)
+
+string GRP_SNIPER = "Sniper Logic"
+useSniperBiasFilter  = input.bool(true, "Require sniper bias alignment", group=GRP_SNIPER)
+sniperMinPct         = input.float(57.0, "Minimum sniper score %", minval=40, maxval=100, step=1, group=GRP_SNIPER)
+useSniperCrossTrigger = input.bool(true, "Allow EMA 9/21 cross trigger", group=GRP_SNIPER)
+strongBiasDiff       = input.float(40.0, "Strong bias difference", minval=10, maxval=100, step=5, group=GRP_SNIPER)
+
+string GRP_SIGNAL = "Signal Generation"
+signalIntervalMin = input.int(3, "Signal interval (minutes)", minval=1, maxval=240, group=GRP_SIGNAL)
+signalScoreMin    = input.int(8, "Minimum total score", minval=1, maxval=20, group=GRP_SIGNAL)
+signalEdgeMin     = input.int(2, "Minimum score edge", minval=0, maxval=20, group=GRP_SIGNAL)
+minMoveAtr        = input.float(0.30, "Min move from last signal (ATR)", step=0.05, group=GRP_SIGNAL)
+
+string GRP_TIME = "Trading Schedule"
+useTimeFilter = input.bool(false, "Use time filter", group=GRP_TIME)
+startHour     = input.int(7, "Start trading hour", minval=0, maxval=23, group=GRP_TIME)
+endHour       = input.int(23, "End trading hour", minval=0, maxval=23, group=GRP_TIME)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hilfsfunktionen und Grunddaten
+// ─────────────────────────────────────────────────────────────────────────────
+inSession() =>
+    if not useTimeFilter
+        true
+    else
+        int currentHour = hour(time, syminfo.timezone)
+        startHour <= endHour ?
+             (currentHour >= startHour and currentHour < endHour) :
+             (currentHour >= startHour or currentHour < endHour)
+
+bool sessionOK = inSession()
+
+float ema9       = ta.ema(close, 9)
+float ema21      = ta.ema(close, 21)
+float vwapValue  = ta.vwap(hlc3)
+float atrValue   = ta.atr(atrLen)
+float rsiValue   = ta.rsi(close, 14)
+float rsi5m      = request.security(syminfo.tickerid, "5", ta.rsi(close, 14))
+float volAvg     = ta.sma(volume, 20)
+
+[macdMain, macdSignal, _] = ta.macd(close, 12, 26, 9)
+[_, _, adxValue] = ta.dmi(14, 14)
+
+bool emaCrossUp = ta.crossover(ema9, ema21)
+bool emaCrossDn = ta.crossunder(ema9, ema21)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Richtung, Momentum und Gedächtnis
+// ─────────────────────────────────────────────────────────────────────────────
+int histLen = math.min(historyBars, 4096)
+float upCount = 0.0
+float downCount = 0.0
+
+for i = 1 to histLen
+    if not na(close[i]) and not na(close[i + 1])
+        float priceChange = close[i] - close[i + 1]
+        float recencyWeight = 1.0 + ((histLen - i) / histLen)
+        if priceChange > 0
+            upCount += recencyWeight
+        else if priceChange < 0
+            downCount += recencyWeight
+
+float totalMoves = upCount + downCount
+float bullProb = totalMoves > 0 ? upCount / totalMoves : 0.0
+float bearProb = totalMoves > 0 ? downCount / totalMoves : 0.0
+
+int trendDir = bullProb > bearProb ? 1 : bearProb > bullProb ? -1 : 0
+float stateMomentum = math.abs(bullProb - bearProb)
+int confidenceScore = math.max(bullProb, bearProb) >= confThreshold ? 1 : 0
+int momentumScore = stateMomentum >= momentumThreshold ? 1 : 0
+
+var float qMemory = 0.0
+float memoryInput = trendDir == 1 ?
+     0.18 + stateMomentum * 0.30 :
+     trendDir == -1 ? -(0.18 + stateMomentum * 0.30) : 0.0
+qMemory := math.max(-1.0, math.min(1.0, qMemory * memoryDecay + memoryInput))
+
+int memoryBias = qMemory > memoryThreshold ? 1 : qMemory < -memoryThreshold ? -1 : 0
+int preferredDir = trendDir != 0 ? trendDir : memoryBias
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Filter
+// ─────────────────────────────────────────────────────────────────────────────
+float trendEmaValue = ta.ema(close, trendEmaLen)
+float trendEmaSlope = trendEmaValue - trendEmaValue[1]
+
+bool emaBull = close > trendEmaValue and trendEmaSlope > 0
+bool emaBear = close < trendEmaValue and trendEmaSlope < 0
+
+bool mtfBull = request.security(
+     syminfo.tickerid,
+     mtfTf,
+     close > ta.ema(close, trendEmaLen) and
+     ta.ema(close, trendEmaLen) > ta.ema(close, trendEmaLen)[1])
+
+bool mtfBear = request.security(
+     syminfo.tickerid,
+     mtfTf,
+     close < ta.ema(close, trendEmaLen) and
+     ta.ema(close, trendEmaLen) < ta.ema(close, trendEmaLen)[1])
+
+float volSMA = ta.sma(volume, volLookback)
+bool volOK = not na(volSMA) and volume > volSMA * volMultiplier
+
+float atrBase = ta.sma(atrValue, atrMaLen)
+bool atrOK = not useATRfilter or (not na(atrBase) and atrValue >= atrBase * atrMultiplier)
+
+float candleRange = math.max(high - low, syminfo.mintick)
+float bodyRatio = math.abs(close - open) / candleRange
+bool bullCandle = close > open and bodyRatio >= bodyRatioMin
+bool bearCandle = close < open and bodyRatio >= bodyRatioMin
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sniper-Bias
+// ─────────────────────────────────────────────────────────────────────────────
+float bullScoreSniper =
+     (close > vwapValue ? 1 : 0) +
+     (rsiValue > 50 ? 1 : 0) +
+     (macdMain > macdSignal ? 1 : 0) +
+     (ema9 > ema21 ? 1 : 0) +
+     (adxValue > 25 and close > ema9 ? 1 : 0) +
+     (volume > volAvg and close > open ? 1 : 0) +
+     (rsi5m > 50 ? 1 : 0)
+
+float bearScoreSniper =
+     (close < vwapValue ? 1 : 0) +
+     (rsiValue < 50 ? 1 : 0) +
+     (macdMain < macdSignal ? 1 : 0) +
+     (ema9 < ema21 ? 1 : 0) +
+     (adxValue > 25 and close < ema9 ? 1 : 0) +
+     (volume > volAvg and close < open ? 1 : 0) +
+     (rsi5m < 50 ? 1 : 0)
+
+float bullPct = bullScoreSniper / 7.0 * 100.0
+float bearPct = bearScoreSniper / 7.0 * 100.0
+float biasDiff = bullPct - bearPct
+
+bool sniperLongBias = bullPct > bearPct and bullPct >= sniperMinPct
+bool sniperShortBias = bearPct > bullPct and bearPct >= sniperMinPct
+
+bool sniperLongTrigger =
+     useSniperCrossTrigger and emaCrossUp and sniperLongBias and
+     close > vwapValue and macdMain > macdSignal and rsi5m > 50
+
+bool sniperShortTrigger =
+     useSniperCrossTrigger and emaCrossDn and sniperShortBias and
+     close < vwapValue and macdMain < macdSignal and rsi5m < 50
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entry-Scores und Signalbegrenzung
+// ─────────────────────────────────────────────────────────────────────────────
+int longScore =
+     (preferredDir == 1 ? 2 : 0) +
+     (trendDir == 1 ? 1 : 0) +
+     (memoryBias == 1 ? 1 : 0) +
+     confidenceScore +
+     momentumScore +
+     ((not useEMAfilter or emaBull) ? 1 : 0) +
+     ((not useMTFfilter or mtfBull) ? 1 : 0) +
+     ((not useVolFilter or volOK) ? 1 : 0) +
+     (atrOK ? 1 : 0) +
+     ((not useCandleFilter or bullCandle) ? 1 : 0) +
+     (bullPct > bearPct ? 2 : 0) +
+     (biasDiff >= strongBiasDiff ? 1 : 0) +
+     (close > vwapValue ? 1 : 0) +
+     (macdMain > macdSignal ? 1 : 0) +
+     (adxValue > 25 ? 1 : 0) +
+     (rsi5m > 50 ? 1 : 0)
+
+int shortScore =
+     (preferredDir == -1 ? 2 : 0) +
+     (trendDir == -1 ? 1 : 0) +
+     (memoryBias == -1 ? 1 : 0) +
+     confidenceScore +
+     momentumScore +
+     ((not useEMAfilter or emaBear) ? 1 : 0) +
+     ((not useMTFfilter or mtfBear) ? 1 : 0) +
+     ((not useVolFilter or volOK) ? 1 : 0) +
+     (atrOK ? 1 : 0) +
+     ((not useCandleFilter or bearCandle) ? 1 : 0) +
+     (bearPct > bullPct ? 2 : 0) +
+     (-biasDiff >= strongBiasDiff ? 1 : 0) +
+     (close < vwapValue ? 1 : 0) +
+     (macdMain < macdSignal ? 1 : 0) +
+     (adxValue > 25 ? 1 : 0) +
+     (rsi5m < 50 ? 1 : 0)
+
+int longEdge = longScore - shortScore
+int shortEdge = shortScore - longScore
+
+var int lastSignalBarIndex = na
+var int lastSignalType = 0
+var float lastSignalPrice = na
+
+int chartSecondsRaw = timeframe.in_seconds(timeframe.period)
+int chartSeconds = na(chartSecondsRaw) ? 60 : chartSecondsRaw
+int intervalBars = math.max(1, int(math.ceil(signalIntervalMin * 60.0 / chartSeconds)))
+
+bool newCheck = na(lastSignalBarIndex) or bar_index - lastSignalBarIndex >= intervalBars
+bool longRearmOK = na(lastSignalPrice) or lastSignalType != 1 or close >= lastSignalPrice + atrValue * minMoveAtr
+bool shortRearmOK = na(lastSignalPrice) or lastSignalType != -1 or close <= lastSignalPrice - atrValue * minMoveAtr
+bool longBiasGate = not useSniperBiasFilter or sniperLongBias or biasDiff >= strongBiasDiff
+bool shortBiasGate = not useSniperBiasFilter or sniperShortBias or -biasDiff >= strongBiasDiff
+
+bool rawLongSignal =
+     sessionOK and newCheck and longRearmOK and longBiasGate and
+     longScore >= signalScoreMin and longEdge >= signalEdgeMin
+
+bool rawShortSignal =
+     sessionOK and newCheck and shortRearmOK and shortBiasGate and
+     shortScore >= signalScoreMin and shortEdge >= signalEdgeMin
+
+rawLongSignal := rawLongSignal or sniperLongTrigger
+rawShortSignal := rawShortSignal or sniperShortTrigger
+
+if rawLongSignal and rawShortSignal
+    if bullPct >= bearPct
+        rawShortSignal := false
+    else
+        rawLongSignal := false
+
+if rawLongSignal or rawShortSignal
+    lastSignalBarIndex := bar_index
+    lastSignalType := rawLongSignal ? 1 : -1
+    lastSignalPrice := close
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Datenquellen für Px Lux Rules
+// ─────────────────────────────────────────────────────────────────────────────
+plot(rawLongSignal ? 1.0 : 0.0, "QF Long Open", display=display.data_window)
+plot(rawShortSignal ? 1.0 : 0.0, "QF Short Open", display=display.data_window)
+plot(rawShortSignal ? 1.0 : 0.0, "QF Long Close", display=display.data_window)
+plot(rawLongSignal ? 1.0 : 0.0, "QF Short Close", display=display.data_window)
+
+// Zusätzliche Diagnosewerte; sie werden nicht als Lux-Regeln verwendet.
+plot(longScore, "QF Long Score", display=display.data_window)
+plot(shortScore, "QF Short Score", display=display.data_window)

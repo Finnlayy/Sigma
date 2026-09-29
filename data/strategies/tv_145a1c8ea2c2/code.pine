@@ -1,0 +1,419 @@
+//@version=6
+strategy(
+     title               = "AI SuperTrend KNN RSI Bot v6",
+     shorttitle          = "ST-KNN-RSI",
+     overlay             = true,
+     pyramiding          = 0,
+     initial_capital     = 1000,
+     default_qty_type    = strategy.percent_of_equity,
+     default_qty_value   = 5,
+     commission_type     = strategy.commission.percent,
+     commission_value    = 0.05,
+     slippage            = 2,
+     calc_on_every_tick  = true,
+     max_bars_back       = 500)
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 1 — INPUTS
+// ═══════════════════════════════════════════════════════════
+
+// SuperTrend
+i_st_atr    = input.int(10,    "ST ATR Period",       minval=1,          group="SuperTrend")
+i_st_mult   = input.float(3.0, "ST ATR Multiplier",   minval=0.1, step=0.1, group="SuperTrend")
+
+// KNN
+i_knn_k     = input.int(5,     "KNN Neighbours (k)",  minval=1,  maxval=21, group="KNN")
+i_knn_lb    = input.int(50,    "KNN Lookback",        minval=20, maxval=200,group="KNN")
+
+// RSI
+i_rsi_len   = input.int(9,     "RSI Length",          minval=2,  maxval=50, group="RSI")
+i_rsi_ob    = input.int(75,    "RSI Overbought Base", minval=60, maxval=95, group="RSI")
+i_rsi_os    = input.int(25,    "RSI Oversold Base",   minval=5,  maxval=40, group="RSI")
+
+// EMA
+i_ema_fast  = input.int(50,    "Fast EMA",            minval=5,             group="EMA Filter")
+i_ema_slow  = input.int(200,   "Slow EMA",            minval=50,            group="EMA Filter")
+
+// Risk
+i_atr_sl    = input.float(1.8, "SL ATR Mult",         minval=0.5, step=0.1, group="Risk")
+i_atr_tp1   = input.float(2.5, "TP1 ATR Mult",        minval=0.5, step=0.1, group="Risk")
+i_trail_atr = input.float(1.5, "Trail ATR Mult",      minval=0.5, step=0.1, group="Risk")
+i_max_dd    = input.float(50.0,"Max Daily DD (USDT)",  minval=5.0,           group="Risk")
+i_risk_pct  = input.float(2.0, "Risk % Per Trade",    minval=0.1, maxval=10, group="Risk")
+
+// Anti-Martingale
+i_am_on     = input.bool(true,  "Anti-Martingale On",                        group="Anti-Martingale")
+i_am_win    = input.float(1.25, "Mult on Win",         step=0.05,            group="Anti-Martingale")
+i_am_loss   = input.float(0.80, "Mult on Loss",        step=0.05,            group="Anti-Martingale")
+i_am_max    = input.float(3.0,  "Max Mult Cap",        step=0.1,             group="Anti-Martingale")
+i_am_min    = input.float(0.5,  "Min Mult Floor",      step=0.1,             group="Anti-Martingale")
+
+// Visuals
+i_show_st   = input.bool(true,  "Show SuperTrend",                           group="Visuals")
+i_show_sig  = input.bool(true,  "Show Entry Labels",                         group="Visuals")
+i_show_db   = input.bool(true,  "Show Dashboard",                            group="Visuals")
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 2 — CORE INDICATORS
+// ═══════════════════════════════════════════════════════════
+
+atr_val     = ta.atr(i_st_atr)
+
+// SuperTrend
+_hl2        = hl2
+_upperRaw   = _hl2 + i_st_mult * atr_val
+_lowerRaw   = _hl2 - i_st_mult * atr_val
+
+var float stUp  = na
+var float stDn  = na
+var int   stDir = 1
+
+stUp  := na(stUp<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>)  ? _upperRaw : close<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a> > stUp<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>  ? math.max(_upperRaw, stUp<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>)  : _upperRaw
+stDn  := na(stDn<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>)  ? _lowerRaw : close<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a> < stDn<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>  ? math.min(_lowerRaw, stDn<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>)  : _lowerRaw
+stDir := close > stUp<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a> ? 1 : close < stDn<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a> ? -1 : nz(stDir<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>, 1)
+
+stLine      = stDir == 1 ? stDn : stUp
+st_bull     = stDir ==  1
+st_bear     = stDir == -1
+st_flip_up  = st_bull and nz(stDir<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>, 1) == -1
+st_flip_dn  = st_bear and nz(stDir<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a>,  1) ==  1
+
+// RSI
+rsi_val     = ta.rsi(close, i_rsi_len)
+
+// EMAs
+ema_fast    = ta.ema(close, i_ema_fast)
+ema_slow    = ta.ema(close, i_ema_slow)
+trend_up    = ema_fast > ema_slow
+trend_dn    = ema_fast < ema_slow
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 3 — 4-STATE MARKET REGIME
+// ═══════════════════════════════════════════════════════════
+// 0 = Strong Bull | 1 = Weak Bull | 2 = Weak Bear | 3 = Strong Bear
+
+rsi_slope   = rsi_val - rsi_val<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[3]</a>
+
+regime      = trend_up  and rsi_val > 55 and rsi_slope > 0  ? 0 :
+              trend_up  and rsi_val >= 45                    ? 1 :
+              trend_dn  and rsi_val <= 55 and rsi_slope < 0  ? 3 :
+              trend_dn                                        ? 2 : 1
+
+// Adaptive RSI thresholds
+rsi_ob_dyn  = regime == 0 ? i_rsi_ob + 5  :
+              regime == 1 ? i_rsi_ob       :
+              regime == 2 ? i_rsi_ob - 5   :
+                            i_rsi_ob - 10
+
+rsi_os_dyn  = regime == 0 ? i_rsi_os + 10 :
+              regime == 1 ? i_rsi_os + 5   :
+              regime == 2 ? i_rsi_os        :
+                            i_rsi_os - 5
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 4 — KNN CLASSIFIER
+// Features: RSI | EMA-distance | ATR-normalised | ST-direction
+// Label:    next bar close > this bar close => bull
+// ═══════════════════════════════════════════════════════════
+
+f_rsi   = rsi_val
+f_emad  = math.min(math.max((close - ema_slow) / ema_slow * 1000.0 + 50.0, 0.0), 100.0)
+f_atr   = math.min(atr_val / close * 1000.0, 100.0)
+f_std   = st_bull ? 75.0 : 25.0
+
+var int knn_bull_raw = 0
+var int knn_bear_raw = 0
+
+knn_bull_raw := 0
+knn_bear_raw := 0
+
+if bar_index >= i_knn_lb
+    for i = 1 to i_knn_lb
+        d = math.sqrt(
+             math.pow(f_rsi  - f_rsi[i],  2) +
+             math.pow(f_emad - f_emad[i], 2) +
+             math.pow(f_atr  - f_atr[i],  2) +
+             math.pow(f_std  - f_std[i],  2))
+
+        w   = d > 0.001 ? 1.0 / d : 1000.0
+        lbl = close[i - 1] > close[i] ? 1 : -1
+
+        if lbl == 1
+            knn_bull_raw += int(w * 10.0)
+        else
+            knn_bear_raw += int(w * 10.0)
+
+knn_total  = knn_bull_raw + knn_bear_raw
+knn_ratio  = knn_total > 0 ? float(knn_bull_raw) / float(knn_total) : 0.5
+
+knn_bull   = knn_ratio >= 0.60
+knn_bear   = knn_ratio <= 0.40
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 5 — COMPOSITE SIGNAL (bar-close confirmed)
+// ═══════════════════════════════════════════════════════════
+
+rsi_long_ok  = rsi_val < rsi_os_dyn or (rsi_val<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a> < 50 and rsi_val >= 50)
+rsi_short_ok = rsi_val > rsi_ob_dyn or (rsi_val<a href="" class="citation-link" target="_blank" style="vertical-align: super; font-size: 0.8em; margin-left: 3px;">[1]</a> > 50 and rsi_val <= 50)
+
+confirmed    = barstate.isconfirmed
+
+long_signal  = confirmed and st_bull and knn_bull and rsi_long_ok  and trend_up
+short_signal = confirmed and st_bear and knn_bear and rsi_short_ok and trend_dn
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 6 — DAILY DRAWDOWN KILL-SWITCH
+// ═══════════════════════════════════════════════════════════
+
+var float day_eq_start  = strategy.initial_capital
+var bool  halted        = false
+
+new_day = ta.change(time("D")) != 0
+if new_day
+    day_eq_start := strategy.equity
+    halted       := false
+
+daily_dd = day_eq_start - strategy.equity
+halted  := halted or daily_dd >= i_max_dd
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 7 — ANTI-MARTINGALE SIZING
+// ═══════════════════════════════════════════════════════════
+
+var float size_mult      = 1.0
+var int   prev_trades    = 0
+
+if strategy.closedtrades > prev_trades and i_am_on
+    last_win   = strategy.closedtrades.profit(strategy.closedtrades - 1) > 0
+    size_mult  := last_win ?
+         math.min(size_mult * i_am_win,  i_am_max) :
+         math.max(size_mult * i_am_loss, i_am_min)
+    prev_trades := strategy.closedtrades
+
+adj_risk = i_risk_pct * size_mult
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 8 — ENTRY & EXIT ORDERS
+// ═══════════════════════════════════════════════════════════
+
+// ATR-risk quantity calculation
+calc_qty(entry_p, sl_p) =>
+    risk_usd  = strategy.equity * adj_risk / 100.0
+    stop_dist = math.abs(entry_p - sl_p)
+    stop_dist > 0.0 ? risk_usd / stop_dist : na
+
+// --- LONG ---
+if long_signal and strategy.position_size == 0 and not halted
+    sl_l  = close - i_atr_sl   * atr_val
+    tp1_l = close + i_atr_tp1  * atr_val
+    qty   = calc_qty(close, sl_l)
+    if not na(qty) and qty > 0
+        strategy.entry("Long",  strategy.long,  qty = qty, comment = "L-IN")
+        strategy.exit("L-TP1", "Long",
+             qty          = qty * 0.5,
+             stop         = sl_l,
+             limit        = tp1_l,
+             comment      = "L-TP1")
+        strategy.exit("L-TRL", "Long",
+             qty_percent  = 100,
+             stop         = sl_l,
+             trail_points = i_trail_atr * atr_val / syminfo.mintick,
+             trail_offset = i_trail_atr * atr_val / syminfo.mintick,
+             comment      = "L-TRAIL")
+
+// --- SHORT ---
+if short_signal and strategy.position_size == 0 and not halted
+    sl_s  = close + i_atr_sl   * atr_val
+    tp1_s = close - i_atr_tp1  * atr_val
+    qty   = calc_qty(close, sl_s)
+    if not na(qty) and qty > 0
+        strategy.entry("Short", strategy.short, qty = qty, comment = "S-IN")
+        strategy.exit("S-TP1", "Short",
+             qty          = qty * 0.5,
+             stop         = sl_s,
+             limit        = tp1_s,
+             comment      = "S-TP1")
+        strategy.exit("S-TRL", "Short",
+             qty_percent  = 100,
+             stop         = sl_s,
+             trail_points = i_trail_atr * atr_val / syminfo.mintick,
+             trail_offset = i_trail_atr * atr_val / syminfo.mintick,
+             comment      = "S-TRAIL")
+
+// --- Signal flip closes ---
+if strategy.position_size > 0 and short_signal
+    strategy.close("Long",  comment = "L-FLIP")
+if strategy.position_size < 0 and long_signal
+    strategy.close("Short", comment = "S-FLIP")
+
+// --- Daily halt ---
+if halted and strategy.position_size != 0
+    strategy.close_all(comment = "DD-HALT")
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 9 — PLOTS & VISUALS
+// ═══════════════════════════════════════════════════════════
+
+st_col = st_bull ? color.new(color.lime, 15) : color.new(color.red, 15)
+plot(i_show_st ? stLine : na, "SuperTrend", color = st_col, linewidth = 2)
+
+plot(ema_fast, "EMA Fast", color = color.new(color.orange, 50), linewidth = 1)
+plot(ema_slow, "EMA Slow", color = color.new(color.blue,   40), linewidth = 2)
+
+// Entry shapes
+plotshape(i_show_sig and long_signal,
+     title     = "Long Signal",
+     style     = shape.labelup,
+     location  = location.belowbar,
+     color     = color.new(color.lime, 5),
+     textcolor = color.white,
+     text      = "BUY",
+     size      = size.small)
+
+plotshape(i_show_sig and short_signal,
+     title     = "Short Signal",
+     style     = shape.labeldown,
+     location  = location.abovebar,
+     color     = color.new(color.red, 5),
+     textcolor = color.white,
+     text      = "SELL",
+     size      = size.small)
+
+// SuperTrend flip markers
+plotshape(st_flip_up,
+     title    = "ST Flip Up",
+     style    = shape.triangleup,
+     location = location.belowbar,
+     color    = color.new(color.aqua, 10),
+     size     = size.tiny)
+
+plotshape(st_flip_dn,
+     title    = "ST Flip Down",
+     style    = shape.triangledown,
+     location = location.abovebar,
+     color    = color.new(color.fuchsia, 10),
+     size     = size.tiny)
+
+// Regime background
+bg_c = regime == 0 ? color.new(color.lime,   92) :
+       regime == 1 ? color.new(color.green,  94) :
+       regime == 2 ? color.new(color.orange, 94) :
+                     color.new(color.red,    92)
+bgcolor(bg_c, title = "Regime Background")
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 10 — OSCILLATOR PANE (KNN Strength + RSI)
+// ═══════════════════════════════════════════════════════════
+
+knn_strength = (knn_ratio - 0.5) * 200.0
+
+knn_col = knn_bull ? color.new(color.lime, 10) :
+          knn_bear ? color.new(color.red,  10) :
+                     color.new(color.gray, 30)
+
+plot(knn_strength, "KNN Strength", color = knn_col,           linewidth = 2, display = display.pane)
+plot(rsi_val,      "RSI",          color = color.new(color.yellow, 0), linewidth = 1, display = display.pane)
+plot(rsi_ob_dyn,   "RSI OB",       color = color.new(color.red,  60), linewidth = 1, display = display.pane)
+plot(rsi_os_dyn,   "RSI OS",       color = color.new(color.lime, 60), linewidth = 1, display = display.pane)
+
+hline(60,  "KNN Bull",    color.new(color.lime, 50), linestyle = hline.style_dashed, display = display.pane)
+hline(-60, "KNN Bear",    color.new(color.red,  50), linestyle = hline.style_dashed, display = display.pane)
+hline(0,   "KNN Mid",     color.new(color.gray, 50), linestyle = hline.style_solid,  display = display.pane)
+hline(50,  "RSI Mid",     color.new(color.gray, 70), linestyle = hline.style_dotted, display = display.pane)
+
+// ═══════════════════════════════════════════════════════════
+// SECTION 11 — DASHBOARD TABLE (no closures, no emoji)
+// ═══════════════════════════════════════════════════════════
+
+var table db = table.new(
+     position     = position.top_right,
+     columns      = 2,
+     rows         = 13,
+     bgcolor       = color.new(color.black, 25),
+     border_color  = color.new(color.gray,  50),
+     border_width  = 1,
+     frame_color   = color.new(color.white, 30),
+     frame_width   = 1)
+
+if i_show_db and barstate.islast
+
+    // Header
+    table.cell(db, 0, 0, "AI ST-KNN-RSI BOT",
+         text_color = color.white,
+         text_size  = size.normal,
+         bgcolor    = color.new(color.navy, 15))
+    table.cell(db, 1, 0, syminfo.tickerid + "  " + timeframe.period + "m",
+         text_color = color.yellow,
+         text_size  = size.normal,
+         bgcolor    = color.new(color.navy, 15))
+
+    // Regime
+    regime_str = regime == 0 ? "STRONG BULL" :
+                 regime == 1 ? "WEAK BULL"   :
+                 regime == 2 ? "WEAK BEAR"   : "STRONG BEAR"
+    regime_col = regime == 0 or regime == 1 ? color.lime : color.red
+    table.cell(db, 0, 1, "Regime",     text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 1, regime_str,   text_color = regime_col,   text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // SuperTrend
+    st_str  = st_bull ? "BULLISH" : "BEARISH"
+    st_col2 = st_bull ? color.lime : color.red
+    table.cell(db, 0, 2, "SuperTrend", text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 2, st_str,       text_color = st_col2,      text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // KNN Vote
+    knn_pct   = str.tostring(math.round(knn_ratio * 100)) + "% Bull"
+    knn_col2  = knn_bull ? color.lime : knn_bear ? color.red : color.gray
+    knn_label = knn_bull ? "BULL " + knn_pct : knn_bear ? "BEAR " + knn_pct : "NEUTRAL"
+    table.cell(db, 0, 3, "KNN Vote",   text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 3, knn_label,    text_color = knn_col2,     text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // RSI value
+    table.cell(db, 0, 4, "RSI",        text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 4, str.tostring(math.round(rsi_val, 1)),
+         text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // RSI OB/OS dynamic
+    table.cell(db, 0, 5, "OB / OS",    text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 5, str.tostring(rsi_ob_dyn) + " / " + str.tostring(rsi_os_dyn),
+         text_color = color.silver, text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // ATR
+    table.cell(db, 0, 6, "ATR",        text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 6, str.tostring(math.round(atr_val, 5)),
+         text_color = color.orange, text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // Size multiplier
+    table.cell(db, 0, 7, "Size Mult",  text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 7, "x" + str.tostring(math.round(size_mult, 2)),
+         text_color = color.aqua, text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // Daily drawdown
+    dd_col = daily_dd > i_max_dd * 0.8 ? color.red : color.lime
+    table.cell(db, 0, 8, "Daily DD",   text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 8, str.tostring(math.round(daily_dd, 2)) + " USDT",
+         text_color = dd_col, text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // Trading status
+    halt_str = halted ? "HALTED" : "ACTIVE"
+    halt_col = halted ? color.red : color.lime
+    table.cell(db, 0, 9, "Status",     text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 9, halt_str,     text_color = halt_col,     text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // Net P&L
+    pnl_col = strategy.netprofit >= 0 ? color.lime : color.red
+    table.cell(db, 0, 10, "Net P&L",   text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 10, str.tostring(math.round(strategy.netprofit, 2)) + " USDT",
+         text_color = pnl_col, text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // Win rate
+    wr_str = strategy.closedtrades > 0 ?
+         str.tostring(math.round(float(strategy.wintrades) / float(strategy.closedtrades) * 100.0, 1)) + "%" :
+         "N/A"
+    table.cell(db, 0, 11, "Win Rate",  text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 11, wr_str,      text_color = color.white,  text_size = size.small, bgcolor = color.new(color.black, 45))
+
+    // Trade count
+    table.cell(db, 0, 12, "Trades",    text_color = color.silver, text_size = size.small, bgcolor = color.new(color.gray, 78))
+    table.cell(db, 1, 12, str.tostring(strategy.closedtrades),
+         text_color = color.white, text_size = size.small, bgcolor = color.new(color.black, 45))

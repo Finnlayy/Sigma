@@ -1,0 +1,489 @@
+//@version=6
+strategy(
+     title                   = "MTF CISD Strategy v1 Refined",
+     overlay                 = true,
+     pyramiding              = 0,
+     initial_capital         = 100000,
+     default_qty_type        = strategy.fixed,
+     default_qty_value       = 1,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.05,
+     slippage                = 1,
+     calc_on_every_tick      = false,
+     process_orders_on_close = true
+)
+
+string group_tf = "Multi-TF Settings"
+string tf1_in = input.timeframe("W", title = "Timeframe 1", group = group_tf)
+bool enable_tf1 = input.bool(true, title = "Enable Timeframe 1", group = group_tf)
+string tf2_in = input.timeframe("D", title = "Timeframe 2", group = group_tf)
+bool enable_tf2 = input.bool(true, title = "Enable Timeframe 2", group = group_tf)
+string tf3_in = input.timeframe("240", title = "Timeframe 3", group = group_tf)
+bool enable_tf3 = input.bool(true, title = "Enable Timeframe 3", group = group_tf)
+string tf4_in = input.timeframe("60", title = "Timeframe 4", group = group_tf)
+bool enable_tf4 = input.bool(true, title = "Enable Timeframe 4", group = group_tf)
+string tf5_in = input.timeframe("15", title = "Timeframe 5", group = group_tf)
+bool enable_tf5 = input.bool(true, title = "Enable Timeframe 5", group = group_tf)
+string tf6_in = input.timeframe("5", title = "Timeframe 6", group = group_tf)
+bool enable_tf6 = input.bool(true, title = "Enable Timeframe 6", group = group_tf)
+
+string group_trade = "Trade Settings"
+float rr_ratio = input.float(2.0, title = "Risk-Reward Ratio", minval = 2.0, step = 0.1, group = group_trade)
+bool use_prev_candle_for_sl = input.bool(false, title = "Use Previous Candle for SL", group = group_trade)
+float risk_pct = input.float(1.0, title = "Risk Per Trade %", minval = 0.1, maxval = 5.0, step = 0.1, group = group_trade)
+float tp1_qty_pct = input.float(50.0, title = "TP1 Qty %", minval = 1.0, maxval = 99.0, step = 1.0, group = group_trade)
+bool use_trailing_runner = input.bool(true, title = "Use Trailing Stop On Runner", group = group_trade)
+float trail_atr_mult = input.float(1.5, title = "Runner Trail ATR Multiplier", minval = 0.25, maxval = 10.0, step = 0.05, group = group_trade)
+bool move_stop_to_breakeven_on_tp1 = input.bool(true, title = "Move Stop To Breakeven After TP1", group = group_trade)
+float breakeven_offset_ticks = input.float(1.0, title = "Breakeven Offset In Ticks", minval = 0.0, step = 1.0, group = group_trade)
+bool close_remainder_on_alignment_loss = input.bool(true, title = "Close Remainder On Alignment Loss", group = group_trade)
+bool close_on_opposite_local_signal = input.bool(true, title = "Close Remainder On Opposite Local CISD", group = group_trade)
+float min_risk_ticks = input.float(2.0, title = "Min Risk Distance In Ticks", minval = 1.0, step = 1.0, group = group_trade)
+float max_position_qty = input.float(1000000.0, title = "Max Position Size", minval = 1.0, step = 1.0, group = group_trade)
+
+string group_filter = "Entry Filter Settings"
+int start_hour_est = input.int(9, "Start Hour (EST)", minval = 0, maxval = 23, group = group_filter)
+int start_min_est = input.int(30, "Start Minute", minval = 0, maxval = 59, group = group_filter)
+int end_hour_est = input.int(16, "End Hour (EST)", minval = 0, maxval = 23, group = group_filter)
+int end_min_est = input.int(0, "End Minute", minval = 0, maxval = 59, group = group_filter)
+bool allow_sun = input.bool(false, "Allow Sunday", group = group_filter)
+bool allow_mon = input.bool(true, "Allow Monday", group = group_filter)
+bool allow_tue = input.bool(true, "Allow Tuesday", group = group_filter)
+bool allow_wed = input.bool(true, "Allow Wednesday", group = group_filter)
+bool allow_thu = input.bool(true, "Allow Thursday", group = group_filter)
+bool allow_fri = input.bool(true, "Allow Friday", group = group_filter)
+bool allow_sat = input.bool(false, "Allow Saturday", group = group_filter)
+
+string group_ai = "Probability Filter"
+bool ai_enabled = input.bool(true, "Enable Probability Filter", group = group_ai)
+float ai_long_threshold = input.float(0.58, "Min Long Probability", minval = 0.50, maxval = 0.95, step = 0.01, group = group_ai)
+float ai_short_threshold = input.float(0.42, "Max Long Probability For Short", minval = 0.05, maxval = 0.50, step = 0.01, group = group_ai)
+
+string group_feat = "Feature Filter"
+int ema_len = input.int(34, "EMA Length", minval = 5, maxval = 200, group = group_feat)
+int rsi_len = input.int(14, "RSI Length", minval = 2, maxval = 50, group = group_feat)
+int atr_len = input.int(14, "ATR Length", minval = 2, maxval = 50, group = group_feat)
+
+string group_quality = "Trade Quality Filter"
+int min_signal_rating = input.int(3, "Min Signal Rating", minval = 1, maxval = 4, group = group_quality)
+int alignment_max_wait_bars = input.int(12, "Max Bars After Alignment", minval = 1, maxval = 100, group = group_quality)
+int cooldown_bars = input.int(3, "Cooldown Bars After Trade", minval = 0, maxval = 100, group = group_quality)
+float long_rsi_floor = input.float(52.0, "Long RSI Floor", minval = 0.0, maxval = 100.0, step = 0.5, group = group_quality)
+float short_rsi_ceiling = input.float(48.0, "Short RSI Ceiling", minval = 0.0, maxval = 100.0, step = 0.5, group = group_quality)
+bool use_atr_ceiling = input.bool(true, "Use ATR Ceiling", group = group_quality)
+float max_atr_pct = input.float(0.015, "Max ATR %", minval = 0.001, maxval = 0.100, step = 0.001, group = group_quality)
+
+string group_display = "Display"
+bool show_bg = input.bool(true, "Show Alignment Background", group = group_display)
+bool show_levels = input.bool(true, "Show Local CISD Markers", group = group_display)
+bool show_ai_plot = input.bool(true, "Show AI Probability", group = group_display)
+bool show_dashboard = input.bool(true, "Show Dashboard", group = group_display)
+
+const string tz = "America/New_York"
+const string LONG_TP1_ID = "Long TP1"
+const string LONG_SL_ID = "Long SL"
+const string SHORT_TP1_ID = "Short TP1"
+const string SHORT_SL_ID = "Short SL"
+const string LONG_RUNNER_SL_ID = "Long Runner SL"
+const string SHORT_RUNNER_SL_ID = "Short Runner SL"
+const string LONG_OCA = "LONG_BRACKET"
+const string SHORT_OCA = "SHORT_BRACKET"
+
+f_tfDisplay(string tf) =>
+    tf == "D" ? "Daily" : tf == "W" ? "Weekly" : tf == "240" ? "H4" : tf == "60" ? "H1" : tf == "15" ? "M15" : tf == "5" ? "M5" : tf == "1" ? "M1" : tf
+
+f_bool_to_float(bool value) =>
+    value ? 1.0 : 0.0
+
+f_clamp(float value, float min_value, float max_value) =>
+    math.max(min_value, math.min(max_value, value))
+
+f_confidence_rating(bool is_long_signal, float probability_up, float long_threshold, float short_threshold) =>
+    if na(probability_up)
+        2
+    else
+        float normalized_confidence = is_long_signal ? f_clamp((probability_up - long_threshold) / math.max(1.0 - long_threshold, 0.000001), 0.0, 1.0) : f_clamp((short_threshold - probability_up) / math.max(short_threshold, 0.000001), 0.0, 1.0)
+        normalized_confidence >= 0.75 ? 4 : normalized_confidence >= 0.50 ? 3 : normalized_confidence >= 0.25 ? 2 : 1
+
+f_cisdLogic() =>
+    var float bull_target = na
+    var float bear_target = na
+    var int last_state = 0
+
+    bool is_inside = high < high[1] and low > low[1]
+    bool is_bearish = close < open
+    bool is_bullish = close > open
+
+    bool bullishCISD = not na(bull_target) and close > bull_target and close[1] <= bull_target
+    bool bearishCISD = not na(bear_target) and close < bear_target and close[1] >= bear_target
+
+    if barstate.isconfirmed
+        if bullishCISD
+            last_state := 1
+        if bearishCISD
+            last_state := -1
+
+    if is_bearish and not is_inside
+        bull_target := open
+    if is_bullish and not is_inside
+        bear_target := open
+
+    [last_state, bullishCISD, bearishCISD]
+
+f_cisdState() =>
+    [state_value, bull_unused, bear_unused] = f_cisdLogic()
+    state_value
+
+[local_state, local_bullCISD, local_bearCISD] = f_cisdLogic()
+int state1 = enable_tf1 ? request.security(syminfo.tickerid, tf1_in, f_cisdState(), lookahead = barmerge.lookahead_off) : 0
+int state2 = enable_tf2 ? request.security(syminfo.tickerid, tf2_in, f_cisdState(), lookahead = barmerge.lookahead_off) : 0
+int state3 = enable_tf3 ? request.security(syminfo.tickerid, tf3_in, f_cisdState(), lookahead = barmerge.lookahead_off) : 0
+int state4 = enable_tf4 ? request.security(syminfo.tickerid, tf4_in, f_cisdState(), lookahead = barmerge.lookahead_off) : 0
+int state5 = enable_tf5 ? request.security(syminfo.tickerid, tf5_in, f_cisdState(), lookahead = barmerge.lookahead_off) : 0
+int state6 = enable_tf6 ? request.security(syminfo.tickerid, tf6_in, f_cisdState(), lookahead = barmerge.lookahead_off) : 0
+
+int enabled_count = 0
+int bullish_count = 0
+int bearish_count = 0
+
+if enable_tf1
+    enabled_count += 1
+    bullish_count += state1 == 1 ? 1 : 0
+    bearish_count += state1 == -1 ? 1 : 0
+if enable_tf2
+    enabled_count += 1
+    bullish_count += state2 == 1 ? 1 : 0
+    bearish_count += state2 == -1 ? 1 : 0
+if enable_tf3
+    enabled_count += 1
+    bullish_count += state3 == 1 ? 1 : 0
+    bearish_count += state3 == -1 ? 1 : 0
+if enable_tf4
+    enabled_count += 1
+    bullish_count += state4 == 1 ? 1 : 0
+    bearish_count += state4 == -1 ? 1 : 0
+if enable_tf5
+    enabled_count += 1
+    bullish_count += state5 == 1 ? 1 : 0
+    bearish_count += state5 == -1 ? 1 : 0
+if enable_tf6
+    enabled_count += 1
+    bullish_count += state6 == 1 ? 1 : 0
+    bearish_count += state6 == -1 ? 1 : 0
+
+bool allBullish = enabled_count > 0 and bullish_count == enabled_count
+bool allBearish = enabled_count > 0 and bearish_count == enabled_count
+
+var bool prev_allBullish = false
+var bool prev_allBearish = false
+bool new_bull_alignment = allBullish and not prev_allBullish
+bool new_bear_alignment = allBearish and not prev_allBearish
+prev_allBullish := allBullish
+prev_allBearish := allBearish
+
+var bool pending_long = false
+var bool pending_short = false
+var int pending_long_start_bar = na
+var int pending_short_start_bar = na
+
+if new_bull_alignment
+    pending_long := true
+    pending_short := false
+    pending_long_start_bar := bar_index
+    pending_short_start_bar := na
+if new_bear_alignment
+    pending_short := true
+    pending_long := false
+    pending_short_start_bar := bar_index
+    pending_long_start_bar := na
+if not allBullish
+    pending_long := false
+    pending_long_start_bar := na
+if not allBearish
+    pending_short := false
+    pending_short_start_bar := na
+if pending_long and not na(pending_long_start_bar) and bar_index - pending_long_start_bar > alignment_max_wait_bars
+    pending_long := false
+    pending_long_start_bar := na
+if pending_short and not na(pending_short_start_bar) and bar_index - pending_short_start_bar > alignment_max_wait_bars
+    pending_short := false
+    pending_short_start_bar := na
+
+int entry_time = time + timeframe.in_seconds() * 1000
+int entry_hour = hour(entry_time, tz)
+int entry_min = minute(entry_time, tz)
+int entry_dow = dayofweek(entry_time, tz)
+int start_min_total = start_hour_est * 60 + start_min_est
+int end_min_total = end_hour_est * 60 + end_min_est
+int entry_min_total = entry_hour * 60 + entry_min
+bool time_in_window = start_min_total <= end_min_total ? entry_min_total >= start_min_total and entry_min_total <= end_min_total : entry_min_total >= start_min_total or entry_min_total <= end_min_total
+
+bool day_allowed = false
+if entry_dow == dayofweek.sunday
+    day_allowed := allow_sun
+else if entry_dow == dayofweek.monday
+    day_allowed := allow_mon
+else if entry_dow == dayofweek.tuesday
+    day_allowed := allow_tue
+else if entry_dow == dayofweek.wednesday
+    day_allowed := allow_wed
+else if entry_dow == dayofweek.thursday
+    day_allowed := allow_thu
+else if entry_dow == dayofweek.friday
+    day_allowed := allow_fri
+else if entry_dow == dayofweek.saturday
+    day_allowed := allow_sat
+
+bool entry_allowed = day_allowed and time_in_window
+
+float ema_value = ta.ema(close, ema_len)
+float rsi_value = ta.rsi(close, rsi_len)
+float atr_value = ta.atr(atr_len)
+float atr_pct = close == 0.0 ? 0.0 : atr_value / close
+float momentum = na(close[1]) or close[1] == 0.0 ? 0.0 : close / close[1] - 1.0
+float price_vs_ema = ema_value == 0.0 ? 0.0 : close / ema_value - 1.0
+
+var float ai_prob_up = na
+var float ai_training_loss = na
+var float ai_validation_loss = na
+
+bool ai_ready = not na(rsi_value) and not na(ema_value) and not na(atr_pct) and not na(momentum)
+if ai_enabled and ai_ready
+    float alignment_bias = enabled_count > 0 ? (bullish_count - bearish_count) / enabled_count : 0.0
+    float local_bias = local_state
+    float rsi_bias = f_clamp((rsi_value - 50.0) / 25.0, -1.0, 1.0)
+    float ema_bias = f_clamp(price_vs_ema * 40.0, -1.0, 1.0)
+    float momentum_bias = f_clamp(momentum * 200.0, -1.0, 1.0)
+    float volatility_penalty = f_clamp(atr_pct * 25.0, 0.0, 1.0)
+    float score = alignment_bias * 0.35 + local_bias * 0.20 + rsi_bias * 0.15 + ema_bias * 0.15 + momentum_bias * 0.20 - volatility_penalty * 0.05
+    ai_prob_up := f_clamp(0.5 + score * 0.5, 0.0, 1.0)
+    ai_training_loss := na
+    ai_validation_loss := na
+else
+    ai_prob_up := na
+    ai_training_loss := na
+    ai_validation_loss := na
+
+bool ai_long_ok = not ai_enabled or not ai_ready or not na(ai_prob_up) and ai_prob_up >= ai_long_threshold
+bool ai_short_ok = not ai_enabled or not ai_ready or not na(ai_prob_up) and ai_prob_up <= ai_short_threshold
+
+float long_stop_candidate = use_prev_candle_for_sl ? low[1] : open
+float short_stop_candidate = use_prev_candle_for_sl ? high[1] : open
+float long_risk_candidate = close - long_stop_candidate
+float short_risk_candidate = short_stop_candidate - close
+float min_risk_distance = min_risk_ticks * syminfo.mintick
+bool valid_long_risk = not na(long_stop_candidate) and long_risk_candidate > min_risk_distance
+bool valid_short_risk = not na(short_stop_candidate) and short_risk_candidate > min_risk_distance
+
+float risk_cash = strategy.equity * risk_pct * 0.01
+float long_qty = valid_long_risk ? math.min(risk_cash / long_risk_candidate, max_position_qty) : 0.0
+float short_qty = valid_short_risk ? math.min(risk_cash / short_risk_candidate, max_position_qty) : 0.0
+
+bool base_long_signal = pending_long and local_bullCISD and allBullish
+bool base_short_signal = pending_short and local_bearCISD and allBearish
+int long_signal_rating = f_confidence_rating(true, ai_prob_up, ai_long_threshold, ai_short_threshold)
+int short_signal_rating = f_confidence_rating(false, ai_prob_up, ai_long_threshold, ai_short_threshold)
+bool long_fresh_ok = na(pending_long_start_bar) or bar_index - pending_long_start_bar <= alignment_max_wait_bars
+bool short_fresh_ok = na(pending_short_start_bar) or bar_index - pending_short_start_bar <= alignment_max_wait_bars
+bool long_trend_ok = close > ema_value and rsi_value >= long_rsi_floor
+bool short_trend_ok = close < ema_value and rsi_value <= short_rsi_ceiling
+bool volatility_ok = not use_atr_ceiling or atr_pct <= max_atr_pct
+var int last_trade_closed_bar = na
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    last_trade_closed_bar := bar_index
+bool cooldown_ok = na(last_trade_closed_bar) or bar_index - last_trade_closed_bar > cooldown_bars
+bool new_long = base_long_signal and entry_allowed and ai_long_ok and strategy.position_size == 0 and long_qty > 0 and long_signal_rating >= min_signal_rating and long_fresh_ok and long_trend_ok and volatility_ok and cooldown_ok
+bool new_short = base_short_signal and entry_allowed and ai_short_ok and strategy.position_size == 0 and short_qty > 0 and short_signal_rating >= min_signal_rating and short_fresh_ok and short_trend_ok and volatility_ok and cooldown_ok
+
+if new_long
+    pending_long := false
+    pending_long_start_bar := na
+if new_short
+    pending_short := false
+    pending_short_start_bar := na
+
+var float queued_long_stop = na
+var float queued_short_stop = na
+var float trade_stop_price = na
+var float trade_risk = na
+var float trade_tp1_price = na
+var float initial_position_qty_abs = na
+var float runner_stop_price = na
+var float high_since_entry = na
+var float low_since_entry = na
+var bool tp1_filled = false
+
+if new_long
+    queued_long_stop := long_stop_candidate
+    queued_short_stop := na
+    strategy.entry("Long", strategy.long, qty = long_qty, alert_message = "MTF CISD Neural Long")
+
+if new_short
+    queued_short_stop := short_stop_candidate
+    queued_long_stop := na
+    strategy.entry("Short", strategy.short, qty = short_qty, alert_message = "MTF CISD Neural Short")
+
+bool new_long_position = strategy.position_size > 0 and strategy.position_size[1] <= 0
+bool new_short_position = strategy.position_size < 0 and strategy.position_size[1] >= 0
+
+if new_long_position
+    float fallback_stop = strategy.position_avg_price - math.max(atr_value, min_risk_distance)
+    trade_stop_price := not na(queued_long_stop) and queued_long_stop < strategy.position_avg_price ? queued_long_stop : fallback_stop
+    trade_risk := strategy.position_avg_price - trade_stop_price
+    trade_tp1_price := strategy.position_avg_price + trade_risk * rr_ratio
+    initial_position_qty_abs := math.abs(strategy.position_size)
+    runner_stop_price := na
+    high_since_entry := high
+    low_since_entry := low
+    tp1_filled := false
+    queued_long_stop := na
+    strategy.cancel(SHORT_TP1_ID)
+    strategy.cancel(SHORT_SL_ID)
+    strategy.cancel(SHORT_RUNNER_SL_ID)
+
+if new_short_position
+    float fallback_stop = strategy.position_avg_price + math.max(atr_value, min_risk_distance)
+    trade_stop_price := not na(queued_short_stop) and queued_short_stop > strategy.position_avg_price ? queued_short_stop : fallback_stop
+    trade_risk := trade_stop_price - strategy.position_avg_price
+    trade_tp1_price := strategy.position_avg_price - trade_risk * rr_ratio
+    initial_position_qty_abs := math.abs(strategy.position_size)
+    runner_stop_price := na
+    high_since_entry := high
+    low_since_entry := low
+    tp1_filled := false
+    queued_short_stop := na
+    strategy.cancel(LONG_TP1_ID)
+    strategy.cancel(LONG_SL_ID)
+    strategy.cancel(LONG_RUNNER_SL_ID)
+
+if strategy.position_size > 0
+    high_since_entry := na(high_since_entry) ? high : math.max(high_since_entry, high)
+    low_since_entry := na(low_since_entry) ? low : math.min(low_since_entry, low)
+    float pos_qty = math.abs(strategy.position_size)
+    float qty_tolerance = math.max(nz(initial_position_qty_abs) * 0.001, 0.000001)
+    if not tp1_filled and not na(initial_position_qty_abs) and pos_qty < initial_position_qty_abs - qty_tolerance
+        tp1_filled := true
+        strategy.cancel(LONG_TP1_ID)
+        strategy.cancel(LONG_SL_ID)
+    if tp1_filled
+        float trail_candidate = high_since_entry - atr_value * trail_atr_mult
+        float be_floor = strategy.position_avg_price + breakeven_offset_ticks * syminfo.mintick
+        float managed_runner_stop = use_trailing_runner ? trail_candidate : trade_stop_price
+        if move_stop_to_breakeven_on_tp1
+            managed_runner_stop := math.max(managed_runner_stop, be_floor)
+        runner_stop_price := na(runner_stop_price) ? managed_runner_stop : math.max(runner_stop_price, managed_runner_stop)
+        strategy.order(LONG_RUNNER_SL_ID, strategy.short, qty = pos_qty, stop = runner_stop_price, alert_message = "Long runner SL")
+    else if not na(trade_stop_price) and not na(trade_tp1_price)
+        strategy.cancel(LONG_RUNNER_SL_ID)
+        float tp_qty = math.max(pos_qty * tp1_qty_pct * 0.01, 0)
+        strategy.order(LONG_TP1_ID, strategy.short, qty = tp_qty, limit = trade_tp1_price, oca_name = LONG_OCA, oca_type = strategy.oca.reduce, alert_message = "Long TP1")
+        strategy.order(LONG_SL_ID, strategy.short, qty = pos_qty, stop = trade_stop_price, oca_name = LONG_OCA, oca_type = strategy.oca.reduce, alert_message = "Long SL")
+
+if strategy.position_size < 0
+    high_since_entry := na(high_since_entry) ? high : math.max(high_since_entry, high)
+    low_since_entry := na(low_since_entry) ? low : math.min(low_since_entry, low)
+    float pos_qty = math.abs(strategy.position_size)
+    float qty_tolerance = math.max(nz(initial_position_qty_abs) * 0.001, 0.000001)
+    if not tp1_filled and not na(initial_position_qty_abs) and pos_qty < initial_position_qty_abs - qty_tolerance
+        tp1_filled := true
+        strategy.cancel(SHORT_TP1_ID)
+        strategy.cancel(SHORT_SL_ID)
+    if tp1_filled
+        float trail_candidate = low_since_entry + atr_value * trail_atr_mult
+        float be_ceiling = strategy.position_avg_price - breakeven_offset_ticks * syminfo.mintick
+        float managed_runner_stop = use_trailing_runner ? trail_candidate : trade_stop_price
+        if move_stop_to_breakeven_on_tp1
+            managed_runner_stop := math.min(managed_runner_stop, be_ceiling)
+        runner_stop_price := na(runner_stop_price) ? managed_runner_stop : math.min(runner_stop_price, managed_runner_stop)
+        strategy.order(SHORT_RUNNER_SL_ID, strategy.long, qty = pos_qty, stop = runner_stop_price, alert_message = "Short runner SL")
+    else if not na(trade_stop_price) and not na(trade_tp1_price)
+        strategy.cancel(SHORT_RUNNER_SL_ID)
+        float tp_qty = math.max(pos_qty * tp1_qty_pct * 0.01, 0)
+        strategy.order(SHORT_TP1_ID, strategy.long, qty = tp_qty, limit = trade_tp1_price, oca_name = SHORT_OCA, oca_type = strategy.oca.reduce, alert_message = "Short TP1")
+        strategy.order(SHORT_SL_ID, strategy.long, qty = pos_qty, stop = trade_stop_price, oca_name = SHORT_OCA, oca_type = strategy.oca.reduce, alert_message = "Short SL")
+
+bool long_alignment_exit = strategy.position_size > 0 and close_remainder_on_alignment_loss and not allBullish
+bool short_alignment_exit = strategy.position_size < 0 and close_remainder_on_alignment_loss and not allBearish
+bool long_local_flip_exit = strategy.position_size > 0 and close_on_opposite_local_signal and local_bearCISD
+bool short_local_flip_exit = strategy.position_size < 0 and close_on_opposite_local_signal and local_bullCISD
+
+if long_alignment_exit or long_local_flip_exit
+    strategy.cancel(LONG_TP1_ID)
+    strategy.cancel(LONG_SL_ID)
+    strategy.cancel(LONG_RUNNER_SL_ID)
+    strategy.close("Long", comment = long_alignment_exit ? "Alignment Lost" : "Opposite CISD", alert_message = "Long remainder closed")
+
+if short_alignment_exit or short_local_flip_exit
+    strategy.cancel(SHORT_TP1_ID)
+    strategy.cancel(SHORT_SL_ID)
+    strategy.cancel(SHORT_RUNNER_SL_ID)
+    strategy.close("Short", comment = short_alignment_exit ? "Alignment Lost" : "Opposite CISD", alert_message = "Short remainder closed")
+
+if strategy.position_size == 0
+    strategy.cancel(LONG_TP1_ID)
+    strategy.cancel(LONG_SL_ID)
+    strategy.cancel(LONG_RUNNER_SL_ID)
+    strategy.cancel(SHORT_TP1_ID)
+    strategy.cancel(SHORT_SL_ID)
+    strategy.cancel(SHORT_RUNNER_SL_ID)
+    trade_stop_price := na
+    trade_risk := na
+    trade_tp1_price := na
+    initial_position_qty_abs := na
+    runner_stop_price := na
+    high_since_entry := na
+    low_since_entry := na
+    tp1_filled := false
+
+bgcolor(show_bg ? allBullish ? color.new(color.green, 88) : allBearish ? color.new(color.red, 88) : na : na, title = "Alignment Background")
+plotshape(show_levels and local_bullCISD ? low : na, title = "Bullish CISD", style = shape.triangleup, location = location.absolute, color = color.lime, size = size.small)
+plotshape(show_levels and local_bearCISD ? high : na, title = "Bearish CISD", style = shape.triangledown, location = location.absolute, color = color.red, size = size.small)
+plotshape(new_long ? low : na, title = "Long Entry", style = shape.labelup, location = location.absolute, color = color.new(color.green, 0), text = "L", size = size.tiny)
+plotshape(new_short ? high : na, title = "Short Entry", style = shape.labeldown, location = location.absolute, color = color.new(color.red, 0), text = "S", size = size.tiny)
+
+if new_long
+    label.new(bar_index, low, "L " + str.tostring(long_signal_rating) + "/4", style = label.style_label_up, textcolor = color.white, color = color.new(color.green, 0), size = size.tiny)
+
+if new_short
+    label.new(bar_index, high, "S " + str.tostring(short_signal_rating) + "/4", style = label.style_label_down, textcolor = color.white, color = color.new(color.red, 0), size = size.tiny)
+
+// Hidden connector outputs for Lux external-source alerts.
+plot(new_long ? 1 : 0, "Lux Long Pulse", display = display.none)
+plot(new_short ? 1 : 0, "Lux Short Pulse", display = display.none)
+plot(new_long ? 1 : new_short ? -1 : 0, "Lux Entry Pulse", display = display.none)
+plot(allBullish ? 1 : allBearish ? -1 : 0, "Lux Alignment Bias", display = display.none)
+plot(ai_prob_up, "Lux Probability", display = display.none)
+
+plot(strategy.position_size > 0 ? trade_stop_price : na, "Long Stop", color = color.new(color.red, 0), style = plot.style_linebr)
+plot(strategy.position_size > 0 ? trade_tp1_price : na, "Long TP1", color = color.new(color.green, 0), style = plot.style_linebr)
+plot(strategy.position_size > 0 and tp1_filled ? runner_stop_price : na, "Long Runner Stop", color = color.new(color.orange, 0), style = plot.style_linebr)
+plot(strategy.position_size < 0 ? trade_stop_price : na, "Short Stop", color = color.new(color.red, 0), style = plot.style_linebr)
+plot(strategy.position_size < 0 ? trade_tp1_price : na, "Short TP1", color = color.new(color.green, 0), style = plot.style_linebr)
+plot(strategy.position_size < 0 and tp1_filled ? runner_stop_price : na, "Short Runner Stop", color = color.new(color.orange, 0), style = plot.style_linebr)
+plot(show_ai_plot ? ai_prob_up : na, "AI Probability Up", color = color.new(color.aqua, 0), linewidth = 2, display = display.pane)
+plot(show_ai_plot ? ai_long_threshold : na, "AI Long Threshold", color = color.new(color.green, 50), linewidth = 1, style = plot.style_linebr, display = display.pane)
+plot(show_ai_plot ? ai_short_threshold : na, "AI Short Threshold", color = color.new(color.red, 50), linewidth = 1, style = plot.style_linebr, display = display.pane)
+
+var table dash = table.new(position.top_right, 2, 10, bgcolor = color.new(#1e222d, 80), border_width = 1, frame_color = color.gray)
+if show_dashboard and barstate.islast
+    table.cell(dash, 0, 0, "Metric", text_color = color.white, bgcolor = color.new(color.blue, 70), text_size = size.small)
+    table.cell(dash, 1, 0, "Value", text_color = color.white, bgcolor = color.new(color.blue, 70), text_size = size.small)
+    table.cell(dash, 0, 1, "W", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 1, state1 == 1 ? "Bull" : state1 == -1 ? "Bear" : "Neutral", text_color = state1 == 1 ? color.lime : state1 == -1 ? color.red : color.gray, text_size = size.tiny)
+    table.cell(dash, 0, 2, "D", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 2, state2 == 1 ? "Bull" : state2 == -1 ? "Bear" : "Neutral", text_color = state2 == 1 ? color.lime : state2 == -1 ? color.red : color.gray, text_size = size.tiny)
+    table.cell(dash, 0, 3, "H4/H1/M15/M5", text_color = color.white, text_size = size.tiny)
+    string lower_states = (state3 == 1 ? "B" : state3 == -1 ? "S" : "N") + " " + (state4 == 1 ? "B" : state4 == -1 ? "S" : "N") + " " + (state5 == 1 ? "B" : state5 == -1 ? "S" : "N") + " " + (state6 == 1 ? "B" : state6 == -1 ? "S" : "N")
+    table.cell(dash, 1, 3, lower_states, text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 0, 4, "Alignment", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 4, allBullish ? "All Bullish" : allBearish ? "All Bearish" : "Mixed", text_color = allBullish ? color.lime : allBearish ? color.red : color.gray, text_size = size.tiny)
+    table.cell(dash, 0, 5, "Session", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 5, entry_allowed ? "Open" : "Blocked", text_color = entry_allowed ? color.lime : color.orange, text_size = size.tiny)
+    table.cell(dash, 0, 6, "AI Up Prob", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 6, na(ai_prob_up) ? "Warmup" : str.tostring(ai_prob_up, "#.###"), text_color = na(ai_prob_up) ? color.gray : ai_prob_up >= ai_long_threshold ? color.lime : ai_prob_up <= ai_short_threshold ? color.red : color.yellow, text_size = size.tiny)
+    table.cell(dash, 0, 7, "Train Loss", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 7, na(ai_training_loss) ? "na" : str.tostring(ai_training_loss, "#.####"), text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 0, 8, "Val Loss", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 8, na(ai_validation_loss) ? "na" : str.tostring(ai_validation_loss, "#.####"), text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 0, 9, "Pos", text_color = color.white, text_size = size.tiny)
+    table.cell(dash, 1, 9, strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat", text_color = strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray, text_size = size.tiny)

@@ -1,0 +1,292 @@
+//@version=6
+// Pionex-LuxAlgo Regel-Vermittler v3.
+// Reiner Regel-Connector: Jede Regel waehlt eine Aktion und definiert, welche LuxAlgo-Quelle
+// diese Aktion ausloest. TradingView Alert: {{strategy.order.alert_message}}
+strategy(
+    title="Pionex LuxAlgo Regel Vermittler v3",
+    shorttitle="Px Lux Rules v3",
+    overlay=true,
+    initial_capital=100,
+    currency=currency.USDT,
+    default_qty_type=strategy.cash,
+    default_qty_value=100,
+    pyramiding=0,
+    calc_on_every_tick=false,
+    process_orders_on_close=true,
+    commission_type=strategy.commission.percent,
+    commission_value=0.05,
+    slippage=2,
+    margin_long=0,
+    margin_short=0,
+    max_labels_count=200
+)
+
+const int STARTZEIT_DEFAULT = 1744119900000
+
+string GRP_CONN = "1. Verbindung"
+bool lux_quellen_verbunden = input.bool(false, "Lux Quellen verbunden", group=GRP_CONN, tooltip="Erst aktivieren, wenn die genutzten LuxAlgo-Quellen wirklich in den Regeln ausgewaehlt wurden.")
+string ausloese_modus = input.string("Nur neues Signal", "Ausloese-Modus", options=["Nur neues Signal", "Aktiver Zustand"], group=GRP_CONN, tooltip="Nur neues Signal feuert nur beim frischen Wechsel auf wahr. Aktiver Zustand feuert, solange die Bedingung wahr ist und eine Order erlaubt ist.")
+int signal_gedaechtnis = input.int(0, "Signal-Gedaechtnis Kerzen", minval=0, maxval=20, group=GRP_CONN, tooltip="0 = nur aktuelle Kerze. Hoehere Werte halten ein Signal fuer mehrere Kerzen aktiv.")
+float gleich_toleranz = input.float(0.000001, "Gleichheits-Toleranz", minval=0.0, step=0.000001, group=GRP_CONN, tooltip="Toleranz fuer Gleich/Nicht gleich. Hilft, wenn externe Quellen nicht exakt 1.000000 liefern.")
+bool startzeit_aktiv = input.bool(false, "Startzeitfilter aktiv", group=GRP_CONN, tooltip="Trades werden erst ab der gewaehlten Startzeit erlaubt.")
+int startzeit = input.time(STARTZEIT_DEFAULT, "Startzeit", group=GRP_CONN, tooltip="Optionaler Startzeitpunkt. Beispiel: 2025-04-08 13:45 UTC.")
+
+string GRP_RULES = "2. Regel-Builder"
+bool regel_1_aktiv = input.bool(false, "Regel 1 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_1_aktion = input.string("Long oeffnen", "Regel 1 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_1_links = input.source(close, "Regel 1 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle, z.B. bullish_ob_entered oder confirmation_uptrend.")
+string regel_1_operator = input.string("Gleich", "Regel 1 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_1_rechts_typ = input.string("Wert", "Regel 1 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl wie 1. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_1_wert = input.float(1.0, "Regel 1 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert. Fuer Lux-Flags meistens 1.")
+float regel_1_rechts = input.source(open, "Regel 1 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+bool regel_2_aktiv = input.bool(false, "Regel 2 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_2_aktion = input.string("Short oeffnen", "Regel 2 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_2_links = input.source(close, "Regel 2 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle.")
+string regel_2_operator = input.string("Gleich", "Regel 2 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_2_rechts_typ = input.string("Wert", "Regel 2 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_2_wert = input.float(1.0, "Regel 2 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert.")
+float regel_2_rechts = input.source(open, "Regel 2 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+bool regel_3_aktiv = input.bool(false, "Regel 3 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_3_aktion = input.string("Long schliessen", "Regel 3 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_3_links = input.source(close, "Regel 3 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle.")
+string regel_3_operator = input.string("Gleich", "Regel 3 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_3_rechts_typ = input.string("Wert", "Regel 3 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_3_wert = input.float(1.0, "Regel 3 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert.")
+float regel_3_rechts = input.source(open, "Regel 3 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+bool regel_4_aktiv = input.bool(false, "Regel 4 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_4_aktion = input.string("Short schliessen", "Regel 4 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_4_links = input.source(close, "Regel 4 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle.")
+string regel_4_operator = input.string("Gleich", "Regel 4 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_4_rechts_typ = input.string("Wert", "Regel 4 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_4_wert = input.float(1.0, "Regel 4 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert.")
+float regel_4_rechts = input.source(open, "Regel 4 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+bool regel_5_aktiv = input.bool(false, "Regel 5 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_5_aktion = input.string("Long oeffnen", "Regel 5 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_5_links = input.source(close, "Regel 5 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle.")
+string regel_5_operator = input.string("Gleich", "Regel 5 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_5_rechts_typ = input.string("Wert", "Regel 5 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_5_wert = input.float(1.0, "Regel 5 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert.")
+float regel_5_rechts = input.source(open, "Regel 5 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+bool regel_6_aktiv = input.bool(false, "Regel 6 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_6_aktion = input.string("Short oeffnen", "Regel 6 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_6_links = input.source(close, "Regel 6 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle.")
+string regel_6_operator = input.string("Gleich", "Regel 6 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_6_rechts_typ = input.string("Wert", "Regel 6 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_6_wert = input.float(1.0, "Regel 6 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert.")
+float regel_6_rechts = input.source(open, "Regel 6 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+bool regel_7_aktiv = input.bool(false, "Regel 7 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_7_aktion = input.string("Long schliessen", "Regel 7 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_7_links = input.source(close, "Regel 7 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle.")
+string regel_7_operator = input.string("Gleich", "Regel 7 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_7_rechts_typ = input.string("Wert", "Regel 7 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_7_wert = input.float(1.0, "Regel 7 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert.")
+float regel_7_rechts = input.source(open, "Regel 7 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+bool regel_8_aktiv = input.bool(false, "Regel 8 aktiv", group=GRP_RULES, tooltip="Aktiviert diese Regel.")
+string regel_8_aktion = input.string("Short schliessen", "Regel 8 Aktion", options=["Long oeffnen", "Short oeffnen", "Long schliessen", "Short schliessen", "Alle schliessen"], group=GRP_RULES, tooltip="Was passieren soll, wenn die Bedingung wahr wird.")
+float regel_8_links = input.source(close, "Regel 8 Quelle", group=GRP_RULES, tooltip="LuxAlgo-Quelle oder Chart-Quelle.")
+string regel_8_operator = input.string("Gleich", "Regel 8 Vergleich", options=["Ist aktiv", "Ist inaktiv", "Gleich", "Nicht gleich", "Groesser", "Kleiner", "Groesser/gleich", "Kleiner/gleich", "Kreuzt ueber", "Kreuzt unter"], group=GRP_RULES, tooltip="Ist aktiv erkennt auch X-/Label-Plots, die Preiswerte statt 1 ausgeben. Sonst Vergleich zwischen Quelle und rechter Seite.")
+string regel_8_rechts_typ = input.string("Wert", "Regel 8 Rechte Seite", options=["Wert", "Quelle"], group=GRP_RULES, tooltip="Wert = feste Zahl. Quelle = zweite TradingView/LuxAlgo-Quelle.")
+float regel_8_wert = input.float(1.0, "Regel 8 Wert", step=0.1, group=GRP_RULES, tooltip="Fester Vergleichswert.")
+float regel_8_rechts = input.source(open, "Regel 8 Vergleichsquelle", group=GRP_RULES, tooltip="Nur relevant, wenn Rechte Seite = Quelle.")
+
+string GRP_EXIT = "3. Ausfuehrung"
+bool reversal_aktiv = input.bool(false, "Reversal", group=GRP_EXIT, tooltip="Ein: ein gegnerischer Open-Trigger schliesst die aktuelle Position und oeffnet direkt die Gegenseite.")
+bool bei_gegensignal_schliessen = input.bool(true, "Bei Gegensignal schliessen + drehen", group=GRP_EXIT, tooltip="Ein: ein gegnerischer Open-Trigger schliesst die aktuelle Position und oeffnet danach die Gegenseite. Aus: gegnerische Open-Trigger werden ignoriert, ausser Reversal ist aktiv.")
+int maximale_trade_dauer = input.int(0, "Maximale Trade-Dauer Kerzen", minval=0, maxval=100, group=GRP_EXIT, tooltip="0 deaktiviert den Zeit-Exit. 1-100 schliesst nach dieser Anzahl Kerzen im Trade.")
+
+string GRP_SIZE = "4. Positionsgroesse und Kelly"
+string groessen_modus = input.string("Fester Einsatz", "Positionsgroessen-Modus", options=["Fester Einsatz", "Manuelles Kelly", "Auto Kelly"], group=GRP_SIZE, tooltip="Fester Einsatz nutzt einen fixen USDT-Wert. Kelly nutzt Prozent des Eigenkapitals.")
+float fester_einsatz_usdt = input.float(100.0, "Fester Einsatz USDT", minval=0.0, step=1.0, group=GRP_SIZE, tooltip="Orderwert in USDT, wenn Fester Einsatz aktiv ist.")
+float manuell_kelly_trefferquote = input.float(50.0, "Manuelles Kelly Trefferquote %", minval=1.0, maxval=99.0, step=0.1, group=GRP_SIZE, tooltip="Angenommene Trefferquote fuer manuelles Kelly.")
+float manuell_kelly_win_loss = input.float(1.5, "Manuelles Kelly Gewinn/Verlust", minval=0.1, maxval=20.0, step=0.1, group=GRP_SIZE, tooltip="Durchschnittlicher Gewinn geteilt durch durchschnittlichen Verlust.")
+int auto_kelly_lookback = input.int(50, "Auto Kelly geschlossene Trades", minval=5, maxval=500, group=GRP_SIZE, tooltip="Auto Kelly nutzt die letzten N geschlossenen Strategie-Trades.")
+float kelly_anteil = input.float(0.25, "Kelly Anteil", minval=0.05, maxval=1.0, step=0.05, group=GRP_SIZE, tooltip="Bruchteil des vollen Kelly-Werts.")
+float kelly_min_prozent = input.float(0.0, "Kelly Minimum %", minval=0.0, maxval=20.0, step=0.1, group=GRP_SIZE, tooltip="0 bedeutet: kein Trade, wenn Kelly keinen Vorteil erkennt.")
+float kelly_max_prozent = input.float(10.0, "Kelly Maximum %", minval=0.1, maxval=100.0, step=0.1, group=GRP_SIZE, tooltip="Obergrenze fuer Kelly-Risiko in Prozent des Eigenkapitals.")
+float mengen_schritt = input.float(0.000001, "Mengen-Schritt", minval=0.000001, step=0.000001, group=GRP_SIZE, tooltip="Rundet die Ordermenge ab. Je nach Pionex-Symbol/Contract anpassen.")
+
+string GRP_PIONEX = "5. Pionex Webhook"
+string pionex_uuid = input.string("", "Pionex Signal Bot UUID", group=GRP_PIONEX, tooltip="UUID deines Pionex Signal Bots. Fuer reine Backtests leer lassen.")
+bool close_alerts_senden = input.bool(true, "Close-Alerts senden", group=GRP_PIONEX, tooltip="An lassen, wenn Pionex auch Close-Signale erhalten soll.")
+bool status_anzeigen = input.bool(true, "Status-Tabelle anzeigen", group=GRP_PIONEX, tooltip="Zeigt aktive Regeln, Groesse und Position rechts oben.")
+
+f_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + pionex_uuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+
+f_compare(float links, string op, float rechts, float tol) =>
+    bool cross_over = ta.crossover(links, rechts)
+    bool cross_under = ta.crossunder(links, rechts)
+    bool active = not na(links) and math.abs(links) > tol
+    bool result = false
+    if op == "Ist aktiv"
+        result := active
+    else if op == "Ist inaktiv"
+        result := not active
+    else if op == "Gleich"
+        result := math.abs(links - rechts) <= tol
+    else if op == "Nicht gleich"
+        result := math.abs(links - rechts) > tol
+    else if op == "Groesser"
+        result := links > rechts
+    else if op == "Kleiner"
+        result := links < rechts
+    else if op == "Groesser/gleich"
+        result := links >= rechts
+    else if op == "Kleiner/gleich"
+        result := links <= rechts
+    else if op == "Kreuzt ueber"
+        result := cross_over
+    else if op == "Kreuzt unter"
+        result := cross_under
+    result
+
+f_recent(bool bedingung, int kerzen) =>
+    int seit = ta.barssince(bedingung)
+    kerzen == 0 ? bedingung : not na(seit) and seit <= kerzen
+
+f_rule_hit(bool aktiv, float links, string op, string rechts_typ, float wert, float rechts_quelle) =>
+    float rechts = rechts_typ == "Quelle" ? rechts_quelle : wert
+    bool raw = aktiv and lux_quellen_verbunden and f_compare(links, op, rechts, gleich_toleranz)
+    bool remembered = f_recent(raw, signal_gedaechtnis)
+    ausloese_modus == "Nur neues Signal" ? remembered and not remembered[1] : remembered
+
+f_round_qty(float menge, float schritt) =>
+    schritt > 0 ? math.floor(menge / schritt) * schritt : menge
+
+f_kelly_prozent(float trefferquote, float win_loss, float anteil, float min_prozent, float max_prozent) =>
+    float raw = win_loss > 0 ? trefferquote - (1.0 - trefferquote) / win_loss : 0.0
+    float positiv = math.max(0.0, raw)
+    float prozent = positiv > 0 ? positiv * anteil * 100.0 : min_prozent
+    math.min(max_prozent, math.max(0.0, prozent))
+
+f_auto_kelly_prozent(int lookback, float anteil, float min_prozent, float max_prozent) =>
+    int trade_count = strategy.closedtrades
+    int sample_size = math.min(trade_count, lookback)
+    float wins = 0.0
+    float losses = 0.0
+    float gross_win = 0.0
+    float gross_loss = 0.0
+    if sample_size > 0
+        int first_trade = trade_count - sample_size
+        int last_trade = trade_count - 1
+        for trade_no = first_trade to last_trade
+            float trade_profit = strategy.closedtrades.profit(trade_no)
+            if trade_profit > 0
+                wins += 1.0
+                gross_win += trade_profit
+            else if trade_profit < 0
+                losses += 1.0
+                gross_loss += math.abs(trade_profit)
+    float total = wins + losses
+    float trefferquote = total > 0 ? wins / total : 0.0
+    float avg_win = wins > 0 ? gross_win / wins : na
+    float avg_loss = losses > 0 ? gross_loss / losses : na
+    float win_loss = not na(avg_win) and not na(avg_loss) and avg_loss > 0 ? avg_win / avg_loss : 0.0
+    f_kelly_prozent(trefferquote, win_loss, anteil, min_prozent, max_prozent)
+
+bool zeit_ok = not startzeit_aktiv or time >= startzeit
+bool regel_1_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_1_aktiv, regel_1_links, regel_1_operator, regel_1_rechts_typ, regel_1_wert, regel_1_rechts)
+bool regel_2_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_2_aktiv, regel_2_links, regel_2_operator, regel_2_rechts_typ, regel_2_wert, regel_2_rechts)
+bool regel_3_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_3_aktiv, regel_3_links, regel_3_operator, regel_3_rechts_typ, regel_3_wert, regel_3_rechts)
+bool regel_4_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_4_aktiv, regel_4_links, regel_4_operator, regel_4_rechts_typ, regel_4_wert, regel_4_rechts)
+bool regel_5_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_5_aktiv, regel_5_links, regel_5_operator, regel_5_rechts_typ, regel_5_wert, regel_5_rechts)
+bool regel_6_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_6_aktiv, regel_6_links, regel_6_operator, regel_6_rechts_typ, regel_6_wert, regel_6_rechts)
+bool regel_7_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_7_aktiv, regel_7_links, regel_7_operator, regel_7_rechts_typ, regel_7_wert, regel_7_rechts)
+bool regel_8_hit = zeit_ok and barstate.isconfirmed and f_rule_hit(regel_8_aktiv, regel_8_links, regel_8_operator, regel_8_rechts_typ, regel_8_wert, regel_8_rechts)
+
+bool long_open_req = (regel_1_hit and regel_1_aktion == "Long oeffnen") or (regel_2_hit and regel_2_aktion == "Long oeffnen") or (regel_3_hit and regel_3_aktion == "Long oeffnen") or (regel_4_hit and regel_4_aktion == "Long oeffnen") or (regel_5_hit and regel_5_aktion == "Long oeffnen") or (regel_6_hit and regel_6_aktion == "Long oeffnen") or (regel_7_hit and regel_7_aktion == "Long oeffnen") or (regel_8_hit and regel_8_aktion == "Long oeffnen")
+bool short_open_req = (regel_1_hit and regel_1_aktion == "Short oeffnen") or (regel_2_hit and regel_2_aktion == "Short oeffnen") or (regel_3_hit and regel_3_aktion == "Short oeffnen") or (regel_4_hit and regel_4_aktion == "Short oeffnen") or (regel_5_hit and regel_5_aktion == "Short oeffnen") or (regel_6_hit and regel_6_aktion == "Short oeffnen") or (regel_7_hit and regel_7_aktion == "Short oeffnen") or (regel_8_hit and regel_8_aktion == "Short oeffnen")
+bool long_close_req = (regel_1_hit and regel_1_aktion == "Long schliessen") or (regel_2_hit and regel_2_aktion == "Long schliessen") or (regel_3_hit and regel_3_aktion == "Long schliessen") or (regel_4_hit and regel_4_aktion == "Long schliessen") or (regel_5_hit and regel_5_aktion == "Long schliessen") or (regel_6_hit and regel_6_aktion == "Long schliessen") or (regel_7_hit and regel_7_aktion == "Long schliessen") or (regel_8_hit and regel_8_aktion == "Long schliessen")
+bool short_close_req = (regel_1_hit and regel_1_aktion == "Short schliessen") or (regel_2_hit and regel_2_aktion == "Short schliessen") or (regel_3_hit and regel_3_aktion == "Short schliessen") or (regel_4_hit and regel_4_aktion == "Short schliessen") or (regel_5_hit and regel_5_aktion == "Short schliessen") or (regel_6_hit and regel_6_aktion == "Short schliessen") or (regel_7_hit and regel_7_aktion == "Short schliessen") or (regel_8_hit and regel_8_aktion == "Short schliessen")
+bool all_close_req = (regel_1_hit and regel_1_aktion == "Alle schliessen") or (regel_2_hit and regel_2_aktion == "Alle schliessen") or (regel_3_hit and regel_3_aktion == "Alle schliessen") or (regel_4_hit and regel_4_aktion == "Alle schliessen") or (regel_5_hit and regel_5_aktion == "Alle schliessen") or (regel_6_hit and regel_6_aktion == "Alle schliessen") or (regel_7_hit and regel_7_aktion == "Alle schliessen") or (regel_8_hit and regel_8_aktion == "Alle schliessen")
+
+float manuell_kelly_prozent = f_kelly_prozent(manuell_kelly_trefferquote * 0.01, manuell_kelly_win_loss, kelly_anteil, kelly_min_prozent, kelly_max_prozent)
+float auto_kelly_prozent = f_auto_kelly_prozent(auto_kelly_lookback, kelly_anteil, kelly_min_prozent, kelly_max_prozent)
+float aktiver_kapital_prozent = groessen_modus == "Manuelles Kelly" ? manuell_kelly_prozent : groessen_modus == "Auto Kelly" ? auto_kelly_prozent : na
+float order_wert = groessen_modus == "Fester Einsatz" ? fester_einsatz_usdt : strategy.equity * aktiver_kapital_prozent * 0.01
+float order_menge_raw = close > 0 ? order_wert / close : 0.0
+float order_menge = f_round_qty(order_menge_raw, mengen_schritt)
+bool groesse_ok = order_menge >= mengen_schritt
+string payload_message = str.length(pionex_uuid) > 0 ? f_payload() : ""
+
+bool clean_long_open = long_open_req and not short_open_req
+bool clean_short_open = short_open_req and not long_open_req
+bool opposite_long_to_short = clean_short_open and strategy.position_size > 0
+bool opposite_short_to_long = clean_long_open and strategy.position_size < 0
+bool allow_opposite_turn = reversal_aktiv or bei_gegensignal_schliessen
+bool turn_long_to_short = allow_opposite_turn and opposite_long_to_short
+bool turn_short_to_long = allow_opposite_turn and opposite_short_to_long
+
+var int entry_bar = na
+bool neue_position = strategy.position_size != 0 and strategy.position_size[1] == 0
+bool richtungswechsel = (strategy.position_size > 0 and strategy.position_size[1] < 0) or (strategy.position_size < 0 and strategy.position_size[1] > 0)
+bool position_geschlossen = strategy.position_size == 0 and strategy.position_size[1] != 0
+
+if neue_position or richtungswechsel
+    entry_bar := bar_index
+
+if position_geschlossen
+    entry_bar := na
+
+int bars_im_trade = not na(entry_bar) ? bar_index - entry_bar : 0
+bool zeit_exit_long = maximale_trade_dauer > 0 and strategy.position_size > 0 and bars_im_trade >= maximale_trade_dauer
+bool zeit_exit_short = maximale_trade_dauer > 0 and strategy.position_size < 0 and bars_im_trade >= maximale_trade_dauer
+bool do_long_close = strategy.position_size > 0 and (all_close_req or long_close_req or turn_long_to_short or zeit_exit_long)
+bool do_short_close = strategy.position_size < 0 and (all_close_req or short_close_req or turn_short_to_long or zeit_exit_short)
+
+if do_long_close
+    strategy.close("Long", comment=turn_long_to_short ? "Opposite Close Long" : zeit_exit_long ? "Max Bars Exit" : "Rule Long Close", alert_message=close_alerts_senden ? payload_message : "")
+
+if do_short_close
+    strategy.close("Short", comment=turn_short_to_long ? "Opposite Close Short" : zeit_exit_short ? "Max Bars Exit" : "Rule Short Close", alert_message=close_alerts_senden ? payload_message : "")
+
+if clean_long_open and groesse_ok and (strategy.position_size == 0 or turn_short_to_long)
+    strategy.entry("Long", strategy.long, qty=order_menge, comment="Rule Long", alert_message=payload_message)
+
+if clean_short_open and groesse_ok and (strategy.position_size == 0 or turn_long_to_short)
+    strategy.entry("Short", strategy.short, qty=order_menge, comment="Rule Short", alert_message=payload_message)
+
+plotshape(clean_long_open, title="Regel Long", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small, text="LO")
+plotshape(clean_short_open, title="Regel Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SO")
+plotshape(do_long_close, title="Regel Long Close", style=shape.xcross, location=location.abovebar, color=color.orange, size=size.tiny, text="LC")
+plotshape(do_short_close, title="Regel Short Close", style=shape.xcross, location=location.belowbar, color=color.orange, size=size.tiny, text="SC")
+bgcolor(not lux_quellen_verbunden ? color.new(color.orange, 90) : not zeit_ok ? color.new(color.gray, 92) : na)
+
+int aktive_regeln = (regel_1_aktiv ? 1 : 0) + (regel_2_aktiv ? 1 : 0) + (regel_3_aktiv ? 1 : 0) + (regel_4_aktiv ? 1 : 0) + (regel_5_aktiv ? 1 : 0) + (regel_6_aktiv ? 1 : 0) + (regel_7_aktiv ? 1 : 0) + (regel_8_aktiv ? 1 : 0)
+int getroffene_regeln = (regel_1_hit ? 1 : 0) + (regel_2_hit ? 1 : 0) + (regel_3_hit ? 1 : 0) + (regel_4_hit ? 1 : 0) + (regel_5_hit ? 1 : 0) + (regel_6_hit ? 1 : 0) + (regel_7_hit ? 1 : 0) + (regel_8_hit ? 1 : 0)
+float profit_factor = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+float net_profit = strategy.netprofit
+
+var table status = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 78), border_width=1)
+if status_anzeigen and barstate.islast
+    table.cell(status, 0, 0, "Pionex Regeln", text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(status, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(status, 0, 1, "Quellen/Zeit", text_color=color.white)
+    table.cell(status, 1, 1, lux_quellen_verbunden ? zeit_ok ? "OK" : "VOR START" : "FEHLT", text_color=lux_quellen_verbunden and zeit_ok ? color.lime : color.orange)
+    table.cell(status, 0, 2, "Regeln", text_color=color.white)
+    table.cell(status, 1, 2, str.tostring(getroffene_regeln) + "/" + str.tostring(aktive_regeln), text_color=getroffene_regeln > 0 ? color.lime : color.white)
+    table.cell(status, 0, 3, "Aktion", text_color=color.white)
+    table.cell(status, 1, 3, turn_short_to_long ? "CLOSE->LONG" : turn_long_to_short ? "CLOSE->SHORT" : clean_long_open ? "LONG" : clean_short_open ? "SHORT" : do_long_close ? "LONG CLOSE" : do_short_close ? "SHORT CLOSE" : "WARTEN", text_color=turn_short_to_long or clean_long_open ? color.lime : turn_long_to_short or clean_short_open ? color.red : do_long_close or do_short_close ? color.orange : color.gray)
+    table.cell(status, 0, 4, "Reversal", text_color=color.white)
+    table.cell(status, 1, 4, reversal_aktiv ? "AN" : "AUS", text_color=reversal_aktiv ? color.lime : color.white)
+    table.cell(status, 0, 5, "Groesse", text_color=color.white)
+    table.cell(status, 1, 5, groesse_ok ? str.tostring(order_menge, "#.######") : "KEINE", text_color=groesse_ok ? color.white : color.orange)
+    table.cell(status, 0, 6, "Sizing", text_color=color.white)
+    table.cell(status, 1, 6, groessen_modus, text_color=groessen_modus == "Fester Einsatz" ? color.white : color.lime)
+    table.cell(status, 0, 7, "Kapital %", text_color=color.white)
+    table.cell(status, 1, 7, groessen_modus == "Fester Einsatz" ? "-" : str.tostring(aktiver_kapital_prozent, "#.##"), text_color=color.white)
+    table.cell(status, 0, 8, "Bars", text_color=color.white)
+    table.cell(status, 1, 8, maximale_trade_dauer > 0 ? str.tostring(bars_im_trade) + "/" + str.tostring(maximale_trade_dauer) : str.tostring(bars_im_trade) + "/AUS", text_color=zeit_exit_long or zeit_exit_short ? color.orange : color.white)
+    table.cell(status, 0, 9, "Position", text_color=color.white)
+    table.cell(status, 1, 9, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray)
+    table.cell(status, 0, 10, "PF", text_color=color.white)
+    table.cell(status, 1, 10, na(profit_factor) ? "NA" : str.tostring(profit_factor, "#.##"), text_color=na(profit_factor) ? color.gray : profit_factor >= 1.0 ? color.lime : color.red)
+    table.cell(status, 0, 11, "Net Profit", text_color=color.white)
+    table.cell(status, 1, 11, str.tostring(net_profit, "#.##"), text_color=net_profit >= 0 ? color.lime : color.red)

@@ -1,0 +1,2 @@
+// RSI reversion archetype (seed)
+function onCandle(ctx){ const r=ctx.rsi(14); if(r<32) return ctx.long('buy'); if(r>68) return ctx.short('sell'); return ctx.hold(); }

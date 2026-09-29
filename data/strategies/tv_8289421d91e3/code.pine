@@ -1,0 +1,216 @@
+//@version=6
+strategy(
+     title             = "MTF CISD Trade System",
+     shorttitle        = "MTF_CISD",
+     overlay           = true,
+     pyramiding        = 0,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     initial_capital   = 10000,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.1,
+     slippage          = 2
+ )
+grp_tf   = "Timeframe Settings"
+tf_w     = input.timeframe("W",   "Weekly TF",    group=grp_tf)
+tf_d     = input.timeframe("D",   "Daily TF",     group=grp_tf)
+tf_h4    = input.timeframe("240", "H4 TF",        group=grp_tf)
+tf_h1    = input.timeframe("60",  "H1 TF",        group=grp_tf)
+tf_m15   = input.timeframe("15",  "M15 TF",       group=grp_tf)
+tf_m5    = input.timeframe("5",   "M5 TF",        group=grp_tf)
+
+grp_cisd = "CISD Settings"
+cisd_lookback = input.int(3, "CISD Lookback Bars", minval=1, maxval=20, group=grp_cisd)
+
+grp_risk = "Risk / Trade Settings"
+sl_atr_mult    = input.float(1.5,  "SL ATR Multiplier",      step=0.1, group=grp_risk)
+tp1_atr_mult   = input.float(3.0,  "TP1 ATR Multiplier",     step=0.1, group=grp_risk)
+tp2_atr_mult   = input.float(6.0,  "TP2 ATR Multiplier",     step=0.1, group=grp_risk)
+tp1_pct        = input.float(85.0, "TP1 Close %",            step=1.0, group=grp_risk)
+atr_period     = input.int(14,     "ATR Period",              minval=1, group=grp_risk)
+hold_atr_mult  = input.float(2.0,  "Hold Bars ATR Mult",     step=0.1, group=grp_risk)
+min_hold       = input.int(3,      "Min Hold Bars",           minval=1, group=grp_risk)
+max_hold       = input.int(20,     "Max Hold Bars",           minval=1, group=grp_risk)
+cooldown_bars  = input.int(5,      "Cooldown Bars",           minval=0, group=grp_risk)
+vol_ratio_min  = input.float(1.2,  "Min Vol Ratio (vs 20-SMA)",step=0.1,group=grp_risk)
+
+grp_soft = "Soft Alignment Stop"
+use_soft_stop   = input.bool(true,  "Enable Soft Alignment Stop", group=grp_soft)
+soft_stop_bars  = input.int(4,      "Bars Before Soft Stop",  minval=1, group=grp_soft)
+
+grp_reentry = "Re-Entry (Tight SL) Settings"
+use_reentry     = input.bool(true,  "Enable Re-Entry on Tight SL", group=grp_reentry)
+tight_sl_pct    = input.float(0.3,  "Tight SL Threshold %",  step=0.05, group=grp_reentry)
+
+grp_alert = "Pionex Signal Bot"
+pionex_bot_token = input.string("YOUR_BOT_TOKEN", "Bot Token", group=grp_alert)
+// ============================================================
+// SECTION 2 — ATR + VOLUME
+// ============================================================
+atr_val   = ta.atr(atr_period)
+vol_sma20 = ta.sma(volume, 20)
+vol_ok    = volume / vol_sma20 >= vol_ratio_min
+// ============================================================
+// SECTION 3 — MTF SECURITY CALLS
+// ============================================================
+
+// --- Weekly ---
+w_open  = request.security(syminfo.tickerid, tf_w,  open[1],  lookahead=barmerge.lookahead_off)
+w_close = request.security(syminfo.tickerid, tf_w,  close[1], lookahead=barmerge.lookahead_off)
+w_open2 = request.security(syminfo.tickerid, tf_w,  open[2],  lookahead=barmerge.lookahead_off)
+w_close2= request.security(syminfo.tickerid, tf_w,  close[2], lookahead=barmerge.lookahead_off)
+cisd_bull_w = w_close2 < w_open2 and w_close > w_open
+cisd_bear_w = w_close2 > w_open2 and w_close < w_open
+
+// --- Daily ---
+d_open  = request.security(syminfo.tickerid, tf_d,  open[1],  lookahead=barmerge.lookahead_off)
+d_close = request.security(syminfo.tickerid, tf_d,  close[1], lookahead=barmerge.lookahead_off)
+d_open2 = request.security(syminfo.tickerid, tf_d,  open[2],  lookahead=barmerge.lookahead_off)
+d_close2= request.security(syminfo.tickerid, tf_d,  close[2], lookahead=barmerge.lookahead_off)
+cisd_bull_d = d_close2 < d_open2 and d_close > d_open
+cisd_bear_d = d_close2 > d_open2 and d_close < d_open
+
+// --- H4 ---
+h4_open  = request.security(syminfo.tickerid, tf_h4, open[1],  lookahead=barmerge.lookahead_off)
+h4_close = request.security(syminfo.tickerid, tf_h4, close[1], lookahead=barmerge.lookahead_off)
+h4_open2 = request.security(syminfo.tickerid, tf_h4, open[2],  lookahead=barmerge.lookahead_off)
+h4_close2= request.security(syminfo.tickerid, tf_h4, close[2], lookahead=barmerge.lookahead_off)
+cisd_bull_h4 = h4_close2 < h4_open2 and h4_close > h4_open
+cisd_bear_h4 = h4_close2 > h4_open2 and h4_close < h4_open
+
+// --- H1 ---
+h1_open  = request.security(syminfo.tickerid, tf_h1, open[1],  lookahead=barmerge.lookahead_off)
+h1_close = request.security(syminfo.tickerid, tf_h1, close[1], lookahead=barmerge.lookahead_off)
+h1_open2 = request.security(syminfo.tickerid, tf_h1, open[2],  lookahead=barmerge.lookahead_off)
+h1_close2= request.security(syminfo.tickerid, tf_h1, close[2], lookahead=barmerge.lookahead_off)
+cisd_bull_h1 = h1_close2 < h1_open2 and h1_close > h1_open
+cisd_bear_h1 = h1_close2 > h1_open2 and h1_close < h1_open
+
+// --- M15 ---
+m15_open  = request.security(syminfo.tickerid, tf_m15, open[1],  lookahead=barmerge.lookahead_off)
+m15_close = request.security(syminfo.tickerid, tf_m15, close[1], lookahead=barmerge.lookahead_off)
+m15_open2 = request.security(syminfo.tickerid, tf_m15, open[2],  lookahead=barmerge.lookahead_off)
+m15_close2= request.security(syminfo.tickerid, tf_m15, close[2], lookahead=barmerge.lookahead_off)
+cisd_bull_m15 = m15_close2 < m15_open2 and m15_close > m15_open
+cisd_bear_m15 = m15_close2 > m15_open2 and m15_close < m15_open
+
+// --- M5 ---
+m5_open  = request.security(syminfo.tickerid, tf_m5, open[1],  lookahead=barmerge.lookahead_off)
+m5_close = request.security(syminfo.tickerid, tf_m5, close[1], lookahead=barmerge.lookahead_off)
+m5_open2 = request.security(syminfo.tickerid, tf_m5, open[2],  lookahead=barmerge.lookahead_off)
+m5_close2= request.security(syminfo.tickerid, tf_m5, close[2], lookahead=barmerge.lookahead_off)
+cisd_bull_m5 = m5_close2 < m5_open2 and m5_close > m5_open
+cisd_bear_m5 = m5_close2 > m5_open2 and m5_close < m5_open
+// ============================================================
+// SECTION 4 — CISD STATE TABLE  (per-TF persistent state)
+// ============================================================
+var bool state_bull_w   = false
+var bool state_bear_w   = false
+var bool state_bull_d   = false
+var bool state_bear_d   = false
+var bool state_bull_h4  = false
+var bool state_bear_h4  = false
+var bool state_bull_h1  = false
+var bool state_bear_h1  = false
+var bool state_bull_m15 = false
+var bool state_bear_m15 = false
+var bool state_bull_m5  = false
+var bool state_bear_m5  = false
+
+if cisd_bull_w
+    state_bull_w  := true
+    state_bear_w  := false
+if cisd_bear_w
+    state_bear_w  := true
+    state_bull_w  := false
+if cisd_bull_d
+    state_bull_d  := true
+    state_bear_d  := false
+if cisd_bear_d
+    state_bear_d  := true
+    state_bull_d  := false
+if cisd_bull_h4
+    state_bull_h4 := true
+    state_bear_h4 := false
+if cisd_bear_h4
+    state_bear_h4 := true
+    state_bull_h4 := false
+if cisd_bull_h1
+    state_bull_h1 := true
+    state_bear_h1 := false
+if cisd_bear_h1
+    state_bear_h1 := true
+    state_bull_h1 := false
+if cisd_bull_m15
+    state_bull_m15 := true
+    state_bear_m15 := false
+if cisd_bear_m15
+    state_bear_m15 := true
+    state_bull_m15 := false
+if cisd_bull_m5
+    state_bull_m5  := true
+    state_bear_m5  := false
+if cisd_bear_m5
+    state_bear_m5  := true
+    state_bull_m5  := false
+// ============================================================
+// SECTION 5 — ALIGNMENT LOGIC
+// ============================================================
+all_bull_align = state_bull_w  and state_bull_d  and state_bull_h4 and
+                 state_bull_h1 and state_bull_m15 and state_bull_m5
+
+all_bear_align = state_bear_w  and state_bear_d  and state_bear_h4 and
+                 state_bear_h1 and state_bear_m15 and state_bear_m5
+                 // ============================================================
+// SECTION 6 — TRADE STATE VARIABLES
+// ============================================================
+var float  entry_price    = na
+var float  sl_price       = na
+var float  tp1_price      = na
+var float  tp2_price      = na
+var bool   tp1_hit        = false
+var int    bars_in_trade  = 0
+var int    hold_bars_dyn  = 0
+var int    last_exit_bar  = -999
+var bool   in_trade       = false
+var string trade_dir      = ""
+var bool   reentry_done   = false
+// ============================================================
+// SECTION 7 — ENTRY CONDITIONS (NORMAL)
+// ============================================================
+can_trade     = (bar_index - last_exit_bar) >= cooldown_bars
+long_signal   = all_bull_align and vol_ok and can_trade and not in_trade
+short_signal  = all_bear_align and vol_ok and can_trade and not in_trade
+
+// Dynamic hold bars: scale ATR relative to average ATR
+atr_sma = ta.sma(atr_val, 20)
+dyn_hold = math.round(hold_atr_mult * (atr_sma / math.max(atr_val, 1e-10)))
+dyn_hold_clamped = math.max(min_hold, math.min(max_hold, dyn_hold))
+
+if long_signal
+    entry_price   := close
+    sl_price      := close - sl_atr_mult  * atr_val
+    tp1_price     := close + tp1_atr_mult * atr_val
+    tp2_price     := close + tp2_atr_mult * atr_val
+    tp1_hit       := false
+    bars_in_trade := 0
+    hold_bars_dyn := dyn_hold_clamped
+    in_trade      := true
+    trade_dir     := "long"
+    reentry_done  := false
+    strategy.entry("Long", strategy.long)
+    alert('{"action":"open_long","bot_token":"' + pionex_bot_token + '","symbol":"' + syminfo.ticker + '"}', alert.freq_once_per_bar)
+
+if short_signal
+    entry_price   := close
+    sl_price      := close + sl_atr_mult  * atr_val
+    tp1_price     := close - tp1_atr_mult * atr_val
+    tp2_price     := close - tp2_atr_mult * atr_val
+    tp1_hit       := false
+    bars_in_trade := 0
+    hold_bars_dyn := dyn_hold_clamped
+    in_trade      := true
+    trade_dir     := "short"
+    reentry_done  := false
+    strategy.entry("Short", strategy.short)
+    alert('{"action":"open_short","bot_token":"' + pionex_bot_token + '","symbol":"' + syminfo.ticker + '"}', alert.freq_once_per_bar)

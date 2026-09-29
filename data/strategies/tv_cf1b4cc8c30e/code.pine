@@ -1,0 +1,56 @@
+//@version=6
+strategy(title="15m MTF CISD [High Activity]", overlay=true, initial_capital=10000, 
+     commission_type=strategy.commission.percent, commission_value=0.04, slippage=1)
+
+// ==========================================
+// 1. SETTINGS
+// ==========================================
+string tf_high = input.timeframe("60", title="Trend TF (H1)") // Dropped H4 for more speed
+float rr_ratio = input.float(1.5, title="Risk-Reward Ratio")
+bool use_bos   = input.bool(false, title="Require BOS?") // Set to false for more trades
+
+// ==========================================
+// 2. LOGIC
+// ==========================================
+f_cisd() =>
+    var float bull_t = na, var float bear_t = na, var string state = "Neutral"
+    bool is_inside = high < high[1] and low > low[1]
+    if not na(bull_t) and ta.crossover(close, bull_t) then state := "Bullish"
+    if not na(bear_t) and ta.crossunder(close, bear_t) then state := "Bearish"
+    if close < open and not is_inside then bull_t := open
+    if close > open and not is_inside then bear_t := open
+    state
+
+state_h = request.security(syminfo.tickerid, tf_high, f_cisd())
+state_l = f_cisd() // 15m TF
+
+// Reduced to 2-TF alignment
+bool aligned_bull = state_h == "Bullish" and state_l == "Bullish"
+bool aligned_bear = state_h == "Bearish" and state_l == "Bearish"
+
+// BOS (Now Optional)
+bool bos_bull = high > ta.highest(high, 10)[1]
+bool bos_bear = low < ta.lowest(low, 10)[1]
+
+// New FVG (Primary Trigger)
+bool fvg_bull = low > high[2]
+bool fvg_bear = high < low[2]
+
+// ==========================================
+// 3. EXECUTION
+// ==========================================
+// Entry: Simplified conditions for higher frequency
+if aligned_bull and (not use_bos or bos_bull) and fvg_bull and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+
+if aligned_bear and (not use_bos or bos_bear) and fvg_bear and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+
+// Standard ATR Exit
+float atr = ta.atr(14)
+if strategy.position_size != 0
+    float sl_dist = atr * 1.5
+    if strategy.position_size > 0
+        strategy.exit("L", "Long", stop=close - sl_dist, limit=close + (sl_dist * rr_ratio))
+    else
+        strategy.exit("S", "Short", stop=close + sl_dist, limit=close - (sl_dist * rr_ratio))

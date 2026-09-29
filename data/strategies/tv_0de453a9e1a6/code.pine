@@ -1,0 +1,266 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Quant (LuxAlgo Specialist)
+
+//@version=6
+strategy("Neo-Quantum SMC Signals [Lux Inspired]", overlay=true, pyramiding=3, default_qty_type=strategy.percent_of_equity, default_qty_value=10, max_labels_count=500, max_lines_count=500)
+
+// --- Constants & Colors ---
+COLOR_BULL = #00ffbb
+COLOR_BEAR = #ff0055
+COLOR_NEUT = #5b9cf6
+COLOR_TP   = #00ffbb
+COLOR_SL   = #ff0055
+
+// --- Inputs ---
+group_smc    = "Smart Money Concepts"
+msLen        = input.int(5, "Market Structure Length", minval = 1, tooltip = "Lookback for swing highs/lows to detect structure shifts.")
+showBlocks   = input.bool(true, "Show Breaker Blocks", tooltip = "Displays institutional breaker zones.")
+
+group_trade  = "Trade Management"
+rrRatio      = input.float(2.0, "Risk:Reward Ratio", minval = 0.5, step = 0.1)
+atrMult      = input.float(1.5, "ATR Multiplier for Stop Loss", minval = 0.5)
+mergeRatio   = input.float(50.0, "Cluster Merge Ratio (%)",  minval = 0, maxval = 100, step = 5, tooltip = "0% = keep original levels, 50% = median blend (default), 100% = adopt newest trade's levels")
+
+group_confidence = "Confidence Engine"
+useTrendFilter   = input.bool(true, "Trend Confirmation (EMA 200)")
+
+// Volume Filter
+useVolumeFilter  = input.bool(true, "Volume-TP Filter", group = "Volume Filter")
+minVolRatio      = input.float(0.6, "Min Volume Ratio for Signal", minval = 0.2, step = 0.1, group = "Volume Filter")
+maxTpAtrRatio    = input.float(3.0, "Max TP Distance (in ATR) per Volume Unit", minval = 1.0, step = 0.5, group = "Volume Filter")
+
+// --- Core Calculations ---
+atr      = ta.atr(14)
+ema200   = ta.ema(close, 200)
+rsi      = ta.rsi(close, 14)
+avgVol   = ta.sma(volume, 20)
+
+// Market Structure Detection
+ph = ta.pivothigh(high, msLen, msLen)
+pl = ta.pivotlow(low, msLen, msLen)
+
+var float lastPH = na
+var float lastPL = na
+var float prevPH = na
+var float prevPL = na
+
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+// Market Structure Shift (MSS)
+bullMSS = ta.crossover(close, lastPH)
+bearMSS = ta.crossunder(close, lastPL)
+
+// Breaker Block Logic (Simplified Institutional Zone)
+var float bullBreakerTop = na
+var float bullBreakerBtm = na
+var float bearBreakerTop = na
+var float bearBreakerBtm = na
+
+if bullMSS
+    bullBreakerTop := lastPH
+    bullBreakerBtm := math.min(low[msLen], low)
+if bearMSS
+    bearBreakerTop := math.max(high[msLen], high)
+    bearBreakerBtm := lastPL
+
+// Volume filter logic
+volRatio = math.min(volume / math.max(avgVol, 1e-10), 3.0)
+
+filterVol(isBull) =>
+    float risk = isBull ? close - (low - atr * (atrMult * math.max(0.5, math.min(2.5, avgVol / math.max(volume, 1))))) : (high + atr * (atrMult * math.max(0.5, math.min(2.5, avgVol / math.max(volume, 1))))) - close
+    float tpRaw = isBull ? close + (risk * rrRatio) : close - (risk * rrRatio)
+    float tpAtrDist = (isBull ? tpRaw - close : close - tpRaw) / math.max(atr, 1e-10)
+    float reqVol = tpAtrDist / math.max(maxTpAtrRatio, 0.1)
+    not useVolumeFilter or (volRatio >= reqVol and volRatio >= minVolRatio)
+
+// Signals
+isLong  = bullMSS and (not useTrendFilter or close > ema200) and filterVol(true)
+isShort = bearMSS and (not useTrendFilter or close < ema200) and filterVol(false)
+
+// --- Confidence Score ---
+get_confidence(isBullish) =>
+    float score = 30.0
+    if (isBullish and close > ema200) or (not isBullish and close < ema200)
+        score += 25.0
+    if volume > avgVol * 1.2
+        score += 20.0
+    if (isBullish and rsi < 55) or (not isBullish and rsi > 45)
+        score += 25.0
+    score
+
+// === LONG STATE TRACKING ===
+var int    longCount = 0
+var array<float> longEntryPrices = array.new<float>(0)
+var array<float> longSLs = array.new<float>(0)
+var array<float> longTPs = array.new<float>(0)
+var array<float> longConf = array.new<float>(0)
+
+longConfirmed  = isLong and longCount < 3
+longConfScore  = longConfirmed ? get_confidence(true) : 0.0
+
+if longConfirmed
+    longCount += 1
+    array.push(longEntryPrices, close)
+    array.push(longSLs, close - atr * atrMult)
+    array.push(longTPs, close + atr * atrMult * rrRatio)
+    array.push(longConf, longConfScore)
+
+    // --- MERGE LOGIC: blend-based TP/SL using mergeRatio ---
+    if longCount == 2 and array.size(longTPs) >= 2
+        tpOld = array.get(longTPs, 0)
+        tpNew = array.get(longTPs, 1)
+        slOld = array.get(longSLs, 0)
+        slNew = array.get(longSLs, 1)
+        // blend TP: tpOld + (tpNew - tpOld) * (mergeRatio / 100)
+        tpBlended = tpOld + (tpNew - tpOld) * (mergeRatio / 100.0)
+        // blend SL: slOld + (slNew - slOld) * (mergeRatio / 100)
+        slBlended = slOld + (slNew - slOld) * (mergeRatio / 100.0)
+        array.set(longTPs, 0, tpBlended)
+        array.set(longTPs, 1, tpBlended)
+        // blend SL
+        array.set(longSLs, 0, slBlended)
+        array.set(longSLs, 1, slBlended)
+        array.set(longConf, 0, math.max(array.get(longConf, 0), array.get(longConf, 1)))
+        array.set(longConf, 1, array.get(longConf, 0))
+
+    if longCount == 3 and array.size(longTPs) == 3
+        tpMerged12 = array.get(longTPs, 0)    // already merged median of T1 & T2
+        tp3        = array.get(longTPs, 2)
+        sl3        = array.get(longSLs, 2)
+        // blend all three TP: tpMerged12 + (tp3 - tpMerged12) * (mergeRatio / 100)
+        tpBlended = tpMerged12 + (tp3 - tpMerged12) * (mergeRatio / 100.0)
+        array.set(longTPs, 0, tpBlended)
+        array.set(longTPs, 1, tpBlended)
+        array.set(longTPs, 2, tpBlended)
+        // SL of all set to blend toward SL3: existing + (sl3 - existing) * (mergeRatio / 100)
+        slExisting = array.get(longSLs, 0)
+        slBlended = slExisting + (sl3 - slExisting) * (mergeRatio / 100.0)
+        array.set(longSLs, 0, slBlended)
+        array.set(longSLs, 1, slBlended)
+        // confidence
+        array.set(longConf, 0, math.max(array.get(longConf, 0), array.get(longConf, 1), array.get(longConf, 2)))
+        array.set(longConf, 1, array.get(longConf, 0))
+        array.set(longConf, 2, array.get(longConf, 0))
+
+// --- Entry orders ---
+for i = 0 to array.size(longEntryPrices) - 1
+    if strategy.position_size == 0 and i == 0 and longConfirmed
+        strategy.entry("L1", strategy.long, qty=1)
+    else if i == 1 and longCount == 2 and array.get(longEntryPrices, 1) == close
+        strategy.entry("L2", strategy.long, qty=1)
+    else if i == 2 and longCount == 3 and array.get(longEntryPrices, 2) == close
+        strategy.entry("L3", strategy.long, qty=1)
+
+// --- Exit orders (longs) ---
+for i = 0 to array.size(longTPs) - 1
+    tp = array.get(longTPs, i)
+    sl = array.get(longSLs, i)
+    exitId = "LX_" + str.tostring(i)
+    strategy.exit(exitId, from_entry="L" + str.tostring(i + 1), limit=tp, stop=sl)
+
+// === SHORT STATE TRACKING ===
+var int    shortCount = 0
+var array<float> shortEntryPrices = array.new<float>(0)
+var array<float> shortSLs = array.new<float>(0)
+var array<float> shortTPs = array.new<float>(0)
+var array<float> shortConf = array.new<float>(0)
+
+shortConfirmed = isShort and shortCount < 3
+shortConfScore = shortConfirmed ? get_confidence(false) : 0.0
+
+if shortConfirmed
+    shortCount += 1
+    array.push(shortEntryPrices, close)
+    array.push(shortSLs, close + atr * atrMult)
+    array.push(shortTPs, close - atr * atrMult * rrRatio)
+    array.push(shortConf, shortConfScore)
+
+    // --- MERGE LOGIC: blend-based TP/SL using mergeRatio ---
+    if shortCount == 2 and array.size(shortTPs) >= 2
+        tpOld = array.get(shortTPs, 0)
+        tpNew = array.get(shortTPs, 1)
+        slOld = array.get(shortSLs, 0)
+        slNew = array.get(shortSLs, 1)
+        // blend TP: tpOld + (tpNew - tpOld) * (mergeRatio / 100)
+        tpBlended = tpOld + (tpNew - tpOld) * (mergeRatio / 100.0)
+        // blend SL: slOld + (slNew - slOld) * (mergeRatio / 100)
+        slBlended = slOld + (slNew - slOld) * (mergeRatio / 100.0)
+        array.set(shortTPs, 0, tpBlended)
+        array.set(shortTPs, 1, tpBlended)
+        // blend SL
+        array.set(shortSLs, 0, slBlended)
+        array.set(shortSLs, 1, slBlended)
+        array.set(shortConf, 0, math.max(array.get(shortConf, 0), array.get(shortConf, 1)))
+        array.set(shortConf, 1, array.get(shortConf, 0))
+
+    if shortCount == 3 and array.size(shortTPs) == 3
+        tpMerged12 = array.get(shortTPs, 0)    // already merged median of T1 & T2
+        tp3        = array.get(shortTPs, 2)
+        sl3        = array.get(shortSLs, 2)
+        // blend all three TP: tpMerged12 + (tp3 - tpMerged12) * (mergeRatio / 100)
+        tpBlended = tpMerged12 + (tp3 - tpMerged12) * (mergeRatio / 100.0)
+        array.set(shortTPs, 0, tpBlended)
+        array.set(shortTPs, 1, tpBlended)
+        array.set(shortTPs, 2, tpBlended)
+        // SL of all set to SL3 with blend: slExisting + (sl3 - slExisting) * (mergeRatio / 100)
+        slBlended = array.get(shortSLs, 0) + (sl3 - array.get(shortSLs, 0)) * (mergeRatio / 100.0)
+        array.set(shortSLs, 0, slBlended)
+        array.set(shortSLs, 1, slBlended)
+        // confidence
+        array.set(shortConf, 0, math.max(array.get(shortConf, 0), array.get(shortConf, 1), array.get(shortConf, 2)))
+        array.set(shortConf, 1, array.get(shortConf, 0))
+        array.set(shortConf, 2, array.get(shortConf, 0))
+
+// --- Entry orders (shorts) ---
+for i = 0 to array.size(shortEntryPrices) - 1
+    if strategy.position_size == 0 and i == 0 and shortConfirmed
+        strategy.entry("S1", strategy.short, qty=1)
+    else if i == 1 and shortCount == 2 and array.get(shortEntryPrices, 1) == close
+        strategy.entry("S2", strategy.short, qty=1)
+    else if i == 2 and shortCount == 3 and array.get(shortEntryPrices, 2) == close
+        strategy.entry("S3", strategy.short, qty=1)
+
+// --- Exit orders (shorts) ---
+for i = 0 to array.size(shortTPs) - 1
+    tp = array.get(shortTPs, i)
+    sl = array.get(shortSLs, i)
+    exitId = "SX_" + str.tostring(i)
+    strategy.exit(exitId, from_entry="S" + str.tostring(i + 1), limit=tp, stop=sl)
+
+// === Visual Debug: Plot Merge Points ===
+var float lastMergedLongTP  = na
+var float lastMergedLongSL  = na
+var float lastMergedShortTP = na
+var float lastMergedShortSL = na
+
+if longCount >= 1 and array.size(longTPs) > 0
+    lastMergedLongTP := array.get(longTPs, 0)
+    lastMergedLongSL := array.get(longSLs, 0)
+
+if shortCount >= 1 and array.size(shortTPs) > 0
+    lastMergedShortTP := array.get(shortTPs, 0)
+    lastMergedShortSL := array.get(shortSLs, 0)
+
+plot(lastMergedLongTP,  "Long TP",  color=COLOR_TP,  style=plot.style_circles, linewidth=1, display=display.pane)
+plot(lastMergedLongSL,  "Long SL",  color=COLOR_SL,  style=plot.style_circles, linewidth=1, display=display.pane)
+plot(lastMergedShortTP, "Short TP", color=COLOR_TP,  style=plot.style_circles, linewidth=1, display=display.pane)
+plot(lastMergedShortSL, "Short SL", color=COLOR_SL,  style=plot.style_circles, linewidth=1, display=display.pane)
+
+// === Breaker Block Boxes ===
+if showBlocks
+    var box lastBullBox = na
+    var box lastBearBox = na
+    box.delete(lastBullBox)
+    box.delete(lastBearBox)
+
+    if not na(bullBreakerBtm) and not na(bullBreakerTop)
+        lastBullBox := box.new(bar_index[msLen*2], bullBreakerTop, bar_index, bullBreakerBtm,
+            border_color=COLOR_BULL, bgcolor=color.new(COLOR_BULL, 90), xloc=xloc.bar_time)
+    if not na(bearBreakerBtm) and not na(bearBreakerTop)
+        lastBearBox := box.new(bar_index[msLen*2], bearBreakerTop, bar_index, bearBreakerBtm,
+            border_color=COLOR_BEAR, bgcolor=color.new(COLOR_BEAR, 90), xloc=xloc.bar_time)

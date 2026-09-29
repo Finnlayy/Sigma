@@ -1,0 +1,47 @@
+//@version=5
+strategy("TradingLab Breakout Strategy Final", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// --- Inputs ---
+lookback = input.int(20, "Lookback Period für Support/Resistance", minval=5)
+atrMult = input.float(2.0, "Chandelier ATR Multiplier", step=0.1)
+atrPeriod = input.int(22, "Chandelier ATR Period")
+tp1_ratio = input.float(1.5, "Take Profit 1 (CRV)", step=0.1)
+
+// --- Chandelier Exit Logik ---
+atrValue = ta.atr(atrPeriod)
+longStop = ta.highest(high, atrPeriod) - atrValue * atrMult
+shortStop = ta.lowest(low, atrPeriod) + atrValue * atrMult
+
+var bool isLong = false
+if close > longStop
+    isLong := true
+else if close < shortStop
+    isLong := false
+
+plot(isLong ? longStop : shortStop, color=isLong ? color.green : color.red, title="Chandelier Exit")
+
+// --- Support & Resistance Erkennung ---
+resistance = ta.highest(high, lookback)[1]
+support = ta.lowest(low, lookback)[1]
+
+// --- Momentum Bestätigung ---
+isMomentumLong = (close > resistance) and (math.abs(close - open) > ta.atr(14) * 1.5)
+isThreeGreen = (close > resistance) and (close > open) and (close[1] > open[1]) and (close[2] > open[2])
+longCondition = isMomentumLong or isThreeGreen
+
+// --- Trade Management ---
+var float stopLossPrice = na
+var float takeProfit1 = na
+
+if (longCondition and strategy.position_size == 0)
+    stopLossPrice := resistance * 0.995
+    float risk = close - stopLossPrice
+    takeProfit1 := close + (risk * tp1_ratio)
+    strategy.entry("Long", strategy.long)
+
+// --- Exit Logik ---
+if (strategy.position_size > 0)
+    strategy.exit("TP1/SL", "Long", qty_percent=50, limit=takeProfit1, stop=stopLossPrice, comment_loss="SL", comment_profit="TP1")
+
+if (strategy.position_size > 0 and not isLong)
+    strategy.close("Long", comment="Chandelier Exit")

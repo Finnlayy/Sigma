@@ -1,0 +1,44 @@
+//@version=6
+strategy("Scalp-Master v14.9 - Elite-48", overlay=true, initial_capital=1000, default_qty_type=strategy.cash, currency=currency.EUR, commission_value=0.04, pyramiding=1)
+
+// ==========================================
+// --- 1. SETTINGS & COUNTER ---
+// ==========================================
+max_daily_trades = input.int(48, "Max Trades pro Tag")
+ema_trend        = ta.ema(close, 200)
+atr_v            = ta.atr(14)
+
+// Counter für die heutigen Trades
+var int trades_today = 0
+if ta.change(time("D")) // Wenn ein neuer Tag beginnt
+    trades_today := 0
+
+// Registriere jeden neuen Trade
+if strategy.closedtrades > strategy.closedtrades[1] or strategy.opentrades > strategy.opentrades[1]
+    trades_today := trades_today + 1
+
+// ==========================================
+// --- 2. EXECUTION (Nur wenn Limit nicht erreicht) ---
+// ==========================================
+can_trade = trades_today < max_daily_trades
+is_new_min = ta.change(time("1")) != 0 // Check für Minute
+
+fixed_margin = input.float(50.0, "Margin pro Trade (€)")
+pos_size     = close > 0 ? (fixed_margin * 10) / close : 0
+
+if strategy.position_size == 0 and is_new_min and can_trade
+    if close > ema_trend
+        strategy.entry("L", strategy.long, qty=pos_size)
+    else
+        strategy.entry("S", strategy.short, qty=pos_size)
+
+// ==========================================
+// --- 3. TWIN-EXIT (3.0 CRV Fokus) ---
+// ==========================================
+if strategy.position_size != 0
+    float sl_ticks = (atr_v * 1.5) / syminfo.mintick
+    float tp1_ticks = sl_ticks * 1.5
+    float tp2_ticks = sl_ticks * 3.0 // Dein Target-Ratio
+
+    strategy.exit("TP1", qty_percent=50, loss=sl_ticks, profit=tp1_ticks, comment="Safety")
+    strategy.exit("TP2", qty_percent=100, loss=sl_ticks, profit=tp2_ticks, comment="Giant")

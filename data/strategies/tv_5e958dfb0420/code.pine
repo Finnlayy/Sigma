@@ -1,0 +1,523 @@
+//@version=6
+strategy(title="ONNX Quant Management Hub v2", shorttitle="ONNX QM Hub v2", overlay=true, max_boxes_count=100, max_lines_count=200, max_labels_count=200)
+
+string G0 = "ONNX / Execution"
+string signal_type = input.string("", "Signal Token (UUID)", group=G0)
+string contracts = input.string("0.001", "Contracts", group=G0)
+bool emit_scans = input.bool(true, "Emit scan alerts", group=G0)
+bool emit_every_bar = input.bool(true, "Scan every confirmed bar", group=G0)
+bool debug_mode = input.bool(false, "Debug labels", group=G0)
+bool use_fractal_tp = input.bool(true, "Fractal TP", group=G0)
+
+string G1 = "MTF"
+int tf_h4 = input.int(240, "TF H4", minval=1, group=G1)
+int tf_h1 = input.int(60, "TF H1", minval=1, group=G1)
+int tf_m15 = input.int(15, "TF M15", minval=1, group=G1)
+int tf_m5 = input.int(5, "TF M5", minval=1, group=G1)
+bool en_h4 = input.bool(true, "H4", group=G1)
+bool en_h1 = input.bool(true, "H1", group=G1)
+bool en_m15 = input.bool(true, "M15", group=G1)
+bool en_m5 = input.bool(false, "M5", group=G1)
+int min_alignment = input.int(3, "Min alignment", minval=1, maxval=4, group=G1)
+
+string G2 = "Risk"
+float sl_atr_mul = input.float(1.4, "SL ATR", minval=0.5, maxval=5.0, step=0.1, group=G2)
+float tp_atr_mul = input.float(2.8, "TP ATR", minval=1.0, maxval=8.0, step=0.1, group=G2)
+bool use_max_dd = input.bool(true, "Max DD breaker", group=G2)
+float max_dd_pct = input.float(8.0, "Max DD %", minval=1.0, maxval=30.0, step=0.5, group=G2)
+
+string G3 = "Filters"
+int min_conf = input.int(18, "Min confidence", minval=1, maxval=100, group=G3)
+bool use_vol = input.bool(true, "Volume filter", group=G3)
+float vol_mult = input.float(1.05, "Volume mult", minval=1.0, maxval=3.0, step=0.05, group=G3)
+int vol_period = input.int(20, "Volume SMA", minval=5, maxval=100, group=G3)
+bool use_time = input.bool(false, "Session filter", group=G3)
+int sess_start = input.int(7, "Session start UTC", minval=0, maxval=23, group=G3)
+int sess_end = input.int(22, "Session end UTC", minval=0, maxval=23, group=G3)
+bool use_daily = input.bool(true, "Daily loss limit", group=G3)
+float daily_lim = input.float(3.0, "Daily loss %", minval=0.5, maxval=15.0, step=0.5, group=G3)
+bool use_ema_filter = input.bool(true, "EMA 200 filter", group=G3)
+int ema_len = input.int(200, "EMA length", minval=10, maxval=500, group=G3)
+bool use_rsi_filter = input.bool(true, "RSI filter", group=G3)
+int rsi_len = input.int(14, "RSI length", minval=5, maxval=50, group=G3)
+float rsi_ob = input.float(78.0, "RSI OB", minval=60.0, maxval=95.0, step=1.0, group=G3)
+float rsi_os = input.float(22.0, "RSI OS", minval=5.0, maxval=40.0, step=1.0, group=G3)
+bool use_atr_filter = input.bool(true, "ATR filter", group=G3)
+float atr_min_pct = input.float(0.15, "ATR min %", minval=0.01, maxval=1.0, step=0.01, group=G3)
+bool news_bull = input.bool(false, "News bullish", group=G3)
+bool news_bear = input.bool(false, "News bearish", group=G3)
+
+string G4 = "Structure"
+int ob_pivot = input.int(6, "OB pivot", minval=2, maxval=20, group=G4)
+string orb_session = input.session("0900-0930", "Opening range", group=G4)
+bool show_visuals = input.bool(true, "Show visuals", group=G4)
+
+string G5 = "Trend / Math"
+int fast_ema_len = input.int(9, "Fast EMA", minval=1, maxval=100, group=G5)
+int slow_ema_len = input.int(21, "Slow EMA", minval=2, maxval=200, group=G5)
+int bb_len = input.int(20, "BB length", minval=5, maxval=200, group=G5)
+float bb_mult = input.float(2.0, "BB mult", minval=0.5, maxval=5.0, step=0.1, group=G5)
+float squeeze_pct = input.float(1.6, "Squeeze %", minval=0.2, maxval=10.0, step=0.1, group=G5)
+int don_len = input.int(20, "Donchian", minval=5, maxval=200, group=G5)
+int kc_len = input.int(20, "Keltner", minval=5, maxval=200, group=G5)
+float kc_mult = input.float(1.5, "Keltner mult", minval=0.5, maxval=5.0, step=0.1, group=G5)
+int stoch_len = input.int(14, "Stoch length", minval=5, maxval=100, group=G5)
+int stoch_d_len = input.int(3, "Stoch D", minval=1, maxval=20, group=G5)
+int adx_len = input.int(14, "ADX length", minval=5, maxval=50, group=G5)
+float adx_thr = input.float(20.0, "ADX threshold", minval=5.0, maxval=50.0, step=0.5, group=G5)
+int macd_fast = input.int(12, "MACD fast", minval=1, maxval=50, group=G5)
+int macd_slow = input.int(26, "MACD slow", minval=2, maxval=100, group=G5)
+int macd_siglen = input.int(9, "MACD signal", minval=1, maxval=50, group=G5)
+int hma_len = input.int(55, "HMA length", minval=5, maxval=200, group=G5)
+float psar_start = input.float(0.02, "PSAR start", minval=0.001, maxval=0.2, step=0.001, group=G5)
+float psar_inc = input.float(0.02, "PSAR inc", minval=0.001, maxval=0.2, step=0.001, group=G5)
+float psar_max = input.float(0.2, "PSAR max", minval=0.01, maxval=1.0, step=0.01, group=G5)
+float climax_vol_mult = input.float(1.8, "Climax vol mult", minval=1.0, maxval=5.0, step=0.1, group=G5)
+
+f_norm_hhmm(int hhmm) =>
+    int h = int(math.floor(hhmm / 100.0))
+    int m = hhmm % 100
+    h := math.max(0, math.min(23, h))
+    m := math.max(0, math.min(59, m))
+    h * 100 + m
+
+f_in_session(int start_hhmm, int end_hhmm, string tz) =>
+    int now_hhmm = hour(time, tz == "Exchange" ? syminfo.timezone : tz) * 100 + minute(time, tz == "Exchange" ? syminfo.timezone : tz)
+    start_hhmm <= end_hhmm ? (now_hhmm >= start_hhmm and now_hhmm <= end_hhmm) : (now_hhmm >= start_hhmm or now_hhmm <= end_hhmm)
+
+f_escape_json(string raw) => str.replace(raw, "\"", "\\\"")
+f_fmt_price(float v) => na(v) ? "na" : str.tostring(v, format.mintick)
+f_reverse_side(string side) => side == "long" ? "short" : "long"
+
+f_cisd(float o, float c, float h, float l) =>
+    var int state = 0
+    bool bull = c > o, bear = c < o, up = false, dn = false
+    if bear and state != -1 and c < o[1] and not (h < h[1] and l > l[1])
+        state := -1, dn := true
+    if bull and state != 1 and c > o[1] and not (h < h[1] and l > l[1])
+        state := 1, up := true
+    [state, up, dn]
+
+f_htf_cisd(int tf_minutes) =>
+    [oo, cc, hh, ll] = request.security(syminfo.tickerid, str.tostring(tf_minutes), [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+    [st, _, _] = f_cisd(oo, cc, hh, ll)
+    st
+
+f_tma(float src, int len) => ta.sma(ta.sma(src, len), len)
+f_kama(float src, int length, int fast_len, int slow_len) =>
+    float change = math.abs(src - nz(src[length], src))
+    float volatility = 0.0
+    for i = 0 to length - 1
+        volatility += math.abs(nz(src[i], src) - nz(src[i + 1], src))
+    float er = volatility != 0.0 ? change / volatility : 0.0
+    float fast_sc = 2.0 / (fast_len + 1.0)
+    float slow_sc = 2.0 / (slow_len + 1.0)
+    float sc = math.pow(er * (fast_sc - slow_sc) + slow_sc, 2.0)
+    var float kama = na
+    kama := na(kama[1]) ? src : kama[1] + sc * (src - kama[1])
+    kama
+f_ut_stop(float src, int atr_len, float atr_mult) =>
+    float a = ta.atr(atr_len), lo = src - a * atr_mult, hi = src + a * atr_mult
+    var float trail = na
+    trail := na(trail) ? lo : src > trail ? math.max(trail, lo) : math.min(trail, hi)
+    trail
+
+float atr_val = ta.atr(14), ema_fast = ta.ema(close, fast_ema_len), ema_slow = ta.ema(close, slow_ema_len), ema200 = ta.ema(close, ema_len)
+float rsi_val = ta.rsi(close, rsi_len), vol_sma = ta.sma(volume, vol_period), vol_ratio = vol_sma > 0 ? volume / vol_sma : 0.0, vwap_val = ta.vwap(hlc3)
+float kama_line = f_kama(close, 50, 2, 30), tma_line = f_tma(close, 30), ut_stop = f_ut_stop(close, 14, 1.5)
+float bb_mid = ta.sma(close, bb_len), bb_dev = ta.stdev(close, bb_len) * bb_mult, bb_up = bb_mid + bb_dev, bb_dn = bb_mid - bb_dev, bb_width_pct = close != 0 ? (bb_up - bb_dn) / close * 100 : 0.0
+float kc_mid = ta.ema(close, kc_len), kc_dev = ta.atr(kc_len) * kc_mult, kc_up = kc_mid + kc_dev, kc_dn = kc_mid - kc_dev
+float macd_line = ta.ema(close, macd_fast) - ta.ema(close, macd_slow), macd_sig = ta.ema(macd_line, macd_siglen), macd_hist = macd_line - macd_sig
+float stoch_k = ta.stoch(close, high, low, stoch_len), stoch_d = ta.sma(stoch_k, stoch_d_len)
+[plus_di, minus_di, adx_val] = ta.dmi(adx_len, adx_len)
+float hma_line = ta.hma(close, hma_len), psar_val = ta.sar(psar_start, psar_inc, psar_max), ema_slope = ema200 - ema200[1], vwap_dist = na(vwap_val) or close == 0 ? 0.0 : (close - vwap_val) / close
+float atr_pct = close == 0 ? 0.0 : (atr_val / close) * 100, ha_close = (open + high + low + close) / 4.0
+var float ha_open = na
+ha_open := na(ha_open[1]) ? (open + close) / 2.0 : (ha_open[1] + ha_close[1]) / 2.0
+float ha_bias = ha_close > ha_open ? 1.0 : ha_close < ha_open ? -1.0 : 0.0
+
+bool time_ok = use_time ? f_in_session(f_norm_hhmm(sess_start * 100), f_norm_hhmm(sess_end * 100), "UTC") : true
+bool ema_long_ok = use_ema_filter ? close > ema200 : true, ema_short_ok = use_ema_filter ? close < ema200 : true
+bool rsi_long_ok = use_rsi_filter ? rsi_val < rsi_ob : true, rsi_short_ok = use_rsi_filter ? rsi_val > rsi_os : true
+bool atr_ok = use_atr_filter ? atr_pct >= atr_min_pct : true, vol_ok = use_vol ? volume > vol_sma * vol_mult : true
+var float daily_start_price = close
+var float daily_pnl_pct = 0.0
+bool is_new_day = ta.change(time("D")) != 0
+if is_new_day
+    daily_start_price := close
+    daily_pnl_pct := 0.0
+daily_pnl_pct := daily_start_price != 0 ? ((close - daily_start_price) / daily_start_price) * 100 : 0.0
+bool daily_ok = use_daily ? daily_pnl_pct > -daily_lim : true
+var float equity_peak = close
+var float current_dd_pct = 0.0
+equity_peak := math.max(equity_peak, close)
+current_dd_pct := equity_peak != 0 ? ((equity_peak - close) / equity_peak) * 100 : 0.0
+bool dd_ok = use_max_dd ? current_dd_pct < max_dd_pct : true
+if is_new_day
+    equity_peak := close
+    current_dd_pct := 0.0
+
+int state_h4 = en_h4 ? f_htf_cisd(tf_h4) : 0, state_h1 = en_h1 ? f_htf_cisd(tf_h1) : 0, state_m15 = en_m15 ? f_htf_cisd(tf_m15) : 0, state_m5 = en_m5 ? f_htf_cisd(tf_m5) : 0
+[local_state, local_bull_cisd, local_bear_cisd] = f_cisd(open, close, high, low)
+int bull_count = (en_h4 and state_h4 == 1 ? 1 : 0) + (en_h1 and state_h1 == 1 ? 1 : 0) + (en_m15 and state_m15 == 1 ? 1 : 0) + (en_m5 and state_m5 == 1 ? 1 : 0)
+int bear_count = (en_h4 and state_h4 == -1 ? 1 : 0) + (en_h1 and state_h1 == -1 ? 1 : 0) + (en_m15 and state_m15 == -1 ? 1 : 0) + (en_m5 and state_m5 == -1 ? 1 : 0)
+int active_tfs = (en_h4 ? 1 : 0) + (en_h1 ? 1 : 0) + (en_m15 ? 1 : 0) + (en_m5 ? 1 : 0)
+bool bull_aligned = bull_count >= min_alignment, bear_aligned = bear_count >= min_alignment
+float mtf_bull_ratio = active_tfs > 0 ? bull_count * 1.0 / active_tfs : 0.0, mtf_bear_ratio = active_tfs > 0 ? bear_count * 1.0 / active_tfs : 0.0
+int mtf_bias = bull_count - bear_count, news_bias = news_bull ? 1 : news_bear ? -1 : 0
+int structure_bias = (local_bull_cisd ? 1 : 0) + (local_bear_cisd ? -1 : 0)
+
+float pivot_high = ta.pivothigh(high, ob_pivot, ob_pivot), pivot_low = ta.pivotlow(low, ob_pivot, ob_pivot)
+var float last_fractal_high = na
+var float last_fractal_low = na
+if not na(pivot_high)
+    last_fractal_high := pivot_high
+if not na(pivot_low)
+    last_fractal_low := pivot_low
+bool bull_ob_touch = not na(pivot_low) and close[ob_pivot] < open[ob_pivot] and low <= high[ob_pivot] and high >= low[ob_pivot]
+bool bear_ob_touch = not na(pivot_high) and close[ob_pivot] > open[ob_pivot] and high >= low[ob_pivot] and low <= high[ob_pivot]
+bool bull_fvg_touch = low > high[2] or (not na(last_fractal_low) and low <= last_fractal_low)
+bool bear_fvg_touch = high < low[2] or (not na(last_fractal_high) and high >= last_fractal_high)
+bool in_orb = not na(time(timeframe.period, orb_session))
+var float orb_high = na
+var float orb_low = na
+if in_orb and not in_orb[1]
+    orb_high := high, orb_low := low
+else if in_orb
+    orb_high := math.max(orb_high, high), orb_low := math.min(orb_low, low)
+bool orb_ready = not in_orb and not na(orb_high) and not na(orb_low)
+
+f_fractal_tp(bool is_long, float entry, float atr_v, float fallback_mult, float fractal_high, float fractal_low) =>
+    float fb = is_long ? entry + atr_v * fallback_mult : entry - atr_v * fallback_mult
+    is_long ? (not na(fractal_high) and fractal_high > entry ? fractal_high : fb) : (not na(fractal_low) and fractal_low < entry ? fractal_low : fb)
+
+f_pack(bool long_sig, bool short_sig, int long_score, int short_score, float tp_mult) =>
+    float lsl = close - atr_val * sl_atr_mul, ssl = close + atr_val * sl_atr_mul
+    float ltp = use_fractal_tp ? f_fractal_tp(true, close, atr_val, tp_mult, last_fractal_high, last_fractal_low) : close + atr_val * tp_mult
+    float stp = use_fractal_tp ? f_fractal_tp(false, close, atr_val, tp_mult, last_fractal_high, last_fractal_low) : close - atr_val * tp_mult
+    [long_sig, short_sig, long_score, short_score, lsl, ltp, ssl, stp]
+
+f_candidate_json(string id, bool long_sig, bool short_sig, int long_score, int short_score, float long_sl, float long_tp, float short_sl, float short_tp) =>
+    "{\"id\":\"" + id + "\",\"long\":" + (long_sig ? "true" : "false") + ",\"short\":" + (short_sig ? "true" : "false") + ",\"score_long\":" + str.tostring(long_score) + ",\"score_short\":" + str.tostring(short_score) + ",\"stop_long\":\"" + f_fmt_price(long_sl) + "\",\"tp_long\":\"" + f_fmt_price(long_tp) + "\",\"stop_short\":\"" + f_fmt_price(short_sl) + "\",\"tp_short\":\"" + f_fmt_price(short_tp) + "\"}"
+f_build_payload(string tv_action, string pos_size, string family, string side, float stop, float target, int conf, string reason, string pack_raw) =>
+    "{\"data\":{\"action\":\"" + tv_action + "\",\"contracts\":\"" + contracts + "\",\"position_size\":\"" + pos_size + "\"},\"strategy_family\":\"" + family + "\",\"strategy_side\":\"" + side + "\",\"reason\":\"" + reason + "\",\"confidence\":\"" + str.tostring(conf) + "\",\"price\":\"" + f_fmt_price(close) + "\",\"stop\":\"" + f_fmt_price(stop) + "\",\"target\":\"" + f_fmt_price(target) + "\",\"signal_param\":\"" + f_escape_json(pack_raw) + "\",\"signal_type\":\"" + signal_type + "\",\"symbol\":\"" + syminfo.ticker + "\",\"time\":\"" + str.tostring(timenow) + "\"}"
+f_reverse_payload(string from_side, float stop, float target, int conf, string family, string pack_raw) =>
+    f_build_payload("reverse", f_reverse_side(from_side) == "long" ? "1" : "-1", family, f_reverse_side(from_side), stop, target, conf, "reverse", pack_raw)
+f_update_best(string family, int long_score, int short_score, string best_family, string best_side, int best_score) =>
+    int candidate_score = math.max(long_score, short_score)
+    string out_family = best_family
+    string out_side = best_side
+    int out_score = best_score
+    if candidate_score > best_score
+        out_family := family
+        out_side := long_score >= short_score ? "long" : "short"
+        out_score := candidate_score
+    [out_family, out_side, out_score]
+
+f_ema_trend_set() =>
+    int ls = (ema_fast > ema_slow ? 4 : 0) + (close > ema200 ? 4 : 0) + (vol_ok ? 2 : 0)
+    int ss = (ema_fast < ema_slow ? 4 : 0) + (close < ema200 ? 4 : 0) + (vol_ok ? 2 : 0)
+    f_pack(ta.crossover(ema_fast, ema_slow) and close > ema200, ta.crossunder(ema_fast, ema_slow) and close < ema200, ls, ss, tp_atr_mul)
+
+f_ema_vwap_scalper_set() =>
+    int ls = (ema_fast > ema_slow ? 3 : 0) + (close > vwap_val ? 4 : 0) + (rsi_val < 70 ? 2 : 0)
+    int ss = (ema_fast < ema_slow ? 3 : 0) + (close < vwap_val ? 4 : 0) + (rsi_val > 30 ? 2 : 0)
+    f_pack(ta.crossover(ema_fast, ema_slow) and close > vwap_val, ta.crossunder(ema_fast, ema_slow) and close < vwap_val, ls, ss, tp_atr_mul * 0.9)
+
+f_rsi_reversion_set() =>
+    int ls = (rsi_val < rsi_os ? 5 : 0) + (close <= bb_dn ? 3 : 0) + (close > open ? 2 : 0)
+    int ss = (rsi_val > rsi_ob ? 5 : 0) + (close >= bb_up ? 3 : 0) + (close < open ? 2 : 0)
+    f_pack(ta.crossover(rsi_val, rsi_os) and close <= bb_mid, ta.crossunder(rsi_val, rsi_ob) and close >= bb_mid, ls, ss, tp_atr_mul * 0.8)
+
+f_orb_breakout_set() =>
+    int ls = (orb_ready ? 4 : 0) + (orb_ready and close > orb_high ? 6 : 0) + (vol_ok ? 2 : 0)
+    int ss = (orb_ready ? 4 : 0) + (orb_ready and close < orb_low ? 6 : 0) + (vol_ok ? 2 : 0)
+    f_pack(orb_ready and ta.crossover(close, orb_high), orb_ready and ta.crossunder(close, orb_low), ls, ss, tp_atr_mul)
+
+f_quantum_trend_set() =>
+    int ls = (close > kama_line ? 4 : 0) + (close > tma_line ? 4 : 0) + (close > ut_stop ? 4 : 0) + (bull_count >= bear_count ? 4 : 0)
+    int ss = (close < kama_line ? 4 : 0) + (close < tma_line ? 4 : 0) + (close < ut_stop ? 4 : 0) + (bear_count >= bull_count ? 4 : 0)
+    f_pack(close > kama_line and close > tma_line and close > ut_stop and bull_aligned, close < kama_line and close < tma_line and close < ut_stop and bear_aligned, ls, ss, tp_atr_mul * 1.1)
+
+f_cisd_structure_set() =>
+    int ls = (bull_aligned ? 4 : 0) + (local_bull_cisd ? 5 : 0) + (bull_ob_touch ? 3 : 0) + (bull_fvg_touch ? 3 : 0) + (structure_bias > 0 ? 2 : 0)
+    int ss = (bear_aligned ? 4 : 0) + (local_bear_cisd ? 5 : 0) + (bear_ob_touch ? 3 : 0) + (bear_fvg_touch ? 3 : 0) + (structure_bias < 0 ? 2 : 0)
+    f_pack(bull_aligned and local_bull_cisd and (bull_ob_touch or bull_fvg_touch), bear_aligned and local_bear_cisd and (bear_ob_touch or bear_fvg_touch), ls, ss, tp_atr_mul)
+
+f_glint_news_set() =>
+    int ls = (news_bull ? 6 : 0) + (bull_aligned ? 4 : 0) + (local_bull_cisd ? 4 : 0) + ((bull_ob_touch or bull_fvg_touch) ? 2 : 0)
+    int ss = (news_bear ? 6 : 0) + (bear_aligned ? 4 : 0) + (local_bear_cisd ? 4 : 0) + ((bear_ob_touch or bear_fvg_touch) ? 2 : 0)
+    f_pack(news_bull and local_bull_cisd, news_bear and local_bear_cisd, ls, ss, tp_atr_mul * 1.2)
+
+f_wti_scalper_set() =>
+    int ls = ((state_m5 == 1 or state_m15 == 1) ? 4 : 0) + (close > vwap_val ? 3 : 0) + ((bull_ob_touch or bull_fvg_touch) ? 3 : 0) + (vol_ok ? 2 : 0)
+    int ss = ((state_m5 == -1 or state_m15 == -1) ? 4 : 0) + (close < vwap_val ? 3 : 0) + ((bear_ob_touch or bear_fvg_touch) ? 3 : 0) + (vol_ok ? 2 : 0)
+    f_pack((state_m5 == 1 or state_m15 == 1) and close > vwap_val and (bull_ob_touch or bull_fvg_touch), (state_m5 == -1 or state_m15 == -1) and close < vwap_val and (bear_ob_touch or bear_fvg_touch), ls, ss, tp_atr_mul * 0.9)
+
+f_bb_reversion_set() =>
+    int ls = (close < bb_dn ? 5 : 0) + (rsi_val < rsi_os ? 4 : 0) + (close > open ? 2 : 0)
+    int ss = (close > bb_up ? 5 : 0) + (rsi_val > rsi_ob ? 4 : 0) + (close < open ? 2 : 0)
+    f_pack(close < bb_dn and ta.crossover(close, bb_dn), close > bb_up and ta.crossunder(close, bb_up), ls, ss, tp_atr_mul * 0.85)
+
+f_bb_squeeze_breakout_set() =>
+    int ls = (bb_width_pct < squeeze_pct ? 4 : 0) + (close > bb_up ? 5 : 0) + (vol_ok ? 2 : 0)
+    int ss = (bb_width_pct < squeeze_pct ? 4 : 0) + (close < bb_dn ? 5 : 0) + (vol_ok ? 2 : 0)
+    f_pack(bb_width_pct < squeeze_pct and ta.crossover(close, bb_up), bb_width_pct < squeeze_pct and ta.crossunder(close, bb_dn), ls, ss, tp_atr_mul)
+
+f_donchian_breakout_set() =>
+    float dh = ta.highest(high, don_len)[1], dl = ta.lowest(low, don_len)[1]
+    int ls = (not na(dh) and close > dh ? 6 : 0) + (ema_long_ok ? 2 : 0) + (vol_ok ? 2 : 0)
+    int ss = (not na(dl) and close < dl ? 6 : 0) + (ema_short_ok ? 2 : 0) + (vol_ok ? 2 : 0)
+    f_pack(not na(dh) and ta.crossover(close, dh), not na(dl) and ta.crossunder(close, dl), ls, ss, tp_atr_mul)
+
+f_hma_trend_set() =>
+    int ls = (close > hma_line ? 4 : 0) + (hma_line > hma_line[1] ? 4 : 0) + (ema_fast > ema_slow ? 2 : 0)
+    int ss = (close < hma_line ? 4 : 0) + (hma_line < hma_line[1] ? 4 : 0) + (ema_fast < ema_slow ? 2 : 0)
+    f_pack(ta.crossover(close, hma_line) and hma_line > hma_line[1], ta.crossunder(close, hma_line) and hma_line < hma_line[1], ls, ss, tp_atr_mul * 1.05)
+
+f_macd_momentum_set() =>
+    int ls = (macd_hist > 0 ? 4 : 0) + (macd_line > macd_sig ? 4 : 0) + (close > ema_fast ? 2 : 0)
+    int ss = (macd_hist < 0 ? 4 : 0) + (macd_line < macd_sig ? 4 : 0) + (close < ema_fast ? 2 : 0)
+    f_pack(ta.crossover(macd_line, macd_sig) and macd_hist > 0, ta.crossunder(macd_line, macd_sig) and macd_hist < 0, ls, ss, tp_atr_mul)
+
+f_stoch_reversal_set() =>
+    int ls = (stoch_k < 20 ? 4 : 0) + (ta.crossover(stoch_k, stoch_d) ? 4 : 0) + (close < bb_mid ? 2 : 0)
+    int ss = (stoch_k > 80 ? 4 : 0) + (ta.crossunder(stoch_k, stoch_d) ? 4 : 0) + (close > bb_mid ? 2 : 0)
+    f_pack(stoch_k < 20 and ta.crossover(stoch_k, stoch_d), stoch_k > 80 and ta.crossunder(stoch_k, stoch_d), ls, ss, tp_atr_mul * 0.8)
+
+f_adx_pullback_set() =>
+    int ls = (adx_val > adx_thr ? 4 : 0) + (plus_di > minus_di ? 4 : 0) + (low <= ema_fast ? 4 : 0) + (close > ema_slow ? 2 : 0)
+    int ss = (adx_val > adx_thr ? 4 : 0) + (minus_di > plus_di ? 4 : 0) + (high >= ema_fast ? 4 : 0) + (close < ema_slow ? 2 : 0)
+    f_pack(adx_val > adx_thr and plus_di > minus_di and low <= ema_fast and close > ema_slow, adx_val > adx_thr and minus_di > plus_di and high >= ema_fast and close < ema_slow, ls, ss, tp_atr_mul * 1.1)
+
+f_keltner_breakout_set() =>
+    int ls = (close > kc_mid ? 2 : 0) + (close > kc_up ? 6 : 0) + (vol_ok ? 2 : 0)
+    int ss = (close < kc_mid ? 2 : 0) + (close < kc_dn ? 6 : 0) + (vol_ok ? 2 : 0)
+    f_pack(ta.crossover(close, kc_up), ta.crossunder(close, kc_dn), ls, ss, tp_atr_mul)
+
+f_vwap_reversion_set() =>
+    int ls = (close < vwap_val ? 4 : 0) + (rsi_val < 50 ? 2 : 0) + (ta.crossover(close, vwap_val) ? 6 : 0)
+    int ss = (close > vwap_val ? 4 : 0) + (rsi_val > 50 ? 2 : 0) + (ta.crossunder(close, vwap_val) ? 6 : 0)
+    f_pack(close < vwap_val and ta.crossover(close, vwap_val), close > vwap_val and ta.crossunder(close, vwap_val), ls, ss, tp_atr_mul * 0.9)
+
+f_fractal_breakout_set() =>
+    int ls = (not na(last_fractal_high) ? 2 : 0) + (not na(last_fractal_high) and close > last_fractal_high ? 6 : 0) + (bull_count >= bear_count ? 2 : 0)
+    int ss = (not na(last_fractal_low) ? 2 : 0) + (not na(last_fractal_low) and close < last_fractal_low ? 6 : 0) + (bear_count >= bull_count ? 2 : 0)
+    f_pack(not na(last_fractal_high) and ta.crossover(close, last_fractal_high), not na(last_fractal_low) and ta.crossunder(close, last_fractal_low), ls, ss, tp_atr_mul)
+
+f_pivot_rejection_set() =>
+    int ls = (not na(last_fractal_low) ? 2 : 0) + (not na(last_fractal_low) and low < last_fractal_low ? 4 : 0) + (close > last_fractal_low ? 4 : 0) + (close > open ? 2 : 0)
+    int ss = (not na(last_fractal_high) ? 2 : 0) + (not na(last_fractal_high) and high > last_fractal_high ? 4 : 0) + (close < last_fractal_high ? 4 : 0) + (close < open ? 2 : 0)
+    f_pack(not na(last_fractal_low) and low < last_fractal_low and close > last_fractal_low and close > open, not na(last_fractal_high) and high > last_fractal_high and close < last_fractal_high and close < open, ls, ss, tp_atr_mul * 0.85)
+
+f_atr_expansion_set() =>
+    int ls = ((high - low) > atr_val * 1.4 ? 6 : 0) + (close > open ? 2 : 0) + (close > ema_fast ? 2 : 0)
+    int ss = ((high - low) > atr_val * 1.4 ? 6 : 0) + (close < open ? 2 : 0) + (close < ema_fast ? 2 : 0)
+    f_pack((high - low) > atr_val * 1.4 and close > open and close > ema_fast, (high - low) > atr_val * 1.4 and close < open and close < ema_fast, ls, ss, tp_atr_mul)
+
+f_volume_climax_set() =>
+    int ls = (volume > vol_sma * climax_vol_mult ? 6 : 0) + (close > high[1] ? 4 : 0) + (close > open ? 2 : 0)
+    int ss = (volume > vol_sma * climax_vol_mult ? 6 : 0) + (close < low[1] ? 4 : 0) + (close < open ? 2 : 0)
+    f_pack(volume > vol_sma * climax_vol_mult and close > high[1] and close > open, volume > vol_sma * climax_vol_mult and close < low[1] and close < open, ls, ss, tp_atr_mul)
+
+f_engulfing_reversal_set() =>
+    bool bull_engulf = close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+    bool bear_engulf = close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+    int ls = (bull_engulf ? 8 : 0) + (rsi_val < 50 ? 2 : 0) + (close > ema_slow ? 2 : 0)
+    int ss = (bear_engulf ? 8 : 0) + (rsi_val > 50 ? 2 : 0) + (close < ema_slow ? 2 : 0)
+    f_pack(bull_engulf, bear_engulf, ls, ss, tp_atr_mul * 0.8)
+
+f_inside_bar_breakout_set() =>
+    bool inside_prev = high[1] < high[2] and low[1] > low[2]
+    int ls = (inside_prev ? 4 : 0) + (inside_prev and close > high[1] ? 6 : 0) + (vol_ok ? 2 : 0)
+    int ss = (inside_prev ? 4 : 0) + (inside_prev and close < low[1] ? 6 : 0) + (vol_ok ? 2 : 0)
+    f_pack(inside_prev and ta.crossover(close, high[1]), inside_prev and ta.crossunder(close, low[1]), ls, ss, tp_atr_mul)
+
+f_heikin_trend_set() =>
+    int ls = (ha_close > ha_open ? 4 : 0) + (ha_close > ha_close[1] ? 4 : 0) + (ema_fast > ema_slow ? 2 : 0)
+    int ss = (ha_close < ha_open ? 4 : 0) + (ha_close < ha_close[1] ? 4 : 0) + (ema_fast < ema_slow ? 2 : 0)
+    f_pack(ha_close > ha_open and ha_close > ha_close[1], ha_close < ha_open and ha_close < ha_close[1], ls, ss, tp_atr_mul * 1.05)
+
+f_psar_trend_set() =>
+    int ls = (close > psar_val ? 4 : 0) + (psar_val < psar_val[1] ? 4 : 0) + (ema_fast > ema_slow ? 2 : 0)
+    int ss = (close < psar_val ? 4 : 0) + (psar_val > psar_val[1] ? 4 : 0) + (ema_fast < ema_slow ? 2 : 0)
+    f_pack(close > psar_val and psar_val < psar_val[1], close < psar_val and psar_val > psar_val[1], ls, ss, tp_atr_mul * 1.05)
+
+[ema_long_sig, ema_short_sig, ema_long_score, ema_short_score, ema_long_sl, ema_long_tp, ema_short_sl, ema_short_tp] = f_ema_trend_set()
+[vwap_long_sig, vwap_short_sig, vwap_long_score, vwap_short_score, vwap_long_sl, vwap_long_tp, vwap_short_sl, vwap_short_tp] = f_ema_vwap_scalper_set()
+[rsi_long_sig, rsi_short_sig, rsi_long_score, rsi_short_score, rsi_long_sl, rsi_long_tp, rsi_short_sl, rsi_short_tp] = f_rsi_reversion_set()
+[orb_long_sig, orb_short_sig, orb_long_score, orb_short_score, orb_long_sl, orb_long_tp, orb_short_sl, orb_short_tp] = f_orb_breakout_set()
+[quant_long_sig, quant_short_sig, quant_long_score, quant_short_score, quant_long_sl, quant_long_tp, quant_short_sl, quant_short_tp] = f_quantum_trend_set()
+[struct_long_sig, struct_short_sig, struct_long_score, struct_short_score, struct_long_sl, struct_long_tp, struct_short_sl, struct_short_tp] = f_cisd_structure_set()
+[glint_long_sig, glint_short_sig, glint_long_score, glint_short_score, glint_long_sl, glint_long_tp, glint_short_sl, glint_short_tp] = f_glint_news_set()
+[wti_long_sig, wti_short_sig, wti_long_score, wti_short_score, wti_long_sl, wti_long_tp, wti_short_sl, wti_short_tp] = f_wti_scalper_set()
+[bb_long_sig, bb_short_sig, bb_long_score, bb_short_score, bb_long_sl, bb_long_tp, bb_short_sl, bb_short_tp] = f_bb_reversion_set()
+[squeeze_long_sig, squeeze_short_sig, squeeze_long_score, squeeze_short_score, squeeze_long_sl, squeeze_long_tp, squeeze_short_sl, squeeze_short_tp] = f_bb_squeeze_breakout_set()
+[don_long_sig, don_short_sig, don_long_score, don_short_score, don_long_sl, don_long_tp, don_short_sl, don_short_tp] = f_donchian_breakout_set()
+[hma_long_sig, hma_short_sig, hma_long_score, hma_short_score, hma_long_sl, hma_long_tp, hma_short_sl, hma_short_tp] = f_hma_trend_set()
+[macd_long_sig, macd_short_sig, macd_long_score, macd_short_score, macd_long_sl, macd_long_tp, macd_short_sl, macd_short_tp] = f_macd_momentum_set()
+[stoch_long_sig, stoch_short_sig, stoch_long_score, stoch_short_score, stoch_long_sl, stoch_long_tp, stoch_short_sl, stoch_short_tp] = f_stoch_reversal_set()
+[adx_long_sig, adx_short_sig, adx_long_score, adx_short_score, adx_long_sl, adx_long_tp, adx_short_sl, adx_short_tp] = f_adx_pullback_set()
+[kc_long_sig, kc_short_sig, kc_long_score, kc_short_score, kc_long_sl, kc_long_tp, kc_short_sl, kc_short_tp] = f_keltner_breakout_set()
+[vwaprev_long_sig, vwaprev_short_sig, vwaprev_long_score, vwaprev_short_score, vwaprev_long_sl, vwaprev_long_tp, vwaprev_short_sl, vwaprev_short_tp] = f_vwap_reversion_set()
+[fractal_long_sig, fractal_short_sig, fractal_long_score, fractal_short_score, fractal_long_sl, fractal_long_tp, fractal_short_sl, fractal_short_tp] = f_fractal_breakout_set()
+[pivot_long_sig, pivot_short_sig, pivot_long_score, pivot_short_score, pivot_long_sl, pivot_long_tp, pivot_short_sl, pivot_short_tp] = f_pivot_rejection_set()
+[atrx_long_sig, atrx_short_sig, atrx_long_score, atrx_short_score, atrx_long_sl, atrx_long_tp, atrx_short_sl, atrx_short_tp] = f_atr_expansion_set()
+[vol_long_sig, vol_short_sig, vol_long_score, vol_short_score, vol_long_sl, vol_long_tp, vol_short_sl, vol_short_tp] = f_volume_climax_set()
+[eng_long_sig, eng_short_sig, eng_long_score, eng_short_score, eng_long_sl, eng_long_tp, eng_short_sl, eng_short_tp] = f_engulfing_reversal_set()
+[inside_long_sig, inside_short_sig, inside_long_score, inside_short_score, inside_long_sl, inside_long_tp, inside_short_sl, inside_short_tp] = f_inside_bar_breakout_set()
+[ha_long_sig, ha_short_sig, ha_long_score, ha_short_score, ha_long_sl, ha_long_tp, ha_short_sl, ha_short_tp] = f_heikin_trend_set()
+[psar_long_sig, psar_short_sig, psar_long_score, psar_short_score, psar_long_sl, psar_long_tp, psar_short_sl, psar_short_tp] = f_psar_trend_set()
+
+string best_family = "EMA_TREND", best_side = "long"
+int best_score = -1
+int ema_trend_candidate_score = math.max(ema_long_score, ema_short_score)
+if ema_trend_candidate_score > best_score
+    best_family := "EMA_TREND"
+    best_side := ema_long_score >= ema_short_score ? "long" : "short"
+    best_score := ema_trend_candidate_score
+int ema_vwap_scalper_candidate_score = math.max(vwap_long_score, vwap_short_score)
+if ema_vwap_scalper_candidate_score > best_score
+    best_family := "EMA_VWAP_SCALPER"
+    best_side := vwap_long_score >= vwap_short_score ? "long" : "short"
+    best_score := ema_vwap_scalper_candidate_score
+int rsi_reversion_candidate_score = math.max(rsi_long_score, rsi_short_score)
+if rsi_reversion_candidate_score > best_score
+    best_family := "RSI_REVERSION"
+    best_side := rsi_long_score >= rsi_short_score ? "long" : "short"
+    best_score := rsi_reversion_candidate_score
+int orb_breakout_candidate_score = math.max(orb_long_score, orb_short_score)
+if orb_breakout_candidate_score > best_score
+    best_family := "ORB_BREAKOUT"
+    best_side := orb_long_score >= orb_short_score ? "long" : "short"
+    best_score := orb_breakout_candidate_score
+int quantum_trend_candidate_score = math.max(quant_long_score, quant_short_score)
+if quantum_trend_candidate_score > best_score
+    best_family := "QUANTUM_TREND"
+    best_side := quant_long_score >= quant_short_score ? "long" : "short"
+    best_score := quantum_trend_candidate_score
+int cisd_structure_candidate_score = math.max(struct_long_score, struct_short_score)
+if cisd_structure_candidate_score > best_score
+    best_family := "CISD_STRUCTURE"
+    best_side := struct_long_score >= struct_short_score ? "long" : "short"
+    best_score := cisd_structure_candidate_score
+int glint_news_candidate_score = math.max(glint_long_score, glint_short_score)
+if glint_news_candidate_score > best_score
+    best_family := "GLINT_NEWS"
+    best_side := glint_long_score >= glint_short_score ? "long" : "short"
+    best_score := glint_news_candidate_score
+int wti_scalper_candidate_score = math.max(wti_long_score, wti_short_score)
+if wti_scalper_candidate_score > best_score
+    best_family := "WTI_SCALPER"
+    best_side := wti_long_score >= wti_short_score ? "long" : "short"
+    best_score := wti_scalper_candidate_score
+int bb_reversion_candidate_score = math.max(bb_long_score, bb_short_score)
+if bb_reversion_candidate_score > best_score
+    best_family := "BB_REVERSION"
+    best_side := bb_long_score >= bb_short_score ? "long" : "short"
+    best_score := bb_reversion_candidate_score
+int bb_squeeze_candidate_score = math.max(squeeze_long_score, squeeze_short_score)
+if bb_squeeze_candidate_score > best_score
+    best_family := "BB_SQUEEZE"
+    best_side := squeeze_long_score >= squeeze_short_score ? "long" : "short"
+    best_score := bb_squeeze_candidate_score
+int donchian_breakout_candidate_score = math.max(don_long_score, don_short_score)
+if donchian_breakout_candidate_score > best_score
+    best_family := "DONCHIAN_BREAKOUT"
+    best_side := don_long_score >= don_short_score ? "long" : "short"
+    best_score := donchian_breakout_candidate_score
+int hma_trend_candidate_score = math.max(hma_long_score, hma_short_score)
+if hma_trend_candidate_score > best_score
+    best_family := "HMA_TREND"
+    best_side := hma_long_score >= hma_short_score ? "long" : "short"
+    best_score := hma_trend_candidate_score
+int macd_momentum_candidate_score = math.max(macd_long_score, macd_short_score)
+if macd_momentum_candidate_score > best_score
+    best_family := "MACD_MOMENTUM"
+    best_side := macd_long_score >= macd_short_score ? "long" : "short"
+    best_score := macd_momentum_candidate_score
+int stoch_reversal_candidate_score = math.max(stoch_long_score, stoch_short_score)
+if stoch_reversal_candidate_score > best_score
+    best_family := "STOCH_REVERSAL"
+    best_side := stoch_long_score >= stoch_short_score ? "long" : "short"
+    best_score := stoch_reversal_candidate_score
+int adx_pullback_candidate_score = math.max(adx_long_score, adx_short_score)
+if adx_pullback_candidate_score > best_score
+    best_family := "ADX_PULLBACK"
+    best_side := adx_long_score >= adx_short_score ? "long" : "short"
+    best_score := adx_pullback_candidate_score
+int keltner_breakout_candidate_score = math.max(kc_long_score, kc_short_score)
+if keltner_breakout_candidate_score > best_score
+    best_family := "KELTNER_BREAKOUT"
+    best_side := kc_long_score >= kc_short_score ? "long" : "short"
+    best_score := keltner_breakout_candidate_score
+int vwap_reversion_candidate_score = math.max(vwaprev_long_score, vwaprev_short_score)
+if vwap_reversion_candidate_score > best_score
+    best_family := "VWAP_REVERSION"
+    best_side := vwaprev_long_score >= vwaprev_short_score ? "long" : "short"
+    best_score := vwap_reversion_candidate_score
+int fractal_breakout_candidate_score = math.max(fractal_long_score, fractal_short_score)
+if fractal_breakout_candidate_score > best_score
+    best_family := "FRACTAL_BREAKOUT"
+    best_side := fractal_long_score >= fractal_short_score ? "long" : "short"
+    best_score := fractal_breakout_candidate_score
+int pivot_rejection_candidate_score = math.max(pivot_long_score, pivot_short_score)
+if pivot_rejection_candidate_score > best_score
+    best_family := "PIVOT_REJECTION"
+    best_side := pivot_long_score >= pivot_short_score ? "long" : "short"
+    best_score := pivot_rejection_candidate_score
+int atr_expansion_candidate_score = math.max(atrx_long_score, atrx_short_score)
+if atr_expansion_candidate_score > best_score
+    best_family := "ATR_EXPANSION"
+    best_side := atrx_long_score >= atrx_short_score ? "long" : "short"
+    best_score := atr_expansion_candidate_score
+int volume_climax_candidate_score = math.max(vol_long_score, vol_short_score)
+if volume_climax_candidate_score > best_score
+    best_family := "VOLUME_CLIMAX"
+    best_side := vol_long_score >= vol_short_score ? "long" : "short"
+    best_score := volume_climax_candidate_score
+int engulfing_reversal_candidate_score = math.max(eng_long_score, eng_short_score)
+if engulfing_reversal_candidate_score > best_score
+    best_family := "ENGULFING_REVERSAL"
+    best_side := eng_long_score >= eng_short_score ? "long" : "short"
+    best_score := engulfing_reversal_candidate_score
+int inside_bar_breakout_candidate_score = math.max(inside_long_score, inside_short_score)
+if inside_bar_breakout_candidate_score > best_score
+    best_family := "INSIDE_BAR_BREAKOUT"
+    best_side := inside_long_score >= inside_short_score ? "long" : "short"
+    best_score := inside_bar_breakout_candidate_score
+int heikin_trend_candidate_score = math.max(ha_long_score, ha_short_score)
+if heikin_trend_candidate_score > best_score
+    best_family := "HEIKIN_TREND"
+    best_side := ha_long_score >= ha_short_score ? "long" : "short"
+    best_score := heikin_trend_candidate_score
+int psar_trend_candidate_score = math.max(psar_long_score, psar_short_score)
+if psar_trend_candidate_score > best_score
+    best_family := "PSAR_TREND"
+    best_side := psar_long_score >= psar_short_score ? "long" : "short"
+    best_score := psar_trend_candidate_score
+
+string features_json = "[" + str.tostring(atr_pct, "#.###") + "," + str.tostring(rsi_val / 100.0, "#.###") + "," + str.tostring(vol_ratio, "#.###") + "," + str.tostring(mtf_bull_ratio, "#.###") + "," + str.tostring(mtf_bear_ratio, "#.###") + "," + str.tostring(local_state, "#") + "," + str.tostring(bb_width_pct, "#.###") + "," + str.tostring(macd_hist, "#.###") + "," + str.tostring(adx_val / 100.0, "#.###") + "," + str.tostring(ema_slope / math.max(close, syminfo.mintick), "#.###") + "," + str.tostring(vwap_dist, "#.###") + "," + str.tostring(daily_pnl_pct / 100.0, "#.###") + "," + str.tostring(current_dd_pct / 100.0, "#.###") + "," + str.tostring(news_bias, "#") + "," + str.tostring(mtf_bias, "#") + "," + str.tostring(ha_bias, "#") + "," + str.tostring(structure_bias, "#") + "]"
+
+string candidates_json = "[" + f_candidate_json("EMA_TREND", ema_long_sig, ema_short_sig, ema_long_score, ema_short_score, ema_long_sl, ema_long_tp, ema_short_sl, ema_short_tp) + "," + f_candidate_json("EMA_VWAP_SCALPER", vwap_long_sig, vwap_short_sig, vwap_long_score, vwap_short_score, vwap_long_sl, vwap_long_tp, vwap_short_sl, vwap_short_tp) + "," + f_candidate_json("RSI_REVERSION", rsi_long_sig, rsi_short_sig, rsi_long_score, rsi_short_score, rsi_long_sl, rsi_long_tp, rsi_short_sl, rsi_short_tp) + "," + f_candidate_json("ORB_BREAKOUT", orb_long_sig, orb_short_sig, orb_long_score, orb_short_score, orb_long_sl, orb_long_tp, orb_short_sl, orb_short_tp) + "," + f_candidate_json("QUANTUM_TREND", quant_long_sig, quant_short_sig, quant_long_score, quant_short_score, quant_long_sl, quant_long_tp, quant_short_sl, quant_short_tp) + "," + f_candidate_json("CISD_STRUCTURE", struct_long_sig, struct_short_sig, struct_long_score, struct_short_score, struct_long_sl, struct_long_tp, struct_short_sl, struct_short_tp) + "," + f_candidate_json("GLINT_NEWS", glint_long_sig, glint_short_sig, glint_long_score, glint_short_score, glint_long_sl, glint_long_tp, glint_short_sl, glint_short_tp) + "," + f_candidate_json("WTI_SCALPER", wti_long_sig, wti_short_sig, wti_long_score, wti_short_score, wti_long_sl, wti_long_tp, wti_short_sl, wti_short_tp) + "," + f_candidate_json("BB_REVERSION", bb_long_sig, bb_short_sig, bb_long_score, bb_short_score, bb_long_sl, bb_long_tp, bb_short_sl, bb_short_tp) + "," + f_candidate_json("BB_SQUEEZE", squeeze_long_sig, squeeze_short_sig, squeeze_long_score, squeeze_short_score, squeeze_long_sl, squeeze_long_tp, squeeze_short_sl, squeeze_short_tp) + "," + f_candidate_json("DONCHIAN_BREAKOUT", don_long_sig, don_short_sig, don_long_score, don_short_score, don_long_sl, don_long_tp, don_short_sl, don_short_tp) + "," + f_candidate_json("HMA_TREND", hma_long_sig, hma_short_sig, hma_long_score, hma_short_score, hma_long_sl, hma_long_tp, hma_short_sl, hma_short_tp) + "," + f_candidate_json("MACD_MOMENTUM", macd_long_sig, macd_short_sig, macd_long_score, macd_short_score, macd_long_sl, macd_long_tp, macd_short_sl, macd_short_tp) + "," + f_candidate_json("STOCH_REVERSAL", stoch_long_sig, stoch_short_sig, stoch_long_score, stoch_short_score, stoch_long_sl, stoch_long_tp, stoch_short_sl, stoch_short_tp) + "," + f_candidate_json("ADX_PULLBACK", adx_long_sig, adx_short_sig, adx_long_score, adx_short_score, adx_long_sl, adx_long_tp, adx_short_sl, adx_short_tp) + "," + f_candidate_json("KELTNER_BREAKOUT", kc_long_sig, kc_short_sig, kc_long_score, kc_short_score, kc_long_sl, kc_long_tp, kc_short_sl, kc_short_tp) + "," + f_candidate_json("VWAP_REVERSION", vwaprev_long_sig, vwaprev_short_sig, vwaprev_long_score, vwaprev_short_score, vwaprev_long_sl, vwaprev_long_tp, vwaprev_short_sl, vwaprev_short_tp) + "," + f_candidate_json("FRACTAL_BREAKOUT", fractal_long_sig, fractal_short_sig, fractal_long_score, fractal_short_score, fractal_long_sl, fractal_long_tp, fractal_short_sl, fractal_short_tp) + "," + f_candidate_json("PIVOT_REJECTION", pivot_long_sig, pivot_short_sig, pivot_long_score, pivot_short_score, pivot_long_sl, pivot_long_tp, pivot_short_sl, pivot_short_tp) + "," + f_candidate_json("ATR_EXPANSION", atrx_long_sig, atrx_short_sig, atrx_long_score, atrx_short_score, atrx_long_sl, atrx_long_tp, atrx_short_sl, atrx_short_tp) + "," + f_candidate_json("VOLUME_CLIMAX", vol_long_sig, vol_short_sig, vol_long_score, vol_short_score, vol_long_sl, vol_long_tp, vol_short_sl, vol_short_tp) + "," + f_candidate_json("ENGULFING_REVERSAL", eng_long_sig, eng_short_sig, eng_long_score, eng_short_score, eng_long_sl, eng_long_tp, eng_short_sl, eng_short_tp) + "," + f_candidate_json("INSIDE_BAR_BREAKOUT", inside_long_sig, inside_short_sig, inside_long_score, inside_short_score, inside_long_sl, inside_long_tp, inside_short_sl, inside_short_tp) + "," + f_candidate_json("HEIKIN_TREND", ha_long_sig, ha_short_sig, ha_long_score, ha_short_score, ha_long_sl, ha_long_tp, ha_short_sl, ha_short_tp) + "," + f_candidate_json("PSAR_TREND", psar_long_sig, psar_short_sig, psar_long_score, psar_short_score, psar_long_sl, psar_long_tp, psar_short_sl, psar_short_tp) + "]"
+
+string pack_raw = "{\"mode\":\"SCAN\",\"catalog_size\":25,\"symbol\":\"" + syminfo.ticker + "\",\"timeframe\":\"" + timeframe.period + "\",\"best_family\":\"" + best_family + "\",\"best_side\":\"" + best_side + "\",\"best_score\":" + str.tostring(best_score) + ",\"helpers\":{\"fractal_tp\":" + (use_fractal_tp ? "true" : "false") + ",\"reverse_available\":true},\"features\":" + features_json + ",\"candidates\":" + candidates_json + "}"
+
+bool confirmed = barstate.isconfirmed
+bool scan_ready = confirmed and emit_scans and str.length(signal_type) > 0 and (emit_every_bar or best_score >= min_conf)
+if scan_ready
+    float outer_stop = best_side == "short" ? close + atr_val * sl_atr_mul : close - atr_val * sl_atr_mul
+    float outer_target = best_side == "short" ? close - atr_val * tp_atr_mul : close + atr_val * tp_atr_mul
+    alert(f_build_payload("scan", "0", best_family, best_side, outer_stop, outer_target, best_score, "scan", pack_raw), alert.freq_once_per_bar_close)
+
+if scan_ready and debug_mode and best_score >= math.max(1, min_conf - 2)
+    label.new(bar_index, high + atr_val * 0.5, best_family + " / " + best_side + " / " + str.tostring(best_score), style=label.style_label_down, color=best_side == "long" ? color.green : color.red, textcolor=color.white, size=size.tiny)
+
+plot(show_visuals ? ema200 : na, "EMA 200", color=color.new(color.blue, 35), linewidth=2)
+plot(show_visuals ? vwap_val : na, "VWAP", color=color.new(color.orange, 25), linewidth=1)
+plot(show_visuals ? ut_stop : na, "UT Stop", color=color.new(color.red, 0), linewidth=1, style=plot.style_linebr)
+plot(show_visuals and orb_ready ? orb_high : na, "ORB High", color=color.new(color.green, 30), style=plot.style_linebr)
+plot(show_visuals and orb_ready ? orb_low : na, "ORB Low", color=color.new(color.red, 30), style=plot.style_linebr)
+bgcolor(best_side == "long" ? color.new(color.green, 92) : best_side == "short" ? color.new(color.red, 92) : na)
+plotshape(scan_ready and best_side == "long" and best_score >= min_conf, title="Best Long", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.tiny, text="ONNX")
+plotshape(scan_ready and best_side == "short" and best_score >= min_conf, title="Best Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.tiny, text="ONNX")

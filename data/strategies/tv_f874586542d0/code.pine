@@ -1,0 +1,84 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © AI-Architekt
+
+//@version=5
+strategy("Der Architekt - Opening Range Reversal (ORR)", shorttitle="ORR Strategie", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, margin_long=10, margin_short=10, calc_on_every_tick=true)
+
+// =========================================================================
+// 1. INPUTS & PARAMETER
+// =========================================================================
+grp_trend = "Trend Filter (Daily Bias)"
+sma_length = input.int(50, title="Daily SMA Länge", group=grp_trend)
+
+grp_time = "Zeit & Session"
+session_time = input.session("0930-1600", title="Trading Session", group=grp_time)
+or_duration = input.int(15, title="Opening Range Dauer (Minuten)", group=grp_time)
+
+// =========================================================================
+// 2. DAILY TREND BIAS
+// =========================================================================
+daily_sma = request.security(syminfo.tickerid, "D", ta.sma(close, sma_length))
+plot(daily_sma, color=color.new(color.blue, 0), linewidth=3, title="50 Daily SMA")
+
+is_bullish = close > daily_sma
+is_bearish = close < daily_sma
+
+// =========================================================================
+// 3. SESSION & OPENING RANGE LOGIK
+// =========================================================================
+in_session = time(timeframe.period, session_time) 
+is_new_session = in_session and not in_session[1] 
+
+var float session_open = na
+var float daily_high = na
+var float daily_low = na
+var float or_high = na
+var float or_low = na
+var int session_start_time = na
+
+if is_new_session
+    session_open := open
+    daily_high := high
+    daily_low := low
+    or_high := high
+    or_low := low
+    session_start_time := time
+
+if in_session
+    daily_high := math.max(daily_high, high)
+    daily_low := math.min(daily_low, low)
+
+in_or_window = in_session and (time - session_start_time) < (or_duration * 60 * 1000)
+
+if in_or_window
+    or_high := math.max(or_high, high)
+    or_low := math.min(or_low, low)
+
+bgcolor(in_or_window ? color.new(color.yellow, 90) : na, title="Opening Range Highlight")
+
+// =========================================================================
+// 4. TRIGGER LOGIK
+// =========================================================================
+long_trigger = in_session and not in_or_window and is_bullish and close[1] < session_open and close > high[1]
+short_trigger = in_session and not in_or_window and is_bearish and close[1] > session_open and close < low[1]
+
+// =========================================================================
+// 5. AUSFÜHRUNG & RISIKOMANAGEMENT
+// =========================================================================
+if long_trigger and strategy.position_size == 0
+    strategy.entry("ORR Long", strategy.long)
+    strategy.exit("Exit Long", "ORR Long", stop=daily_low, limit=or_high)
+
+if short_trigger and strategy.position_size == 0
+    strategy.entry("ORR Short", strategy.short)
+    strategy.exit("Exit Short", "ORR Short", stop=daily_high, limit=or_low)
+
+if not in_session and in_session[1]
+    strategy.close_all(comment="End of Day Close")
+
+// =========================================================================
+// 6. VISUELLE HILFSMITTEL
+// =========================================================================
+plot(in_session ? session_open : na, color=color.new(color.gray, 50), style=plot.style_cross, title="Session Open")
+plot(in_session ? or_high : na, color=color.new(color.green, 70), style=plot.style_linebr, title="OR High")
+plot(in_session ? or_low : na, color=color.new(color.red, 70), style=plot.style_linebr, title="OR Low")

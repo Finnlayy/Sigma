@@ -1,0 +1,727 @@
+//@version=6
+// ============================================================================
+// CIIF Master v2.1 - ZEC 30s Lean Edition (backtest-refined)
+// Pine Script v6 strategy, tuned for Zcash (ZEC/USDT) 30-second chart.
+//
+// v2.1 changes driven by the Aug 3-10 2026 backtest (1327 trades, PF 0.30):
+// - 88% of exits were emergency stops -> SAR assist now OFF by default,
+//   initial stop widened/tightened to 2.5 ATR with ratchet.
+// - No profit banking -> added ATR take-profit (3.0 ATR) + break-even
+//   ratchet after 1.5 ATR in profit.
+// - Signal churn (max losing streak 31) -> reverse hysteresis: opposite
+//   signal must beat the score threshold by a margin AND position must be
+//   held a minimum number of bars before a reverse close is allowed.
+// - Overtrading (~190 trades/day) -> higher score/confidence defaults,
+//   30 bars between entries, pyramiding off by default, longer cooldown.
+// - Chop killed the lean mode -> optional chop block in Lean (default ON).
+// ============================================================================
+strategy(
+     title                  = "CIIF Master v2.1 - ZEC 30s Lean Edition",
+     shorttitle             = "Master v2.1 30s",
+     overlay                = true,
+     pyramiding             = 2,
+     calc_on_every_tick     = false,
+     calc_on_order_fills    = true,
+     process_orders_on_close = false,
+     initial_capital        = 1000,
+     currency               = currency.USD,
+     default_qty_type       = strategy.fixed,
+     default_qty_value      = 1,
+     commission_type        = strategy.commission.percent,
+     commission_value       = 0.05,
+     slippage               = 2,
+     max_bars_back          = 3000,
+     max_boxes_count        = 120,
+     max_labels_count       = 120,
+     max_lines_count        = 80)
+
+// ============================================================================
+// Inputs
+// ============================================================================
+string groupCore = "01 Core"
+string groupLiq = "02 Liquidity Matrix"
+string groupStruct = "03 Structure / Regime"
+string groupSignal = "04 Signal Engine"
+string groupAdv = "04b Advanced Filters (Balanced / Strict only)"
+string groupRisk = "05 Kelly / Risk"
+string groupExec = "06 Execution / Alerts"
+string groupVisual = "07 Visuals"
+
+bool requireThirtySecChart = input.bool(true, "Require 30s chart", group=groupCore)
+bool useSessionFilter = input.bool(false, "Use session filter", group=groupCore)
+string tradeSession = input.session("0000-2359", "Trading session", group=groupCore)
+bool enableLongs = input.bool(true, "Enable longs", group=groupCore)
+bool enableShorts = input.bool(true, "Enable shorts", group=groupCore)
+
+string primaryTf = input.timeframe("5", "Primary liquidity timeframe", group=groupLiq)
+string confTf1 = input.timeframe("15", "FVG confluence TF 1", group=groupLiq)
+string confTf2 = input.timeframe("30", "FVG confluence TF 2", group=groupLiq)
+string confTf3 = input.timeframe("60", "FVG confluence TF 3", group=groupLiq)
+int maxZones = input.int(18, "Max active liquidity zones", group=groupLiq, minval=4, maxval=60)
+int zoneMaxAgeBars = input.int(1200, "Zone max age in chart bars", group=groupLiq, minval=50, maxval=5000)
+float minZoneQuality = input.float(1.05, "Minimum zone quality", group=groupLiq, minval=0.10, maxval=5.00, step=0.05)
+float fvgAtrMin = input.float(0.35, "Minimum FVG width / ATR", group=groupLiq, minval=0.05, maxval=3.00, step=0.05)
+float obDisplacementAtr = input.float(1.15, "OB displacement ATR", group=groupLiq, minval=0.25, maxval=5.00, step=0.05)
+int obSwingLen = input.int(5, "OB / CISD swing length", group=groupLiq, minval=2, maxval=20)
+int obSearchBars = input.int(8, "OB opposing candle search", group=groupLiq, minval=1, maxval=20)
+string mitigationMode = input.string("50% Fill", "Zone mitigation", group=groupLiq, options=["Touch", "50% Fill", "Full Fill"])
+
+int atrLen = input.int(14, "ATR length", group=groupStruct, minval=1, maxval=200)
+int fastEmaLen = input.int(21, "Fast EMA", group=groupStruct, minval=1, maxval=200)
+int slowEmaLen = input.int(55, "Slow EMA", group=groupStruct, minval=2, maxval=400)
+int regressionLen = input.int(120, "Light regression length", group=groupStruct, minval=30, maxval=500)
+int sweepLen = input.int(20, "Sweep lookback", group=groupStruct, minval=3, maxval=100)
+
+string filterPreset = input.string("Lean (score only)", "Filter preset", group=groupSignal, options=["Lean (score only)", "Balanced", "Strict (classic)"], tooltip="Lean: only score + confidence gate entries. Balanced: adds chop guard + zone-or-CISD alignment. Strict: original full filter stack.")
+float minSniperScore = input.float(64.0, "Minimum Sniper / Quantum score", group=groupSignal, minval=0.0, maxval=100.0, step=1.0)
+float minConfidence = input.float(0.60, "Minimum confidence", group=groupSignal, minval=0.0, maxval=1.0, step=0.01)
+bool leanBlockChop = input.bool(true, "Block chop in Lean mode", group=groupSignal, tooltip="Backtest showed chop phases destroy lean-mode edge. Uncheck to trade purely on the score.")
+bool requireEmaSide = input.bool(false, "Require price on EMA side", group=groupSignal)
+bool requireConfirmedBars = input.bool(true, "Signals only on confirmed bars", group=groupSignal)
+int minBarsBetweenEntries = input.int(30, "Min bars between entries", group=groupSignal, minval=0, maxval=200)
+
+bool useCisd = input.bool(true, "Use CISD alignment", group=groupAdv)
+bool usePremiumDiscount = input.bool(true, "Use premium / discount", group=groupAdv)
+bool useRegimeGuard = input.bool(true, "Block chop / compression", group=groupAdv)
+bool requireZoneTouch = input.bool(true, "Require active zone touch", group=groupAdv)
+bool requireCvmiPressure = input.bool(false, "Require CVMI pressure", group=groupAdv)
+float minCvmiAbs = input.float(0.10, "Minimum absolute CVMI pressure", group=groupAdv, minval=0.0, maxval=5.0, step=0.05)
+
+bool useKelly = input.bool(true, "Use fractional Kelly sizing", group=groupRisk)
+string kellyMode = input.string("Half", "Kelly mode", group=groupRisk, options=["Quarter", "Half", "Full", "Adaptive"])
+int minKellyTrades = input.int(30, "Min closed trades for live Kelly", group=groupRisk, minval=5, maxval=300)
+float fallbackWinRatePct = input.float(54.0, "Fallback winrate %", group=groupRisk, minval=1.0, maxval=99.0, step=0.5)
+float fallbackRR = input.float(1.60, "Fallback avg R:R", group=groupRisk, minval=0.10, maxval=10.0, step=0.05)
+float maxRiskPct = input.float(4.0, "Max position equity %", group=groupRisk, minval=0.1, maxval=25.0, step=0.1)
+float minQty = input.float(0.001, "Minimum quantity", group=groupRisk, minval=0.0, step=0.001)
+float ddTier1 = input.float(5.0, "DD tier 1 %", group=groupRisk, minval=0.5, maxval=50.0, step=0.5)
+float ddTier2 = input.float(10.0, "DD tier 2 %", group=groupRisk, minval=1.0, maxval=70.0, step=0.5)
+float ddTier3 = input.float(15.0, "DD tier 3 %", group=groupRisk, minval=1.0, maxval=90.0, step=0.5)
+int lossCooldownBars = input.int(20, "Cooldown after losing trade", group=groupRisk, minval=0, maxval=500)
+
+int maxSameDirectionEntries = input.int(1, "Max same-direction entries", group=groupExec, minval=1, maxval=2)
+float reverseScoreMargin = input.float(10.0, "Reverse score margin (hysteresis)", group=groupExec, minval=0.0, maxval=40.0, step=1.0, tooltip="Opposite signal must exceed the score threshold by this many points before an open position is closed for reversal.")
+int minHoldBarsBeforeReverse = input.int(20, "Min hold bars before reverse", group=groupExec, minval=0, maxval=500)
+bool useEmergencyStop = input.bool(true, "Use ATR protective stop", group=groupExec)
+float stopAtrMult = input.float(2.5, "Initial stop ATR", group=groupExec, minval=0.5, maxval=20.0, step=0.25)
+bool useTakeProfit = input.bool(true, "Use ATR take profit", group=groupExec)
+float tpAtrMult = input.float(3.0, "Take profit ATR", group=groupExec, minval=0.5, maxval=30.0, step=0.25)
+bool useBreakEven = input.bool(true, "Move stop to break-even", group=groupExec)
+float breakEvenAtr = input.float(1.5, "Break-even trigger ATR", group=groupExec, minval=0.25, maxval=10.0, step=0.25)
+bool useSarStopAssist = input.bool(false, "Use SAR stop assist", group=groupExec)
+float sarStart = input.float(0.02, "SAR start", group=groupExec, minval=0.001, maxval=0.20, step=0.001)
+float sarIncrement = input.float(0.02, "SAR increment", group=groupExec, minval=0.001, maxval=0.20, step=0.001)
+float sarMaximum = input.float(0.20, "SAR maximum", group=groupExec, minval=0.01, maxval=1.00, step=0.01)
+string reverseMode = input.string("Next bar after flat", "Reverse timing", group=groupExec, options=["Next bar after flat", "Same confirmed bar (emulated)"])
+string pionexUuid = input.string("", "Pionex Signal Bot UUID", group=groupExec)
+bool sendCloseAlerts = input.bool(true, "Send close alerts", group=groupExec)
+
+bool showZones = input.bool(true, "Show liquidity zones", group=groupVisual)
+bool showDashboard = input.bool(true, "Show dashboard", group=groupVisual)
+bool showSignals = input.bool(true, "Show signal markers", group=groupVisual)
+bool showRegimeLines = input.bool(true, "Show EMAs / equilibrium", group=groupVisual)
+
+if requireThirtySecChart and timeframe.in_seconds(timeframe.period) != 30
+    runtime.error("CIIF Master v2.1 is designed for the 30-second chart. Disable the guard only for research.")
+
+// ============================================================================
+// Types
+// ============================================================================
+type LiquidityZone
+    string kind
+    int direction
+    float top
+    float bottom
+    float mid
+    float quality
+    int confluence
+    int bornBar
+    int bornTime
+    int touches
+    bool mitigated
+    box boxId
+
+// ============================================================================
+// Helpers
+// ============================================================================
+f_clamp(float value, float lo, float hi) =>
+    math.max(lo, math.min(hi, value))
+
+f_safeDiv(float numerator, float denominator, float fallback) =>
+    denominator != 0.0 ? numerator / denominator : fallback
+
+f_normSigned(float value, float scale) =>
+    scale > 0.0 ? f_clamp(value / scale, -1.0, 1.0) : 0.0
+
+f_fmt(float value) =>
+    na(value) ? "na" : str.tostring(value, "#.####")
+
+f_dirText(int direction) =>
+    direction == 1 ? "bull" : direction == -1 ? "bear" : "neutral"
+
+f_zoneColor(int direction, float quality) =>
+    int alpha = quality >= 2.0 ? 78 : quality >= 1.35 ? 84 : 90
+    direction == 1 ? color.new(color.lime, alpha) : color.new(color.red, alpha)
+
+f_payload(string action, string direction, string reason, float quality, float cvmiValue, float kellyPct, float confidence) =>
+    string uuid = str.length(pionexUuid) > 0 ? pionexUuid : "CIIF_LOCAL_REVIEW"
+    string meta = str.format("\\\"reason\\\":\\\"{0}\\\",\\\"quality\\\":\\\"{1}\\\",\\\"cvmi\\\":\\\"{2}\\\",\\\"kelly\\\":\\\"{3}\\\",\\\"confidence\\\":\\\"{4}\\\"", reason, f_fmt(quality), f_fmt(cvmiValue), f_fmt(kellyPct), f_fmt(confidence))
+    "{\"uuid\":\"" + uuid + "\",\"action\":\"" + action + "\",\"direction\":\"" + direction + "\"," + str.replace_all(meta, "\\\"", "\"") + "}"
+
+// ============================================================================
+// Confirmed HTF Event Engines
+// ============================================================================
+f_fvgEvent() =>
+    float atr = ta.atr(atrLen)
+    float volMa = ta.sma(volume, 20)
+    float volRatio = volMa > 0.0 ? volume / volMa : 1.0
+    float candleRange = math.max(high - low, syminfo.mintick)
+    float closeEfficiency = math.abs(close - open) / candleRange
+    bool bull = low > high[2]
+    bool bear = high < low[2]
+    float top = bull ? low : bear ? low[2] : na
+    float bottom = bull ? high[2] : bear ? high : na
+    float width = not na(top) and not na(bottom) ? math.abs(top - bottom) : na
+    float widthScore = not na(width) and atr > 0 ? width / atr : 0.0
+    float quality = (widthScore + volRatio + closeEfficiency) / 3.0
+    int dir = bull and widthScore >= fvgAtrMin ? 1 : bear and widthScore >= fvgAtrMin ? -1 : 0
+    [time[1], dir[1], top[1], bottom[1], quality[1]]
+
+f_lastBearTop(int maxBack) =>
+    float result = na
+    for i = 1 to maxBack
+        if na(result) and close[i] < open[i]
+            result := open[i]
+    result
+
+f_lastBearBottom(int maxBack) =>
+    float result = na
+    for i = 1 to maxBack
+        if na(result) and close[i] < open[i]
+            result := low[i]
+    result
+
+f_lastBullTop(int maxBack) =>
+    float result = na
+    for i = 1 to maxBack
+        if na(result) and close[i] > open[i]
+            result := high[i]
+    result
+
+f_lastBullBottom(int maxBack) =>
+    float result = na
+    for i = 1 to maxBack
+        if na(result) and close[i] > open[i]
+            result := open[i]
+    result
+
+f_obAndStructureEvent() =>
+    var float lastSwingHigh = na
+    var float lastSwingLow = na
+    var int htfBias = 0
+    float ph = ta.pivothigh(high, obSwingLen, obSwingLen)
+    float pl = ta.pivotlow(low, obSwingLen, obSwingLen)
+    if not na(ph)
+        lastSwingHigh := ph
+    if not na(pl)
+        lastSwingLow := pl
+    float atr = ta.atr(atrLen)
+    float body = math.abs(close - open)
+    bool displacement = body >= atr * obDisplacementAtr
+    bool bullBos = not na(lastSwingHigh) and close > lastSwingHigh and close[1] <= lastSwingHigh and displacement
+    bool bearBos = not na(lastSwingLow) and close < lastSwingLow and close[1] >= lastSwingLow and displacement
+    int eventTime = na
+    int eventDir = 0
+    float eventTop = na
+    float eventBottom = na
+    if bullBos
+        htfBias := 1
+        eventTime := time
+        eventDir := 1
+        eventTop := f_lastBearTop(obSearchBars)
+        eventBottom := f_lastBearBottom(obSearchBars)
+    if bearBos
+        htfBias := -1
+        eventTime := time
+        eventDir := -1
+        eventTop := f_lastBullTop(obSearchBars)
+        eventBottom := f_lastBullBottom(obSearchBars)
+    [eventTime[1], eventDir[1], eventTop[1], eventBottom[1], lastSwingHigh[1], lastSwingLow[1], htfBias[1]]
+
+f_cisdTrend() =>
+    var float lastPh = na
+    var float lastPl = na
+    var int trend = 0
+    float ph = ta.pivothigh(high, obSwingLen, obSwingLen)
+    float pl = ta.pivotlow(low, obSwingLen, obSwingLen)
+    if not na(ph)
+        lastPh := ph
+    if not na(pl)
+        lastPl := pl
+    if not na(lastPh) and close > lastPh
+        trend := 1
+    else if not na(lastPl) and close < lastPl
+        trend := -1
+    [trend[1], lastPh[1], lastPl[1]]
+
+[fvgT15, fvgD15, fvgTop15, fvgBot15, fvgQ15] = request.security(syminfo.tickerid, primaryTf, f_fvgEvent(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[fvgT1, fvgD1, fvgTop1, fvgBot1, fvgQ1] = request.security(syminfo.tickerid, confTf1, f_fvgEvent(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[fvgT2, fvgD2, fvgTop2, fvgBot2, fvgQ2] = request.security(syminfo.tickerid, confTf2, f_fvgEvent(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[fvgT3, fvgD3, fvgTop3, fvgBot3, fvgQ3] = request.security(syminfo.tickerid, confTf3, f_fvgEvent(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[obTime, obDir, obTop, obBot, htfSwingHigh, htfSwingLow, htfBias] = request.security(syminfo.tickerid, primaryTf, f_obAndStructureEvent(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htfCisdTrend, htfCisdHigh, htfCisdLow] = request.security(syminfo.tickerid, primaryTf, f_cisdTrend(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// ============================================================================
+// Base Series / Regime
+// ============================================================================
+float atrValue = ta.atr(atrLen)
+float fastEma = ta.ema(close, fastEmaLen)
+float slowEma = ta.ema(close, slowEmaLen)
+[plusDI, minusDI, adxValue] = ta.dmi(14, 14)
+float volMa = ta.sma(volume, 20)
+float relVolume = volMa > 0.0 ? volume / volMa : 1.0
+float candleRange = math.max(high - low, syminfo.mintick)
+float closeEfficiency = math.abs(close - open) / candleRange
+
+float linregNow = ta.linreg(hl2, regressionLen, 0)
+float linregPrev = ta.linreg(hl2, regressionLen, 1)
+float regressionSlope = linregNow - linregPrev
+float regressionDev = ta.stdev(hl2, regressionLen)
+bool contraction = math.abs(regressionSlope) * regressionLen < regressionDev * 0.65
+bool chopRegime = adxValue < 17 and contraction
+
+float rangeHigh = htfSwingHigh
+float rangeLow = htfSwingLow
+bool validDealingRange = not na(rangeHigh) and not na(rangeLow) and rangeHigh > rangeLow
+float equilibrium = validDealingRange ? (rangeHigh + rangeLow) * 0.5 : na
+bool inDiscount = validDealingRange and close <= equilibrium
+bool inPremium = validDealingRange and close >= equilibrium
+
+bool bullSweep = low < ta.lowest(low[1], sweepLen) and close > open and close > low + (high - low) * 0.60
+bool bearSweep = high > ta.highest(high[1], sweepLen) and close < open and close < high - (high - low) * 0.60
+bool bullMomentumShift = ta.crossover(fastEma, slowEma) or (close > fastEma and fastEma > slowEma and regressionSlope > 0)
+bool bearMomentumShift = ta.crossunder(fastEma, slowEma) or (close < fastEma and fastEma < slowEma and regressionSlope < 0)
+
+// ============================================================================
+// Liquidity Matrix
+// ============================================================================
+var array<LiquidityZone> zones = array.new<LiquidityZone>()
+var int lastFvgT15 = na
+var int lastFvgT1 = na
+var int lastFvgT2 = na
+var int lastFvgT3 = na
+var int lastObTime = na
+
+f_zoneConfluence(int dir, float top, float bottom) =>
+    int count = 1
+    float mid = (top + bottom) * 0.5
+    float tol = atrValue * 5.0
+    bool c1 = fvgD1 == dir and not na(fvgTop1) and math.abs(mid - (fvgTop1 + fvgBot1) * 0.5) <= tol
+    bool c2 = fvgD2 == dir and not na(fvgTop2) and math.abs(mid - (fvgTop2 + fvgBot2) * 0.5) <= tol
+    bool c3 = fvgD3 == dir and not na(fvgTop3) and math.abs(mid - (fvgTop3 + fvgBot3) * 0.5) <= tol
+    count += c1 ? 1 : 0
+    count += c2 ? 1 : 0
+    count += c3 ? 1 : 0
+    count
+
+f_addZone(string kind, int dir, float topRaw, float botRaw, float baseQuality, int confluence, int bornTime) =>
+    float top = math.max(topRaw, botRaw)
+    float bottom = math.min(topRaw, botRaw)
+    if dir != 0 and not na(top) and not na(bottom) and top > bottom
+        float width = top - bottom
+        float widthScore = f_safeDiv(width, atrValue, 0.0)
+        float freshness = 1.0
+        float quality = (baseQuality + widthScore + relVolume + closeEfficiency + confluence * 0.35 + freshness) / 5.0
+        if quality >= minZoneQuality
+            box b = na
+            if showZones
+                b := box.new(left=bar_index, top=top, right=bar_index + 1, bottom=bottom, bgcolor=f_zoneColor(dir, quality), border_color=color.new(dir == 1 ? color.lime : color.red, 35))
+            zones.unshift(LiquidityZone.new(kind, dir, top, bottom, (top + bottom) * 0.5, quality, confluence, bar_index, bornTime, 0, false, b))
+            while zones.size() > maxZones
+                LiquidityZone old = zones.pop()
+                if not na(old.boxId)
+                    box.delete(old.boxId)
+
+f_isMitigated(LiquidityZone z) =>
+    z.direction == 1 ? (mitigationMode == "Touch" ? low <= z.top : mitigationMode == "Full Fill" ? low <= z.bottom : low <= z.mid) :
+     z.direction == -1 ? (mitigationMode == "Touch" ? high >= z.bottom : mitigationMode == "Full Fill" ? high >= z.top : high >= z.mid) : false
+
+if fvgD15 != 0 and fvgT15 != lastFvgT15
+    int conf = f_zoneConfluence(fvgD15, fvgTop15, fvgBot15)
+    f_addZone("FVG", fvgD15, fvgTop15, fvgBot15, fvgQ15, conf, fvgT15)
+    lastFvgT15 := fvgT15
+
+if obDir != 0 and obTime != lastObTime
+    f_addZone("OB", obDir, obTop, obBot, 1.10, 1, obTime)
+    lastObTime := obTime
+
+// Chart timeframe S/R sweep zones: lightweight MOS-inspired confluence.
+float phLocal = ta.pivothigh(high, obSwingLen, obSwingLen)
+float plLocal = ta.pivotlow(low, obSwingLen, obSwingLen)
+if not na(phLocal)
+    f_addZone("SR", -1, high[obSwingLen], math.max(open[obSwingLen], close[obSwingLen]), 0.95, 1, time[obSwingLen])
+if not na(plLocal)
+    f_addZone("SR", 1, math.min(open[obSwingLen], close[obSwingLen]), low[obSwingLen], 0.95, 1, time[obSwingLen])
+
+bool touchedBullZone = false
+bool touchedBearZone = false
+float bestBullQuality = 0.0
+float bestBearQuality = 0.0
+string bestBullKind = "none"
+string bestBearKind = "none"
+float cvmiRaw = 0.0
+
+if zones.size() > 0
+    for i = zones.size() - 1 to 0
+        LiquidityZone z = zones.get(i)
+        bool expired = bar_index - z.bornBar > zoneMaxAgeBars
+        bool mitigatedNow = f_isMitigated(z)
+        bool removeZone = expired or mitigatedNow
+        if removeZone
+            if not na(z.boxId)
+                box.delete(z.boxId)
+            zones.remove(i)
+        else
+            bool touched = low <= z.top and high >= z.bottom
+            if touched
+                z.touches += 1
+                zones.set(i, z)
+            if not na(z.boxId)
+                box.set_right(z.boxId, bar_index + 1)
+                box.set_bgcolor(z.boxId, f_zoneColor(z.direction, z.quality))
+            float widthAtr = f_safeDiv(z.top - z.bottom, atrValue, 0.0)
+            cvmiRaw += z.direction * widthAtr * z.quality
+            if z.direction == 1
+                touchedBullZone := touchedBullZone or touched
+                if z.quality > bestBullQuality
+                    bestBullQuality := z.quality
+                    bestBullKind := z.kind
+            if z.direction == -1
+                touchedBearZone := touchedBearZone or touched
+                if z.quality > bestBearQuality
+                    bestBearQuality := z.quality
+                    bestBearKind := z.kind
+
+float cvmi = f_clamp(cvmiRaw / math.max(1.0, zones.size()), -5.0, 5.0)
+
+// ============================================================================
+// Sniper / Quantum Score
+// ============================================================================
+float trendFeature = f_normSigned(fastEma - slowEma, atrValue * 2.0)
+float slopeFeature = f_normSigned(regressionSlope, atrValue * 0.15)
+float momentumFeature = f_normSigned(close - close[5], atrValue * 2.0)
+float volumeFeature = f_clamp((relVolume - 1.0) / 2.0, -1.0, 1.0)
+float cisdFeature = htfCisdTrend == 1 ? 1.0 : htfCisdTrend == -1 ? -1.0 : 0.0
+float pdFeature = inDiscount ? 0.45 : inPremium ? -0.45 : 0.0
+float sweepFeature = bullSweep ? 0.60 : bearSweep ? -0.60 : 0.0
+float zoneFeature = touchedBullZone ? 0.85 : touchedBearZone ? -0.85 : 0.0
+float cvmiFeature = f_clamp(cvmi / 2.0, -1.0, 1.0)
+
+// In Lean mode the former hard filters get slightly more score weight,
+// because they no longer gate entries directly.
+float bonusWeight = filterPreset == "Lean (score only)" ? 0.03 : 0.0
+
+float quantumScore =
+     trendFeature * 0.14 +
+     slopeFeature * 0.10 +
+     momentumFeature * 0.12 +
+     volumeFeature * 0.08 +
+     cisdFeature * (0.17 + bonusWeight) +
+     pdFeature * (0.09 + bonusWeight) +
+     sweepFeature * 0.08 +
+     zoneFeature * (0.14 + bonusWeight) +
+     cvmiFeature * (0.08 + bonusWeight)
+
+float confidence = f_clamp(0.50 + math.abs(quantumScore) * 0.42 + math.max(adxValue - 18.0, 0.0) / 140.0 + math.min(math.max(bestBullQuality, bestBearQuality), 3.0) / 40.0, 0.0, 1.0)
+float longScore = f_clamp(50.0 + quantumScore * 50.0 + (bullMomentumShift ? 8.0 : 0.0) + (bullSweep ? 5.0 : 0.0), 0.0, 100.0)
+float shortScore = f_clamp(50.0 - quantumScore * 50.0 + (bearMomentumShift ? 8.0 : 0.0) + (bearSweep ? 5.0 : 0.0), 0.0, 100.0)
+
+// ============================================================================
+// Filter Preset Logic
+// ============================================================================
+bool leanMode = filterPreset == "Lean (score only)"
+bool balancedMode = filterPreset == "Balanced"
+
+bool sessionOK = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+bool confirmedOK = not requireConfirmedBars or barstate.isconfirmed
+bool regimeOK = not useRegimeGuard or not chopRegime
+bool cisdLongOK = not useCisd or htfCisdTrend == 1
+bool cisdShortOK = not useCisd or htfCisdTrend == -1
+bool pdLongOK = not usePremiumDiscount or not validDealingRange or inDiscount
+bool pdShortOK = not usePremiumDiscount or not validDealingRange or inPremium
+bool zoneLongOK = not requireZoneTouch or touchedBullZone
+bool zoneShortOK = not requireZoneTouch or touchedBearZone
+bool cvmiLongOK = not requireCvmiPressure or cvmi >= minCvmiAbs
+bool cvmiShortOK = not requireCvmiPressure or cvmi <= -minCvmiAbs
+bool emaLongOK = not requireEmaSide or close > fastEma
+bool emaShortOK = not requireEmaSide or close < fastEma
+
+// Base gate: the prediction engine itself.
+bool baseLongOK = enableLongs and sessionOK and confirmedOK and emaLongOK and longScore >= minSniperScore and confidence >= minConfidence
+bool baseShortOK = enableShorts and sessionOK and confirmedOK and emaShortOK and shortScore >= minSniperScore and confidence >= minConfidence
+
+// Lean: score decides; optional single chop guard (backtest: chop is the killer).
+bool leanLongOK = not leanBlockChop or not chopRegime
+bool leanShortOK = not leanBlockChop or not chopRegime
+
+// Balanced: one structural alignment is enough (zone touch OR CISD), plus chop guard.
+bool balLongOK = regimeOK and (touchedBullZone or htfCisdTrend == 1)
+bool balShortOK = regimeOK and (touchedBearZone or htfCisdTrend == -1)
+
+// Strict: original v1 full stack.
+bool strictLongOK = regimeOK and cisdLongOK and pdLongOK and zoneLongOK and cvmiLongOK
+bool strictShortOK = regimeOK and cisdShortOK and pdShortOK and zoneShortOK and cvmiShortOK
+
+bool longSignal = baseLongOK and (leanMode ? leanLongOK : balancedMode ? balLongOK : strictLongOK)
+bool shortSignal = baseShortOK and (leanMode ? leanShortOK : balancedMode ? balShortOK : strictShortOK)
+
+if longSignal and shortSignal
+    if longScore > shortScore
+        shortSignal := false
+    else if shortScore > longScore
+        longSignal := false
+    else
+        longSignal := false
+        shortSignal := false
+
+string signalReason = longSignal ? str.format("long_{0}_q{1}", bestBullKind, f_fmt(bestBullQuality)) : shortSignal ? str.format("short_{0}_q{1}", bestBearKind, f_fmt(bestBearQuality)) : "wait"
+
+// ============================================================================
+// Kelly / Risk State
+// ============================================================================
+var int processedClosedTrades = 0
+var int winTrades = 0
+var int lossTrades = 0
+var float sumWins = 0.0
+var float sumLosses = 0.0
+var float equityPeak = na
+var int lastLossExitBar = na
+
+equityPeak := na(equityPeak) ? strategy.equity : math.max(equityPeak, strategy.equity)
+float drawdownPct = equityPeak > 0 ? (equityPeak - strategy.equity) / equityPeak * 100.0 : 0.0
+
+if strategy.closedtrades > processedClosedTrades
+    for tradeIndex = processedClosedTrades to strategy.closedtrades - 1
+        float profit = strategy.closedtrades.profit(tradeIndex)
+        if profit > 0
+            winTrades += 1
+            sumWins += profit
+        else if profit < 0
+            lossTrades += 1
+            sumLosses += math.abs(profit)
+            lastLossExitBar := strategy.closedtrades.exit_bar_index(tradeIndex)
+    processedClosedTrades := strategy.closedtrades
+
+int totalClosed = winTrades + lossTrades
+float liveWinRate = totalClosed > 0 ? winTrades / totalClosed : fallbackWinRatePct / 100.0
+float avgWin = winTrades > 0 ? sumWins / winTrades : fallbackRR
+float avgLoss = lossTrades > 0 ? sumLosses / lossTrades : 1.0
+float liveRR = avgLoss > 0 ? avgWin / avgLoss : fallbackRR
+float effectiveWinRate = useKelly and totalClosed >= minKellyTrades ? liveWinRate : fallbackWinRatePct / 100.0
+float effectiveRR = useKelly and totalClosed >= minKellyTrades ? math.max(liveRR, 0.10) : fallbackRR
+float rawKelly = effectiveRR > 0 ? effectiveWinRate - (1.0 - effectiveWinRate) / effectiveRR : 0.0
+float modeFactor = kellyMode == "Quarter" ? 0.25 : kellyMode == "Half" ? 0.50 : kellyMode == "Adaptive" ? (drawdownPct >= ddTier2 ? 0.25 : drawdownPct >= ddTier1 ? 0.50 : 0.75) : 1.0
+float ddFactor = drawdownPct >= ddTier3 ? 0.10 : drawdownPct >= ddTier2 ? 0.25 : drawdownPct >= ddTier1 ? 0.50 : 1.0
+float kellyPct = f_clamp(math.max(rawKelly, 0.0) * 100.0 * modeFactor * ddFactor, 0.0, maxRiskPct)
+float fallbackPct = math.min(maxRiskPct, 1.0) * ddFactor
+float positionPct = useKelly ? (kellyPct > 0 ? kellyPct : fallbackPct) : fallbackPct
+float entryQty = math.max(minQty, strategy.equity * positionPct / 100.0 / close)
+string riskTier = drawdownPct >= ddTier3 ? "DD3" : drawdownPct >= ddTier2 ? "DD2" : drawdownPct >= ddTier1 ? "DD1" : "NORMAL"
+bool lossCooldownOK = lossCooldownBars == 0 or na(lastLossExitBar) or bar_index - lastLossExitBar > lossCooldownBars
+
+// ============================================================================
+// Execution
+// ============================================================================
+var int pendingReverseDir = 0
+var int pendingReverseBar = na
+var int lastEntryBar = na
+var int orderSeq = 0
+var string lastAction = "idle"
+
+int currentDir = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
+bool flatConfirmed = strategy.position_size == 0 and strategy.opentrades == 0
+bool canFireThisBar = lossCooldownOK and (na(lastEntryBar) or bar_index - lastEntryBar > minBarsBetweenEntries)
+bool sameBarReverse = reverseMode == "Same confirmed bar (emulated)"
+float activeQuality = longSignal ? bestBullQuality : shortSignal ? bestBearQuality : math.max(bestBullQuality, bestBearQuality)
+
+// Reverse hysteresis: opposite signal must clear the threshold by a margin,
+// and the position must have been held for a minimum number of bars.
+int barsHeld = na(lastEntryBar) ? 0 : bar_index - lastEntryBar
+bool holdLongEnough = barsHeld >= minHoldBarsBeforeReverse
+bool reverseToShortOK = shortSignal and shortScore >= minSniperScore + reverseScoreMargin and holdLongEnough
+bool reverseToLongOK = longSignal and longScore >= minSniperScore + reverseScoreMargin and holdLongEnough
+
+if confirmedOK
+    if currentDir == 1 and reverseToShortOK
+        if sendCloseAlerts
+            strategy.close_all(comment="CIIF close long", alert_message=f_payload("close", "long", "opposite_short_signal", activeQuality, cvmi, positionPct, confidence))
+        else
+            strategy.close_all(comment="CIIF close long")
+        pendingReverseDir := -1
+        pendingReverseBar := bar_index
+        lastAction := "close_long_for_reverse"
+        if sameBarReverse and canFireThisBar
+            orderSeq += 1
+            strategy.entry("Short", strategy.short, qty=entryQty, comment=str.format("CIIF Short {0}", orderSeq), alert_message=f_payload("sell", "short", "same_bar_reverse_short", activeQuality, cvmi, positionPct, confidence))
+            lastEntryBar := bar_index
+            lastAction := "same_bar_reverse_short"
+            pendingReverseDir := 0
+    else if currentDir == -1 and reverseToLongOK
+        if sendCloseAlerts
+            strategy.close_all(comment="CIIF close short", alert_message=f_payload("close", "short", "opposite_long_signal", activeQuality, cvmi, positionPct, confidence))
+        else
+            strategy.close_all(comment="CIIF close short")
+        pendingReverseDir := 1
+        pendingReverseBar := bar_index
+        lastAction := "close_short_for_reverse"
+        if sameBarReverse and canFireThisBar
+            orderSeq += 1
+            strategy.entry("Long", strategy.long, qty=entryQty, comment=str.format("CIIF Long {0}", orderSeq), alert_message=f_payload("buy", "long", "same_bar_reverse_long", activeQuality, cvmi, positionPct, confidence))
+            lastEntryBar := bar_index
+            lastAction := "same_bar_reverse_long"
+            pendingReverseDir := 0
+    else if flatConfirmed and pendingReverseDir != 0
+        bool reverseWaitOK = sameBarReverse or (not na(pendingReverseBar) and bar_index > pendingReverseBar)
+        if reverseWaitOK and canFireThisBar
+            if pendingReverseDir == 1 and enableLongs
+                orderSeq += 1
+                strategy.entry("Long", strategy.long, qty=entryQty, comment=str.format("CIIF Long {0}", orderSeq), alert_message=f_payload("buy", "long", "confirmed_flat_reverse_long", activeQuality, cvmi, positionPct, confidence))
+                lastEntryBar := bar_index
+                lastAction := "confirmed_flat_reverse_long"
+            if pendingReverseDir == -1 and enableShorts
+                orderSeq += 1
+                strategy.entry("Short", strategy.short, qty=entryQty, comment=str.format("CIIF Short {0}", orderSeq), alert_message=f_payload("sell", "short", "confirmed_flat_reverse_short", activeQuality, cvmi, positionPct, confidence))
+                lastEntryBar := bar_index
+                lastAction := "confirmed_flat_reverse_short"
+            pendingReverseDir := 0
+            pendingReverseBar := na
+    else if flatConfirmed and pendingReverseDir == 0 and canFireThisBar
+        if longSignal
+            orderSeq += 1
+            strategy.entry("Long", strategy.long, qty=entryQty, comment=str.format("CIIF Long {0}", orderSeq), alert_message=f_payload("buy", "long", signalReason, activeQuality, cvmi, positionPct, confidence))
+            lastEntryBar := bar_index
+            lastAction := "initial_long"
+        else if shortSignal
+            orderSeq += 1
+            strategy.entry("Short", strategy.short, qty=entryQty, comment=str.format("CIIF Short {0}", orderSeq), alert_message=f_payload("sell", "short", signalReason, activeQuality, cvmi, positionPct, confidence))
+            lastEntryBar := bar_index
+            lastAction := "initial_short"
+    else if currentDir == 1 and longSignal and strategy.opentrades < maxSameDirectionEntries and canFireThisBar
+        orderSeq += 1
+        strategy.entry("Long", strategy.long, qty=entryQty, comment=str.format("CIIF Add Long {0}", orderSeq), alert_message=f_payload("buy", "long", "pyramid_long", activeQuality, cvmi, positionPct, confidence))
+        lastEntryBar := bar_index
+        lastAction := "pyramid_long"
+    else if currentDir == -1 and shortSignal and strategy.opentrades < maxSameDirectionEntries and canFireThisBar
+        orderSeq += 1
+        strategy.entry("Short", strategy.short, qty=entryQty, comment=str.format("CIIF Add Short {0}", orderSeq), alert_message=f_payload("sell", "short", "pyramid_short", activeQuality, cvmi, positionPct, confidence))
+        lastEntryBar := bar_index
+        lastAction := "pyramid_short"
+
+// ============================================================================
+// Protective exits: ATR stop + ATR take profit + break-even ratchet
+// ============================================================================
+float sarValue = ta.sar(sarStart, sarIncrement, sarMaximum)
+var float longStopPrice = na
+var float shortStopPrice = na
+
+if strategy.position_size == 0
+    longStopPrice := na
+    shortStopPrice := na
+
+if strategy.position_size > 0
+    float avgPrice = strategy.position_avg_price
+    float baseStop = useEmergencyStop ? avgPrice - atrValue * stopAtrMult : na
+    if useSarStopAssist and not na(baseStop) and sarValue < close
+        baseStop := math.max(baseStop, sarValue)
+    bool beTriggered = useBreakEven and (close - avgPrice) >= atrValue * breakEvenAtr
+    float targetStop = na(baseStop) ? na : beTriggered ? math.max(baseStop, avgPrice + syminfo.mintick) : baseStop
+    if not na(targetStop)
+        longStopPrice := na(longStopPrice) ? targetStop : math.max(longStopPrice, targetStop)
+    float tpPrice = useTakeProfit ? avgPrice + atrValue * tpAtrMult : na
+    if not na(longStopPrice) or not na(tpPrice)
+        strategy.exit("Long Protect", from_entry="Long", stop=longStopPrice, limit=tpPrice, comment_loss="CIIF stop long", comment_profit="CIIF tp long", alert_loss=f_payload("close", "long", "protective_stop", activeQuality, cvmi, positionPct, confidence), alert_profit=f_payload("close", "long", "take_profit", activeQuality, cvmi, positionPct, confidence))
+
+if strategy.position_size < 0
+    float avgPrice = strategy.position_avg_price
+    float baseStop = useEmergencyStop ? avgPrice + atrValue * stopAtrMult : na
+    if useSarStopAssist and not na(baseStop) and sarValue > close
+        baseStop := math.min(baseStop, sarValue)
+    bool beTriggered = useBreakEven and (avgPrice - close) >= atrValue * breakEvenAtr
+    float targetStop = na(baseStop) ? na : beTriggered ? math.min(baseStop, avgPrice - syminfo.mintick) : baseStop
+    if not na(targetStop)
+        shortStopPrice := na(shortStopPrice) ? targetStop : math.min(shortStopPrice, targetStop)
+    float tpPrice = useTakeProfit ? avgPrice - atrValue * tpAtrMult : na
+    if not na(shortStopPrice) or not na(tpPrice)
+        strategy.exit("Short Protect", from_entry="Short", stop=shortStopPrice, limit=tpPrice, comment_loss="CIIF stop short", comment_profit="CIIF tp short", alert_loss=f_payload("close", "short", "protective_stop", activeQuality, cvmi, positionPct, confidence), alert_profit=f_payload("close", "short", "take_profit", activeQuality, cvmi, positionPct, confidence))
+
+// ============================================================================
+// Visuals / Dashboard
+// ============================================================================
+plot(showRegimeLines ? fastEma : na, "Fast EMA", color=color.new(color.teal, 0))
+plot(showRegimeLines ? slowEma : na, "Slow EMA", color=color.new(color.orange, 0))
+plot(showRegimeLines and validDealingRange ? equilibrium : na, "HTF Equilibrium", color=color.new(color.gray, 0), style=plot.style_linebr)
+plot(showRegimeLines and validDealingRange ? rangeHigh : na, "HTF Range High", color=color.new(color.red, 55), style=plot.style_linebr)
+plot(showRegimeLines and validDealingRange ? rangeLow : na, "HTF Range Low", color=color.new(color.lime, 55), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? longStopPrice : strategy.position_size < 0 ? shortStopPrice : na, "Protective Stop", color=color.new(color.red, 20), style=plot.style_linebr)
+plot(strategy.position_size > 0 and useTakeProfit ? strategy.position_avg_price + atrValue * tpAtrMult : strategy.position_size < 0 and useTakeProfit ? strategy.position_avg_price - atrValue * tpAtrMult : na, "Take Profit", color=color.new(color.lime, 20), style=plot.style_linebr)
+
+plotshape(showSignals and longSignal, title="CIIF Long Signal", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small, text="CIIF L")
+plotshape(showSignals and shortSignal, title="CIIF Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="CIIF S")
+plotshape(showSignals and pendingReverseDir != 0, title="Pending Reverse", style=shape.diamond, location=location.top, color=color.yellow, size=size.tiny, text="REV")
+
+var table dash = table.new(position.top_right, 2, 20, bgcolor=color.new(color.black, 78), border_width=1, border_color=color.new(color.gray, 55))
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "CIIF MASTER", text_color=color.white, bgcolor=color.new(color.blue, 30))
+    table.cell(dash, 1, 0, "v2.1 30s", text_color=color.white, bgcolor=color.new(color.blue, 30))
+    table.cell(dash, 0, 1, "Position", text_color=color.white)
+    table.cell(dash, 1, 1, currentDir == 1 ? "LONG" : currentDir == -1 ? "SHORT" : "FLAT", text_color=currentDir == 1 ? color.lime : currentDir == -1 ? color.red : color.gray)
+    table.cell(dash, 0, 2, "Open trades", text_color=color.white)
+    table.cell(dash, 1, 2, str.tostring(strategy.opentrades), text_color=strategy.opentrades <= maxSameDirectionEntries ? color.white : color.red)
+    table.cell(dash, 0, 3, "Regime", text_color=color.white)
+    table.cell(dash, 1, 3, chopRegime ? "CHOP" : contraction ? "CONTRACTION" : "ACTIVE", text_color=chopRegime ? color.orange : color.lime)
+    table.cell(dash, 0, 4, "CISD / HTF", text_color=color.white)
+    table.cell(dash, 1, 4, f_dirText(htfCisdTrend) + " / " + f_dirText(htfBias), text_color=htfCisdTrend == 1 ? color.lime : htfCisdTrend == -1 ? color.red : color.gray)
+    table.cell(dash, 0, 5, "P/D", text_color=color.white)
+    table.cell(dash, 1, 5, inDiscount ? "DISCOUNT" : inPremium ? "PREMIUM" : "NA", text_color=inDiscount ? color.lime : inPremium ? color.red : color.gray)
+    table.cell(dash, 0, 6, "Zones", text_color=color.white)
+    table.cell(dash, 1, 6, str.tostring(zones.size()), text_color=zones.size() <= maxZones ? color.white : color.red)
+    table.cell(dash, 0, 7, "Best Bull", text_color=color.white)
+    table.cell(dash, 1, 7, bestBullKind + " " + f_fmt(bestBullQuality), text_color=bestBullQuality >= minZoneQuality ? color.lime : color.gray)
+    table.cell(dash, 0, 8, "Best Bear", text_color=color.white)
+    table.cell(dash, 1, 8, bestBearKind + " " + f_fmt(bestBearQuality), text_color=bestBearQuality >= minZoneQuality ? color.red : color.gray)
+    table.cell(dash, 0, 9, "CVMI", text_color=color.white)
+    table.cell(dash, 1, 9, f_fmt(cvmi), text_color=cvmi > 0 ? color.lime : cvmi < 0 ? color.red : color.gray)
+    table.cell(dash, 0, 10, "Scores L/S", text_color=color.white)
+    table.cell(dash, 1, 10, f_fmt(longScore) + " / " + f_fmt(shortScore), text_color=longScore > shortScore ? color.lime : shortScore > longScore ? color.red : color.gray)
+    table.cell(dash, 0, 11, "Confidence", text_color=color.white)
+    table.cell(dash, 1, 11, f_fmt(confidence), text_color=confidence >= minConfidence ? color.lime : color.orange)
+    table.cell(dash, 0, 12, "Kelly %", text_color=color.white)
+    table.cell(dash, 1, 12, f_fmt(positionPct), text_color=positionPct > 0 ? color.lime : color.gray)
+    table.cell(dash, 0, 13, "Qty", text_color=color.white)
+    table.cell(dash, 1, 13, f_fmt(entryQty), text_color=color.white)
+    table.cell(dash, 0, 14, "Drawdown", text_color=color.white)
+    table.cell(dash, 1, 14, f_fmt(drawdownPct) + "% " + riskTier, text_color=riskTier == "NORMAL" ? color.lime : color.orange)
+    table.cell(dash, 0, 15, "Win/RR", text_color=color.white)
+    table.cell(dash, 1, 15, f_fmt(effectiveWinRate * 100.0) + "% / " + f_fmt(effectiveRR), text_color=color.white)
+    table.cell(dash, 0, 16, "Signal", text_color=color.white)
+    table.cell(dash, 1, 16, longSignal ? "LONG" : shortSignal ? "SHORT" : "WAIT", text_color=longSignal ? color.lime : shortSignal ? color.red : color.gray)
+    table.cell(dash, 0, 17, "Last action", text_color=color.white)
+    table.cell(dash, 1, 17, lastAction, text_color=color.white)
+    table.cell(dash, 0, 18, "Bars held", text_color=color.white)
+    table.cell(dash, 1, 18, str.tostring(barsHeld) + (holdLongEnough ? " OK" : " LOCK"), text_color=holdLongEnough ? color.lime : color.orange)
+    table.cell(dash, 0, 19, "Filter preset", text_color=color.white)
+    table.cell(dash, 1, 19, leanMode ? "LEAN" : balancedMode ? "BALANCED" : "STRICT", text_color=leanMode ? color.aqua : balancedMode ? color.yellow : color.orange)
+
+// ============================================================================
+// Signal Export / External Connections (Added for Dropdown Visibility)
+// ============================================================================
+float export_long_signal  = longSignal ? 1.0 : 0.0
+float export_short_signal = shortSignal ? 1.0 : 0.0
+
+plot(export_long_signal,  title="CIIF: External Buy Signal",  color=color.lime, display=display.none)
+plot(export_short_signal, title="CIIF: External Sell Signal", color=color.red,  display=display.none)
+
+plot(htfCisdTrend,  title="CIIF Filter: HTF Trend (1=Bull, -1=Bear)", color=color.gray, display=display.none)
+plot(chopRegime ? 1.0 : 0.0, title="CIIF Filter: Is Chop Regime (1=Yes)", color=color.orange, display=display.none)
+plot(inDiscount ? 1.0 : 0.0, title="CIIF Filter: Is in Discount (1=Yes)", color=color.green, display=display.none)
+plot(inPremium  ? 1.0 : 0.0, title="CIIF Filter: Is in Premium (1=Yes)", color=color.red, display=display.none)

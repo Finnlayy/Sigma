@@ -1,0 +1,117 @@
+//@version=6
+//Time Frame: H1
+strategy('Pin Bar Magic v1', overlay = true)
+
+// User Input
+usr_risk = input.int(title = 'Equity Risk (%)', minval = 1, maxval = 100, step = 1, defval = 3, confirm = false)
+atr_mult = input.float(title = 'Stop Loss (x*ATR, Float)', minval = 0.1, maxval = 100, step = 0.1, defval = 0.5, confirm = false)
+slPoints = input.int(title = 'Stop Loss Trail Points (Pips)', minval = 1, maxval = 1000, step = 1, defval = 1, confirm = false)
+slOffset = input.int(title = 'Stop Loss Trail Offset (Pips)', minval = 1, maxval = 1000, step = 1, defval = 1, confirm = false)
+sma_slow = input.int(title = 'Slow SMA (Period)', minval = 1, maxval = 500, step = 1, defval = 50, confirm = false)
+ema_medm = input.int(title = 'Medm EMA (Period)', minval = 1, maxval = 500, step = 1, defval = 18, confirm = false)
+ema_fast = input.int(title = 'Fast EMA (Period)', minval = 1, maxval = 500, step = 1, defval = 6, confirm = false)
+atr_valu = input.int(title = 'ATR (Period)', minval = 1, maxval = 500, step = 1, defval = 14, confirm = false)
+ent_canc = input.int(title = 'Cancel Entry After X Bars (Period)', minval = 1, maxval = 500, step = 1, defval = 3, confirm = false)
+
+// Optimization Parameters (Defaulted to Optimized Values)
+sl_atr_mult = input.float(0.810176375441306, 'SL ATR Multiplier', minval = 0.1, step = 0.1)
+tp_atr_mult = input.float(4.574817107532002, 'TP ATR Multiplier', minval = 0.1, step = 0.1)
+conf_threshold = input.int(16, 'Confidence Threshold', minval = 0)
+vol_mult = input.float(1.5001788086956303, 'Volume Multiplier', minval = 0.1)
+
+// Create Indicators
+slowSMA = ta.sma(close, sma_slow)
+medmEMA = ta.ema(close, ema_medm)
+fastEMA = ta.ema(close, ema_fast)
+atr = ta.atr(atr_valu)
+sma_200 = ta.sma(close, 200)
+atr_val = ta.atr(14)
+is_recovery_active = close > sma_200
+
+bullishPinBar = (close > open and open - low > 0.66 * (high - low)) or (close < open and close - low > 0.66 * (high - low))
+bearishPinBar = (close > open and high - close > 0.66 * (high - low)) or (close < open and high - open > 0.66 * (high - low))
+
+// Specify Trend Conditions
+fanUpTrend = fastEMA > medmEMA and medmEMA > slowSMA
+fanDnTrend = fastEMA < medmEMA and medmEMA < slowSMA
+
+// Specify Piercing Conditions
+bullPierce = (low < fastEMA and open > fastEMA and close > fastEMA) or (low < medmEMA and open > medmEMA and close > medmEMA) or (low < slowSMA and open > slowSMA and close > slowSMA)
+bearPierce = (high > fastEMA and open < fastEMA and close < fastEMA) or (high > medmEMA and open < medmEMA and close < medmEMA) or (high > slowSMA and open < slowSMA and close < slowSMA)
+
+// Specify Entry Conditions
+longEntry = fanUpTrend and bullishPinBar and bullPierce
+shortEntry = fanDnTrend and bearishPinBar and bearPierce
+
+// Long Entry Function
+enterlong() =>
+    risk = usr_risk * 0.01 * strategy.equity
+    stopLoss = low[1] - atr[1] * atr_mult
+    entryPrice = high[1]
+    priceRisk = entryPrice - stopLoss
+
+    if priceRisk > 0
+        units = risk / priceRisk
+        strategy.entry('long', strategy.long, qty = units, stop = entryPrice)
+        strategy.exit('exit long', from_entry = 'long', trail_points = slPoints, trail_offset = slOffset)
+
+// Short Entry Function
+entershort() =>
+    risk = usr_risk * 0.01 * strategy.equity
+    stopLoss = high[1] + atr[1] * atr_mult
+    entryPrice = low[1]
+    priceRisk = stopLoss - entryPrice
+
+    if priceRisk > 0
+        units = risk / priceRisk
+        strategy.entry('short', strategy.short, qty = units, stop = entryPrice)
+        strategy.exit('exit short', from_entry = 'short', trail_points = slPoints, trail_offset = slOffset)
+
+// Exit Logic (Incorporating Stop Loss and Take Profit ATR Multipliers)
+if strategy.position_size > 0
+    float sl_price = strategy.position_avg_price - atr_val * sl_atr_mult
+    float tp_price = strategy.position_avg_price + atr_val * tp_atr_mult
+
+    if close < sl_price
+        strategy.close_all('SL Hit')
+
+    if close > tp_price
+        strategy.close_all('TP Hit')
+
+// Execute Entries
+if is_recovery_active and strategy.position_size == 0 and longEntry
+    enterlong()
+
+if is_recovery_active and strategy.position_size == 0 and shortEntry
+    entershort()
+
+// Cancel the Entry if Bar Time is Exceeded
+if ta.barssince(longEntry) > ent_canc
+    strategy.cancel('long')
+if ta.barssince(shortEntry) > ent_canc
+    strategy.cancel('short')
+
+// Force Close During Certain Conditions
+if hour == 16 and dayofweek == dayofweek.friday
+    strategy.close_all(comment = 'exit all, market-closed')
+if ta.crossunder(fastEMA, medmEMA)
+    strategy.close_all(comment = 'exit long, re-cross')
+if ta.crossover(fastEMA, medmEMA)
+    strategy.close_all(comment = 'exit short, re-cross')
+
+// Plot Moving Averages to Chart
+plot(fastEMA, color = color.new(color.red, 0))
+plot(medmEMA, color = color.new(color.blue, 0))
+plot(slowSMA, color = color.new(color.green, 0))
+
+// Plot Pin Bars to Chart
+plotshape(bullishPinBar, text = 'Bull PB', style = shape.labeldown, location = location.abovebar, color = color.new(color.green, 0), textcolor = color.new(color.white, 0))
+plotshape(bearishPinBar, text = 'Bear PB', style = shape.labelup, location = location.belowbar, color = color.new(color.red, 0), textcolor = color.new(color.white, 0))
+
+// Plot Days of Week
+plotshape(hour == 0 and dayofweek == dayofweek.monday, text = 'Monday', style = shape.labeldown, location = location.abovebar, color = color.new(color.black, 0), textcolor = color.new(color.white, 0))
+plotshape(hour == 0 and dayofweek == dayofweek.tuesday, text = 'Tuesday', style = shape.labeldown, location = location.abovebar, color = color.new(color.black, 0), textcolor = color.new(color.white, 0))
+plotshape(hour == 0 and dayofweek == dayofweek.wednesday, text = 'Wednesday', style = shape.labeldown, location = location.abovebar, color = color.new(color.black, 0), textcolor = color.new(color.white, 0))
+plotshape(hour == 0 and dayofweek == dayofweek.thursday, text = 'Thursday', style = shape.labeldown, location = location.abovebar, color = color.new(color.black, 0), textcolor = color.new(color.white, 0))
+plotshape(hour == 0 and dayofweek == dayofweek.friday, text = 'Friday', style = shape.labeldown, location = location.abovebar, color = color.new(color.black, 0), textcolor = color.new(color.white, 0))
+plotshape(hour == 16 and dayofweek == dayofweek.friday, text = 'Market Closed', style = shape.labeldown, location = location.abovebar, color = color.new(color.black, 0), textcolor = color.new(color.white, 0))

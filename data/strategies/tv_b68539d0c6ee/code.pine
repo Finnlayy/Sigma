@@ -1,0 +1,263 @@
+//@version=6
+strategy("ZECUSDT.P Step 1 - 15m OB Premium Discount", overlay=true, pyramiding=0, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.06, slippage=2, calc_on_order_fills=true, calc_on_every_tick=false, process_orders_on_close=true, default_qty_type=strategy.fixed, default_qty_value=1, max_boxes_count=20, max_lines_count=50, max_labels_count=20, max_bars_back=500)
+
+// ---------- Inputs ----------
+groupCore = "Core"
+htfTf = input.timeframe("15", "Order Block Timeframe", group=groupCore)
+showDashboard = input.bool(true, "Show Dashboard", group=groupCore)
+
+groupRange = "15m Premium / Discount"
+rangeLen = input.int(48, "15m Range Lookback", minval=5, group=groupRange)
+showPremiumDiscount = input.bool(true, "Show Premium / Discount Zones", group=groupRange)
+showDeepZones = input.bool(true, "Show 0.382 / 0.618 Reference Lines", group=groupRange)
+
+groupOB = "15m Order Blocks"
+bosLen = input.int(12, "15m Sweep / BOS Lookback", minval=3, group=groupOB)
+obSearchBars = input.int(8, "15m OB Search Bars", minval=1, maxval=20, group=groupOB)
+obUseWicks = input.bool(true, "Use Full Wick Zone", group=groupOB)
+obMaxAgeHtfBars = input.int(64, "OB Max Age in 15m Bars", minval=1, group=groupOB)
+obExtendBars = input.int(120, "OB Box Extension on 5m Chart", minval=1, group=groupOB)
+showOnlyLatestOb = input.bool(true, "Show Only Latest Bull/Bear OB", group=groupOB)
+
+groupStyle = "Style"
+premiumColorInput = input.color(color.red, "Premium Color", group=groupStyle)
+discountColorInput = input.color(color.lime, "Discount Color", group=groupStyle)
+bullObColorInput = input.color(color.lime, "Bullish OB Color", group=groupStyle)
+bearObColorInput = input.color(color.red, "Bearish OB Color", group=groupStyle)
+
+// ---------- Helpers ----------
+f_fmt(v) =>
+    string s = "n/a"
+    if not na(v)
+        s := str.tostring(v, "#.##")
+    s
+
+// ---------- HTF OB Functions ----------
+// Bullish OB: nach einem 15m Sweep/BOS nach oben wird der tiefste verursachende Bereich gesucht.
+f_htfBullObHigh(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    float bestLow = na
+    bool bosUp = high > ta.highest(high, _bosLen)[1]
+    if bosUp
+        for i = 1 to _searchBars
+            if na(bestLow) or low[i] < bestLow
+                bestLow := low[i]
+                if _useWicks
+                    out := high[i]
+                else
+                    out := math.max(open[i], close[i])
+    out
+
+f_htfBullObLow(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    float bestLow = na
+    bool bosUp = high > ta.highest(high, _bosLen)[1]
+    if bosUp
+        for i = 1 to _searchBars
+            if na(bestLow) or low[i] < bestLow
+                bestLow := low[i]
+                if _useWicks
+                    out := low[i]
+                else
+                    out := math.min(open[i], close[i])
+    out
+
+// Bearish OB: nach einem 15m Sweep/BOS nach unten wird der höchste verursachende Bereich gesucht.
+f_htfBearObHigh(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    float bestHigh = na
+    bool bosDown = low < ta.lowest(low, _bosLen)[1]
+    if bosDown
+        for i = 1 to _searchBars
+            if na(bestHigh) or high[i] > bestHigh
+                bestHigh := high[i]
+                if _useWicks
+                    out := high[i]
+                else
+                    out := math.max(open[i], close[i])
+    out
+
+f_htfBearObLow(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    float bestHigh = na
+    bool bosDown = low < ta.lowest(low, _bosLen)[1]
+    if bosDown
+        for i = 1 to _searchBars
+            if na(bestHigh) or high[i] > bestHigh
+                bestHigh := high[i]
+                if _useWicks
+                    out := low[i]
+                else
+                    out := math.min(open[i], close[i])
+    out
+
+// ---------- Confirmed 15m Data ----------
+htfRangeHigh = request.security(syminfo.tickerid, htfTf, ta.highest(high, rangeLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfRangeLow = request.security(syminfo.tickerid, htfTf, ta.lowest(low, rangeLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+newBullObHigh = request.security(syminfo.tickerid, htfTf, f_htfBullObHigh(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBullObLow = request.security(syminfo.tickerid, htfTf, f_htfBullObLow(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBearObHigh = request.security(syminfo.tickerid, htfTf, f_htfBearObHigh(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBearObLow = request.security(syminfo.tickerid, htfTf, f_htfBearObLow(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+htfTime = request.security(syminfo.tickerid, htfTf, time, barmerge.gaps_off, barmerge.lookahead_off)
+htfTimeDelta = ta.change(htfTime)
+newHtfBar = not na(htfTimeDelta) and htfTimeDelta != 0
+
+// ---------- Premium / Discount ----------
+htfRange = htfRangeHigh - htfRangeLow
+
+float equilibrium = na
+float deepDiscountLine = na
+float deepPremiumLine = na
+
+if htfRange > 0.0
+    equilibrium := htfRangeLow + htfRange * 0.50
+    deepDiscountLine := htfRangeLow + htfRange * 0.382
+    deepPremiumLine := htfRangeLow + htfRange * 0.618
+
+priceFib = 0.50
+if htfRange > 0.0
+    priceFib := (close - htfRangeLow) / htfRange
+
+inDiscount = not na(equilibrium) and close < equilibrium
+inPremium = not na(equilibrium) and close > equilibrium
+
+// ---------- Persist latest OBs ----------
+var float bullObHigh = na
+var float bullObLow = na
+var int bullObAge = 100000
+
+var float bearObHigh = na
+var float bearObLow = na
+var int bearObAge = 100000
+
+var box bullBox = na
+var box bearBox = na
+
+if newHtfBar
+    bullObAge := bullObAge + 1
+    bearObAge := bearObAge + 1
+
+    if not na(newBullObHigh) and not na(newBullObLow)
+        bullObHigh := math.max(newBullObHigh, newBullObLow)
+        bullObLow := math.min(newBullObHigh, newBullObLow)
+        bullObAge := 0
+
+        if showOnlyLatestOb and not na(bullBox)
+            box.delete(bullBox)
+
+        bullBox := box.new(left=bar_index, top=bullObHigh, right=bar_index + obExtendBars, bottom=bullObLow, xloc=xloc.bar_index, extend=extend.none, bgcolor=color.new(bullObColorInput, 85), border_color=color.new(bullObColorInput, 0), border_width=1)
+
+    if not na(newBearObHigh) and not na(newBearObLow)
+        bearObHigh := math.max(newBearObHigh, newBearObLow)
+        bearObLow := math.min(newBearObHigh, newBearObLow)
+        bearObAge := 0
+
+        if showOnlyLatestOb and not na(bearBox)
+            box.delete(bearBox)
+
+        bearBox := box.new(left=bar_index, top=bearObHigh, right=bar_index + obExtendBars, bottom=bearObLow, xloc=xloc.bar_index, extend=extend.none, bgcolor=color.new(bearObColorInput, 85), border_color=color.new(bearObColorInput, 0), border_width=1)
+
+if bullObAge > obMaxAgeHtfBars
+    bullObHigh := na
+    bullObLow := na
+    if not na(bullBox)
+        box.delete(bullBox)
+        bullBox := na
+
+if bearObAge > obMaxAgeHtfBars
+    bearObHigh := na
+    bearObLow := na
+    if not na(bearBox)
+        box.delete(bearBox)
+        bearBox := na
+
+if not na(bullBox)
+    box.set_right(bullBox, bar_index + obExtendBars)
+
+if not na(bearBox)
+    box.set_right(bearBox, bar_index + obExtendBars)
+
+// ---------- OB Context ----------
+bullObValid = not na(bullObHigh) and not na(bullObLow) and bullObAge <= obMaxAgeHtfBars
+bearObValid = not na(bearObHigh) and not na(bearObLow) and bearObAge <= obMaxAgeHtfBars
+
+float bullObMid = na
+float bearObMid = na
+
+if bullObValid
+    bullObMid := (bullObHigh + bullObLow) * 0.5
+
+if bearObValid
+    bearObMid := (bearObHigh + bearObLow) * 0.5
+
+bullObInDiscount = bullObValid and not na(equilibrium) and bullObMid <= equilibrium
+bearObInPremium = bearObValid and not na(equilibrium) and bearObMid >= equilibrium
+
+// ---------- Plots ----------
+rangeHighPlot = plot(showPremiumDiscount ? htfRangeHigh : na, "15m Range High", color=color.new(color.gray, 20), linewidth=1)
+rangeLowPlot = plot(showPremiumDiscount ? htfRangeLow : na, "15m Range Low", color=color.new(color.gray, 20), linewidth=1)
+equilibriumPlot = plot(showPremiumDiscount ? equilibrium : na, "15m Equilibrium 0.5", color=color.new(color.yellow, 0), linewidth=2)
+
+fill(equilibriumPlot, rangeHighPlot, color=showPremiumDiscount ? color.new(premiumColorInput, 90) : na, title="Premium Zone")
+fill(rangeLowPlot, equilibriumPlot, color=showPremiumDiscount ? color.new(discountColorInput, 90) : na, title="Discount Zone")
+
+plot(showDeepZones ? deepDiscountLine : na, "15m 0.382 Discount Reference", color=color.new(discountColorInput, 55), linewidth=1)
+plot(showDeepZones ? deepPremiumLine : na, "15m 0.618 Premium Reference", color=color.new(premiumColorInput, 55), linewidth=1)
+
+plot(bullObValid ? bullObHigh : na, "Latest 15m Bull OB High", color=color.new(bullObColorInput, 0), linewidth=2)
+plot(bullObValid ? bullObLow : na, "Latest 15m Bull OB Low", color=color.new(bullObColorInput, 0), linewidth=2)
+plot(bearObValid ? bearObHigh : na, "Latest 15m Bear OB High", color=color.new(bearObColorInput, 0), linewidth=2)
+plot(bearObValid ? bearObLow : na, "Latest 15m Bear OB Low", color=color.new(bearObColorInput, 0), linewidth=2)
+
+plotshape(newHtfBar and not na(newBullObHigh), title="New 15m Bull OB", style=shape.circle, location=location.belowbar, size=size.tiny, color=color.new(bullObColorInput, 0), text="15m OB")
+plotshape(newHtfBar and not na(newBearObHigh), title="New 15m Bear OB", style=shape.circle, location=location.abovebar, size=size.tiny, color=color.new(bearObColorInput, 0), text="15m OB")
+
+// ---------- Dashboard ----------
+var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 10), border_width=1)
+
+if showDashboard and barstate.islast
+    zoneText = "Neutral"
+    zoneColor = color.white
+
+    if inDiscount
+        zoneText := "Discount"
+        zoneColor := color.lime
+
+    if inPremium
+        zoneText := "Premium"
+        zoneColor := color.red
+
+    bullText = bullObValid ? "Valid" : "None"
+    bearText = bearObValid ? "Valid" : "None"
+
+    bullLocText = bullObInDiscount ? "Discount" : "Not Discount"
+    bearLocText = bearObInPremium ? "Premium" : "Not Premium"
+
+    table.cell(dash, 0, 0, "Step 1", text_color=color.white, bgcolor=color.new(color.gray, 70))
+    table.cell(dash, 1, 0, "15m OB / PD", text_color=color.white, bgcolor=color.new(color.gray, 70))
+
+    table.cell(dash, 0, 1, "Chart TF", text_color=color.white)
+    table.cell(dash, 1, 1, "Use on 5m", text_color=color.white)
+
+    table.cell(dash, 0, 2, "HTF", text_color=color.white)
+    table.cell(dash, 1, 2, htfTf, text_color=color.white)
+
+    table.cell(dash, 0, 3, "Current Zone", text_color=color.white)
+    table.cell(dash, 1, 3, zoneText + " | Fib " + f_fmt(priceFib), text_color=zoneColor)
+
+    table.cell(dash, 0, 4, "Range High", text_color=color.white)
+    table.cell(dash, 1, 4, f_fmt(htfRangeHigh), text_color=color.white)
+
+    table.cell(dash, 0, 5, "Range Low", text_color=color.white)
+    table.cell(dash, 1, 5, f_fmt(htfRangeLow), text_color=color.white)
+
+    table.cell(dash, 0, 6, "Bull OB", text_color=color.white)
+    table.cell(dash, 1, 6, bullText + " | " + bullLocText + " | Age " + str.tostring(bullObAge), text_color=bullObInDiscount ? color.lime : color.gray)
+
+    table.cell(dash, 0, 7, "Bear OB", text_color=color.white)
+    table.cell(dash, 1, 7, bearText + " | " + bearLocText + " | Age " + str.tostring(bearObAge), text_color=bearObInPremium ? color.red : color.gray)
+
+    table.cell(dash, 0, 8, "Next Step", text_color=color.white)
+    table.cell(dash, 1, 8, "Entry Logic später", text_color=color.orange)

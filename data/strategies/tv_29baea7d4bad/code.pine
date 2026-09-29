@@ -1,0 +1,420 @@
+//@version=6
+strategy("Quantum_HFT_PRO_Fusion_V6_FAST",
+     overlay=true,
+     pyramiding=1,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     initial_capital=100,
+     default_qty_type=strategy.cash,
+     default_qty_value=100,
+     margin_long=0,
+     margin_short=0,
+     commission_type=strategy.commission.percent,
+     commission_value=0.04)
+
+// ==========================================
+// === INTERNE FUNKTIONEN ===
+// ==========================================
+f_manualKama(float src, int len) =>
+    float diff = math.abs(src - src[len])
+    float volatility = math.sum(math.abs(src - src[1]), len)
+    float er = volatility != 0 ? diff / volatility : 0.0
+    float fastAlpha = 2.0 / (2.0 + 1.0)
+    float slowAlpha = 2.0 / (30.0 + 1.0)
+    float sc = math.pow(er * (fastAlpha - slowAlpha) + slowAlpha, 2)
+    float kama = na
+    kama := nz(kama[1], src) + sc * (src - nz(kama[1], src))
+    kama
+
+alert_msg(string action, float scoreValue) =>
+    '{"ticker":"' + syminfo.ticker + '","action":"' + action + '","score":"' + str.tostring(scoreValue, "#.##") + '"}'
+
+// ==========================================
+// === INPUTS ===
+// ==========================================
+group_speed = "=== Speed Tuning ==="
+useHftMode = input.bool(true, "HFT Turbo Modus aktiv", group=group_speed)
+hftSignalScore = input.int(4, "HFT Min Score", minval=1, maxval=20, group=group_speed)
+hftEdgeMin = input.int(1, "HFT Min Edge", minval=0, maxval=20, group=group_speed)
+hftKamaLen = input.int(6, "HFT KAMA Reaktion", minval=2, group=group_speed)
+fastEmaLen = input.int(5, "Fast EMA", minval=1, group=group_speed)
+slowEmaLen = input.int(13, "Slow EMA", minval=2, group=group_speed)
+fastRsiLen = input.int(7, "Fast RSI", minval=2, group=group_speed)
+macdFastLen = input.int(8, "MACD Fast", minval=1, group=group_speed)
+macdSlowLen = input.int(17, "MACD Slow", minval=2, group=group_speed)
+macdSignalLen = input.int(5, "MACD Signal", minval=1, group=group_speed)
+
+group_size = "=== Position Size ==="
+positionSizePct = input.float(100.0, "Position size (%) of fixed 100 USDT", minval=1.0, maxval=100.0, step=1.0, group=group_size)
+
+group_quantum = "=== Quantum Strategy Core ==="
+historyBars = input.int(24, "Analyse Zeitraum", minval=8, group=group_quantum)
+confThreshold = input.float(0.51, "Min Confidence", step=0.01, group=group_quantum)
+signalScoreMin = input.int(6, "Strategie Min Score", minval=1, maxval=20, group=group_quantum)
+signalEdgeMin = input.int(1, "Strategie Min Edge", minval=0, maxval=20, group=group_quantum)
+
+group_sync = "=== Sync Bootstrap ==="
+enableSyncBootstrap = input.bool(true, "Open one sync trade after init", group=group_sync)
+syncBootstrapBars = input.int(3, "Bootstrap retry bars", minval=1, maxval=20, group=group_sync)
+syncMinTrendVotes = input.int(4, "Bootstrap min trend votes", minval=1, maxval=7, group=group_sync)
+
+group_psar = "=== Parabolic SAR Entry Points ==="
+usePsarEntryPoints = input.bool(true, "Use PSAR entry points for normal entries", group=group_psar)
+psarStart = input.float(0.02, "PSAR Start", step=0.01, group=group_psar)
+psarIncrement = input.float(0.02, "PSAR Increment", step=0.01, group=group_psar)
+psarMaximum = input.float(0.2, "PSAR Maximum", step=0.01, group=group_psar)
+showPsarEntryPoints = input.bool(true, "Show PSAR points", group=group_psar)
+
+group_risk = "=== Risk Management ==="
+tp1Mult = input.float(1.25, "TP 1 (ATR Mult)", step=0.05, group=group_risk)
+tp2Mult = input.float(1.9, "TP 2 (ATR Mult)", step=0.05, group=group_risk)
+tp3Mult = input.float(2.5, "TP 3 (ATR Mult)", step=0.05, group=group_risk)
+slMult = input.float(1.3, "SL (ATR Mult)", step=0.1, group=group_risk)
+tp1ClosePct = input.float(50.0, "TP1 Close %", minval=0, maxval=100, step=5, group=group_risk)
+tp2ClosePct = input.float(35.0, "TP2 Close %", minval=0, maxval=100, step=5, group=group_risk)
+trailAtrMult = input.float(0.9, "Trail ATR Mult after TP2", minval=0.1, step=0.1, group=group_risk)
+minHoldBars = input.int(2, "Min Hold Bars before fast exit", minval=0, maxval=20, group=group_risk)
+fastExitEdge = input.int(2, "Fast Exit Score Edge", minval=0, maxval=10, group=group_risk)
+
+// ==========================================
+// === INDIKATOREN ===
+// ==========================================
+atr = ta.atr(14)
+kama = f_manualKama(close, hftKamaLen)
+vwapV = ta.vwap(hlc3)
+emaFast = ta.ema(close, fastEmaLen)
+emaSlow = ta.ema(close, slowEmaLen)
+rsiFast = ta.rsi(close, fastRsiLen)
+[macdM, macdS, _] = ta.macd(close, macdFastLen, macdSlowLen, macdSignalLen)
+
+// ==========================================
+// === PARABOLIC SAR ENTRY POINTS ===
+// ==========================================
+var bool psarUptrend = false
+var float psarEP = na
+var float psarSAR = na
+var float psarAF = psarStart
+var float psarNextBarSAR = na
+
+if bar_index > 0
+    bool psarFirstTrendBar = false
+    psarSAR := psarNextBarSAR
+    if bar_index == 1
+        float psarPrevSAR = na
+        float psarPrevEP = na
+        float psarLowPrev = low[1]
+        float psarHighPrev = high[1]
+        float psarCloseCur = close
+        float psarClosePrev = close[1]
+        if psarCloseCur > psarClosePrev
+            psarUptrend := true
+            psarEP := high
+            psarPrevSAR := psarLowPrev
+            psarPrevEP := high
+        else
+            psarUptrend := false
+            psarEP := low
+            psarPrevSAR := psarHighPrev
+            psarPrevEP := low
+        psarFirstTrendBar := true
+        psarSAR := psarPrevSAR + psarStart * (psarPrevEP - psarPrevSAR)
+        psarAF := psarStart
+    if psarUptrend
+        if psarSAR > low
+            psarFirstTrendBar := true
+            psarUptrend := false
+            psarSAR := math.max(psarEP, high)
+            psarEP := low
+            psarAF := psarStart
+    else
+        if psarSAR < high
+            psarFirstTrendBar := true
+            psarUptrend := true
+            psarSAR := math.min(psarEP, low)
+            psarEP := high
+            psarAF := psarStart
+    if not psarFirstTrendBar
+        if psarUptrend
+            if high > psarEP
+                psarEP := high
+                psarAF := math.min(psarAF + psarIncrement, psarMaximum)
+        else
+            if low < psarEP
+                psarEP := low
+                psarAF := math.min(psarAF + psarIncrement, psarMaximum)
+    if psarUptrend
+        psarSAR := math.min(psarSAR, low[1])
+        if bar_index > 1
+            psarSAR := math.min(psarSAR, low[2])
+    else
+        psarSAR := math.max(psarSAR, high[1])
+        if bar_index > 1
+            psarSAR := math.max(psarSAR, high[2])
+    psarNextBarSAR := psarSAR + psarAF * (psarEP - psarSAR)
+
+psarLongPoint = not psarUptrend ? psarNextBarSAR : na
+psarShortPoint = psarUptrend ? psarNextBarSAR : na
+
+// ==========================================
+// === SCHNELLERE QUANTUM PROBABILITY ===
+// ==========================================
+float upCount = 0.0
+float downCount = 0.0
+
+for i = 1 to historyBars
+    float weight = historyBars - i + 1
+    float delta = close[i - 1] - close[i]
+    if delta > 0
+        upCount += weight
+    else if delta < 0
+        downCount += weight
+
+float totalMoves = upCount + downCount
+bullProb = totalMoves > 0 ? upCount / totalMoves : 0.5
+bearProb = totalMoves > 0 ? downCount / totalMoves : 0.5
+
+// ==========================================
+// === HYBRID SCORING SYSTEM (SCHNELLER) ===
+// ==========================================
+float lScore = 0.0
+float sScore = 0.0
+
+lScore += close > emaFast ? 1 : 0
+lScore += emaFast > emaSlow ? 1 : 0
+lScore += close > vwapV ? 1 : 0
+lScore += macdM > macdS ? 1 : 0
+lScore += rsiFast > 52 ? 1 : 0
+lScore += bullProb > confThreshold ? 2 : 0
+lScore += emaFast > kama ? 1 : 0
+
+sScore += close < emaFast ? 1 : 0
+sScore += emaFast < emaSlow ? 1 : 0
+sScore += close < vwapV ? 1 : 0
+sScore += macdM < macdS ? 1 : 0
+sScore += rsiFast < 48 ? 1 : 0
+sScore += bearProb > confThreshold ? 2 : 0
+sScore += emaFast < kama ? 1 : 0
+
+// ==========================================
+// === EXECUTION ENGINE ===
+// ==========================================
+isKamaLong = close > kama
+isKamaShort = close < kama
+
+requiredScore = useHftMode ? hftSignalScore : signalScoreMin
+requiredEdge = useHftMode ? hftEdgeMin : signalEdgeMin
+fixedBaseUsd = 100.0
+entryCash = fixedBaseUsd * positionSizePct / 100.0
+
+longSignal = lScore >= requiredScore and (lScore - sScore) >= requiredEdge and isKamaLong
+shortSignal = sScore >= requiredScore and (sScore - lScore) >= requiredEdge and isKamaShort
+
+longWeak = lScore <= sScore or close < kama or emaFast < emaSlow or macdM < macdS
+shortWeak = sScore <= lScore or close > kama or emaFast > emaSlow or macdM > macdS
+
+varip bool longEntryFiredThisBar = false
+varip bool shortEntryFiredThisBar = false
+varip bool longExitFiredThisBar = false
+varip bool shortExitFiredThisBar = false
+var bool syncBootstrapDone = false
+var int syncBootstrapStartBar = na
+
+var int tradeEntryBar = na
+var float tradeEntryPrice = na
+var float tradeRiskAtr = na
+var float activeStop = na
+var float activeTp1 = na
+var float activeTp2 = na
+var float activeTp3 = na
+var float trailStop = na
+var float trailExtreme = na
+var bool tp1Done = false
+var bool tp2Done = false
+var bool trailArmed = false
+
+if barstate.isnew
+    longEntryFiredThisBar := false
+    shortEntryFiredThisBar := false
+    longExitFiredThisBar := false
+    shortExitFiredThisBar := false
+    if barstate.isrealtime and na(syncBootstrapStartBar)
+        syncBootstrapStartBar := bar_index
+
+longTrendVotes =
+     (close > emaFast ? 1 : 0) +
+     (emaFast > emaSlow ? 1 : 0) +
+     (close > vwapV ? 1 : 0) +
+     (macdM > macdS ? 1 : 0) +
+     (rsiFast > 50 ? 1 : 0) +
+     (close > kama ? 1 : 0) +
+     (bullProb >= bearProb ? 1 : 0)
+
+shortTrendVotes =
+     (close < emaFast ? 1 : 0) +
+     (emaFast < emaSlow ? 1 : 0) +
+     (close < vwapV ? 1 : 0) +
+     (macdM < macdS ? 1 : 0) +
+     (rsiFast < 50 ? 1 : 0) +
+     (close < kama ? 1 : 0) +
+     (bearProb > bullProb ? 1 : 0)
+
+syncWindowOpen = barstate.isrealtime and enableSyncBootstrap and not syncBootstrapDone and strategy.position_size == 0 and not na(syncBootstrapStartBar) and bar_index - syncBootstrapStartBar <= syncBootstrapBars
+syncLongBias = longTrendVotes >= syncMinTrendVotes and longTrendVotes > shortTrendVotes
+syncShortBias = shortTrendVotes >= syncMinTrendVotes and shortTrendVotes > longTrendVotes
+syncLongTrigger = syncWindowOpen and syncLongBias and not longEntryFiredThisBar
+syncShortTrigger = syncWindowOpen and syncShortBias and not shortEntryFiredThisBar
+
+longTrigger = longSignal and strategy.position_size <= 0 and not longEntryFiredThisBar
+shortTrigger = shortSignal and strategy.position_size >= 0 and not shortEntryFiredThisBar
+
+if usePsarEntryPoints and strategy.position_size == 0
+    if not longTrigger and not syncLongTrigger
+        strategy.cancel("Long")
+    if not shortTrigger and not syncShortTrigger
+        strategy.cancel("Short")
+
+if longTrigger
+    if usePsarEntryPoints and not na(psarLongPoint)
+        strategy.entry("Long", strategy.long, qty=entryCash, stop=psarLongPoint, alert_message=alert_msg("buy", lScore))
+    else
+        strategy.entry("Long", strategy.long, qty=entryCash, alert_message=alert_msg("buy", lScore))
+    longEntryFiredThisBar := true
+
+if shortTrigger
+    if usePsarEntryPoints and not na(psarShortPoint)
+        strategy.entry("Short", strategy.short, qty=entryCash, stop=psarShortPoint, alert_message=alert_msg("sell", sScore))
+    else
+        strategy.entry("Short", strategy.short, qty=entryCash, alert_message=alert_msg("sell", sScore))
+    shortEntryFiredThisBar := true
+
+if syncLongTrigger and not longEntryFiredThisBar
+    strategy.entry("Long", strategy.long, qty=entryCash, alert_message=alert_msg("buy", lScore))
+    longEntryFiredThisBar := true
+    syncBootstrapDone := true
+
+if syncShortTrigger and not shortEntryFiredThisBar
+    strategy.entry("Short", strategy.short, qty=entryCash, alert_message=alert_msg("sell", sScore))
+    shortEntryFiredThisBar := true
+    syncBootstrapDone := true
+
+newLongPosition = strategy.position_size > 0 and strategy.position_size[1] <= 0
+newShortPosition = strategy.position_size < 0 and strategy.position_size[1] >= 0
+flatNow = strategy.position_size == 0 and strategy.position_size[1] != 0
+
+if newLongPosition
+    syncBootstrapDone := true
+    tradeEntryBar := bar_index
+    tradeEntryPrice := strategy.position_avg_price
+    tradeRiskAtr := atr
+    activeStop := tradeEntryPrice - tradeRiskAtr * slMult
+    activeTp1 := tradeEntryPrice + tradeRiskAtr * tp1Mult
+    activeTp2 := tradeEntryPrice + tradeRiskAtr * tp2Mult
+    activeTp3 := tradeEntryPrice + tradeRiskAtr * tp3Mult
+    trailStop := na
+    trailExtreme := na
+    tp1Done := false
+    tp2Done := false
+    trailArmed := false
+
+if newShortPosition
+    syncBootstrapDone := true
+    tradeEntryBar := bar_index
+    tradeEntryPrice := strategy.position_avg_price
+    tradeRiskAtr := atr
+    activeStop := tradeEntryPrice + tradeRiskAtr * slMult
+    activeTp1 := tradeEntryPrice - tradeRiskAtr * tp1Mult
+    activeTp2 := tradeEntryPrice - tradeRiskAtr * tp2Mult
+    activeTp3 := tradeEntryPrice - tradeRiskAtr * tp3Mult
+    trailStop := na
+    trailExtreme := na
+    tp1Done := false
+    tp2Done := false
+    trailArmed := false
+
+if flatNow
+    tradeEntryBar := na
+    tradeEntryPrice := na
+    tradeRiskAtr := na
+    activeStop := na
+    activeTp1 := na
+    activeTp2 := na
+    activeTp3 := na
+    trailStop := na
+    trailExtreme := na
+    tp1Done := false
+    tp2Done := false
+    trailArmed := false
+
+barsInTrade = na(tradeEntryBar) ? 0 : bar_index - tradeEntryBar
+
+if strategy.position_size > 0
+    if not tp1Done and not na(activeTp1) and high >= activeTp1
+        tp1Done := true
+        activeStop := math.max(nz(activeStop, tradeEntryPrice), tradeEntryPrice)
+    if not tp2Done and not na(activeTp2) and high >= activeTp2
+        tp2Done := true
+        trailArmed := true
+        trailExtreme := high
+    if trailArmed
+        trailExtreme := math.max(nz(trailExtreme, high), high)
+        trailStop := trailExtreme - nz(tradeRiskAtr, atr) * trailAtrMult
+        activeStop := math.max(nz(activeStop, trailStop), math.max(nz(tradeEntryPrice, trailStop), trailStop))
+
+    strategy.exit("Long_TP1", from_entry="Long", stop=activeStop, limit=activeTp1, qty_percent=tp1ClosePct, alert_message=alert_msg("close", lScore))
+    strategy.exit("Long_TP2", from_entry="Long", stop=activeStop, limit=activeTp2, qty_percent=tp2ClosePct, alert_message=alert_msg("close", lScore))
+    strategy.exit("Long_TP3", from_entry="Long", stop=activeStop, limit=activeTp3, qty_percent=100 - tp1ClosePct - tp2ClosePct, alert_message=alert_msg("close", lScore))
+
+    longFastExit = barsInTrade >= minHoldBars and not tp1Done and close < kama and emaFast < emaSlow and macdM < macdS and sScore >= lScore + fastExitEdge
+    if longFastExit and not longExitFiredThisBar
+        strategy.close("Long", comment="Fast Exit", alert_message=alert_msg("close", lScore))
+        longExitFiredThisBar := true
+
+if strategy.position_size < 0
+    if not tp1Done and not na(activeTp1) and low <= activeTp1
+        tp1Done := true
+        activeStop := math.min(nz(activeStop, tradeEntryPrice), tradeEntryPrice)
+    if not tp2Done and not na(activeTp2) and low <= activeTp2
+        tp2Done := true
+        trailArmed := true
+        trailExtreme := low
+    if trailArmed
+        trailExtreme := math.min(nz(trailExtreme, low), low)
+        trailStop := trailExtreme + nz(tradeRiskAtr, atr) * trailAtrMult
+        activeStop := math.min(nz(activeStop, trailStop), math.min(nz(tradeEntryPrice, trailStop), trailStop))
+
+    strategy.exit("Short_TP1", from_entry="Short", stop=activeStop, limit=activeTp1, qty_percent=tp1ClosePct, alert_message=alert_msg("close", sScore))
+    strategy.exit("Short_TP2", from_entry="Short", stop=activeStop, limit=activeTp2, qty_percent=tp2ClosePct, alert_message=alert_msg("close", sScore))
+    strategy.exit("Short_TP3", from_entry="Short", stop=activeStop, limit=activeTp3, qty_percent=100 - tp1ClosePct - tp2ClosePct, alert_message=alert_msg("close", sScore))
+
+    shortFastExit = barsInTrade >= minHoldBars and not tp1Done and close > kama and emaFast > emaSlow and macdM > macdS and lScore >= sScore + fastExitEdge
+    if shortFastExit and not shortExitFiredThisBar
+        strategy.close("Short", comment="Fast Exit", alert_message=alert_msg("close", sScore))
+        shortExitFiredThisBar := true
+
+// ==========================================
+// === VISUALS ===
+// ==========================================
+plot(kama, color=color.new(color.orange, 0), linewidth=2, title="KAMA Fusion Line")
+plot(vwapV, color=color.new(color.blue, 50), title="VWAP")
+plot(emaFast, color=color.new(color.green, 0), title="Fast EMA")
+plot(emaSlow, color=color.new(color.red, 0), title="Slow EMA")
+plot(showPsarEntryPoints ? psarSAR : na, color=color.orange, linewidth=2, style=plot.style_cross, title="PSAR")
+plot(showPsarEntryPoints ? psarNextBarSAR : na, color=color.aqua, linewidth=2, style=plot.style_cross, title="Next PSAR")
+
+plotshape(longTrigger, style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, title="Long Trigger")
+plotshape(shortTrigger, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, title="Short Trigger")
+
+var table dash = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast
+    table.cell(dash, 0, 0, "Bull Prob", text_color=color.white)
+    table.cell(dash, 1, 0, str.tostring(bullProb, "#.##"), text_color=bullProb > 0.5 ? color.green : color.red)
+    table.cell(dash, 0, 1, "Bear Prob", text_color=color.white)
+    table.cell(dash, 1, 1, str.tostring(bearProb, "#.##"), text_color=bearProb > 0.5 ? color.red : color.green)
+    table.cell(dash, 0, 2, "Long Score", text_color=color.white)
+    table.cell(dash, 1, 2, str.tostring(lScore, "#.##"), text_color=color.green)
+    table.cell(dash, 0, 3, "Short Score", text_color=color.white)
+    table.cell(dash, 1, 3, str.tostring(sScore, "#.##"), text_color=color.red)
+    table.cell(dash, 0, 4, "Mode", text_color=color.white)
+    table.cell(dash, 1, 4, useHftMode ? "HFT" : "CORE", text_color=color.yellow)
+    table.cell(dash, 0, 5, "Bias", text_color=color.white)
+    table.cell(dash, 1, 5, lScore > sScore ? "LONG" : sScore > lScore ? "SHORT" : "NEUTRAL", text_color=lScore > sScore ? color.green : sScore > lScore ? color.red : color.gray)

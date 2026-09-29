@@ -14,6 +14,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from app.optimizer.academy_progress import persist_academy_snapshot
+
 logger = logging.getLogger("app.optimizer.academy")
 
 DRILLS = [
@@ -85,6 +87,13 @@ class AcademyRegistry:
                     "drills_passed": 0,
                     "drills_total": len(DRILLS),
                 })
+        self._persist_progress()
+
+    def _persist_progress(self) -> None:
+        try:
+            persist_academy_snapshot(self.store.academy_entries())
+        except Exception as exc:
+            logger.warning("academy progress snapshot failed: %s", exc)
 
     def list(self) -> List[Dict[str, Any]]:
         rows = self.store.academy_entries()
@@ -176,6 +185,7 @@ class AcademyRegistry:
             "drills_total": len(DRILLS),
             "last_drill_ts": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
         })
+        self._persist_progress()
         return {
             "strategyId": strategy_id,
             "symbol": symbol,

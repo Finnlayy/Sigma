@@ -1,0 +1,367 @@
+//@version=6
+strategy(
+     "Recovery Center Alpha + MOS - BTCUSDT.P 5m Optimized",
+     shorttitle="RCA MOS BTC5m",
+     overlay=true,
+     initial_capital=100,
+     currency=currency.USDT,
+     margin_long=20,
+     margin_short=20,
+     max_boxes_count=200,
+     max_labels_count=50,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=false,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2
+)
+
+// Optimized as a BTCUSDT.P 5m research draft. Live alerts remain gated by TradingView alert setup.
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------------------------------------------------------
+string group_structure = "MOS Structure"
+int leftLen = input.int(6, "Left Bars", minval=1, maxval=50, group=group_structure)
+int rightLen = input.int(3, "Right Bars", minval=1, maxval=25, group=group_structure)
+bool useAuto = input.bool(true, "Auto Timeframe Control", group=group_structure)
+int maxZones = input.int(20, "Max Zones", minval=1, maxval=80, group=group_structure)
+bool showSBR = input.bool(true, "Enable SBR & RBS Zones", group=group_structure)
+bool showInversion = input.bool(true, "Enable IVS & IVR Zones", group=group_structure)
+bool showPO2 = input.bool(true, "Enable PO2 (Second Touch)", group=group_structure)
+bool showSweep = input.bool(true, "Enable Liquidity Sweep", group=group_structure)
+
+string group_filters = "BTCUSDT.P 5m Filters"
+bool useTrendFilter = input.bool(true, "Use EMA/VWAP Trend Filter", group=group_filters)
+int fastLen = input.int(10, "Fast EMA", minval=1, maxval=100, group=group_filters)
+int slowLen = input.int(48, "Slow EMA", minval=2, maxval=200, group=group_filters)
+int regimeLen = input.int(120, "Regime EMA", minval=20, maxval=400, group=group_filters)
+bool useSma200Filter = input.bool(true, "Require SMA 200 Side", group=group_filters)
+bool useMtfFilter = input.bool(true, "Use 15m/60m Bias Guard", group=group_filters)
+bool useAtrFloor = input.bool(true, "Use ATR% Floor", group=group_filters)
+float minAtrPct = input.float(0.08, "Min ATR% of Price", minval=0.0, step=0.01, group=group_filters)
+bool useVolFilter = input.bool(false, "Use Entry Volume Filter", group=group_filters)
+int volLen = input.int(40, "Volume MA Length", minval=1, maxval=200, group=group_filters)
+float volMult = input.float(0.90, "Entry Volume Multiplier", minval=0.1, step=0.05, group=group_filters)
+bool useRsiFilter = input.bool(true, "Use RSI Guard", group=group_filters)
+int rsiLen = input.int(18, "RSI Length", minval=2, maxval=100, group=group_filters)
+float longRsiMin = input.float(42.0, "Long RSI Min", minval=0.0, maxval=100.0, step=0.5, group=group_filters)
+float longRsiMax = input.float(76.0, "Long RSI Max", minval=0.0, maxval=100.0, step=0.5, group=group_filters)
+float shortRsiMin = input.float(24.0, "Short RSI Min", minval=0.0, maxval=100.0, step=0.5, group=group_filters)
+float shortRsiMax = input.float(58.0, "Short RSI Max", minval=0.0, maxval=100.0, step=0.5, group=group_filters)
+
+string group_risk = "Risk & Trade Management"
+float maxDrawdownPct = input.float(15.0, "Max Drawdown Kill Switch %", minval=1.0, maxval=90.0, step=0.5, group=group_risk)
+int atrLen = input.int(14, "ATR Length", minval=1, maxval=100, group=group_risk)
+float stopAtrMult = input.float(0.68, "Stop ATR Multiplier", minval=0.1, step=0.05, group=group_risk)
+float targetAtrMult = input.float(2.40, "Target ATR Multiplier", minval=0.2, step=0.05, group=group_risk)
+bool useBreakeven = input.bool(true, "Move Stop To Breakeven", group=group_risk)
+float breakevenAtr = input.float(1.05, "Breakeven Trigger ATR", minval=0.1, step=0.05, group=group_risk)
+bool useTrail = input.bool(false, "Use ATR Trail After Breakeven", group=group_risk)
+float trailAtrMult = input.float(1.35, "Trail ATR Multiplier", minval=0.1, step=0.05, group=group_risk)
+int cooldownBars = input.int(6, "Cooldown Bars After Entry", minval=0, maxval=100, group=group_risk)
+int minHoldBars = input.int(3, "Minimum Hold Bars Before Time Exit", minval=0, maxval=100, group=group_risk)
+int maxHoldBars = input.int(24, "Maximum Hold Bars", minval=1, maxval=300, group=group_risk)
+bool useAdverseVolExit = input.bool(true, "Exit On Adverse Volume Spike", group=group_risk)
+float adverseVolMult = input.float(3.0, "Adverse Volume Spike Multiplier", minval=1.0, step=0.25, group=group_risk)
+
+string group_alerts = "Pionex Webhook"
+string pionexUuid = input.string("", "Pionex Signal Bot UUID", group=group_alerts)
+bool sendCloseAlerts = input.bool(true, "Send Close Alerts", group=group_alerts)
+
+strategy.risk.max_drawdown(maxDrawdownPct, strategy.percent_of_equity)
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Helpers and base indicators
+// ---------------------------------------------------------------------------------------------------------------------
+color COLOR_GREEN = #089981
+color COLOR_RED = #f23645
+color COLOR_BLUE = #5b9cf6
+
+var color vrColor = color.new(COLOR_RED, 90)
+var color vsColor = color.new(COLOR_GREEN, 90)
+var color sbrColor = color.new(COLOR_RED, 85)
+var color rbsColor = color.new(COLOR_GREEN, 85)
+var color ivsColor = color.new(COLOR_BLUE, 85)
+var color ivrColor = color.new(COLOR_BLUE, 85)
+
+f_pionex_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + pionexUuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+
+f_bias_value() =>
+    float fast = ta.ema(close, fastLen)
+    float slow = ta.ema(close, slowLen)
+    fast > slow ? 1 : fast < slow ? -1 : 0
+
+float atr = ta.atr(atrLen)
+float atrPct = close > 0 ? atr / close * 100.0 : 0.0
+float emaFast = ta.ema(close, fastLen)
+float emaSlow = ta.ema(close, slowLen)
+float regimeEma = ta.ema(close, regimeLen)
+float sma200 = ta.sma(close, 200)
+float vwapValue = ta.vwap(hlc3)
+float rsiValue = ta.rsi(close, rsiLen)
+float volMa = ta.sma(volume, volLen)
+bool confirmed = barstate.isconfirmed
+bool pionexReady = str.length(pionexUuid) > 0
+string payloadMessage = pionexReady ? f_pionex_payload() : ""
+
+plot(sma200, color=color.white, title="SMA 200")
+plot(emaFast, color=color.new(color.teal, 0), title="Fast EMA")
+plot(emaSlow, color=color.new(color.orange, 0), title="Slow EMA")
+plot(vwapValue, color=color.new(color.blue, 30), title="VWAP")
+
+int htfBias15 = request.security(syminfo.tickerid, "15", f_bias_value(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+int htfBias60 = request.security(syminfo.tickerid, "60", f_bias_value(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+bool isHighTf = timeframe.isdaily or timeframe.isweekly or timeframe.ismonthly or (timeframe.isminutes and timeframe.multiplier >= 240)
+int defaultLeft = isHighTf ? 4 : timeframe.isminutes and timeframe.multiplier <= 5 ? 6 : 10
+int defaultRight = isHighTf ? 2 : timeframe.isminutes and timeframe.multiplier <= 5 ? 3 : 5
+int autoLeft = useAuto ? defaultLeft : leftLen
+int autoRight = useAuto ? defaultRight : rightLen
+
+float ph = ta.pivothigh(high, autoLeft, autoRight)
+float pl = ta.pivotlow(low, autoLeft, autoRight)
+
+var box[] liveVr = array.new_box()
+var box[] liveVs = array.new_box()
+var box[] liveIvr = array.new_box()
+var box[] liveIvs = array.new_box()
+
+var int supportBreakCount = 0
+var int resistanceBreakCount = 0
+bool isNewDay = ta.change(time("D")) != 0
+bool buySignal = false
+bool sellSignal = false
+
+// ---------------------------------------------------------------------------------------------------------------------
+// MOS zone mapping
+// ---------------------------------------------------------------------------------------------------------------------
+if not na(ph)
+    float topVal = high[autoRight]
+    float botVal = math.max(open[autoRight], close[autoRight])
+    box bx = box.new(left=bar_index - autoRight, top=topVal, right=bar_index, bottom=botVal, bgcolor=vrColor, border_color=COLOR_RED, border_style=line.style_solid)
+    array.push(liveVr, bx)
+    while array.size(liveVr) > maxZones
+        box.delete(array.shift(liveVr))
+
+if not na(pl)
+    float topVal = math.min(open[autoRight], close[autoRight])
+    float botVal = low[autoRight]
+    box bx = box.new(left=bar_index - autoRight, top=topVal, right=bar_index, bottom=botVal, bgcolor=vsColor, border_color=COLOR_GREEN, border_style=line.style_solid)
+    array.push(liveVs, bx)
+    while array.size(liveVs) > maxZones
+        box.delete(array.shift(liveVs))
+
+if confirmed
+    if isNewDay
+        supportBreakCount := 0
+        resistanceBreakCount := 0
+
+    if array.size(liveVr) > 0
+        for i = array.size(liveVr) - 1 to 0
+            box b = array.get(liveVr, i)
+            float top = box.get_top(b)
+            float bot = box.get_bottom(b)
+            box.set_right(b, bar_index)
+
+            if close > top and close[1] <= top
+                resistanceBreakCount += 1
+                if resistanceBreakCount >= 2
+                    buySignal := true
+                    resistanceBreakCount := 0
+                else if showSBR
+                    box.set_bgcolor(b, rbsColor)
+                    box.set_border_color(b, COLOR_GREEN)
+                    buySignal := true
+
+                if showInversion
+                    box.set_bgcolor(b, ivrColor)
+                    box.set_border_color(b, COLOR_BLUE)
+                    array.push(liveIvr, b)
+                    while array.size(liveIvr) > maxZones
+                        box.delete(array.shift(liveIvr))
+
+                array.remove(liveVr, i)
+
+            else if high > top and close < top and showSweep and high[1] <= top
+                sellSignal := true
+
+    if array.size(liveVs) > 0
+        for i = array.size(liveVs) - 1 to 0
+            box b = array.get(liveVs, i)
+            float bot = box.get_bottom(b)
+            float top = box.get_top(b)
+            box.set_right(b, bar_index)
+
+            if close < bot and close[1] >= bot
+                supportBreakCount += 1
+
+                if supportBreakCount >= 2
+                    sellSignal := true
+                    supportBreakCount := 0
+                else if showSBR
+                    box.set_bgcolor(b, sbrColor)
+                    box.set_border_color(b, COLOR_RED)
+                    sellSignal := true
+
+                if showInversion
+                    box.set_bgcolor(b, ivsColor)
+                    box.set_border_color(b, COLOR_BLUE)
+                    array.push(liveIvs, b)
+                    while array.size(liveIvs) > maxZones
+                        box.delete(array.shift(liveIvs))
+
+                array.remove(liveVs, i)
+
+            else if low < bot and close > bot and showSweep and low[1] >= bot
+                buySignal := true
+
+    if showPO2
+        if array.size(liveIvr) > 0
+            for i = array.size(liveIvr) - 1 to 0
+                box b = array.get(liveIvr, i)
+                float top = box.get_top(b)
+                float bot = box.get_bottom(b)
+                box.set_right(b, bar_index)
+
+                if low <= top and high >= bot and close > bot and close[1] > top
+                    buySignal := true
+                    array.remove(liveIvr, i)
+
+        if array.size(liveIvs) > 0
+            for i = array.size(liveIvs) - 1 to 0
+                box b = array.get(liveIvs, i)
+                float bot = box.get_bottom(b)
+                float top = box.get_top(b)
+                box.set_right(b, bar_index)
+
+                if high >= bot and low <= top and close < top and close[1] < bot
+                    sellSignal := true
+                    array.remove(liveIvs, i)
+else
+    if array.size(liveVr) > 0
+        for i = 0 to array.size(liveVr) - 1
+            box.set_right(array.get(liveVr, i), bar_index)
+    if array.size(liveVs) > 0
+        for i = 0 to array.size(liveVs) - 1
+            box.set_right(array.get(liveVs, i), bar_index)
+    if array.size(liveIvr) > 0
+        for i = 0 to array.size(liveIvr) - 1
+            box.set_right(array.get(liveIvr, i), bar_index)
+    if array.size(liveIvs) > 0
+        for i = 0 to array.size(liveIvs) - 1
+            box.set_right(array.get(liveIvs, i), bar_index)
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Strategy execution
+// ---------------------------------------------------------------------------------------------------------------------
+bool inTrade = strategy.position_size != 0
+var int lastEntryBar = na
+var int entryBar = na
+var float entryAtr = na
+
+bool cooldownOk = na(lastEntryBar) or bar_index - lastEntryBar >= cooldownBars
+bool minDataOk = not na(sma200) and not na(atr) and not na(volMa)
+bool atrOk = not useAtrFloor or atrPct >= minAtrPct
+bool volumeOk = not useVolFilter or volume >= volMa * volMult
+bool trendLongOk = not useTrendFilter or (emaFast > emaSlow and close > regimeEma and close > vwapValue)
+bool trendShortOk = not useTrendFilter or (emaFast < emaSlow and close < regimeEma and close < vwapValue)
+bool smaLongOk = not useSma200Filter or close > sma200
+bool smaShortOk = not useSma200Filter or close < sma200
+bool mtfLongOk = not useMtfFilter or (htfBias15 >= 0 and htfBias60 >= 0)
+bool mtfShortOk = not useMtfFilter or (htfBias15 <= 0 and htfBias60 <= 0)
+bool rsiLongOk = not useRsiFilter or (rsiValue >= longRsiMin and rsiValue <= longRsiMax)
+bool rsiShortOk = not useRsiFilter or (rsiValue >= shortRsiMin and rsiValue <= shortRsiMax)
+
+bool longCondition = confirmed and minDataOk and buySignal and not inTrade and cooldownOk and atrOk and volumeOk and trendLongOk and smaLongOk and mtfLongOk and rsiLongOk
+bool shortCondition = confirmed and minDataOk and sellSignal and not inTrade and cooldownOk and atrOk and volumeOk and trendShortOk and smaShortOk and mtfShortOk and rsiShortOk
+
+if longCondition
+    entryAtr := atr
+    entryBar := bar_index
+    lastEntryBar := bar_index
+    strategy.entry("Long", strategy.long, alert_message=payloadMessage)
+
+if shortCondition
+    entryAtr := atr
+    entryBar := bar_index
+    lastEntryBar := bar_index
+    strategy.entry("Short", strategy.short, alert_message=payloadMessage)
+
+if strategy.position_size != 0 and na(entryBar)
+    entryBar := bar_index
+if strategy.position_size != 0 and na(entryAtr)
+    entryAtr := atr
+
+bool holdTimeReady = not na(entryBar) and bar_index - entryBar >= minHoldBars
+bool maxHoldReached = not na(entryBar) and bar_index - entryBar >= maxHoldBars
+bool adverseVolSpike = useAdverseVolExit and volume > volMa * adverseVolMult
+
+if strategy.position_size > 0 and not na(entryAtr)
+    float longEntry = strategy.position_avg_price
+    float longStopBase = longEntry - entryAtr * stopAtrMult
+    float longTarget = longEntry + entryAtr * targetAtrMult
+    float longStop = longStopBase
+    if useBreakeven and close >= longEntry + entryAtr * breakevenAtr
+        longStop := math.max(longStop, longEntry)
+    if useTrail and close >= longEntry + entryAtr * breakevenAtr
+        longStop := math.max(longStop, close - atr * trailAtrMult)
+    longStop := math.min(longStop, close - syminfo.mintick)
+    strategy.exit("Long Risk", from_entry="Long", stop=longStop, limit=longTarget, alert_message=sendCloseAlerts ? payloadMessage : "")
+    if holdTimeReady and adverseVolSpike and close < open and close < close[1]
+        strategy.close("Long", comment="Adverse Vol", alert_message=sendCloseAlerts ? payloadMessage : "")
+    if maxHoldReached
+        strategy.close("Long", comment="Max Hold", alert_message=sendCloseAlerts ? payloadMessage : "")
+
+if strategy.position_size < 0 and not na(entryAtr)
+    float shortEntry = strategy.position_avg_price
+    float shortStopBase = shortEntry + entryAtr * stopAtrMult
+    float shortTarget = shortEntry - entryAtr * targetAtrMult
+    float shortStop = shortStopBase
+    if useBreakeven and close <= shortEntry - entryAtr * breakevenAtr
+        shortStop := math.min(shortStop, shortEntry)
+    if useTrail and close <= shortEntry - entryAtr * breakevenAtr
+        shortStop := math.min(shortStop, close + atr * trailAtrMult)
+    shortStop := math.max(shortStop, close + syminfo.mintick)
+    strategy.exit("Short Risk", from_entry="Short", stop=shortStop, limit=shortTarget, alert_message=sendCloseAlerts ? payloadMessage : "")
+    if holdTimeReady and adverseVolSpike and close > open and close > close[1]
+        strategy.close("Short", comment="Adverse Vol", alert_message=sendCloseAlerts ? payloadMessage : "")
+    if maxHoldReached
+        strategy.close("Short", comment="Max Hold", alert_message=sendCloseAlerts ? payloadMessage : "")
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    entryAtr := na
+    entryBar := na
+
+plot(strategy.position_size != 0 and not na(entryAtr) ? strategy.position_avg_price : na, color=color.new(color.yellow, 0), style=plot.style_linebr, title="Entry")
+plot(strategy.position_size > 0 and not na(entryAtr) ? strategy.position_avg_price - entryAtr * stopAtrMult : strategy.position_size < 0 and not na(entryAtr) ? strategy.position_avg_price + entryAtr * stopAtrMult : na, color=color.red, style=plot.style_cross, title="Initial Stop")
+plot(strategy.position_size > 0 and not na(entryAtr) ? strategy.position_avg_price + entryAtr * targetAtrMult : strategy.position_size < 0 and not na(entryAtr) ? strategy.position_avg_price - entryAtr * targetAtrMult : na, color=color.green, style=plot.style_circles, title="Target")
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------------------------------------------------
+var table dashboard = table.new(position.top_right, 3, 7, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.gray)
+
+if barstate.islast
+    color biasColor = htfBias15 > 0 and htfBias60 > 0 ? color.lime : htfBias15 < 0 and htfBias60 < 0 ? color.red : color.gray
+    string posText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    string gateText = atrOk and volumeOk ? "READY" : "FILTERED"
+    table.cell(dashboard, 0, 0, "RCA MOS", text_color=color.white, text_halign=text.align_center, bgcolor=color.new(color.blue, 50))
+    table.cell(dashboard, 1, 0, "BTC 5m", text_color=color.white, text_halign=text.align_center, bgcolor=color.new(color.blue, 50))
+    table.cell(dashboard, 2, 0, "STATUS", text_color=color.white, text_halign=text.align_center, bgcolor=color.new(color.blue, 50))
+    table.cell(dashboard, 0, 1, "ATR%", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashboard, 0, 2, str.tostring(atrPct, "#.###") + "%", text_color=atrOk ? color.lime : color.orange, text_halign=text.align_center)
+    table.cell(dashboard, 1, 1, "HTF Bias", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashboard, 1, 2, str.tostring(htfBias15) + " / " + str.tostring(htfBias60), text_color=biasColor, text_halign=text.align_center)
+    table.cell(dashboard, 2, 1, posText, text_color=strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray, text_halign=text.align_center)
+    table.cell(dashboard, 2, 2, gateText, text_color=gateText == "READY" ? color.lime : color.orange, text_halign=text.align_center)
+    table.cell(dashboard, 0, 3, "Pionex", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashboard, 0, 4, pionexReady ? "UUID SET" : "UUID MISSING", text_color=pionexReady ? color.lime : color.orange, text_halign=text.align_center)
+    table.cell(dashboard, 1, 3, "Cooldown", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashboard, 1, 4, cooldownOk ? "OPEN" : "WAIT", text_color=cooldownOk ? color.lime : color.orange, text_halign=text.align_center)
+    table.cell(dashboard, 2, 3, "Hold", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashboard, 2, 4, na(entryBar) ? "-" : str.tostring(bar_index - entryBar), text_color=color.white, text_halign=text.align_center)

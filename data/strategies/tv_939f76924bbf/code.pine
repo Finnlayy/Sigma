@@ -1,0 +1,203 @@
+//@version=6
+strategy("Fib Golden Pocket Sniper v1.0", overlay=true, max_lines_count=50, max_labels_count=50, max_boxes_count=10, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.05, pyramiding=0)
+
+// ══════════════════════════════════════════════
+//  INPUTS
+// ══════════════════════════════════════════════
+show_fibs       = input.bool(true,  "Show Fibonacci Levels")
+show_gp         = input.bool(true,  "Show Golden Pocket Zone")
+show_dashboard  = input.bool(true,  "Show Dashboard")
+fib_lookback    = input.int(50,     "Swing Lookback", minval=10, maxval=200)
+rsi_len         = input.int(14,     "RSI Length")
+rsi_ob          = input.float(65.0, "RSI Overbought")
+rsi_os          = input.float(35.0, "RSI Oversold")
+atr_mult        = input.float(1.5,  "ATR SL Multiplier")
+rr_ratio        = input.float(2.0,  "Risk:Reward Ratio")
+
+// ══════════════════════════════════════════════
+//  CORE CALCULATIONS
+// ══════════════════════════════════════════════
+// Swing High / Low
+swing_high = ta.highest(high, fib_lookback)
+swing_low  = ta.lowest(low,  fib_lookback)
+swing_rng  = swing_high - swing_low
+
+// Fibonacci Levels (Bullish: retracement from high down)
+fib_0      = swing_high
+fib_236    = swing_high - swing_rng * 0.236
+fib_382    = swing_high - swing_rng * 0.382
+fib_500    = swing_high - swing_rng * 0.500
+fib_618    = swing_high - swing_rng * 0.618
+fib_65     = swing_high - swing_rng * 0.650
+fib_786    = swing_high - swing_rng * 0.786
+fib_1      = swing_low
+
+// Golden Pocket Zone: 0.618 – 0.65
+gp_top     = fib_618
+gp_bot     = fib_65
+
+// RSI
+rsi_val    = ta.rsi(close, rsi_len)
+
+// ATR
+atr_val    = ta.atr(14)
+
+// Price in Golden Pocket?
+price_in_gp_flag = close <= gp_top and close >= gp_bot
+
+// ══════════════════════════════════════════════
+//  SIGNAL LOGIC
+// ══════════════════════════════════════════════
+rsi_ok_long  = rsi_val < rsi_ob
+rsi_ok_short = rsi_val > rsi_os   // FIX #7: was incorrectly rsi_ob
+
+// Trend filter for longs (price retracing in an uptrend)
+ema50 = ta.ema(close, 50)
+uptrend = close > ema50
+
+// Long: pullback INTO golden pocket during uptrend (price below 0.5 is fine - that's the pocket)
+long_signal  = price_in_gp_flag and rsi_ok_long and uptrend
+// Short: rejection from golden pocket (price in pocket, RSI not oversold)
+short_signal = price_in_gp_flag and rsi_ok_short and not uptrend
+
+// Entry tracking (FIX #5: plain booleans, no barstate.isnew)
+long_entered_this_bar  = long_signal
+short_entered_this_bar = short_signal
+
+// SL / TP
+long_sl  = close - atr_val * atr_mult
+long_tp  = close + atr_val * atr_mult * rr_ratio
+short_sl = close + atr_val * atr_mult
+short_tp = close - atr_val * atr_mult * rr_ratio
+
+// Last GP touch bar (FIX #6: bar_index not bar_index[1])
+var int last_gp_touch_bar = na
+if price_in_gp_flag
+    last_gp_touch_bar := bar_index
+
+// ══════════════════════════════════════════════
+//  MULTI-TIMEFRAME (FIX #9: gaps_off as 3rd arg)
+// ══════════════════════════════════════════════
+h1_close = request.security(syminfo.tickerid, "60",  close, barmerge.gaps_off, barmerge.lookahead_off)
+h4_close = request.security(syminfo.tickerid, "240", close, barmerge.gaps_off, barmerge.lookahead_off)
+d1_close = request.security(syminfo.tickerid, "D",   close, barmerge.gaps_off, barmerge.lookahead_off)
+
+// ══════════════════════════════════════════════
+//  OHLC MULTI-BAR (FIX #10: one assignment per line)
+// ══════════════════════════════════════════════
+o1 = open[1]
+c1 = close[1]
+h1 = high[1]
+l1 = low[1]
+o2 = open[2]
+c2 = close[2]
+h2 = high[2]
+l2 = low[2]
+
+// ══════════════════════════════════════════════
+//  PLOTS — GLOBAL SCOPE (FIX #1)
+// ══════════════════════════════════════════════
+plot(show_fibs ? fib_0   : na, "Fib 0",     color=color.new(color.white,  20), linewidth=1)
+plot(show_fibs ? fib_236 : na, "Fib 0.236", color=color.new(color.blue,   20), linewidth=1)
+plot(show_fibs ? fib_382 : na, "Fib 0.382", color=color.new(color.yellow, 20), linewidth=1)
+plot(show_fibs ? fib_500 : na, "Fib 0.5",   color=color.new(color.orange, 20), linewidth=1)
+plot(show_fibs ? fib_618 : na, "Fib 0.618", color=color.new(color.green,  20), linewidth=2)
+plot(show_fibs ? fib_65  : na, "Fib 0.65",  color=color.new(color.green,  40), linewidth=1)
+plot(show_fibs ? fib_786 : na, "Fib 0.786", color=color.new(color.red,    20), linewidth=1)
+plot(show_fibs ? fib_1   : na, "Fib 1",     color=color.new(color.white,  20), linewidth=1)
+
+// Golden Pocket Fill
+gp_upper = plot(show_gp ? gp_top : na, "GP Top", color=na)
+gp_lower = plot(show_gp ? gp_bot : na, "GP Bot", color=na)
+fill(gp_upper, gp_lower, color=color.new(color.green, 80), title="Golden Pocket Fill")
+
+// Signal shapes
+plotshape(long_signal,  title="Long",  style=shape.triangleup,   location=location.belowbar, color=color.green, size=size.small)
+plotshape(short_signal, title="Short", style=shape.triangledown,  location=location.abovebar, color=color.red,   size=size.small)
+
+// ══════════════════════════════════════════════
+//  GOLDEN POCKET LINEFILL (FIX #4)
+// ══════════════════════════════════════════════
+var line  gp_line_top = na
+var line  gp_line_bot = na
+var linefill gp_fill  = na
+
+if barstate.islast
+    if not na(gp_fill)
+        linefill.delete(gp_fill)   // FIX #4: delete before reassigning
+        gp_fill := na
+    gp_line_top := line.new(bar_index - fib_lookback, gp_top, bar_index, gp_top, color=color.new(color.green, 60))
+    gp_line_bot := line.new(bar_index - fib_lookback, gp_bot, bar_index, gp_bot, color=color.new(color.green, 60))
+    gp_fill     := linefill.new(gp_line_top, gp_line_bot, color=color.new(color.green, 85))
+
+// ══════════════════════════════════════════════
+//  DASHBOARD TABLE (FIX #2, #3, #11, #12)
+// ══════════════════════════════════════════════
+// FIX #11: declare price_in_gp_color BEFORE table usage
+price_in_gp_color = price_in_gp_flag ? color.new(color.green, 40) : color.new(color.red, 40)
+
+var table tbl = na
+if show_dashboard and barstate.islast
+    tbl := table.new(position.top_right, 2, 9,
+         bgcolor      = color.new(color.black, 70),
+         border_width = 1,
+         border_color = color.gray)
+
+    // Row 0 — Header
+    table.cell(tbl, 0, 0, "Metric",        text_color=color.white,  bgcolor=color.new(color.navy,  20))
+    table.cell(tbl, 1, 0, "Value",         text_color=color.white,  bgcolor=color.new(color.navy,  20))
+
+    // Row 1 — Close
+    table.cell(tbl, 0, 1, "Close",         text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 1, str.tostring(close, "#.####"),
+                                           text_color=color.white,  bgcolor=color.new(color.black, 60))
+
+    // Row 2 — RSI  (FIX #3: "#.##" format string)
+    table.cell(tbl, 0, 2, "RSI(" + str.tostring(rsi_len) + ")",
+                                           text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 2, str.tostring(rsi_val, "#.##"),
+                                           text_color=rsi_val > rsi_ob ? color.red : rsi_val < rsi_os ? color.green : color.white,
+                                           bgcolor=color.new(color.black, 60))
+
+    // Row 3 — GP Top
+    table.cell(tbl, 0, 3, "GP 0.618",     text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 3, str.tostring(gp_top, "#.####"),
+                                           text_color=color.green,  bgcolor=color.new(color.black, 60))
+
+    // Row 4 — GP Bot
+    table.cell(tbl, 0, 4, "GP 0.65",      text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 4, str.tostring(gp_bot, "#.####"),
+                                           text_color=color.green,  bgcolor=color.new(color.black, 60))
+
+    // Row 5 — Price in GP?  (FIX #11: uses pre-declared price_in_gp_color)
+    table.cell(tbl, 0, 5, "In GP Zone?",  text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 5, price_in_gp_flag ? "YES ✅" : "NO ❌",
+                                           text_color=color.white,  bgcolor=price_in_gp_color)
+
+    // Row 6 — Signal
+    table.cell(tbl, 0, 6, "Signal",       text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 6, long_signal ? "LONG 🟢" : short_signal ? "SHORT 🔴" : "WAIT ⚪",
+                                           text_color=long_signal ? color.green : short_signal ? color.red : color.gray,
+                                           bgcolor=color.new(color.black, 60))
+
+    // Row 7 — SL
+    table.cell(tbl, 0, 7, "SL",           text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 7, long_signal ? str.tostring(long_sl,  "#.####") :
+                           short_signal ? str.tostring(short_sl, "#.####") : "—",
+                                           text_color=color.red,    bgcolor=color.new(color.black, 60))
+
+    // Row 8 — TP
+    table.cell(tbl, 0, 8, "TP",           text_color=color.silver, bgcolor=color.new(color.black, 60))
+    table.cell(tbl, 1, 8, long_signal ? str.tostring(long_tp,  "#.####") :
+                           short_signal ? str.tostring(short_tp, "#.####") : "—",
+                                           text_color=color.lime,   bgcolor=color.new(color.black, 60))
+
+// ══════════════════════════════════════════════
+//  STRATEGY
+// ══════════════════════════════════════════════
+if long_signal
+    strategy.entry("Long", strategy.long)
+if short_signal
+    strategy.entry("Short", strategy.short)
+strategy.exit("Long Exit", "Long", stop=long_sl, limit=long_tp)
+strategy.exit("Short Exit", "Short", stop=short_sl, limit=short_tp)

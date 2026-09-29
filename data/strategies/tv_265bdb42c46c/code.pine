@@ -1,0 +1,48 @@
+//@version=5
+indicator("LuxAlgo Smart Money Concepts & Supertrend", overlay=true)
+
+// Input Parameters
+atrPeriod = input.int(10, "ATR Period", minval=1)
+factor = input.float(3.0, "Factor", minval=0.5, step=0.5)
+fastLen = input.int(9, "Fast EMA")
+slowLen = input.int(21, "Slow EMA")
+
+// Calculations
+fastEMA = ta.ema(close, fastLen)
+slowEMA = ta.ema(close, slowLen)
+[supertrend, direction] = ta.supertrend(factor, atrPeriod)
+
+// Signals
+buyCond = ta.crossover(fastEMA, slowEMA) and direction < 0
+sellCond = ta.crossunder(fastEMA, slowEMA) and direction >= 0
+
+// Visualization
+plot(fastEMA, "Fast EMA", color=color.blue, linewidth=2)
+plot(slowEMA, "Slow EMA", color=color.orange, linewidth=2)
+upTrend = plot(direction < 0 ? supertrend : na, "Up Trend", color=color.green, linewidth=2)
+downTrend = plot(direction >= 0 ? supertrend : na, "Down Trend", color=color.red, linewidth=2)
+
+plotshape(buyCond, "Buy Signal", shape.triangleup, location.belowbar, color=color.green, size=size.small)
+plotshape(sellCond, "Sell Signal", shape.triangledown, location.abovebar, color=color.red, size=size.small)
+
+
+// ============================================================================
+// PIONEX WEBHOOK AUTO-TRADING ALERTS ADDON
+// ============================================================================
+// Generated for Pionex AP35 Webhook Signal Ingress
+string tv_webhook_secret = "pionex_ap35_secret_2026"
+string tv_symbol = "ETH_USDT"
+string tv_strat_name = "LuxAlgo Smart Money Concepts & Supertrend"
+
+// Dynamic Alert Triggers for TradingView Webhook
+region Pionex Alerts
+if (buyCond)
+    alert('{"secretToken": "' + tv_webhook_secret + '", "symbol": "' + tv_symbol + '", "action": "BUY_LONG", "price": "' + str.tostring(close) + '", "quantity": "0.05", "leverage": 10, "strategyName": "' + tv_strat_name + '"}', alert.freq_once_per_bar_close)
+
+if (sellCond)
+    alert('{"secretToken": "' + tv_webhook_secret + '", "symbol": "' + tv_symbol + '", "action": "SELL_SHORT", "price": "' + str.tostring(close) + '", "quantity": "0.05", "leverage": 10, "strategyName": "' + tv_strat_name + '"}', alert.freq_once_per_bar_close)
+
+// TradingView alertcondition() hooks for manual Alert UI selection
+alertcondition(buyCond, title="Pionex BUY LONG Webhook Alert", message='{"secretToken": "pionex_ap35_secret_2026", "symbol": "ETH_USDT", "action": "BUY_LONG", "price": "{{close}}", "quantity": "0.05", "leverage": 10, "strategyName": "LuxAlgo Smart Money Concepts & Supertrend"}')
+alertcondition(sellCond, title="Pionex SELL SHORT Webhook Alert", message='{"secretToken": "pionex_ap35_secret_2026", "symbol": "ETH_USDT", "action": "SELL_SHORT", "price": "{{close}}", "quantity": "0.05", "leverage": 10, "strategyName": "LuxAlgo Smart Money Concepts & Supertrend"}')
+#endregion

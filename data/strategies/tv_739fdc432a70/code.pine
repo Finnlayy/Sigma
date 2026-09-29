@@ -1,0 +1,125 @@
+//@version=6
+// ============================================================================
+// CIIF Master v1.3 - High Profit Factor Institutional Engine
+// ============================================================================
+strategy(
+     title                  = "CIIF Master v1.3 - High PF Optimized",
+     shorttitle             = "Master v1.3",
+     overlay                = true,
+     pyramiding             = 0,
+     calc_on_every_tick     = false,
+     calc_on_order_fills    = false,
+     process_orders_on_close = true,
+     initial_capital        = 10000,
+     currency               = currency.USD,
+     default_qty_type       = strategy.percent_of_equity,
+     default_qty_value      = 10,
+     commission_type        = strategy.commission.percent,
+     commission_value       = 0.05,
+     slippage               = 2,
+     max_bars_back          = 3000,
+     max_boxes_count        = 120,
+     max_labels_count       = 120,
+     max_lines_count        = 80)
+
+// ============================================================================
+// Inputs
+// ============================================================================
+string groupCore   = "01 Core Filters"
+string groupSignal = "04 Signal Engine"
+string groupRisk   = "05 Risk Management (SL / TP)"
+string groupVisual = "07 Visuals"
+
+bool enableLongs          = input.bool(true, "Enable longs", group=groupCore)
+bool enableShorts         = input.bool(true, "Enable shorts", group=groupCore)
+int  atrLen               = input.int(14, "ATR Length", group=groupCore, minval=1)
+int  fastEmaLen           = input.int(50, "Fast EMA (Trend)", group=groupCore, minval=5)
+int  slowEmaLen           = input.int(200, "Slow EMA (Trend)", group=groupCore, minval=10)
+int  adxLen               = input.int(14, "ADX Length", group=groupCore, minval=1)
+float minAdxThreshold     = input.float(22.0, "Minimum ADX for Trend Strength", group=groupCore, minval=5.0, maxval=50.0)
+
+// Strict Risk Parameters for PF >= 2.0
+float slAtrMult           = input.float(1.2, "Stop Loss ATR Multiplier", group=groupRisk, minval=0.5, maxval=5.0, step=0.1)
+float tpAtrMult           = input.float(3.0, "Take Profit ATR Multiplier (High CRV)", group=groupRisk, minval=1.0, maxval=10.0, step=0.1)
+int   minBarsBetween      = input.int(12, "Min Bars Between Entries (Anti-Overtrading)", group=groupRisk, minval=1, maxval=100)
+
+bool showDashboard        = input.bool(true, "Show Dashboard", group=groupVisual)
+bool showSignals          = input.bool(true, "Show Signal Markers", group=groupVisual)
+
+// ============================================================================
+// Base Indicators & Filters
+// ============================================================================
+float atrValue = ta.atr(atrLen)
+float fastEma  = ta.ema(close, fastEmaLen)
+float slowEma  = ta.ema(close, slowEmaLen)
+[_, _, adxValue] = ta.dmi(adxLen, adxLen)
+
+// Strict Trend & Momentum Conditions
+bool uptrend   = close > fastEma and fastEma > slowEma and adxValue >= minAdxThreshold
+bool downtrend = close < fastEma and fastEma < slowEma and adxValue >= minAdxThreshold
+
+// Volume Filter
+float volMa    = ta.sma(volume, 20)
+float relVol   = volMa > 0.0 ? volume / volMa : 1.0
+bool highVol   = relVol >= 1.1
+
+// ============================================================================
+// Signal Engine
+// ============================================================================
+bool confirmedOK = barstate.isconfirmed
+var int lastEntryBar = na
+bool cooldownOK  = na(lastEntryBar) or bar_index - lastEntryBar >= minBarsBetween
+
+bool longSignal  = enableLongs and confirmedOK and cooldownOK and uptrend and highVol and ta.crossover(close, fastEma)
+bool shortSignal = enableShorts and confirmedOK and cooldownOK and downtrend and highVol and ta.crossunder(close, fastEma)
+
+if longSignal and shortSignal
+    longSignal := false
+    shortSignal := false
+
+// ============================================================================
+// Execution & Risk Management
+// ============================================================================
+int currentDir = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
+
+if longSignal and currentDir <= 0
+    if currentDir < 0
+        strategy.close_all(comment="Reverse to Long")
+    float longSl = close - (atrValue * slAtrMult)
+    float longTp = close + (atrValue * tpAtrMult)
+    strategy.entry("Long", strategy.long, comment="CIIF Long")
+    strategy.exit("Exit Long", "Long", stop=longSl, limit=longTp)
+    lastEntryBar := bar_index
+
+else if shortSignal and currentDir >= 0
+    if currentDir > 0
+        strategy.close_all(comment="Reverse to Short")
+    float shortSl = close + (atrValue * slAtrMult)
+    float shortTp = close - (atrValue * tpAtrMult)
+    strategy.entry("Short", strategy.short, comment="CIIF Short")
+    strategy.exit("Exit Short", "Short", stop=shortSl, limit=shortTp)
+    lastEntryBar := bar_index
+
+// ============================================================================
+// Visuals / Dashboard
+// ============================================================================
+plot(fastEma, "Fast EMA", color=color.teal)
+plot(slowEma, "Slow EMA", color=color.orange)
+
+plotshape(showSignals and longSignal, title="Long Signal", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small)
+plotshape(showSignals and shortSignal, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+var table dash = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 78), border_width=1, border_color=color.gray)
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "CIIF MASTER", text_color=color.white, bgcolor=color.blue)
+    table.cell(dash, 1, 0, "v1.3", text_color=color.white, bgcolor=color.blue)
+    table.cell(dash, 0, 1, "Position", text_color=color.white)
+    table.cell(dash, 1, 1, currentDir == 1 ? "LONG" : currentDir == -1 ? "SHORT" : "FLAT", text_color=currentDir == 1 ? color.lime : currentDir == -1 ? color.red : color.gray)
+    table.cell(dash, 0, 2, "ADX Filter", text_color=color.white)
+    table.cell(dash, 1, 2, str.tostring(adxValue, "#.#"), text_color=adxValue >= minAdxThreshold ? color.lime : color.orange)
+    table.cell(dash, 0, 3, "ATR Value", text_color=color.white)
+    table.cell(dash, 1, 3, str.tostring(atrValue, "#.####"), text_color=color.white)
+    table.cell(dash, 0, 4, "Cooldown", text_color=color.white)
+    table.cell(dash, 1, 4, cooldownOK ? "READY" : "WAIT", text_color=cooldownOK ? color.lime : color.orange)
+    table.cell(dash, 0, 5, "Target CRV", text_color=color.white)
+    table.cell(dash, 1, 5, str.tostring(tpAtrMult / slAtrMult, "#.##") + " : 1", text_color=color.lime)

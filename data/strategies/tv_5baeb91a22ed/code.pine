@@ -1,0 +1,111 @@
+//@version=6
+strategy("Catch the bear", overlay=true, process_orders_on_close=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=0)
+
+// =========================================================================
+// 1. INPUTS & PARAMETER
+// =========================================================================
+// MACD
+int fastLength     = input.int(12, title="MACD Fast Length",   group="MACD Settings")
+int slowLength     = input.int(26, title="MACD Slow Length",   group="MACD Settings")
+int signalLength   = input.int(9,  title="MACD Signal Length", group="MACD Settings")
+
+// Trend & Momentum Filter
+int trendEmaLength = input.int(200, title="Trend EMA Length",  group="Trend & Filter Settings")
+int adxLength      = input.int(14,  title="ADX Smoothing",     group="Trend & Filter Settings")
+float adxThreshold = input.float(20.0, title="ADX Trend Threshold (Sweetspot: 20-25)", group="Trend & Filter Settings")
+
+// Volumen Filter
+int volSmaLength   = input.int(20,  title="Volume SMA Length", group="Volume Settings")
+float volMultiplier= input.float(1.2, title="Volume Multiplier (z.B. 1.2 = 20% über Schnitt)", group="Volume Settings", step=0.1)
+
+// Risiko Management
+int atrLength      = input.int(14,  title="ATR Length",               group="Risk Management")
+float trailMult    = input.float(2.0, title="Trailing Stop Multiplier", group="Risk Management", step=0.1)
+
+// =========================================================================
+// 2. INDIKATOREN & DATEN-BERECHNUNG (Deterministisch)
+// =========================================================================
+// MACD
+float fastEma      = ta.ema(close, fastLength)
+float slowEma      = ta.ema(close, slowLength)
+float macdLine     = fastEma - slowEma
+float signalLine   = ta.ema(macdLine, signalLength)
+
+// Trend EMA
+float trendEma     = ta.ema(close, trendEmaLength)
+
+// ADX (Misst die Stärke eines Trends, unabhängig von der Richtung)
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+bool isTrending    = adx > adxThreshold
+
+// Volumen-Anomalie (Misst, ob das Signal mit Nachdruck erfolgt)
+float volSma       = ta.sma(volume, volSmaLength)
+bool hasVolume     = volume > (volSma * volMultiplier)
+
+// ATR für Trailing Stop
+float atr          = ta.atr(atrLength)
+
+// =========================================================================
+// 3. SIGNAL-LOGIK (Erweitert um Sweet-Spot Filter)
+// =========================================================================
+// Kernbedingungen für Entry
+bool isMacdCrossUp = ta.crossover(macdLine, signalLine)
+bool isMacdCrossDn = ta.crossunder(macdLine, signalLine)
+
+// Long/Short Entry: Preis kreuzt die blaue 200-EMA-Trendlinie (nicht MACD-Cross nach Rally)
+bool priceCrossUp = ta.crossover(close, trendEma)
+bool priceCrossDn = ta.crossunder(close, trendEma)
+
+bool longCond  = priceCrossUp and isTrending and hasVolume
+bool shortCond = priceCrossDn and isTrending and hasVolume
+
+// =========================================================================
+// 4. TRAILING STOP STATE MANAGEMENT
+// =========================================================================
+var float longStop  = na
+var float shortStop = na
+
+float trailOffset = atr * trailMult
+
+// Dynamische Berechnung des Stops, abhängig von der aktuellen Position
+if strategy.position_size > 0
+    longStop  := math.max(nz(longStop, close - trailOffset), close - trailOffset)
+    shortStop := na
+else if strategy.position_size < 0
+    shortStop := math.min(nz(shortStop, close + trailOffset), close + trailOffset)
+    longStop  := na
+else
+    longStop  := na
+    shortStop := na
+
+// =========================================================================
+// 5. ORDER-AUSFÜHRUNG (Repainting-frei)
+// =========================================================================
+if barstate.isconfirmed
+    // --- EXITS ---
+    if strategy.position_size > 0 and close < longStop
+        strategy.close("Long", comment="Exit Long Trail")
+
+    if strategy.position_size < 0 and close > shortStop
+        strategy.close("Short", comment="Exit Short Trail")
+        
+    // --- ENTRIES ---
+    if longCond and strategy.position_size <= 0
+        strategy.entry("Long", strategy.long)
+        longStop := close - trailOffset 
+        
+    if shortCond and strategy.position_size >= 0
+        strategy.entry("Short", strategy.short)
+        shortStop := close + trailOffset
+
+// =========================================================================
+// 6. VISUALISIERUNG
+// =========================================================================
+plot(trendEma, color=color.blue, title="Trend EMA", linewidth=2)
+
+// Trailing Stops visualisieren
+plot(strategy.position_size > 0 ? longStop : na,  color=color.rgb(38, 255, 0), style=plot.style_linebr, title="Long Trailing Stop",  linewidth=2)
+plot(strategy.position_size < 0 ? shortStop : na, color=color.rgb(255, 0, 0),  style=plot.style_linebr, title="Short Trailing Stop", linewidth=2)
+
+// Optionale Hintergrundfärbung, um Chop-Phasen (wo der Algorithmus nicht tradet) zu identifizieren
+bgcolor(not isTrending ? color.new(color.gray, 90) : na, title="Chop Zone (ADX < Threshold)")

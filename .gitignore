@@ -1,4 +1,22 @@
-/data/
+# Runtime / secrets / lake — not Loop-E learning progress
+/data/secrets/
+/data/logs/
+/data/run/
+/data/signals/
+/data/tv_exports/
+/data/tv_jobs/
+/data/lake/
+/data/duckdb/
+/data/parquet/
+/data/*.duckdb
+/data/*.duckdb.wal
+/data/tv_alerts.json
+
+# Learning progress IS versioned:
+#   data/strategies/{id}/  (parameters.csv, pine, meta)
+#   data/academy/          (registry + training-dataset snapshots)
+#   models/*.onnx          (trained Kelly / allocator weights)
+
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -13,8 +31,6 @@ dist/
 *.tmp
 .DS_Store
 
-# §38 — ONNX-Modelle sind Laufzeit-Artefakte (Registry/Training), nicht versioniert
-models/*.onnx
 .vercel
 .env*
 !.env.example

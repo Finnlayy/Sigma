@@ -1,0 +1,106 @@
+//@version=6
+strategy("AutoStrategy - Downside Tasuki Gap [v6] + Alerts + Plots", 
+         overlay = true, 
+         initial_capital = 1000,
+         default_qty_type = strategy.fixed,
+         currency = currency.EUR,
+         pyramiding = 0,
+         commission_type = strategy.commission.percent,
+         commission_value = 0.075)
+
+// ────────────── INPUTS ──────────────
+ChandelierATRMult   = input.float(2.0,  "Chandelier ATR Multiplikator", group="Breakout-Filter")
+TP1_Ratio           = input.float(1.5,  "TakeProfit1 CRV",              group="Risikomanagement")
+TP2_Ratio           = input.float(3.0,  "TakeProfit2 CRV (50% Position)", group="Risikomanagement")
+ATR_Length          = input.int(22,     "ATR Länge",                    group="Indikatoren")
+
+// ── Neue Größen- & Margin-Optionen ──
+usePercentSize      = input.bool(true,  "✅ % Kapital pro Trade verwenden", group="Risikomanagement", tooltip="False = feste Kontraktgröße")
+PositionSizePercent = input.float(3.5,  "% Kapital pro Trade",          group="Risikomanagement", step=0.1)
+fixedQty            = input.int(1,      "Feste Quantity",               group="Risikomanagement", minval=1)
+InitialCapital      = input.float(1000.0, "Startkapital Backtest (EUR)", group="Risikomanagement")
+MarginPerContract   = input.float(80.0,   "Margin pro Kontrakt (EUR)",  group="Risikomanagement")
+Leverage            = input.float(10.0,   "Leverage (für Margin-Berechnung)", group="Risikomanagement", minval=1.0)
+
+// ────────────── INDIKATOREN & PATTERN ──────────────
+atr = ta.atr(ATR_Length)
+
+bearCandle1 = close[2] < open[2]
+bearCandle2 = close[1] < open[1]
+gapDown     = open[1] < close[2]
+bullCandle3 = close > open
+opensInBody = open > close[1] and open < open[1]
+closesInGap = close > open[1] and close < close[2]
+
+downsideTasukiGap = bearCandle1 and bearCandle2 and gapDown and bullCandle3 and opensInBody and closesInGap
+
+plotshape(downsideTasukiGap, "SHORT Signal", location.abovebar, color.red, shape.triangledown, size=size.small)
+
+// ────────────── POSITIONSGRÖSSE (verbessert) ──────────────
+accountSize     = strategy.equity > 0 ? strategy.equity : InitialCapital
+contractValue   = close * 1.0
+
+qtyPercent      = math.floor(accountSize * (PositionSizePercent / 100.0) / contractValue)
+qtyMarginLimit  = math.floor(accountSize * Leverage / MarginPerContract)   // ← verbessert mit Leverage
+
+qtyRaw          = usePercentSize ? qtyPercent : fixedQty
+qty             = math.min(math.max(qtyRaw, 1), qtyMarginLimit)
+
+// ────────────── LEVELS (für Plots & Alerts) ──────────────
+var float slLevel  = na
+var float tp1Level = na
+var float tp2Level = na
+var float lowestSinceEntry = 0.0
+
+// ────────────── ENTRY + TEIL-EXITS + ALERTS ──────────────
+if downsideTasukiGap and strategy.position_size == 0
+    strategy.entry("ShortEntry", strategy.short, qty = qty)
+    lowestSinceEntry := low
+    
+    stopPrice = high + atr * 1.5
+    risk      = stopPrice - close
+    tp1       = close - risk * TP1_Ratio
+    tp2       = close - risk * TP2_Ratio
+    
+    halfQty   = math.max(math.round(qty / 2), 1)
+    
+    slLevel  := stopPrice
+    tp1Level := tp1
+    tp2Level := tp2
+    
+    strategy.exit("Initial SL",  from_entry="ShortEntry", stop=stopPrice)
+    strategy.exit("TP1",         from_entry="ShortEntry", qty=halfQty,  limit=tp1, comment="TP1")
+    strategy.exit("TP2",         from_entry="ShortEntry", qty=qty-halfQty, limit=tp2, comment="TP2")
+    
+    // === ALERTS ===
+    alert("🚨 SHORT ENTRY - Downside Tasuki Gap | Qty: " + str.tostring(qty) + " | SL: " + str.tostring(stopPrice), alert.freq_once_per_bar_close)
+
+// ────────────── CHANDELIER TRAILING STOP + ALERT ──────────────
+if strategy.position_size < 0
+    lowestSinceEntry := math.min(lowestSinceEntry, low)
+    trailStop = lowestSinceEntry + atr * ChandelierATRMult
+    
+    if high >= trailStop
+        strategy.close("ShortEntry", comment="Chandelier Exit")
+        alert("🔴 CHANDELIER EXIT - Short geschlossen | Trail Stop: " + str.tostring(trailStop), alert.freq_once_per_bar_close)
+else
+    lowestSinceEntry := 0.0
+    slLevel := na
+    tp1Level := na
+    tp2Level := na
+
+// ────────────── PLOTS (Linien nur während Position) ──────────────
+plot(strategy.position_size < 0 ? slLevel  : na,  "Initial Stop Loss", color.red,    2, plot.style_linebr)
+plot(strategy.position_size < 0 ? tp1Level : na,  "TP1 (50%)",         color.green,  2, plot.style_linebr)
+plot(strategy.position_size < 0 ? tp2Level : na,  "TP2 (50%)",         color.lime,   2, plot.style_linebr)
+plot(strategy.position_size < 0 ? lowestSinceEntry + atr * ChandelierATRMult : na, 
+     "Chandelier Trailing Stop", color.orange, 2, plot.style_linebr)
+
+// === Zusätzliche Exit-Alerts (TPs & SL) ===
+if strategy.position_size == 0 and strategy.position_size[1] < 0
+    if strategy.closed_trades.exit_comment(strategy.closed_trades - 1) == "TP1"
+        alert("✅ TP1 getroffen (50% Position)", alert.freq_once_per_bar_close)
+    else if strategy.closed_trades.exit_comment(strategy.closed_trades - 1) == "TP2"
+        alert("✅ TP2 getroffen (50% Position)", alert.freq_once_per_bar_close)
+    else if strategy.closed_trades.exit_comment(strategy.closed_trades - 1) == "Initial SL"
+        alert("🛑 Stop Loss getroffen", alert.freq_once_per_bar_close)

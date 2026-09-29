@@ -1,0 +1,27 @@
+//@version=5
+strategy("YouTube Strategy Backtest", overlay=true, initial_capital=1000, currency=currency.EUR, default_qty_type=strategy.cash, default_qty_value=50)
+
+// ===== Beispiel Indikatoren =====
+fastEMA = ta.ema(close, 50)
+slowEMA = ta.ema(close, 200)
+
+plot(fastEMA, color=color.orange)
+plot(slowEMA, color=color.blue)
+
+// ===== Beispiel Entry Regeln =====
+longCondition = ta.crossover(fastEMA, slowEMA)
+shortCondition = ta.crossunder(fastEMA, slowEMA)
+
+// ===== Trades =====
+if longCondition
+    strategy.entry("Long", strategy.long)
+
+if shortCondition
+    strategy.entry("Short", strategy.short)
+
+// ===== Risk Management =====
+stopLossPerc = 2.0
+takeProfitPerc = 4.0
+
+strategy.exit("TP/SL Long", from_entry="Long", loss=stopLossPerc, profit=takeProfitPerc)
+strategy.exit("TP/SL Short", from_entry="Short", loss=stopLossPerc, profit=takeProfitPerc)

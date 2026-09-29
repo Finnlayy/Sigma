@@ -1,0 +1,235 @@
+//@version=6
+indicator("QuantumForexTrader_PIUSDT_Aggressive_1to15m", overlay=true)
+
+// === Inputs ===
+group_analysis    = "=== PIUSDT Quantum Analysis ==="
+historyBars       = input.int(48, "History bars for analysis", group=group_analysis, minval=32, maxval=4096)
+confThreshold     = input.float(0.42, "Minimum confidence", group=group_analysis, step=0.01)
+momentumThreshold = input.float(0.03, "Minimum momentum", group=group_analysis, step=0.01)
+
+group_filters     = "=== PIUSDT Filters ==="
+useEMAfilter      = input.bool(true, "Use EMA Trend Filter", group=group_filters)
+useMTFfilter      = input.bool(false, "Use higher timeframe trend filter", group=group_filters)
+useVolFilter      = input.bool(false, "Use Volume Filter", group=group_filters)
+useATRfilter      = input.bool(false, "Use ATR Volatility Filter", group=group_filters)
+useCandleFilter   = input.bool(false, "Use Candle Body Filter", group=group_filters)
+
+emaLen            = input.int(9, "EMA Length", group=group_filters)
+volLookback       = input.int(20, "Volume SMA Length", group=group_filters)
+volMultiplier     = input.float(0.90, "Min Relative Volume", group=group_filters, step=0.05)
+mtfTf             = input.timeframe("3", "MTF Trend TF", group=group_filters)
+atrLen            = input.int(14, "ATR Length", group=group_filters)
+atrMaLen          = input.int(20, "ATR SMA Length", group=group_filters)
+atrMultiplier     = input.float(0.90, "Min ATR vs ATR-SMA", group=group_filters, step=0.05)
+bodyRatioMin      = input.float(0.30, "Min Candle Body Ratio", group=group_filters, step=0.05)
+
+group_time        = "=== PIUSDT Trading Schedule ==="
+useTimeFilter     = input.bool(false, "Use time filter", group=group_time)
+startHour         = input.int(7, "Start trading hour", group=group_time, minval=0, maxval=23)
+endHour           = input.int(23, "End trading hour", group=group_time, minval=0, maxval=23)
+
+group_signal      = "=== Signal Generation ==="
+signalIntervalMin = input.int(1, "Signal interval (minutes)", group=group_signal, minval=1, maxval=240)
+signalScoreMin    = input.int(1, "Minimum confluence score", group=group_signal, minval=1, maxval=8)
+signalEdgeMin     = input.int(0, "Minimum score edge", group=group_signal, minval=0, maxval=8)
+minMoveAtr        = input.float(0.05, "Min move from last signal (ATR)", group=group_signal, step=0.05)
+memoryDecay       = input.float(0.72, "Memory decay", group=group_signal, minval=0.50, maxval=0.99, step=0.01)
+memoryThreshold   = input.float(0.03, "Memory threshold", group=group_signal, minval=0.01, maxval=1.00, step=0.01)
+includePriceInAlert = input.bool(true, "Include price in webhook", group=group_signal)
+useCloseActionForExit = input.bool(true, "Use close instead of sell", group=group_signal)
+
+
+// === Time filter ===
+inSession() =>
+    if not useTimeFilter
+        true
+    else
+        int h = hour(time, syminfo.timezone)
+        startHour <= endHour ? (h >= startHour and h < endHour) : (h >= startHour or h < endHour)
+
+sessionOK = inSession()
+
+
+// === Quantum Analysis ===
+int maxHist = 4096
+int histLen = historyBars > maxHist ? maxHist : historyBars
+
+float upCount = 0.0
+float downCount = 0.0
+
+for i = 1 to histLen
+    if not na(close[i]) and not na(close[i + 1])
+        float chg = close[i] - close[i + 1]
+        float weight = 1.0 + ((histLen - i) / histLen)
+        if chg > 0
+            upCount += weight
+        else if chg < 0
+            downCount += weight
+
+totalMoves = upCount + downCount
+bullProb   = totalMoves > 0 ? upCount / totalMoves : 0.0
+bearProb   = totalMoves > 0 ? downCount / totalMoves : 0.0
+
+trendDir =
+     bullProb > bearProb ? 1 :
+     bearProb > bullProb ? -1 : 0
+
+stateMomentum =
+     bullProb > bearProb ? (bullProb - bearProb) :
+     bearProb > bullProb ? (bearProb - bullProb) : 0.0
+
+confidence = math.max(bullProb, bearProb)
+confidenceScore = confidence >= confThreshold ? 1 : 0
+momentumScore   = stateMomentum >= momentumThreshold ? 1 : 0
+
+
+// === EMA Trend Filter ===
+emaVal   = ta.ema(close, emaLen)
+emaSlope = emaVal - emaVal[1]
+emaBull  = close > emaVal and emaSlope > 0
+emaBear  = close < emaVal and emaSlope < 0
+
+
+// === MTF Trend Filter ===
+mtfBull = request.security(syminfo.tickerid, mtfTf, close > ta.ema(close, emaLen) and ta.ema(close, emaLen) > ta.ema(close, emaLen)[1])
+mtfBear = request.security(syminfo.tickerid, mtfTf, close < ta.ema(close, emaLen) and ta.ema(close, emaLen) < ta.ema(close, emaLen)[1])
+
+
+// === Volume Filter ===
+volSMA = ta.sma(volume, volLookback)
+volOK  = not na(volSMA) and volume > volSMA * volMultiplier
+
+
+// === ATR Volatility Filter ===
+atrVal  = ta.atr(atrLen)
+atrBase = ta.sma(atrVal, atrMaLen)
+atrOK   = not useATRfilter or (not na(atrBase) and atrVal >= atrBase * atrMultiplier)
+
+
+// === Candle Body Filter ===
+candleRange = math.max(high - low, syminfo.mintick)
+bodyRatio   = math.abs(close - open) / candleRange
+bullCandle  = close > open and bodyRatio >= bodyRatioMin
+bearCandle  = close < open and bodyRatio >= bodyRatioMin
+
+
+// === Signal Interval ===
+var int lastSignalBarIndex = na
+var int lastSignalType = 0
+var float lastSignalPrice = na
+var float qMemory = 0.0
+var array<string> openLongOrderIds = array.new_string()
+var array<string> openShortOrderIds = array.new_string()
+
+chartSecondsRaw = timeframe.in_seconds(timeframe.period)
+chartSeconds    = na(chartSecondsRaw) ? 60 : chartSecondsRaw
+intervalBars    = math.max(1, int(math.ceil(signalIntervalMin * 60.0 / chartSeconds)))
+newCheck        = na(lastSignalBarIndex) ? true : (bar_index - lastSignalBarIndex >= intervalBars)
+
+memoryInput =
+     trendDir == 1 ? (0.08 + stateMomentum * 0.18) :
+     trendDir == -1 ? -(0.08 + stateMomentum * 0.18) : 0.0
+
+qMemory := math.max(-1.0, math.min(1.0, qMemory * memoryDecay + memoryInput))
+
+memoryBias =
+     qMemory > memoryThreshold ? 1 :
+     qMemory < -memoryThreshold ? -1 : 0
+
+preferredDir = trendDir != 0 ? trendDir : memoryBias
+
+
+// === Confluence Score ===
+longScore =
+     (preferredDir == 1 ? 2 : 0) +
+     (trendDir == 1 ? 1 : 0) +
+     (memoryBias == 1 ? 1 : 0) +
+     confidenceScore +
+     momentumScore +
+     ((not useEMAfilter or emaBull) ? 1 : 0) +
+     ((not useMTFfilter or mtfBull) ? 1 : 0) +
+     ((not useVolFilter or volOK) ? 1 : 0) +
+     (atrOK ? 1 : 0) +
+     ((not useCandleFilter or bullCandle) ? 1 : 0)
+
+shortScore =
+     (preferredDir == -1 ? 2 : 0) +
+     (trendDir == -1 ? 1 : 0) +
+     (memoryBias == -1 ? 1 : 0) +
+     confidenceScore +
+     momentumScore +
+     ((not useEMAfilter or emaBear) ? 1 : 0) +
+     ((not useMTFfilter or mtfBear) ? 1 : 0) +
+     ((not useVolFilter or volOK) ? 1 : 0) +
+     (atrOK ? 1 : 0) +
+     ((not useCandleFilter or bearCandle) ? 1 : 0)
+
+
+// === Combined Filter Logic ===
+longEdge  = longScore - shortScore
+shortEdge = shortScore - longScore
+
+longRearmOK =
+     na(lastSignalPrice) or lastSignalType != 1 or close >= lastSignalPrice + atrVal * minMoveAtr
+
+shortRearmOK =
+     na(lastSignalPrice) or lastSignalType != -1 or close <= lastSignalPrice - atrVal * minMoveAtr
+
+allowLong  = sessionOK and newCheck and longRearmOK and longScore >= signalScoreMin and longEdge >= signalEdgeMin
+allowShort = sessionOK and newCheck and shortRearmOK and shortScore >= signalScoreMin and shortEdge >= signalEdgeMin
+
+sigType =
+     allowLong and (longScore > shortScore or (longScore == shortScore and preferredDir == 1)) ? 1 :
+     allowShort and (shortScore > longScore or (shortScore == longScore and preferredDir == -1)) ? -1 : 0
+
+hasTrackedLong = array.size(openLongOrderIds) > 0
+hasTrackedShort = array.size(openShortOrderIds) > 0
+
+bool rawLongSignal = sigType == 1
+bool rawShortSignal = sigType == -1
+
+bool closeShortSignal = useCloseActionForExit and rawLongSignal and hasTrackedShort
+bool closeLongSignal = useCloseActionForExit and rawShortSignal and hasTrackedLong
+bool buySignal = rawLongSignal
+bool sellSignal = rawShortSignal
+
+if buySignal or sellSignal or closeShortSignal or closeLongSignal
+    lastSignalBarIndex := bar_index
+    lastSignalType := rawLongSignal ? 1 : rawShortSignal ? -1 : lastSignalType
+    lastSignalPrice := close
+
+
+// === Visualization ===
+plotshape(buySignal,        title="Buy Open",    style=shape.triangleup,   color=color.new(color.lime, 0),   size=size.small, location=location.belowbar, text="BUY")
+plotshape(sellSignal,       title="Sell Open",   style=shape.triangledown, color=color.new(color.red, 0),    size=size.small, location=location.abovebar, text="SELL")
+plotshape(closeShortSignal, title="Close Short", style=shape.xcross,       color=color.new(color.orange, 0), size=size.tiny,  location=location.abovebar, text="X-S")
+plotshape(closeLongSignal,  title="Close Long",  style=shape.xcross,       color=color.new(color.orange, 0), size=size.tiny,  location=location.belowbar, text="X-L")
+
+
+// === Alerts ===
+pionexOrderPrefix = "QF_PIUSDT_AGG"
+
+makeOrderId(action) =>
+    pionexOrderPrefix + "_" + timeframe.period + "_" + str.tostring(time) + "_" + str.tostring(bar_index) + "_" + action
+
+makeAlertMessage(action, orderId) =>
+    priceField = includePriceInAlert ? ',"price":' + str.tostring(close, format.mintick) : ""
+    '{"action":"' + action + '","symbol":"' + syminfo.ticker + '"' + priceField + ',"order_id":"' + orderId + '"}'
+
+if closeShortSignal
+    string exitShortOrderId = array.shift(openShortOrderIds)
+    alert(makeAlertMessage("close", exitShortOrderId), alert.freq_once_per_bar_close)
+
+if closeLongSignal
+    string exitLongOrderId = array.shift(openLongOrderIds)
+    alert(makeAlertMessage("close", exitLongOrderId), alert.freq_once_per_bar_close)
+
+if buySignal
+    string entryOrderId = makeOrderId("buy")
+    array.push(openLongOrderIds, entryOrderId)
+    alert(makeAlertMessage("buy", entryOrderId), alert.freq_once_per_bar_close)
+
+if sellSignal
+    string entryOrderId = makeOrderId("sell")
+    array.push(openShortOrderIds, entryOrderId)
+    alert(makeAlertMessage("sell", entryOrderId), alert.freq_once_per_bar_close)

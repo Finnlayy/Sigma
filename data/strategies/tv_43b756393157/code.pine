@@ -1,0 +1,341 @@
+//@version=6
+strategy("VEPM Strategy v1.0", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500, default_qty_type=strategy.cash, default_qty_value=1000, commission_value=0.05, commission_type=strategy.commission.percent, slippage=1)
+
+atrLen         = input.int(14,   "ATR Length",               group="VEPM Core", minval=1)
+atrMult        = input.float(1.5, "ATR Exceedance Multiplier", group="VEPM Core", minval=0.1, step=0.1)
+shortWindow    = input.int(20,   "Short-Term Frequency Window", group="VEPM Core", minval=5)
+baselineWindow = input.int(200,  "Baseline Frequency Window", group="VEPM Core", minval=50)
+zSens          = input.float(1.5, "Z-Score Sensitivity",      group="VEPM Core", minval=0.1, step=0.1)
+
+// Signal Gates (relaxed for >=2 trades/day)
+serialBreakMin = input.float(45.0, "Min Serial Break Prob %", group="Signal Gates", minval=0, maxval=100, step=5)
+clusterEdgeMin = input.float(-0.1, "Min Clustering Edge",     group="Signal Gates", minval=-1, maxval=1, step=0.1)
+useRegimeFilter= input.bool(true,  "Block Quiet Regime",      group="Signal Gates")
+trendEmaLen    = input.int(21,     "Trend EMA Length",        group="Signal Gates", minval=1)
+
+// DER & Hurst
+derLookback    = input.int(20,  "DER Lookback",             group="DER & Hurst", minval=5)
+hurstLen       = input.int(50,  "Hurst Window",             group="DER & Hurst", minval=10)
+useDerFilter   = input.bool(true, "Use DER Filter",          group="DER & Hurst")
+derMin         = input.float(0.35, "Min DER",                group="DER & Hurst", minval=0, maxval=1, step=0.05)
+useHurstFilter = input.bool(false, "Use Hurst Filter",       group="DER & Hurst")
+hurstMin       = input.float(0.48, "Min Hurst",              group="DER & Hurst", minval=0, maxval=1, step=0.01)
+hurstMax       = input.float(0.52, "Max Hurst",              group="DER & Hurst", minval=0, maxval=1, step=0.01)
+
+// Kelly Sizing
+useKelly       = input.bool(true,  "Use Kelly Sizing",       group="Kelly Sizing")
+kellyLookback  = input.int(50,     "Kelly Trade History",    group="Kelly Sizing", minval=10)
+kellyScale     = input.float(0.5,  "Kelly Scaling",          group="Kelly Sizing", minval=0.1, maxval=1, step=0.1)
+maxPosPct      = input.float(10.0, "Max Position % Equity",  group="Kelly Sizing", minval=0.5, maxval=50, step=0.5)
+minPosPct      = input.float(1.0,  "Min Position % Equity",  group="Kelly Sizing", minval=0.1, maxval=10, step=0.1)
+fixedPosPct    = input.float(5.0,  "Fixed Position % (if Kelly off)", group="Kelly Sizing", minval=0.1, maxval=50, step=0.1)
+
+// Risk & Exit
+slAtrMult      = input.float(1.5,  "Initial SL ATR Mult",    group="Risk & Exit", minval=0.5, step=0.1)
+maxSlAtrMult   = input.float(2.0,  "Max SL ATR Mult",        group="Risk & Exit", minval=0.5, step=0.1)
+tp1Mode        = input.string("Fractal", "TP1 Mode",         group="Risk & Exit", options=["Fractal", "ATR"])
+tp2AtrMult     = input.float(1.5,  "TP2 ATR Mult",           group="Risk & Exit", minval=0.5, step=0.1)
+tp3AtrMult     = input.float(2.5,  "TP3 ATR Mult",           group="Risk & Exit", minval=0.5, step=0.1)
+tp1ClosePct    = input.float(30.0, "TP1 Close %",            group="Risk & Exit", minval=0, maxval=100, step=5)
+tp2ClosePct    = input.float(30.0, "TP2 Close %",            group="Risk & Exit", minval=0, maxval=100, step=5)
+trailAtrMult   = input.float(1.5,  "Trail Distance ATR Mult", group="Risk & Exit", minval=0.5, step=0.1)
+trailTightMult = input.float(1.0,  "Tight Trail ATR Mult",   group="Risk & Exit", minval=0.3, step=0.1)
+trailActivate  = input.float(1.0,  "Trail Activation ATR",   group="Risk & Exit", minval=0.1, step=0.1)
+useVolTrail    = input.bool(true,  "Use Volatility Trail",   group="Risk & Exit")
+
+// Visuals
+showAtrBands   = input.bool(true,  "Show ATR Bands",         group="Visuals")
+showRegimeBoxes= input.bool(true,  "Show Regime Boxes",      group="Visuals")
+showSignificance=input.bool(true,  "Show Significance Dots", group="Visuals")
+showDashboard  = input.bool(true,  "Show Dashboard",         group="Visuals")
+
+// Pionex Webhook
+pionexUUID     = input.string("",   "Pionex Signal Bot UUID", group="Pionex Webhook")
+useWebhook     = input.bool(false,  "Enable Webhook Alerts",  group="Pionex Webhook")
+
+// ============================================================================
+// === CALCULATIONS ===
+// ============================================================================
+
+// --- ATR & True Range ---
+atr = ta.atr(atrLen)
+tr  = math.max(high - low, math.abs(high - close[1]), math.abs(low - close[1]))
+
+// --- ATR Bands ---
+upperBand = close[1] + atr * atrMult
+lowerBand = close[1] - atr * atrMult
+
+// --- Exceedance Detection ---
+bool exceedance = tr > atr * atrMult or high > upperBand or low < lowerBand
+
+// --- Frequency Metrics ---
+float shortFreq = mathta.sum(exceedance ? 1.0 : 0.0, shortWindow) / shortWindow * 100.0
+float baseFreq  = ta.sum(exceedance ? 1.0 : 0.0, baselineWindow) / baselineWindow * 100.0
+float freqDelta = shortFreq - baseFreq
+
+// --- Z-Score ---
+float baseStd   = ta.stdev(shortFreq, baselineWindow)
+float zScore    = baseStd > 0 ? (shortFreq - baseFreq) / baseStd : 0.0
+
+// --- Serial Break Probability ---
+bool serialBreak   = exceedance and exceedance[1]
+float serialCount  = ta.sum(serialBreak ? 1.0 : 0.0, baselineWindow)
+float exceedCount  = ta.sum(exceedance ? 1.0 : 0.0, baselineWindow)
+float serialBreakProb = exceedCount > 1 ? serialCount / (exceedCount - 1.0) * 100.0 : 0.0
+
+// --- Clustering Edge (Lag-1 Autocorrelation) ---
+float excFloat = exceedance ? 1.0 : 0.0
+float meanExc  = ta.sma(excFloat, baselineWindow)
+float num      = 0.0
+float den      = 0.0
+for i = 0 to baselineWindow - 2
+    float xi   = excFloat[i] - meanExc
+    float xi1  = excFloat[i+1] - meanExc
+    num := num + xi * xi1
+    den := den + xi * xi
+float clusterEdge = den > 0 ? num / den : 0.0
+
+// --- Regime Classification ---
+int regime = 0 // 0=Quiet, 1=Normal, 2=High-Vol
+regime := zScore < -zSens ? 0 : zScore > zSens ? 2 : 1
+
+// --- DER (Directional Efficiency Ratio) ---
+float netDisp  = math.abs(close - close[derLookback])
+float totalDist= 0.0
+for i = 0 to derLookback - 1
+    totalDist := totalDist + math.abs(close[i] - close[i+1])
+float der = totalDist > 0 ? netDisp / totalDist : 0.5
+
+// --- Hurst Exponent (Simplified R/S) ---
+float hurst = 0.5
+if bar_index >= hurstLen
+    float[] rets = array.new_float(0)
+    for i = 0 to hurstLen - 1
+        array.push(rets, (close[i] - close[i+1]) / close[i+1])
+    float m = array.avg(rets)
+    float maxCum = -1e10
+    float minCum = 1e10
+    float cum = 0.0
+    for i = 0 to hurstLen - 1
+        cum := cum + (array.get(rets, i) - m)
+        maxCum := math.max(maxCum, cum)
+        minCum := math.min(minCum, cum)
+    float s = ta.stdev(array.avg(rets), hurstLen) * math.sqrt(hurstLen)
+    float rsVal = s > 0 ? (maxCum - minCum) / s : 1.0
+    hurst := math.log(rsVal + 1e-10) / math.log(hurstLen)
+
+// --- Trend Bias ---
+float emaTrend = ta.ema(close, trendEmaLen)
+
+// ============================================================================
+// === SIGNAL LOGIC ===
+// ============================================================================
+
+bool isQuiet   = regime == 0
+bool isNormal  = regime == 1
+bool isHighVol = regime == 2
+
+bool regimeOK  = not useRegimeFilter or not isQuiet
+bool zOK       = zScore > 0.5
+bool sbOK      = serialBreakProb > serialBreakMin
+bool ceOK      = clusterEdge > clusterEdgeMin
+bool derOK     = not useDerFilter or der > derMin
+bool hurstOK   = not useHurstFilter or (hurst >= hurstMin and hurst <= hurstMax)
+
+bool longCond  = regimeOK and zOK and sbOK and ceOK and derOK and hurstOK and close > emaTrend
+bool shortCond = regimeOK and zOK and sbOK and ceOK and derOK and hurstOK and close < emaTrend
+
+// Cooldown: max 1 trade per bar
+bool inTrade   = strategy.position_size != 0
+
+// ============================================================================
+// === KELLY POSITION SIZING (Simplified for Pine Script) ===
+// ============================================================================
+
+// Track recent trade performance manually
+var float winSum = 0.0
+var float lossSum = 0.0
+var int winCount = 0
+var int lossCount = 0
+var int lastClosedTrade = 0
+
+// When a new trade closes, record it
+if strategy.closedtrades > lastClosedTrade
+    float p = strategy.closedtrades.profit
+    if p > 0
+        winSum := winSum + p
+        winCount := winCount + 1
+    else
+        lossSum := lossSum + math.abs(p)
+        lossCount := lossCount + 1
+    lastClosedTrade := strategy.closedtrades
+
+// Reset if lookback exceeded (approximate)
+if winCount + lossCount > kellyLookback * 2
+    winSum := 0.0
+    lossSum := 0.0
+    winCount := 0
+    lossCount := 0
+
+float kellySize = fixedPosPct
+if useKelly and (winCount + lossCount) >= math.min(10, kellyLookback)
+    float wr = (winCount + lossCount) > 0 ? winCount / (winCount + lossCount) : 0.5
+    float aw = winCount > 0 ? winSum / winCount : 1.0
+    float al = lossCount > 0 ? lossSum / lossCount : 1.0
+    float kelly = al > 0 ? (wr - ((1.0 - wr) / (aw / al))) : 0.0
+    kellySize := math.max(minPosPct, math.min(maxPosPct, kelly * kellyScale * 100.0))
+else
+    kellySize := fixedPosPct
+
+// DER boost/penalty
+if der > 0.7
+    kellySize := math.min(maxPosPct, kellySize * 1.5)
+else if der < 0.4
+    kellySize := math.max(minPosPct, kellySize * 0.5)
+
+// Regime sizing
+if isNormal
+    kellySize := math.max(minPosPct, kellySize * 0.7)
+else if isHighVol
+    kellySize := math.min(maxPosPct, kellySize * 1.2)
+
+// ============================================================================
+// === EXIT LOGIC ===
+// ============================================================================
+
+// Fractal detection
+float swingHigh = ta.pivothigh(high, 5, 5)
+float swingLow  = ta.pivotlow(low, 5, 5)
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+if not na(swingHigh)
+    lastSwingHigh := swingHigh
+if not na(swingLow)
+    lastSwingLow := swingLow
+
+// TP levels (recalculated each bar based on position)
+var float entryPrice = na
+var float tp1Level = na
+var float tp2Level = na
+var float tp3Level = na
+var float slLevel  = na
+var float trailLevel = na
+
+// On entry, set levels
+if strategy.position_size > 0 and strategy.position_size[1] == 0
+    entryPrice := strategy.position_avg_price
+    tp1Level := tp1Mode == "Fractal" and not na(lastSwingHigh) ? lastSwingHigh : entryPrice + atr * tp2AtrMult
+    tp2Level := entryPrice + atr * tp2AtrMult
+    tp3Level := entryPrice + atr * tp3AtrMult
+    slLevel := entryPrice - atr * slAtrMult
+    slLevel := math.max(slLevel, entryPrice - atr * maxSlAtrMult)
+    trailLevel := na
+else if strategy.position_size < 0 and strategy.position_size[1] == 0
+    entryPrice := strategy.position_avg_price
+    tp1Level := tp1Mode == "Fractal" and not na(lastSwingLow) ? lastSwingLow : entryPrice - atr * tp2AtrMult
+    tp2Level := entryPrice - atr * tp2AtrMult
+    tp3Level := entryPrice - atr * tp3AtrMult
+    slLevel := entryPrice + atr * slAtrMult
+    slLevel := math.min(slLevel, entryPrice + atr * maxSlAtrMult)
+    trailLevel := na
+
+// Update trailing stop
+if useVolTrail and strategy.position_size > 0 and not na(entryPrice)
+    float profitAtr = (close - entryPrice) / atr
+    if profitAtr >= trailActivate
+        float newTrail = close - (isNormal ? atr * trailTightMult : atr * trailAtrMult)
+        if na(trailLevel) or newTrail > trailLevel
+            trailLevel := newTrail
+else if useVolTrail and strategy.position_size < 0 and not na(entryPrice)
+    float profitAtr = (entryPrice - close) / atr
+    if profitAtr >= trailActivate
+        float newTrail = close + (isNormal ? atr * trailTightMult : atr * trailAtrMult)
+        if na(trailLevel) or newTrail < trailLevel
+            trailLevel := newTrail
+
+// Effective SL
+float effSL = na
+if strategy.position_size > 0
+    if not na(trailLevel)
+        effSL := math.max(trailLevel, slLevel)
+    else
+        effSL := slLevel
+else if strategy.position_size < 0
+    if not na(trailLevel)
+        effSL := math.min(trailLevel, slLevel)
+    else
+        effSL := slLevel
+
+// ============================================================================
+// === STRATEGY ORDERS ===
+// ============================================================================
+
+// Entry
+if longCond and not inTrade
+    strategy.entry("Long", strategy.long, qty=strategy.equity * kellySize / 100 / close)
+
+if shortCond and not inTrade
+    strategy.entry("Short", strategy.short, qty=strategy.equity * kellySize / 100 / close)
+
+// Exits
+if strategy.position_size > 0
+    strategy.exit("TP1", "Long", limit=tp1Level, qty_percent=tp1ClosePct, comment_profit="TP1")
+    strategy.exit("TP2", "Long", limit=tp2Level, qty_percent=tp2ClosePct, comment_profit="TP2")
+    strategy.exit("TP3_SL", "Long", limit=tp3Level, stop=effSL, comment_profit="TP3", comment_loss="SL")
+else if strategy.position_size < 0
+    strategy.exit("TP1", "Short", limit=tp1Level, qty_percent=tp1ClosePct, comment_profit="TP1")
+    strategy.exit("TP2", "Short", limit=tp2Level, qty_percent=tp2ClosePct, comment_profit="TP2")
+    strategy.exit("TP3_SL", "Short", limit=tp3Level, stop=effSL, comment_profit="TP3", comment_loss="SL")
+
+// ============================================================================
+// === PIONEX WEBHOOK ALERTS ===
+// ============================================================================
+
+string alertMsg = ""
+if useWebhook and pionexUUID != ""
+    if longCond
+        alertMsg := '{"uuid":"' + pionexUUID + '","action":"open_long","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"time":' + str.tostring(time) + '}'
+    else if shortCond
+        alertMsg := '{"uuid":"' + pionexUUID + '","action":"open_short","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"time":' + str.tostring(time) + '}'
+
+if alertMsg != ""
+    alert(alertMsg, alert.freq_once_per_bar_close)
+
+// ============================================================================
+// === PLOTTING ===
+// ============================================================================
+
+// ATR Bands
+plot(showAtrBands ? upperBand : na, "Upper Band", color=color.new(color.red, 80), style=plot.style_line)
+plot(showAtrBands ? lowerBand : na, "Lower Band", color=color.new(color.green, 80), style=plot.style_line)
+
+// Significance dots
+plotshape(showSignificance and exceedance, "Exceedance", style=shape.circle, location=location.top, color=color.orange, size=size.tiny)
+
+// Regime Boxes
+bgcolor(showRegimeBoxes and isQuiet ? color.new(color.gray, 90) : na)
+bgcolor(showRegimeBoxes and isNormal ? color.new(color.blue, 92) : na)
+bgcolor(showRegimeBoxes and isHighVol ? color.new(color.red, 92) : na)
+
+// Dashboard
+if showDashboard
+    var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 10), frame_color=color.gray, frame_width=1)
+    table.cell(dash, 0, 0, "Regime", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, isQuiet ? "Quiet" : isNormal ? "Normal" : "High-Vol", text_color=isHighVol ? color.red : isNormal ? color.blue : color.gray, text_size=size.small)
+    table.cell(dash, 0, 1, "Z-Score", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(zScore, "#.##"), text_color=zScore > zSens ? color.red : color.white, text_size=size.small)
+    table.cell(dash, 0, 2, "Exceed Freq", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(shortFreq, "#.0") + "%", text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 3, "Serial Break", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(serialBreakProb, "#.0") + "%", text_color=serialBreakProb > serialBreakMin ? color.green : color.white, text_size=size.small)
+    table.cell(dash, 0, 4, "Cluster Edge", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, str.tostring(clusterEdge, "#.00"), text_color=clusterEdge > 0 ? color.green : color.red, text_size=size.small)
+    table.cell(dash, 0, 5, "DER", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, str.tostring(der, "#.00"), text_color=der > 0.5 ? color.green : color.white, text_size=size.small)
+    table.cell(dash, 0, 6, "Position", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 6, str.tostring(kellySize, "#.0") + "%", text_color=color.yellow, text_size=size.small)
+
+// ============================================================================
+// === END ===
+// ============================================================================
+

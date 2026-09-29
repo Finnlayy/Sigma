@@ -1,0 +1,119 @@
+//@version=6
+strategy("BB Mean Reversion Scalper", overlay = true, calc_on_every_tick = true, process_orders_on_close = true, margin_long = 100, margin_short = 100, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+
+// =========================================================================
+// 1. INPUTS & PARAMETER
+// =========================================================================
+grp_bb = "Bollinger Bands Setup"
+bbLength = input.int(20, title="BB Length", group=grp_bb)
+bbMult   = input.float(2.0, title="BB Deviation", group=grp_bb)
+
+grp_risk = "Risk Management (in % vom Einstiegspreis)"
+slPerc       = input.float(0.5, title="Hard Stop Loss (%)", step=0.1, group=grp_risk)
+trailActPerc = input.float(0.2, title="Trailing Activation (%)", step=0.1, group=grp_risk)
+trailOffPerc = input.float(0.1, title="Trailing Offset (%)", step=0.05, group=grp_risk)
+
+grp_filters = "Filter (Drawdown-Schutz)"
+useRsiFilter = input.bool(false, title="Nutze RSI Filter (Standard: Aus für mehr Frequenz)", group=grp_filters)
+rsiLen       = input.int(14, title="RSI Length", group=grp_filters)
+useAdxFilter = input.bool(true, title="Nutze ADX Regime-Filter (ADX < 25)", group=grp_filters)
+adxLen       = input.int(14, title="ADX Length", group=grp_filters)
+useAtrStop   = input.bool(false, title="Nutze ATR-basierten Stop Loss", group=grp_filters)
+atrMult      = input.float(1.5, title="ATR SL Multiplikator", group=grp_filters)
+
+// =========================================================================
+// 2. GLOBALE INDIKATOR-BERECHNUNGEN
+// =========================================================================
+sma20 = ta.sma(close, bbLength)
+dev   = bbMult * ta.stdev(close, bbLength)
+lowerBand = sma20 - dev
+upperBand = sma20 + dev
+
+rsiValue = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adxValue] = ta.dmi(adxLen, adxLen)
+atrValue = ta.atr(14)
+
+// =========================================================================
+// 3. FILTER-LOGIK (Vorausschauend für Resting Orders)
+// =========================================================================
+// WICHTIG: Wir nutzen den Wert der vorherigen Kerze [1], da die Limit-Order 
+// im Voraus in den Markt gelegt wird, BEVOR die aktuelle Kerze das Band berührt.
+// Die RSI-Schwellen wurden auf 40/60 entschärft, um weniger Chancen liegen zu lassen.
+bool rsiLongOk  = useRsiFilter? (rsiValue[1] < 40) : true 
+bool rsiShortOk = useRsiFilter? (rsiValue[1] > 60) : true
+bool adxOk      = useAdxFilter? (adxValue[1] < 25) : true
+
+bool isLong  = strategy.position_size > 0
+bool isShort = strategy.position_size < 0
+
+// =========================================================================
+// 4. PROAKTIVE AUSFÜHRUNG (Resting Limit Orders)
+// =========================================================================
+// Legt die Orders VOR der Preisberührung genau auf die Bänder.
+if adxOk
+    if rsiLongOk and not isLong
+        strategy.entry("Long", strategy.long, limit = lowerBand)
+    else
+        strategy.cancel("Long")
+        
+    if rsiShortOk and not isShort
+        strategy.entry("Short", strategy.short, limit = upperBand)
+    else
+        strategy.cancel("Short")
+else
+    // Löscht alle ausstehenden Orders, wenn der Markt in einen Trend übergeht
+    strategy.cancel("Long")
+    strategy.cancel("Short")
+
+// =========================================================================
+// 5. RISIKOMANAGEMENT: PRECISION SCALING & TRAILING EXIT
+// =========================================================================
+float minTick = syminfo.mintick > 0? syminfo.mintick : 0.01
+float posPrice = strategy.position_avg_price > 0? strategy.position_avg_price : close
+
+int slTicksPerc   = math.round((posPrice * (slPerc / 100)) / minTick)
+int slTicksAtr    = math.round((atrValue * atrMult) / minTick)
+int finalSlTicks  = useAtrStop? slTicksAtr : slTicksPerc
+
+int trailActTicks = math.round((posPrice * (trailActPerc / 100)) / minTick)
+int trailOffTicks = math.round((posPrice * (trailOffPerc / 100)) / minTick)
+
+if isLong
+    strategy.exit("Exit Long", from_entry="Long", loss=finalSlTicks, trail_points=trailActTicks, trail_offset=trailOffTicks)
+
+if isShort
+    strategy.exit("Exit Short", from_entry="Short", loss=finalSlTicks, trail_points=trailActTicks, trail_offset=trailOffTicks)
+
+// =========================================================================
+// 6. DASHBOARD (UI)
+// =========================================================================
+var table dashTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 70), border_width=1, border_color=color.gray)
+
+if barstate.islast
+    table.cell(dashTable, 0, 0, "Performance Metrik", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashTable, 1, 0, "Wert", text_color=color.white, text_halign=text.align_right)
+    
+    int totalClosed = strategy.closedtrades
+    int totalWins   = strategy.wintrades
+    float winRate   = totalClosed > 0? (totalWins / totalClosed) * 100 : 0.0
+    table.cell(dashTable, 0, 1, "Win Rate", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashTable, 1, 1, str.tostring(winRate, "#.##") + " %", text_color=winRate > 50? color.green : color.red, text_halign=text.align_right)
+    
+    float grossProf    = strategy.grossprofit
+    float grossLoss    = strategy.grossloss
+    float profitFactor = grossLoss > 0? (grossProf / grossLoss) : (grossProf > 0? 99.99 : 0.0)
+    table.cell(dashTable, 0, 2, "Profit Factor", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashTable, 1, 2, str.tostring(profitFactor, "#.##"), text_color=profitFactor >= 1.5? color.green : color.orange, text_halign=text.align_right)
+    
+    float netPnL   = strategy.netprofit
+    color pnlColor = netPnL > 0? color.green : color.red
+    table.cell(dashTable, 0, 3, "Net Profit", text_color=color.white, text_halign=text.align_left)
+    table.cell(dashTable, 1, 3, str.tostring(netPnL, "#.##"), text_color=pnlColor, text_halign=text.align_right)
+
+// =========================================================================
+// 7. VISUALISIERUNG
+// =========================================================================
+plot(sma20, color=color.new(color.blue, 0), title="BB Basis")
+p_lower = plot(lowerBand, color=color.new(color.green, 50), title="BB Lower")
+p_upper = plot(upperBand, color=color.new(color.red, 50), title="BB Upper")
+fill(p_upper, p_lower, color=color.new(color.blue, 95), title="BB Background")

@@ -1,0 +1,2 @@
+//@version=6
+strategy("CleanTradeQuantum v8 - MTF OB Quantum Refactor", overlay=true)

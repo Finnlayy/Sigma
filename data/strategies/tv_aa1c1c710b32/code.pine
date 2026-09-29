@@ -1,0 +1,25 @@
+//@version=6
+// BPRC PRO Strategy — AI Manager Edition
+// Adapted from Projekt 2 / BPRC_PRO_minimal_working_alerts.pine
+strategy("BPRC PRO - AI Manager Edition", overlay=true,
+         calc_on_every_tick=false, process_orders_on_close=true,
+         initial_capital=100000, default_qty_type=strategy.percent_of_equity,
+         default_qty_value=5, margin_long=10, margin_short=10, max_labels_count=50)
+
+// Webhook
+string bot_uuid = input.string("", "Pionex Signal Bot UUID")
+
+// Core Engine Parameters
+int   in_channel_len = input.int(20,   "Channel Length")
+float in_bp_mult     = input.float(2.0, "Breakout Multiplier (BP)")
+float in_r_mult      = input.float(0.5, "Reload Multiplier (R)")
+float in_vol_norm    = input.float(1.2, "Vol/Mom Normalization Threshold")
+int   in_req_align   = input.int(70,   "Required MTF Alignment %")
+bool  in_use_mtf     = input.bool(true, "MTF Filter?")
+float in_sl_atr_mult = input.float(1.5, "Stop Loss ATR Multiplier")
+float in_tp_atr_mult = input.float(1.0, "Take Profit ATR Multiplier")
+bool  in_alternating = input.bool(true, "Enforce Alternating Signals")
+
+// Webhook Payload (Pionex Signal Bot compliant)
+f_pionex_payload() =>
+    "{"data":{"action":"{{strategy.order.action}}","contracts":"{{strategy.order.contracts}}","position_size":"{{strategy.position_size}}"},"price":"{{close}}","signal_param":"{}","signal_type":"" + bot_uuid + "","symbol":"{{ticker}}","time":"{{timenow}}"}"

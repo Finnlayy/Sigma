@@ -1,0 +1,706 @@
+//@version=6
+// ============================================================================
+// CleanTradeQuantum Refactored v8.0 — 5m SMC OB/PD Quantum Strategy
+// Autonomous refactor from PDF-exported CleanTradeQuantum v7.2.
+// Core design:
+// - 5m execution chart
+// - 15m confirmed Smart-Money-style Order Blocks
+// - 15m Premium/Discount dealing range
+// - No fixed TP/SL as primary exits
+// - Opposite signal closes current position, then reverses after flat by default
+// - Allows up to 2 stacked entries in same direction
+// - Non-repainting MTF calls via lookahead_off and confirmed-bar gating
+// ============================================================================
+strategy(
+     title="CleanTradeQuantum Refactored v8.0 — SMC OB/PD Quantum",
+     overlay=true,
+     pyramiding=2,
+     initial_capital=1000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=50,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=1,
+     process_orders_on_close=true,
+     calc_on_every_tick=false,
+     calc_on_order_fills=true,
+     max_bars_back=5000,
+     max_boxes_count=150,
+     max_lines_count=150,
+     max_labels_count=150
+)
+
+// ============================================================================
+// MODULE A — CORE CONFIG
+// ============================================================================
+
+groupCore      = "Core Settings"
+groupMTF       = "MTF Settings"
+groupStructure = "Market Structure"
+groupOB        = "Order Blocks"
+groupPD        = "Premium / Discount"
+groupLiquidity = "Liquidity / Imbalance"
+groupQuantum   = "Quantum / Binary Engine"
+groupSignals   = "Signal Engine"
+groupTrade     = "Trade Management"
+groupAlerts    = "Pionex / Alert Payload"
+groupVisual    = "Visuals / Debug"
+
+// --- Core
+chartTfWarning      = input.bool(true, "Warn if chart is not 5m", group=groupCore)
+entryOnConfirmedBar = input.bool(true, "Only trigger entries on confirmed 5m bars", group=groupCore)
+
+// --- MTF
+htfTf      = input.timeframe("15", "HTF for OB / Premium-Discount", group=groupMTF)
+htfAtrLen  = input.int(14, "HTF ATR length", minval=1, maxval=200, group=groupMTF)
+
+// --- Market Structure
+swingLen            = input.int(3, "HTF swing pivot length", minval=2, maxval=20, group=groupStructure)
+displacementAtrMult = input.float(0.75, "Displacement body ATR multiplier", minval=0.10, maxval=5.00, step=0.05, group=groupStructure)
+requireStructureBias = input.bool(true, "Require HTF structure bias alignment", group=groupStructure)
+allowChochReversal   = input.bool(true, "Allow CHoCH reversal against previous bias", group=groupStructure)
+
+// --- Order Blocks
+obSearchBars       = input.int(8, "Search bars for last opposite candle", minval=1, maxval=30, group=groupOB)
+useBodyOrderBlock  = input.bool(false, "Use candle body instead of full wick for OB zone", group=groupOB)
+maxActiveOB        = input.int(6, "Max active OBs per side", minval=1, maxval=20, group=groupOB)
+obMaxAgeBars       = input.int(240, "Max OB age on 5m bars", minval=20, maxval=2000, group=groupOB)
+obInvalidationMode = input.string("Close", "OB invalidation mode", options=["Close", "Wick"], group=groupOB)
+requireOBRetest    = input.bool(true, "Require active OB retest for entry", group=groupOB)
+requireRejection   = input.bool(true, "Require rejection candle on OB retest", group=groupOB)
+obProximityAtr     = input.float(0.50, "OB proximity ATR for classifier", minval=0.05, maxval=5.00, step=0.05, group=groupOB)
+
+// --- Premium / Discount
+pdMode = input.string("Neutral Allowed", "Premium/Discount filter", options=["Strict", "Neutral Allowed", "Off"], group=groupPD)
+pdNeutralPct = input.float(0.05, "Neutral band around equilibrium", minval=0.00, maxval=0.25, step=0.01, group=groupPD)
+
+// --- Liquidity / Imbalance
+useLiquidityConfluence = input.bool(true, "Use liquidity/FVG as confluence", group=groupLiquidity)
+minLiquidityConfluence = input.int(1, "Minimum liquidity confluence points", minval=0, maxval=3, group=groupLiquidity)
+sweepLookback          = input.int(10, "Liquidity sweep lookback", minval=3, maxval=100, group=groupLiquidity)
+fvgMaxAgeBars          = input.int(12, "Recent FVG max age bars", minval=1, maxval=100, group=groupLiquidity)
+fvgMinAtrPct           = input.float(0.05, "Minimum FVG size as ATR fraction", minval=0.00, maxval=2.00, step=0.01, group=groupLiquidity)
+
+// --- Quantum / Binary Engine
+useQuantumFilter = input.bool(true, "Use Quantum/Binary confidence filter", group=groupQuantum)
+quantumThreshold = input.float(18.0, "Minimum directional quantum score", minval=0.0, maxval=100.0, step=1.0, group=groupQuantum)
+minConfidence    = input.float(55.0, "Minimum confidence score", minval=0.0, maxval=100.0, step=1.0, group=groupQuantum)
+trendLen         = input.int(34, "Trend EMA length", minval=1, maxval=300, group=groupQuantum)
+rsiLen           = input.int(14, "RSI length", minval=2, maxval=100, group=groupQuantum)
+volLen           = input.int(30, "Volume SMA length", minval=1, maxval=300, group=groupQuantum)
+volMultiplier    = input.float(1.00, "Relative volume threshold", minval=0.10, maxval=10.0, step=0.05, group=groupQuantum)
+
+// --- Signal Engine
+signalCooldownBars = input.int(3, "Signal cooldown bars", minval=0, maxval=100, group=groupSignals)
+minConfluenceScore = input.int(4, "Minimum setup confluence score", minval=1, maxval=10, group=groupSignals)
+
+// --- Trade Management
+maxStacksPerDirection = input.int(2, "Max stacked entries per direction", minval=1, maxval=2, group=groupTrade)
+reverseMode = input.string("Next Bar After Flat", "Reverse mode", options=["Next Bar After Flat", "Aggressive Same Bar"], group=groupTrade)
+useEmergencySL   = input.bool(false, "Use optional emergency ATR stop", group=groupTrade)
+emergencyAtrLen  = input.int(14, "Emergency ATR length", minval=1, maxval=200, group=groupTrade)
+emergencyAtrMult = input.float(4.0, "Emergency ATR multiplier", minval=0.5, maxval=20.0, step=0.25, group=groupTrade)
+
+// --- Alert payloads
+enableOrderAlerts = input.bool(false, "Enable order alert messages", group=groupAlerts)
+pionexSignalUuid  = input.string("", "Pionex Signal Bot UUID", group=groupAlerts)
+sendCloseAlerts   = input.bool(true, "Send close / emergency alerts", group=groupAlerts)
+
+// --- Visuals
+enableDebugVisuals  = input.bool(true, "Enable All Debug Visuals", group=groupVisual)
+showOrderBlocks     = input.bool(true, "Show 15m Order Blocks", group=groupVisual) and enableDebugVisuals
+showPremiumDiscount = input.bool(true, "Show Premium / Discount", group=groupVisual) and enableDebugVisuals
+showSignals         = input.bool(true, "Show Entry/Close Markers", group=groupVisual) and enableDebugVisuals
+showQuantumPlot     = input.bool(false, "Plot Quantum Score", group=groupVisual) and enableDebugVisuals
+showDebugTable      = input.bool(true, "Show Debug Table", group=groupVisual) and enableDebugVisuals
+
+// ============================================================================
+// MODULE B — UTILITY FUNCTIONS
+// ============================================================================
+
+f_clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
+
+f_safeDiv(float num, float den, float fallback) =>
+    den != 0.0 and not na(den) ? num / den : fallback
+
+f_signFeature(bool bullCond, bool bearCond) =>
+    bullCond and not bearCond ? 1.0 : bearCond and not bullCond ? -1.0 : 0.0
+
+f_regimeLabel(float score, float conf, bool volExpansion) =>
+    conf < 40 ? "LOW_CONF" : math.abs(score) < 15 ? "NEUTRAL" : volExpansion ? "EXPANSION" : "DIRECTIONAL"
+
+f_pionex_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + pionexSignalUuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+
+// HTF SMC calculation. This runs inside request.security() in the selected HTF.
+f_htfSmc(int _swingLen, int _obSearchBars, float _dispAtrMult, int _atrLen, bool _bodyOB) =>
+    var float lastSwingHigh = na
+    var float lastSwingLow  = na
+    var int bias = 0
+
+    float atr = ta.atr(_atrLen)
+    float ph = ta.pivothigh(high, _swingLen, _swingLen)
+    float pl = ta.pivotlow(low, _swingLen, _swingLen)
+
+    if not na(ph)
+        lastSwingHigh := ph
+    if not na(pl)
+        lastSwingLow := pl
+
+    float body = math.abs(close - open)
+    bool displacementUp = close > open and body >= atr * _dispAtrMult and close > high[1]
+    bool displacementDn = close < open and body >= atr * _dispAtrMult and close < low[1]
+
+    int priorBias = bias
+    bool bullBos = not na(lastSwingHigh) and close > lastSwingHigh and close[1] <= lastSwingHigh and displacementUp
+    bool bearBos = not na(lastSwingLow) and close < lastSwingLow and close[1] >= lastSwingLow and displacementDn
+    bool bullChoch = bullBos and priorBias == -1
+    bool bearChoch = bearBos and priorBias == 1
+
+    if bullBos
+        bias := 1
+    else if bearBos
+        bias := -1
+
+    float bullTop = na
+    float bullBot = na
+    int bullTime = na
+    float bearTop = na
+    float bearBot = na
+    int bearTime = na
+
+    if bullBos
+        for i = 1 to _obSearchBars
+            if close[i] < open[i]
+                bullTop := _bodyOB ? open[i] : high[i]
+                bullBot := _bodyOB ? close[i] : low[i]
+                bullTime := time[i]
+                break
+
+    if bearBos
+        for i = 1 to _obSearchBars
+            if close[i] > open[i]
+                bearTop := _bodyOB ? close[i] : high[i]
+                bearBot := _bodyOB ? open[i] : low[i]
+                bearTime := time[i]
+                break
+
+    [open, high, low, close, volume, atr, time, lastSwingHigh, lastSwingLow, bias, bullBos, bearBos, bullChoch, bearChoch, bullTop, bullBot, bullTime, bearTop, bearBot, bearTime]
+
+// ============================================================================
+// MODULE C — 15m MTF DATA ADAPTER / MARKET STRUCTURE
+// ============================================================================
+
+[htfOpenRaw, htfHighRaw, htfLowRaw, htfCloseRaw, htfVolRaw, htfAtrRaw, htfTimeRaw, htfSwingHighRaw, htfSwingLowRaw, htfBiasRaw, htfBullBosRaw, htfBearBosRaw, htfBullChochRaw, htfBearChochRaw, htfBullOBTopRaw, htfBullOBBotRaw, htfBullOBTimeRaw, htfBearOBTopRaw, htfBearOBBotRaw, htfBearOBTimeRaw] = request.security(
+     syminfo.tickerid,
+     htfTf,
+     f_htfSmc(swingLen, obSearchBars, displacementAtrMult, htfAtrLen, useBodyOrderBlock),
+     gaps=barmerge.gaps_off,
+     lookahead=barmerge.lookahead_off
+)
+
+// Conservative safety: use previous 5m value of imported HTF series for filters.
+float htfOpen      = nz(htfOpenRaw[1], htfOpenRaw)
+float htfHigh      = nz(htfHighRaw[1], htfHighRaw)
+float htfLow       = nz(htfLowRaw[1], htfLowRaw)
+float htfClose     = nz(htfCloseRaw[1], htfCloseRaw)
+float htfAtr       = nz(htfAtrRaw[1], htfAtrRaw)
+float htfSwingHigh = nz(htfSwingHighRaw[1], htfSwingHighRaw)
+float htfSwingLow  = nz(htfSwingLowRaw[1], htfSwingLowRaw)
+int htfBias        = nz(htfBiasRaw[1], htfBiasRaw)
+
+bool newHtfBar = ta.change(time(htfTf)) != 0
+bool htfBullBosConfirmed   = newHtfBar and htfBullBosRaw[1]
+bool htfBearBosConfirmed   = newHtfBar and htfBearBosRaw[1]
+bool htfBullChochConfirmed = newHtfBar and htfBullChochRaw[1]
+bool htfBearChochConfirmed = newHtfBar and htfBearChochRaw[1]
+
+bool bullishBias = htfBias == 1
+bool bearishBias = htfBias == -1
+
+// ============================================================================
+// MODULE D — PREMIUM / DISCOUNT ENGINE
+// ============================================================================
+
+bool validDealingRange = not na(htfSwingHigh) and not na(htfSwingLow) and htfSwingHigh > htfSwingLow
+float dealingHigh = validDealingRange ? htfSwingHigh : na
+float dealingLow  = validDealingRange ? htfSwingLow : na
+float equilibrium = validDealingRange ? (dealingHigh + dealingLow) * 0.5 : na
+float dealingRange = validDealingRange ? dealingHigh - dealingLow : na
+float neutralBand = validDealingRange ? dealingRange * pdNeutralPct : na
+
+bool inDiscountStrict = validDealingRange and close < equilibrium - neutralBand
+bool inPremiumStrict  = validDealingRange and close > equilibrium + neutralBand
+bool inDiscountOrNeutral = validDealingRange and close <= equilibrium + neutralBand
+bool inPremiumOrNeutral  = validDealingRange and close >= equilibrium - neutralBand
+
+bool pdLongOk = pdMode == "Off" or (pdMode == "Strict" ? inDiscountStrict : inDiscountOrNeutral)
+bool pdShortOk = pdMode == "Off" or (pdMode == "Strict" ? inPremiumStrict : inPremiumOrNeutral)
+
+// ============================================================================
+// MODULE E — 15m ORDER BLOCK ENGINE
+// ============================================================================
+
+var array<float> bullObTops = array.new<float>()
+var array<float> bullObBots = array.new<float>()
+var array<int>   bullObBars = array.new<int>()
+var array<box>   bullObBoxes = array.new<box>()
+
+var array<float> bearObTops = array.new<float>()
+var array<float> bearObBots = array.new<float>()
+var array<int>   bearObBars = array.new<int>()
+var array<box>   bearObBoxes = array.new<box>()
+
+var int lastAddedBullObTime = na
+var int lastAddedBearObTime = na
+
+// Add new confirmed bullish OB.
+bool newConfirmedBullOB = htfBullBosConfirmed and not na(htfBullOBTimeRaw[1]) and (na(lastAddedBullObTime) or htfBullOBTimeRaw[1] != lastAddedBullObTime) and not na(htfBullOBTopRaw[1]) and not na(htfBullOBBotRaw[1]) and htfBullOBTopRaw[1] > htfBullOBBotRaw[1]
+if newConfirmedBullOB
+    lastAddedBullObTime := htfBullOBTimeRaw[1]
+    box bx = showOrderBlocks ? box.new(bar_index, htfBullOBTopRaw[1], bar_index + 1, htfBullOBBotRaw[1], bgcolor=color.new(color.lime, 86), border_color=color.new(color.lime, 35)) : na
+    array.push(bullObTops, htfBullOBTopRaw[1])
+    array.push(bullObBots, htfBullOBBotRaw[1])
+    array.push(bullObBars, bar_index)
+    array.push(bullObBoxes, bx)
+    while array.size(bullObTops) > maxActiveOB
+        box oldBox = array.shift(bullObBoxes)
+        if not na(oldBox)
+            box.delete(oldBox)
+        array.shift(bullObTops)
+        array.shift(bullObBots)
+        array.shift(bullObBars)
+
+// Add new confirmed bearish OB.
+bool newConfirmedBearOB = htfBearBosConfirmed and not na(htfBearOBTimeRaw[1]) and (na(lastAddedBearObTime) or htfBearOBTimeRaw[1] != lastAddedBearObTime) and not na(htfBearOBTopRaw[1]) and not na(htfBearOBBotRaw[1]) and htfBearOBTopRaw[1] > htfBearOBBotRaw[1]
+if newConfirmedBearOB
+    lastAddedBearObTime := htfBearOBTimeRaw[1]
+    box bx = showOrderBlocks ? box.new(bar_index, htfBearOBTopRaw[1], bar_index + 1, htfBearOBBotRaw[1], bgcolor=color.new(color.red, 86), border_color=color.new(color.red, 35)) : na
+    array.push(bearObTops, htfBearOBTopRaw[1])
+    array.push(bearObBots, htfBearOBBotRaw[1])
+    array.push(bearObBars, bar_index)
+    array.push(bearObBoxes, bx)
+    while array.size(bearObTops) > maxActiveOB
+        box oldBox = array.shift(bearObBoxes)
+        if not na(oldBox)
+            box.delete(oldBox)
+        array.shift(bearObTops)
+        array.shift(bearObBots)
+        array.shift(bearObBars)
+
+bool bullishOBRetest = false
+bool bearishOBRetest = false
+float nearestBullObDistAtr = 999.0
+float nearestBearObDistAtr = 999.0
+float activeBullOBTop = na
+float activeBullOBBot = na
+float activeBearOBTop = na
+float activeBearOBBot = na
+
+float localAtr = ta.atr(14)
+float safeAtr = math.max(nz(localAtr, syminfo.mintick), syminfo.mintick)
+
+// Update bullish OBs, invalidate, detect retest.
+if array.size(bullObTops) > 0
+    int i = array.size(bullObTops) - 1
+    while i >= 0
+        float top = array.get(bullObTops, i)
+        float bot = array.get(bullObBots, i)
+        int bornBar = array.get(bullObBars, i)
+        box bx = array.get(bullObBoxes, i)
+        bool invalid = obInvalidationMode == "Close" ? close < bot : low < bot
+        bool expired = bar_index - bornBar > obMaxAgeBars
+        if invalid or expired
+            if not na(bx)
+                box.delete(bx)
+            array.remove(bullObTops, i)
+            array.remove(bullObBots, i)
+            array.remove(bullObBars, i)
+            array.remove(bullObBoxes, i)
+        else
+            if not na(bx)
+                box.set_right(bx, bar_index + 1)
+            bool touches = low <= top and high >= bot
+            bool rejection = not requireRejection or (close > open and close > bot and (close - low) > (high - close))
+            if touches and rejection
+                bullishOBRetest := true
+                activeBullOBTop := top
+                activeBullOBBot := bot
+            float dist = close > top ? (close - top) / safeAtr : close < bot ? (bot - close) / safeAtr : 0.0
+            if dist < nearestBullObDistAtr
+                nearestBullObDistAtr := dist
+        i -= 1
+
+// Update bearish OBs, invalidate, detect retest.
+if array.size(bearObTops) > 0
+    int i = array.size(bearObTops) - 1
+    while i >= 0
+        float top = array.get(bearObTops, i)
+        float bot = array.get(bearObBots, i)
+        int bornBar = array.get(bearObBars, i)
+        box bx = array.get(bearObBoxes, i)
+        bool invalid = obInvalidationMode == "Close" ? close > top : high > top
+        bool expired = bar_index - bornBar > obMaxAgeBars
+        if invalid or expired
+            if not na(bx)
+                box.delete(bx)
+            array.remove(bearObTops, i)
+            array.remove(bearObBots, i)
+            array.remove(bearObBars, i)
+            array.remove(bearObBoxes, i)
+        else
+            if not na(bx)
+                box.set_right(bx, bar_index + 1)
+            bool touches = high >= bot and low <= top
+            bool rejection = not requireRejection or (close < open and close < top and (high - close) > (close - low))
+            if touches and rejection
+                bearishOBRetest := true
+                activeBearOBTop := top
+                activeBearOBBot := bot
+            float dist = close > top ? (close - top) / safeAtr : close < bot ? (bot - close) / safeAtr : 0.0
+            if dist < nearestBearObDistAtr
+                nearestBearObDistAtr := dist
+        i -= 1
+
+bool bullObContextOk = not requireOBRetest or bullishOBRetest
+bool bearObContextOk = not requireOBRetest or bearishOBRetest
+bool bullObProximityOk = nearestBullObDistAtr <= obProximityAtr
+bool bearObProximityOk = nearestBearObDistAtr <= obProximityAtr
+
+// ============================================================================
+// MODULE F — LIQUIDITY / IMBALANCE ENGINE
+// ============================================================================
+
+float prevLowest = ta.lowest(low[1], sweepLookback)
+float prevHighest = ta.highest(high[1], sweepLookback)
+float candleRange = math.max(high - low, syminfo.mintick)
+float lowerWick = math.min(open, close) - low
+float upperWick = high - math.max(open, close)
+
+bool liquiditySweepLong = low < prevLowest and close > open and lowerWick > candleRange * 0.35
+bool liquiditySweepShort = high > prevHighest and close < open and upperWick > candleRange * 0.35
+
+bool bullFvgFormed = low > high[2] and (low - high[2]) >= safeAtr * fvgMinAtrPct
+bool bearFvgFormed = high < low[2] and (low[2] - high) >= safeAtr * fvgMinAtrPct
+int barsSinceBullFvg = ta.barssince(bullFvgFormed)
+int barsSinceBearFvg = ta.barssince(bearFvgFormed)
+bool bullFvgRecent = not na(barsSinceBullFvg) and barsSinceBullFvg <= fvgMaxAgeBars
+bool bearFvgRecent = not na(barsSinceBearFvg) and barsSinceBearFvg <= fvgMaxAgeBars
+
+bool bullishRejection = close > open and lowerWick > upperWick and lowerWick > candleRange * 0.30
+bool bearishRejection = close < open and upperWick > lowerWick and upperWick > candleRange * 0.30
+
+int longLiquidityScore = (liquiditySweepLong ? 1 : 0) + (bullFvgRecent ? 1 : 0) + (bullishRejection ? 1 : 0)
+int shortLiquidityScore = (liquiditySweepShort ? 1 : 0) + (bearFvgRecent ? 1 : 0) + (bearishRejection ? 1 : 0)
+bool liquidityLongOk = not useLiquidityConfluence or longLiquidityScore >= minLiquidityConfluence
+bool liquidityShortOk = not useLiquidityConfluence or shortLiquidityScore >= minLiquidityConfluence
+
+// ============================================================================
+// MODULE G — QUANTUM / BINARY CLASSIFIER
+// ============================================================================
+
+float emaTrend = ta.ema(close, trendLen)
+float emaSlope = emaTrend - emaTrend[1]
+float rsi = ta.rsi(close, rsiLen)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+float volSma = ta.sma(nz(volume), volLen)
+bool volOk = nz(volume) > volSma * volMultiplier
+float atrBase = ta.sma(localAtr, 50)
+bool volatilityExpansion = not na(atrBase) and localAtr > atrBase
+
+float bullWeight = 0.0
+float bearWeight = 0.0
+float totalWeight = 0.0
+
+// Feature 1: HTF structure bias.
+totalWeight += 18.0
+if bullishBias
+    bullWeight += 18.0
+else if bearishBias
+    bearWeight += 18.0
+
+// Feature 2: 5m EMA slope and position.
+totalWeight += 12.0
+if close > emaTrend and emaSlope > 0
+    bullWeight += 12.0
+else if close < emaTrend and emaSlope < 0
+    bearWeight += 12.0
+
+// Feature 3: OB retest/proximity.
+totalWeight += 16.0
+if bullishOBRetest
+    bullWeight += 16.0
+else if bearishOBRetest
+    bearWeight += 16.0
+else if bullObProximityOk and not bearObProximityOk
+    bullWeight += 8.0
+else if bearObProximityOk and not bullObProximityOk
+    bearWeight += 8.0
+
+// Feature 4: Premium/Discount location.
+totalWeight += 14.0
+if pdLongOk and not pdShortOk
+    bullWeight += 14.0
+else if pdShortOk and not pdLongOk
+    bearWeight += 14.0
+else if inDiscountStrict
+    bullWeight += 8.0
+else if inPremiumStrict
+    bearWeight += 8.0
+
+// Feature 5: Momentum.
+totalWeight += 12.0
+if rsi > 52 and macdHist > 0
+    bullWeight += 12.0
+else if rsi < 48 and macdHist < 0
+    bearWeight += 12.0
+
+// Feature 6: Volume confirmation.
+totalWeight += 8.0
+if volOk and close > open
+    bullWeight += 8.0
+else if volOk and close < open
+    bearWeight += 8.0
+
+// Feature 7: Liquidity / FVG / rejection.
+totalWeight += 12.0
+if longLiquidityScore > shortLiquidityScore
+    bullWeight += 12.0
+else if shortLiquidityScore > longLiquidityScore
+    bearWeight += 12.0
+
+// Feature 8: CHoCH/BOS event freshness.
+int barsSinceBullBos = ta.barssince(htfBullBosConfirmed)
+int barsSinceBearBos = ta.barssince(htfBearBosConfirmed)
+bool recentBullBos = not na(barsSinceBullBos) and barsSinceBullBos <= 18
+bool recentBearBos = not na(barsSinceBearBos) and barsSinceBearBos <= 18
+
+totalWeight += 8.0
+if recentBullBos
+    bullWeight += 8.0
+else if recentBearBos
+    bearWeight += 8.0
+
+float directionalWeight = bullWeight + bearWeight
+float quantumScore = directionalWeight > 0 ? (bullWeight - bearWeight) / directionalWeight * 100.0 : 0.0
+float confidenceScore = totalWeight > 0 ? math.max(bullWeight, bearWeight) / totalWeight * 100.0 : 0.0
+quantumScore := f_clamp(quantumScore, -100.0, 100.0)
+confidenceScore := f_clamp(confidenceScore, 0.0, 100.0)
+
+bool quantumLongOk = not useQuantumFilter or (quantumScore >= quantumThreshold and confidenceScore >= minConfidence)
+bool quantumShortOk = not useQuantumFilter or (quantumScore <= -quantumThreshold and confidenceScore >= minConfidence)
+string regime = f_regimeLabel(quantumScore, confidenceScore, volatilityExpansion)
+
+// ============================================================================
+// MODULE H — SIGNAL ENGINE
+// ============================================================================
+
+bool confirmedEntryOk = not entryOnConfirmedBar or barstate.isconfirmed
+bool isFiveMinuteChart = timeframe.isminutes and timeframe.multiplier == 5
+
+bool structureLongOk = not requireStructureBias or bullishBias or (allowChochReversal and htfBullChochConfirmed)
+bool structureShortOk = not requireStructureBias or bearishBias or (allowChochReversal and htfBearChochConfirmed)
+
+int longConfluenceScore = 0
+longConfluenceScore += structureLongOk ? 1 : 0
+longConfluenceScore += pdLongOk ? 1 : 0
+longConfluenceScore += bullObContextOk ? 1 : 0
+longConfluenceScore += quantumLongOk ? 1 : 0
+longConfluenceScore += liquidityLongOk ? 1 : 0
+longConfluenceScore += recentBullBos ? 1 : 0
+longConfluenceScore += close > emaTrend ? 1 : 0
+
+int shortConfluenceScore = 0
+shortConfluenceScore += structureShortOk ? 1 : 0
+shortConfluenceScore += pdShortOk ? 1 : 0
+shortConfluenceScore += bearObContextOk ? 1 : 0
+shortConfluenceScore += quantumShortOk ? 1 : 0
+shortConfluenceScore += liquidityShortOk ? 1 : 0
+shortConfluenceScore += recentBearBos ? 1 : 0
+shortConfluenceScore += close < emaTrend ? 1 : 0
+
+var int lastSignalBar = na
+bool cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar >= signalCooldownBars
+
+bool rawLongSignal = confirmedEntryOk and cooldownOk and structureLongOk and pdLongOk and bullObContextOk and liquidityLongOk and quantumLongOk and longConfluenceScore >= minConfluenceScore
+bool rawShortSignal = confirmedEntryOk and cooldownOk and structureShortOk and pdShortOk and bearObContextOk and liquidityShortOk and quantumShortOk and shortConfluenceScore >= minConfluenceScore
+
+bool longSignal = rawLongSignal and not rawShortSignal
+bool shortSignal = rawShortSignal and not rawLongSignal
+
+// Conflict resolution: choose the side with stronger classifier and confluence.
+if rawLongSignal and rawShortSignal
+    if longConfluenceScore > shortConfluenceScore and quantumScore > 0
+        longSignal := true
+        shortSignal := false
+    else if shortConfluenceScore > longConfluenceScore and quantumScore < 0
+        longSignal := false
+        shortSignal := true
+    else
+        longSignal := false
+        shortSignal := false
+
+if longSignal or shortSignal
+    lastSignalBar := bar_index
+
+// ============================================================================
+// MODULE I — TRADE STATE & EXECUTION ENGINE
+// ============================================================================
+
+var int pendingReverseDir = 0        // 1 = pending long, -1 = pending short
+var int pendingReverseBar = na
+var int lastEntryBar = na
+var int lastActionBar = na
+
+bool flat = strategy.position_size == 0
+bool longPosition = strategy.position_size > 0
+bool shortPosition = strategy.position_size < 0
+int currentStackCount = strategy.opentrades
+bool canActThisBar = na(lastActionBar) or lastActionBar != bar_index
+bool aggressiveReverse = reverseMode == "Aggressive Same Bar"
+
+bool longOrderSent = false
+bool shortOrderSent = false
+bool closeLongSent = false
+bool closeShortSent = false
+bool alertsReady = enableOrderAlerts and str.length(pionexSignalUuid) > 0
+string orderAlertMessage = alertsReady ? f_pionex_payload() : ""
+string closeAlertMessage = alertsReady and sendCloseAlerts ? f_pionex_payload() : ""
+
+// Pending close-then-reverse execution. Default waits until confirmed flat on a later bar.
+if pendingReverseDir != 0 and flat and canActThisBar and (aggressiveReverse or bar_index > pendingReverseBar)
+    if pendingReverseDir == 1
+        strategy.entry("Long", strategy.long, comment="Reverse Long After Flat", alert_message=orderAlertMessage)
+        longOrderSent := true
+        lastEntryBar := bar_index
+    else if pendingReverseDir == -1
+        strategy.entry("Short", strategy.short, comment="Reverse Short After Flat", alert_message=orderAlertMessage)
+        shortOrderSent := true
+        lastEntryBar := bar_index
+    pendingReverseDir := 0
+    pendingReverseBar := na
+    lastActionBar := bar_index
+
+// Normal execution if no pending reverse has just acted.
+if pendingReverseDir == 0 and canActThisBar
+    if flat
+        if longSignal and not shortSignal
+            strategy.entry("Long", strategy.long, comment="Long Entry", alert_message=orderAlertMessage)
+            longOrderSent := true
+            lastEntryBar := bar_index
+            lastActionBar := bar_index
+        else if shortSignal and not longSignal
+            strategy.entry("Short", strategy.short, comment="Short Entry", alert_message=orderAlertMessage)
+            shortOrderSent := true
+            lastEntryBar := bar_index
+            lastActionBar := bar_index
+    else if longPosition
+        if shortSignal
+            strategy.close("Long", comment="Close Long on Short Signal", alert_message=closeAlertMessage)
+            strategy.cancel("Long_Emergency")
+            closeLongSent := true
+            pendingReverseDir := -1
+            pendingReverseBar := bar_index
+            lastActionBar := bar_index
+            if aggressiveReverse
+                strategy.entry("Short", strategy.short, comment="Aggressive Reverse Short", alert_message=orderAlertMessage)
+                shortOrderSent := true
+                pendingReverseDir := 0
+                pendingReverseBar := na
+                lastEntryBar := bar_index
+        else if longSignal and currentStackCount < maxStacksPerDirection and lastEntryBar != bar_index
+            strategy.entry("Long", strategy.long, comment="Long Add", alert_message=orderAlertMessage)
+            longOrderSent := true
+            lastEntryBar := bar_index
+            lastActionBar := bar_index
+    else if shortPosition
+        if longSignal
+            strategy.close("Short", comment="Close Short on Long Signal", alert_message=closeAlertMessage)
+            strategy.cancel("Short_Emergency")
+            closeShortSent := true
+            pendingReverseDir := 1
+            pendingReverseBar := bar_index
+            lastActionBar := bar_index
+            if aggressiveReverse
+                strategy.entry("Long", strategy.long, comment="Aggressive Reverse Long", alert_message=orderAlertMessage)
+                longOrderSent := true
+                pendingReverseDir := 0
+                pendingReverseBar := na
+                lastEntryBar := bar_index
+        else if shortSignal and currentStackCount < maxStacksPerDirection and lastEntryBar != bar_index
+            strategy.entry("Short", strategy.short, comment="Short Add", alert_message=orderAlertMessage)
+            shortOrderSent := true
+            lastEntryBar := bar_index
+            lastActionBar := bar_index
+
+// Optional emergency stop. Disabled by default; primary exit remains opposite signal.
+float emergencyAtr = ta.atr(emergencyAtrLen)
+if useEmergencySL and longPosition
+    float longEmergencyStop = strategy.position_avg_price - emergencyAtr * emergencyAtrMult
+    strategy.exit("Long_Emergency", from_entry="Long", stop=longEmergencyStop, comment_loss="Emergency SL Long", alert_message=closeAlertMessage)
+else
+    strategy.cancel("Long_Emergency")
+
+if useEmergencySL and shortPosition
+    float shortEmergencyStop = strategy.position_avg_price + emergencyAtr * emergencyAtrMult
+    strategy.exit("Short_Emergency", from_entry="Short", stop=shortEmergencyStop, comment_loss="Emergency SL Short", alert_message=closeAlertMessage)
+else
+    strategy.cancel("Short_Emergency")
+
+// ============================================================================
+// MODULE J — VISUALS & DEBUG
+// ============================================================================
+
+if chartTfWarning and barstate.islast and not isFiveMinuteChart
+    label.new(bar_index, high, "Warning: designed for 5m chart", style=label.style_label_down, color=color.orange, textcolor=color.white)
+
+plot(showPremiumDiscount ? dealingHigh : na, title="HTF Dealing High", color=color.new(color.red, 15), linewidth=1, style=plot.style_linebr)
+plot(showPremiumDiscount ? equilibrium : na, title="HTF Equilibrium", color=color.new(color.gray, 0), linewidth=1, style=plot.style_linebr)
+plot(showPremiumDiscount ? dealingLow : na, title="HTF Dealing Low", color=color.new(color.lime, 15), linewidth=1, style=plot.style_linebr)
+
+pEq = plot(showPremiumDiscount ? equilibrium : na, title="EQ Fill Anchor", color=color.new(color.gray, 100))
+pHi = plot(showPremiumDiscount ? dealingHigh : na, title="Premium Fill Anchor", color=color.new(color.red, 100))
+pLo = plot(showPremiumDiscount ? dealingLow : na, title="Discount Fill Anchor", color=color.new(color.lime, 100))
+fill(pHi, pEq, color=showPremiumDiscount ? color.new(color.red, 92) : na, title="Premium Zone")
+fill(pEq, pLo, color=showPremiumDiscount ? color.new(color.lime, 92) : na, title="Discount Zone")
+
+plot(showQuantumPlot ? quantumScore : na, title="Quantum Score", color=quantumScore >= 0 ? color.lime : color.red, linewidth=2, display=display.pane)
+plot(showQuantumPlot ? quantumThreshold : na, title="Long Quantum Threshold", color=color.new(color.lime, 70), linewidth=1, display=display.pane)
+plot(showQuantumPlot ? -quantumThreshold : na, title="Short Quantum Threshold", color=color.new(color.red, 70), linewidth=1, display=display.pane)
+
+plotshape(showSignals and longOrderSent, title="Long Order", style=shape.triangleup, location=location.belowbar, color=color.lime, text="L", size=size.tiny)
+plotshape(showSignals and shortOrderSent, title="Short Order", style=shape.triangledown, location=location.abovebar, color=color.red, text="S", size=size.tiny)
+plotshape(showSignals and closeLongSent, title="Close Long", style=shape.xcross, location=location.abovebar, color=color.orange, text="XL", size=size.tiny)
+plotshape(showSignals and closeShortSent, title="Close Short", style=shape.xcross, location=location.belowbar, color=color.orange, text="XS", size=size.tiny)
+
+var table dbg = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 10), border_width=1, border_color=color.new(color.gray, 60))
+if showDebugTable and barstate.islast
+    string biasTxt = bullishBias ? "BULL" : bearishBias ? "BEAR" : "NEUTRAL"
+    string pdTxt = inDiscountStrict ? "DISCOUNT" : inPremiumStrict ? "PREMIUM" : validDealingRange ? "EQUILIBRIUM" : "NO RANGE"
+    string posTxt = longPosition ? "LONG x" + str.tostring(strategy.opentrades) : shortPosition ? "SHORT x" + str.tostring(strategy.opentrades) : "FLAT"
+    string pendingTxt = pendingReverseDir == 1 ? "LONG" : pendingReverseDir == -1 ? "SHORT" : "NONE"
+    table.cell(dbg, 0, 0, "CTQ v8 Refactor", text_color=color.white, bgcolor=color.blue)
+    table.cell(dbg, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, bgcolor=color.blue)
+    table.cell(dbg, 0, 1, "HTF Bias", text_color=color.white)
+    table.cell(dbg, 1, 1, biasTxt, text_color=color.white, bgcolor=bullishBias ? color.green : bearishBias ? color.red : color.gray)
+    table.cell(dbg, 0, 2, "PD Zone", text_color=color.white)
+    table.cell(dbg, 1, 2, pdTxt, text_color=color.white, bgcolor=inDiscountStrict ? color.green : inPremiumStrict ? color.red : color.gray)
+    table.cell(dbg, 0, 3, "OB Retest", text_color=color.white)
+    table.cell(dbg, 1, 3, (bullishOBRetest ? "BULL" : bearishOBRetest ? "BEAR" : "NONE"), text_color=color.white, bgcolor=bullishOBRetest ? color.green : bearishOBRetest ? color.red : color.gray)
+    table.cell(dbg, 0, 4, "Quantum", text_color=color.white)
+    table.cell(dbg, 1, 4, str.tostring(quantumScore, "#.0") + " / " + str.tostring(confidenceScore, "#.0"), text_color=color.white, bgcolor=quantumScore > 0 ? color.green : quantumScore < 0 ? color.red : color.gray)
+    table.cell(dbg, 0, 5, "Regime", text_color=color.white)
+    table.cell(dbg, 1, 5, regime, text_color=color.white, bgcolor=regime == "EXPANSION" ? color.purple : regime == "LOW_CONF" ? color.orange : color.gray)
+    table.cell(dbg, 0, 6, "L/S Conf", text_color=color.white)
+    table.cell(dbg, 1, 6, str.tostring(longConfluenceScore) + " / " + str.tostring(shortConfluenceScore), text_color=color.white)
+    table.cell(dbg, 0, 7, "Signals", text_color=color.white)
+    table.cell(dbg, 1, 7, (longSignal ? "LONG" : shortSignal ? "SHORT" : "WAIT"), text_color=color.white, bgcolor=longSignal ? color.green : shortSignal ? color.red : color.gray)
+    table.cell(dbg, 0, 8, "Position", text_color=color.white)
+    table.cell(dbg, 1, 8, posTxt, text_color=color.white, bgcolor=longPosition ? color.green : shortPosition ? color.red : color.gray)
+    table.cell(dbg, 0, 9, "Pending Reverse", text_color=color.white)
+    table.cell(dbg, 1, 9, pendingTxt, text_color=color.white, bgcolor=pendingReverseDir == 0 ? color.gray : color.orange)
+    table.cell(dbg, 0, 10, "Bull/Bear OBs", text_color=color.white)
+    table.cell(dbg, 1, 10, str.tostring(array.size(bullObTops)) + " / " + str.tostring(array.size(bearObTops)), text_color=color.white)
+    table.cell(dbg, 0, 11, "Emergency SL", text_color=color.white)
+    table.cell(dbg, 1, 11, useEmergencySL ? "ON" : "OFF", text_color=color.white, bgcolor=useEmergencySL ? color.orange : color.gray)

@@ -1,0 +1,353 @@
+//@version=6
+strategy(
+     title="MTF CISD Trade System",
+     overlay=true,
+     initial_capital=100,
+     currency=currency.USD,
+     default_qty_type=strategy.cash,
+     default_qty_value=100,
+     pyramiding=1,
+     commission_type=strategy.commission.percent,
+     commission_value=0.0,
+     process_orders_on_close=true,
+     calc_on_order_fills=true
+)
+string tf1_in = input.timeframe("W", title="Timeframe 1", group="Multi-TF Settings")
+bool enable_tf1 = input.bool(true, title="Enable Timeframe 1", group="Multi-TF Settings")
+string tf2_in = input.timeframe("D", title="Timeframe 2", group="Multi-TF Settings")
+bool enable_tf2 = input.bool(true, title="Enable Timeframe 2", group="Multi-TF Settings")
+string tf3_in = input.timeframe("240", title="Timeframe 3", group="Multi-TF Settings")
+bool enable_tf3 = input.bool(true, title="Enable Timeframe 3", group="Multi-TF Settings")
+string tf4_in = input.timeframe("60", title="Timeframe 4", group="Multi-TF Settings")
+bool enable_tf4 = input.bool(true, title="Enable Timeframe 4", group="Multi-TF Settings")
+string tf5_in = input.timeframe("15", title="Timeframe 5", group="Multi-TF Settings")
+bool enable_tf5 = input.bool(true, title="Enable Timeframe 5", group="Multi-TF Settings")
+string tf6_in = input.timeframe("5", title="Timeframe 6", group="Multi-TF Settings")
+bool enable_tf6 = input.bool(true, title="Enable Timeframe 6", group="Multi-TF Settings")
+float rr_ratio = input.float(2.0, title="Risk-Reward Ratio", minval=0.1, step=0.1, group="Trade Settings")
+bool use_prev_candle_for_sl = input.bool(false, title="Use Previous Candle for SL (Low for Long, High for Short)", group="Trade Settings")
+bool enable_fading_trail = input.bool(true, title="Enable Tight Fading Trail Stop", group="Trade Settings")
+float trail_activation_r = input.float(0.25, title="Trail Activation (R)", minval=0.05, step=0.05, group="Trade Settings")
+float trail_distance_r_1 = input.float(0.18, title="Trail Distance Below 1R", minval=0.01, step=0.01, group="Trade Settings")
+float trail_distance_r_2 = input.float(0.10, title="Trail Distance From 1R", minval=0.01, step=0.01, group="Trade Settings")
+float trail_distance_r_3 = input.float(0.06, title="Trail Distance From 1.5R", minval=0.01, step=0.01, group="Trade Settings")
+int start_hour_est = input.int(9, "Start Hour (EST)", minval=0, maxval=23, group="Entry Filter Settings")
+int start_min_est = input.int(30, "Start Minute", minval=0, maxval=59, group="Entry Filter Settings")
+int end_hour_est = input.int(16, "End Hour (EST)", minval=0, maxval=23, group="Entry Filter Settings")
+int end_min_est = input.int(0, "End Minute", minval=0, maxval=59, group="Entry Filter Settings")
+bool allow_sun = input.bool(false, "Allow Sunday", group="Entry Filter Settings")
+bool allow_mon = input.bool(true, "Allow Monday", group="Entry Filter Settings")
+bool allow_tue = input.bool(true, "Allow Tuesday", group="Entry Filter Settings")
+bool allow_wed = input.bool(true, "Allow Wednesday", group="Entry Filter Settings")
+bool allow_thu = input.bool(true, "Allow Thursday", group="Entry Filter Settings")
+bool allow_fri = input.bool(true, "Allow Friday", group="Entry Filter Settings")
+bool allow_sat = input.bool(false, "Allow Saturday", group="Entry Filter Settings")
+const string tz = "America/New_York"
+const string long_entry_id = "LONG"
+const string short_entry_id = "SHORT"
+const string long_exit_id = "LONG EXIT"
+const string short_exit_id = "SHORT EXIT"
+f_tfDisplay(string tf) =>
+    tf == "D" ? "Daily" :
+     tf == "W" ? "Weekly" :
+     tf == "240" ? "H4" :
+     tf == "60" ? "H1" :
+     tf == "15" ? "M15" :
+     tf == "5" ? "M5" :
+     tf == "1" ? "M1" : tf
+f_priceText(float value) =>
+    na(value) ? "na" : str.tostring(value, format.mintick)
+f_webhookMessage(string event_name, string side, float price, float stop_price, float target_price, string note) =>
+    "{" +
+     "\"event\":\"" + event_name + "\"," +
+     "\"symbol\":\"" + syminfo.ticker + "\"," +
+     "\"timeframe\":\"" + timeframe.period + "\"," +
+     "\"side\":\"" + side + "\"," +
+     "\"price\":\"" + f_priceText(price) + "\"," +
+     "\"stop\":\"" + f_priceText(stop_price) + "\"," +
+     "\"target\":\"" + f_priceText(target_price) + "\"," +
+     "\"note\":\"" + note + "\"," +
+     "\"bar_time\":\"" + str.tostring(time) + "\"" +
+     "}"
+f_trailDistanceR(float profit_r) =>
+    profit_r >= 1.5 ? trail_distance_r_3 :
+     profit_r >= 1.0 ? trail_distance_r_2 :
+     trail_distance_r_1
+f_cisdLogic() =>
+    var float bull_target = na
+    var float bear_target = na
+    var string last_state = "Neutral"
+    bool is_inside = high < high[1] and low > low[1]
+    bool is_bearish = close < open
+    bool is_bullish = close > open
+    bool bullishCISD = not na(bull_target) and close > bull_target and close[1] <= bull_target
+    bool bearishCISD = not na(bear_target) and close < bear_target and close[1] >= bear_target
+    if barstate.isconfirmed
+        if bullishCISD
+            last_state := "Bullish"
+        if bearishCISD
+            last_state := "Bearish"
+    if is_bearish and not is_inside
+        bull_target := open
+    if is_bullish and not is_inside
+        bear_target := open
+    [last_state, bullishCISD, bearishCISD]
+int entry_time = time + timeframe.in_seconds() * 1000
+int entry_hour = hour(entry_time, tz)
+int entry_min = minute(entry_time, tz)
+int entry_dow = dayofweek(entry_time, tz)
+int start_min_total = start_hour_est * 60 + start_min_est
+int end_min_total = end_hour_est * 60 + end_min_est
+int entry_min_total = entry_hour * 60 + entry_min
+bool time_in_window = start_min_total <= end_min_total ?
+     (entry_min_total >= start_min_total and entry_min_total <= end_min_total) :
+     (entry_min_total >= start_min_total or entry_min_total <= end_min_total)
+bool day_allowed = false
+if entry_dow == dayofweek.sunday
+    day_allowed := allow_sun
+else if entry_dow == dayofweek.monday
+    day_allowed := allow_mon
+else if entry_dow == dayofweek.tuesday
+    day_allowed := allow_tue
+else if entry_dow == dayofweek.wednesday
+    day_allowed := allow_wed
+else if entry_dow == dayofweek.thursday
+    day_allowed := allow_thu
+else if entry_dow == dayofweek.friday
+    day_allowed := allow_fri
+else if entry_dow == dayofweek.saturday
+    day_allowed := allow_sat
+bool entry_allowed = day_allowed and time_in_window
+[local_state, local_bullCISD, local_bearCISD] = f_cisdLogic()
+[state1, _, _] = request.security(syminfo.tickerid, tf1_in, f_cisdLogic())
+[state2, _, _] = request.security(syminfo.tickerid, tf2_in, f_cisdLogic())
+[state3, _, _] = request.security(syminfo.tickerid, tf3_in, f_cisdLogic())
+[state4, _, _] = request.security(syminfo.tickerid, tf4_in, f_cisdLogic())
+[state5, _, _] = request.security(syminfo.tickerid, tf5_in, f_cisdLogic())
+[state6, _, _] = request.security(syminfo.tickerid, tf6_in, f_cisdLogic())
+var table cisdTable = table.new(position.top_right, 2, 7, bgcolor=color.new(#1e222d, 85), border_width=1, frame_color=color.gray)
+table.cell(cisdTable, 0, 0, "Timeframe", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+table.cell(cisdTable, 1, 0, "Last CISD", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+color tf1_label_color = enable_tf1 ? color.white : color.gray
+color tf1_state_color = enable_tf1 ? (state1 == "Bullish" ? color.lime : state1 == "Bearish" ? color.red : color.gray) : color.gray
+color tf2_label_color = enable_tf2 ? color.white : color.gray
+color tf2_state_color = enable_tf2 ? (state2 == "Bullish" ? color.lime : state2 == "Bearish" ? color.red : color.gray) : color.gray
+color tf3_label_color = enable_tf3 ? color.white : color.gray
+color tf3_state_color = enable_tf3 ? (state3 == "Bullish" ? color.lime : state3 == "Bearish" ? color.red : color.gray) : color.gray
+color tf4_label_color = enable_tf4 ? color.white : color.gray
+color tf4_state_color = enable_tf4 ? (state4 == "Bullish" ? color.lime : state4 == "Bearish" ? color.red : color.gray) : color.gray
+color tf5_label_color = enable_tf5 ? color.white : color.gray
+color tf5_state_color = enable_tf5 ? (state5 == "Bullish" ? color.lime : state5 == "Bearish" ? color.red : color.gray) : color.gray
+color tf6_label_color = enable_tf6 ? color.white : color.gray
+color tf6_state_color = enable_tf6 ? (state6 == "Bullish" ? color.lime : state6 == "Bearish" ? color.red : color.gray) : color.gray
+table.cell(cisdTable, 0, 1, f_tfDisplay(tf1_in), text_color=tf1_label_color, text_size=size.small)
+table.cell(cisdTable, 1, 1, state1, text_color=tf1_state_color, text_size=size.normal)
+table.cell(cisdTable, 0, 2, f_tfDisplay(tf2_in), text_color=tf2_label_color, text_size=size.small)
+table.cell(cisdTable, 1, 2, state2, text_color=tf2_state_color, text_size=size.normal)
+table.cell(cisdTable, 0, 3, f_tfDisplay(tf3_in), text_color=tf3_label_color, text_size=size.small)
+table.cell(cisdTable, 1, 3, state3, text_color=tf3_state_color, text_size=size.normal)
+table.cell(cisdTable, 0, 4, f_tfDisplay(tf4_in), text_color=tf4_label_color, text_size=size.small)
+table.cell(cisdTable, 1, 4, state4, text_color=tf4_state_color, text_size=size.normal)
+table.cell(cisdTable, 0, 5, f_tfDisplay(tf5_in), text_color=tf5_label_color, text_size=size.small)
+table.cell(cisdTable, 1, 5, state5, text_color=tf5_state_color, text_size=size.normal)
+table.cell(cisdTable, 0, 6, f_tfDisplay(tf6_in), text_color=tf6_label_color, text_size=size.small)
+table.cell(cisdTable, 1, 6, state6, text_color=tf6_state_color, text_size=size.normal)
+int enabled_count = 0
+int bullish_count = 0
+int bearish_count = 0
+if enable_tf1
+    enabled_count += 1
+    bullish_count += state1 == "Bullish" ? 1 : 0
+    bearish_count += state1 == "Bearish" ? 1 : 0
+if enable_tf2
+    enabled_count += 1
+    bullish_count += state2 == "Bullish" ? 1 : 0
+    bearish_count += state2 == "Bearish" ? 1 : 0
+if enable_tf3
+    enabled_count += 1
+    bullish_count += state3 == "Bullish" ? 1 : 0
+    bearish_count += state3 == "Bearish" ? 1 : 0
+if enable_tf4
+    enabled_count += 1
+    bullish_count += state4 == "Bullish" ? 1 : 0
+    bearish_count += state4 == "Bearish" ? 1 : 0
+if enable_tf5
+    enabled_count += 1
+    bullish_count += state5 == "Bullish" ? 1 : 0
+    bearish_count += state5 == "Bearish" ? 1 : 0
+if enable_tf6
+    enabled_count += 1
+    bullish_count += state6 == "Bullish" ? 1 : 0
+    bearish_count += state6 == "Bearish" ? 1 : 0
+bool allBullish = enabled_count > 0 and bullish_count == enabled_count
+bool allBearish = enabled_count > 0 and bearish_count == enabled_count
+var bool prev_allBullish = false
+var bool prev_allBearish = false
+bool new_bull_alignment = allBullish and not prev_allBullish
+bool new_bear_alignment = allBearish and not prev_allBearish
+prev_allBullish := allBullish
+prev_allBearish := allBearish
+var bool pending_long = false
+var bool pending_short = false
+if new_bull_alignment
+    pending_long := true
+    pending_short := false
+if new_bear_alignment
+    pending_short := true
+    pending_long := false
+if not allBullish
+    pending_long := false
+if not allBearish
+    pending_short := false
+bool new_long = pending_long and local_bullCISD
+bool new_short = pending_short and local_bearCISD
+if new_long
+    pending_long := false
+if new_short
+    pending_short := false
+if local_bullCISD and barstate.isconfirmed
+    alert(f_webhookMessage("local_cisd_arrow", "bullish", close, na, na, "Local bullish CISD arrow"), alert.freq_all)
+if local_bearCISD and barstate.isconfirmed
+    alert(f_webhookMessage("local_cisd_arrow", "bearish", close, na, na, "Local bearish CISD arrow"), alert.freq_all)
+var float entry_price = na
+var float initial_stop_price = na
+var float active_stop_price = na
+var float target_price = na
+var float initial_risk = na
+var float highest_since_entry = na
+var float lowest_since_entry = na
+var line line_entry = na
+var line line_sl = na
+var line line_tp = na
+var line line_vert = na
+bool flat_now = strategy.position_size == 0
+bool long_open = strategy.position_size > 0
+bool short_open = strategy.position_size < 0
+bool long_entry_signal = false
+bool short_entry_signal = false
+if new_long and entry_allowed and flat_now
+    float ent = close
+    float sl = use_prev_candle_for_sl and not na(low[1]) ? low[1] : open
+    float risk = ent - sl
+    if risk > syminfo.mintick
+        long_entry_signal := true
+        entry_price := ent
+        initial_stop_price := sl
+        active_stop_price := sl
+        target_price := ent + rr_ratio * risk
+        initial_risk := risk
+        highest_since_entry := high
+        lowest_since_entry := na
+        strategy.entry(long_entry_id, strategy.long, alert_message=f_webhookMessage("entry_arrow", "long", ent, sl, target_price, "Long entry arrow"))
+        strategy.exit(long_exit_id, from_entry=long_entry_id, stop=active_stop_price, limit=target_price, alert_message=f_webhookMessage("protective_exit", "long", ent, active_stop_price, target_price, "Initial long stop or target"))
+if new_short and entry_allowed and flat_now
+    float ent = close
+    float sl = use_prev_candle_for_sl and not na(high[1]) ? high[1] : open
+    float risk = sl - ent
+    if risk > syminfo.mintick
+        short_entry_signal := true
+        entry_price := ent
+        initial_stop_price := sl
+        active_stop_price := sl
+        target_price := ent - rr_ratio * risk
+        initial_risk := risk
+        lowest_since_entry := low
+        highest_since_entry := na
+        strategy.entry(short_entry_id, strategy.short, alert_message=f_webhookMessage("entry_arrow", "short", ent, sl, target_price, "Short entry arrow"))
+        strategy.exit(short_exit_id, from_entry=short_entry_id, stop=active_stop_price, limit=target_price, alert_message=f_webhookMessage("protective_exit", "short", ent, active_stop_price, target_price, "Initial short stop or target"))
+if long_entry_signal and barstate.isconfirmed
+    alert(f_webhookMessage("entry_arrow", "long", entry_price, active_stop_price, target_price, "All enabled timeframes aligned long"), alert.freq_all)
+if short_entry_signal and barstate.isconfirmed
+    alert(f_webhookMessage("entry_arrow", "short", entry_price, active_stop_price, target_price, "All enabled timeframes aligned short"), alert.freq_all)
+if long_open
+    highest_since_entry := na(highest_since_entry) ? high : math.max(highest_since_entry, high)
+    if na(entry_price)
+        entry_price := strategy.position_avg_price
+    if na(initial_risk) and not na(initial_stop_price)
+        initial_risk := entry_price - initial_stop_price
+    float profit_r = initial_risk > syminfo.mintick ? (highest_since_entry - entry_price) / initial_risk : 0.0
+    float trail_distance_r = f_trailDistanceR(profit_r)
+    float trail_candidate = highest_since_entry - initial_risk * trail_distance_r
+    if enable_fading_trail and profit_r >= trail_activation_r
+        active_stop_price := math.max(initial_stop_price, trail_candidate)
+    else
+        active_stop_price := initial_stop_price
+    strategy.exit(long_exit_id, from_entry=long_entry_id, stop=active_stop_price, limit=target_price, alert_message=f_webhookMessage("protective_exit", "long", entry_price, active_stop_price, target_price, "Long exit updated with fading trail"))
+    if not allBullish
+        strategy.close(long_entry_id, comment="Alignment lost", alert_message=f_webhookMessage("alignment_exit", "long", close, active_stop_price, target_price, "Long closed because alignment faded"))
+if short_open
+    lowest_since_entry := na(lowest_since_entry) ? low : math.min(lowest_since_entry, low)
+    if na(entry_price)
+        entry_price := strategy.position_avg_price
+    if na(initial_risk) and not na(initial_stop_price)
+        initial_risk := initial_stop_price - entry_price
+    float profit_r = initial_risk > syminfo.mintick ? (entry_price - lowest_since_entry) / initial_risk : 0.0
+    float trail_distance_r = f_trailDistanceR(profit_r)
+    float trail_candidate = lowest_since_entry + initial_risk * trail_distance_r
+    if enable_fading_trail and profit_r >= trail_activation_r
+        active_stop_price := math.min(initial_stop_price, trail_candidate)
+    else
+        active_stop_price := initial_stop_price
+    strategy.exit(short_exit_id, from_entry=short_entry_id, stop=active_stop_price, limit=target_price, alert_message=f_webhookMessage("protective_exit", "short", entry_price, active_stop_price, target_price, "Short exit updated with fading trail"))
+    if not allBearish
+        strategy.close(short_entry_id, comment="Alignment lost", alert_message=f_webhookMessage("alignment_exit", "short", close, active_stop_price, target_price, "Short closed because alignment faded"))
+bool just_flattened = strategy.position_size == 0 and strategy.position_size[1] != 0
+if just_flattened
+    entry_price := na
+    initial_stop_price := na
+    active_stop_price := na
+    target_price := na
+    initial_risk := na
+    highest_since_entry := na
+    lowest_since_entry := na
+if long_entry_signal
+    line_entry := line.new(bar_index, entry_price, bar_index, entry_price, extend=extend.none, color=color.new(color.blue, 0), width=2)
+    line_sl := line.new(bar_index, active_stop_price, bar_index, active_stop_price, extend=extend.none, color=color.new(color.red, 0), width=2, style=line.style_dashed)
+    line_tp := line.new(bar_index, target_price, bar_index, target_price, extend=extend.none, color=color.new(color.green, 0), width=2, style=line.style_dashed)
+    line_vert := line.new(bar_index, active_stop_price, bar_index, entry_price, extend=extend.none, color=color.new(color.blue, 50), width=1)
+if short_entry_signal
+    line_entry := line.new(bar_index, entry_price, bar_index, entry_price, extend=extend.none, color=color.new(color.blue, 0), width=2)
+    line_sl := line.new(bar_index, active_stop_price, bar_index, active_stop_price, extend=extend.none, color=color.new(color.red, 0), width=2, style=line.style_dashed)
+    line_tp := line.new(bar_index, target_price, bar_index, target_price, extend=extend.none, color=color.new(color.green, 0), width=2, style=line.style_dashed)
+    line_vert := line.new(bar_index, entry_price, bar_index, active_stop_price, extend=extend.none, color=color.new(color.blue, 50), width=1)
+if strategy.position_size != 0 and not na(line_entry)
+    line.set_x2(line_entry, bar_index)
+    line.set_x2(line_sl, bar_index)
+    line.set_y1(line_sl, active_stop_price)
+    line.set_y2(line_sl, active_stop_price)
+    line.set_x2(line_tp, bar_index)
+    line.set_x2(line_vert, bar_index)
+    if long_open
+        line.set_y1(line_vert, active_stop_price)
+        line.set_y2(line_vert, entry_price)
+    if short_open
+        line.set_y1(line_vert, entry_price)
+        line.set_y2(line_vert, active_stop_price)
+if just_flattened and not na(line_entry)
+    line.set_x2(line_entry, bar_index)
+    line.set_x2(line_sl, bar_index)
+    line.set_x2(line_tp, bar_index)
+    line.set_x2(line_vert, bar_index)
+var table statsTable = table.new(position.bottom_left, 2, 6, bgcolor=color.new(#1e222d, 85), border_width=1, frame_color=color.gray)
+table.cell(statsTable, 0, 0, "Metric", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+table.cell(statsTable, 1, 0, "Value", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+table.cell(statsTable, 0, 1, "Start Capital", text_color=color.white, text_size=size.small)
+table.cell(statsTable, 1, 1, "100 USDT", text_color=color.white, text_size=size.normal)
+table.cell(statsTable, 0, 2, "Trade Size", text_color=color.white, text_size=size.small)
+table.cell(statsTable, 1, 2, "100 USDT", text_color=color.white, text_size=size.normal)
+table.cell(statsTable, 0, 3, "Closed Trades", text_color=color.white, text_size=size.small)
+table.cell(statsTable, 1, 3, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.normal)
+table.cell(statsTable, 0, 4, "Wins / Losses", text_color=color.white, text_size=size.small)
+table.cell(statsTable, 1, 4, str.tostring(strategy.wintrades) + " / " + str.tostring(strategy.losstrades), text_color=color.white, text_size=size.normal)
+float win_rate = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100.0 : 0.0
+table.cell(statsTable, 0, 5, "Win Rate", text_color=color.white, text_size=size.small)
+table.cell(statsTable, 1, 5, str.tostring(win_rate, "#.##") + "%", text_color=color.white, text_size=size.normal)
+alertcondition(local_bullCISD, title="Bullish CISD Arrow", message="Bullish CISD arrow on {{ticker}}")
+alertcondition(local_bearCISD, title="Bearish CISD Arrow", message="Bearish CISD arrow on {{ticker}}")
+alertcondition(long_entry_signal, title="Bullish Trade Entry", message="Bullish trade entry on {{ticker}}")
+alertcondition(short_entry_signal, title="Bearish Trade Entry", message="Bearish trade entry on {{ticker}}")
+bgcolor(allBullish ? color.new(color.green, 85) : allBearish ? color.new(color.red, 85) : na, title="Alignment Background")
+plotshape(local_bullCISD ? low : na, title="Bullish CISD", style=shape.triangleup, location=location.absolute, color=color.lime, size=size.small)
+plotshape(local_bearCISD ? high : na, title="Bearish CISD", style=shape.triangledown, location=location.absolute, color=color.red, size=size.small)
+plotshape(long_entry_signal ? low : na, title="Long Entry", style=shape.triangleup, location=location.absolute, color=color.new(color.green, 0), size=size.normal)
+plotshape(short_entry_signal ? high : na, title="Short Entry", style=shape.triangledown, location=location.absolute, color=color.new(color.red, 0), size=size.normal)

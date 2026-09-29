@@ -1,0 +1,56 @@
+// @version=6
+strategy("Scalp-Master v16.2 - Sarkasmus-Filter Edition", 
+         overlay=true, 
+         initial_capital=1000, 
+         default_qty_type=strategy.cash, 
+         currency=currency.EUR, 
+         commission_value=0.04)
+
+// ==================== INPUTS ====================
+orb_time      = input.session("1430-1500", "Opening Range (US Open)")
+emaSlowLen    = input.int(30, "Trend Filter EMA")
+fixed_margin  = input.float(75.0, "Margin pro Trade (€)")
+
+// NEU: Sicherheitseinstellungen
+trail_offset  = input.float(0.05, "Trailing Stop Offset (Öl-Punkte)", step=0.01)
+be_activation = input.float(0.10, "Breakeven nach X Punkten Profit", step=0.01)
+
+// ==================== ORB LOGIK ====================
+var float orb_high = na
+var float orb_low  = na
+t = time(timeframe.period, orb_time)
+
+if not na(t) and na(t[1])
+    orb_high := high
+    orb_low  := low
+else if not na(t)
+    orb_high := math.max(high, orb_high)
+    orb_low  := math.min(low, orb_low)
+
+// ==================== LOGIK & SIGNALE ====================
+ema_slow = ta.ema(close, emaSlowLen)
+// Wir filtern jetzt noch härter: Kerze muss ÜBER dem EMA schließen
+long_trigger = ta.crossover(close, orb_high) and close > ema_slow and low > low[1]
+
+// ==================== EXECUTION ====================
+pos_size = (fixed_margin * 10) / (close > 0 ? close : 1)
+
+if long_trigger and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=pos_size, comment="Entry")
+
+// ==================== NEU: DYNAMISCHER STOPP & TRAILING ====================
+if strategy.position_size > 0
+    float entry_price = strategy.opentrades.entry_price(0)
+    float current_profit = close - entry_price
+    
+    // 1. Breakeven: Wenn Preis weit genug vorne, SL auf Entry
+    if current_profit >= be_activation
+        strategy.exit("BE/Trail", "Long", stop=entry_price, trail_points=trail_offset / syminfo.mintick)
+    
+    // 2. Initialer Not-Aus (Falls es sofort dreht)
+    orb_range = orb_high - orb_low
+    strategy.exit("Hard-SL", "Long", loss=orb_range * 0.8, profit=orb_range * 2.0)
+
+// Visuals
+plot(orb_high, "ORB High", color=color.new(color.lime, 40), style=plot.style_stepline)
+plot(ema_slow, "Trend", color=color.orange)

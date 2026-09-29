@@ -1,0 +1,424 @@
+//@version=6
+// ═════════════════════════════════════════════════════════════════════════════
+// ORR MEAN REVERSION v2.1 - ZEC/USDT.P 1m Edition
+// Opening Range Rejection + Adaptive Regime Detector
+// Tuned for ZCash Perpetual Futures on 1-Minute Charts
+// ═════════════════════════════════════════════════════════════════════════════
+strategy("ORR Mean Reversion v2.1 ZEC.P 1m",
+     shorttitle = "ORR ZEC.P 1m",
+     overlay = true,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 1,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     max_lines_count = 500,
+     max_bars_back = 500,
+     max_labels_count = 500)
+
+igroup_or = "📊 Opening Range"
+i_orLookback    = input.int(20,    "OR Lookback Bars",            minval = 5,   maxval = 120, step = 1,   group = igroup_or, tooltip="20 bars ≈ 20min. ZEC.P micro-structure resets quickly on 1m.")
+i_orExtension   = input.float(0.8, "OR Extension %",                minval = 0.1, maxval = 3.0, step = 0.1, group = igroup_or, tooltip="0.8 default - ZEC overextends significantly more than BTC/ETH before rejecting.")
+i_orBreakoutMin = input.float(0.03,"Min Breakout % beyond OR",    minval = 0.0, maxval = 1.0, step = 0.01, group = igroup_or, tooltip="0.03 - micro-breakout sensitivity for 1m ZEC wicks.")
+i_useSessionOr  = input.bool(false, "Use Session-Based OR",         group = igroup_or, tooltip="OFF for 24/7 perp markets.")
+
+igroup_mr = "🔄 Mean Reversion"
+i_useVwap       = input.bool(true,  "Use VWAP as Mean Target",     group = igroup_mr)
+i_useOrMid      = input.bool(true,  "Use OR Midpoint as Mean Target", group = igroup_mr)
+i_meanRevertPct = input.float(0.7,  "Mean Reversion Target %",     minval = 0.1, maxval = 1.0, step = 0.1, group = igroup_mr, tooltip="0.7 - ZEC mean reversion often runs deeper due to lower liquidity.")
+
+igroup_rsi = "🟣 RSI Filter"
+i_rsiLen        = input.int(14,    "RSI Length",                  minval = 2,   maxval = 50,  group = igroup_rsi)
+i_rsiOverbought = input.int(80,    "RSI Overbought (Short)",      minval = 55,  maxval = 95,  group = igroup_rsi, tooltip="80 - ZEC can stay overbought longer than BTC on momentum bursts.")
+i_rsiOversold   = input.int(20,    "RSI Oversold (Long)",         minval = 5,   maxval = 45,  group = igroup_rsi, tooltip="20 - mirror of overbought for ZEC oversold squeezes.")
+i_rsiMaxShort   = input.int(98,    "RSI Max for Short",           minval = 70,  maxval = 99,  group = igroup_rsi, tooltip="98 - almost never block; let the ORR handle extreme RSI.")
+i_rsiMinLong    = input.int(2,     "RSI Min for Long",            minval = 1,   maxval = 30,  group = igroup_rsi, tooltip="2 - almost never block extreme oversold.")
+
+igroup_stoch = "🔵 Stochastic Filter"
+i_useStoch      = input.bool(true,  "Use Stochastic Filter",       group = igroup_stoch)
+i_stochK        = input.int(14,    "%K Length",                   minval = 5,   maxval = 50,  group = igroup_stoch)
+i_stochD        = input.int(3,     "%D Smoothing",                minval = 1,   maxval = 10,  group = igroup_stoch)
+i_stochSmooth   = input.int(3,     "%K Smoothing",                minval = 1,   maxval = 10,  group = igroup_stoch)
+i_stochOb       = input.int(90,    "Stoch Overbought",            minval = 65,  maxval = 95,  group = igroup_stoch)
+i_stochOs       = input.int(10,    "Stoch Oversold",              minval = 5,   maxval = 35,  group = igroup_stoch)
+
+igroup_trend = "🔵 Trend Context"
+i_emaFastLen    = input.int(13,    "EMA Fast Length",             minval = 5,   maxval = 200, step = 1,  group = igroup_trend)
+i_emaSlowLen    = input.int(55,    "EMA Slow Length",             minval = 20,  maxval = 500, step = 1,  group = igroup_trend)
+i_trendFilter   = input.bool(false, "Trend Filter aktiv",          group = igroup_trend)
+i_counterTrend  = input.bool(true,  "Allow Counter-Trend ORR",     group = igroup_trend)
+
+igroup_vol = "🟡 Volume"
+i_volMaLen      = input.int(20,    "Volume MA Length",            minval = 5,   maxval = 100, group = igroup_vol)
+i_volMultiplier = input.float(2.5, "Volume Spike Multiplier",     minval = 0.5, maxval = 10.0, step = 0.1, group = igroup_vol)
+i_volConfirm    = input.bool(false, "Require Volume Spike on Rejection", group = igroup_vol)
+
+igroup_risk = "🔴 Risk Management"
+i_atrLen        = input.int(14,    "ATR Length",                  minval = 5,   maxval = 50,  group = igroup_risk)
+i_atrStopMult   = input.float(3.0, "ATR Stop-Loss Multiplier",    minval = 0.5, maxval = 15.0, step = 0.1, group = igroup_risk)
+i_atrTpMult     = input.float(5.0, "ATR Take-Profit Multiplier",  minval = 0.5, maxval = 20.0, step = 0.5, group = igroup_risk)
+i_riskPercent   = input.float(0.5, "Risk per Trade (%)",           minval = 0.1, maxval = 5.0, step = 0.1, group = igroup_risk)
+i_maxDrawdownPct= input.float(5.0, "Max Daily Drawdown (%)",       minval = 1.0, maxval = 20.0, step = 0.5, group = igroup_risk)
+i_useTrailing   = input.bool(true,  "Use Trailing Stop after TP1", group = igroup_risk)
+i_trailMult     = input.float(2.0, "Trailing Stop ATR Mult",      minval = 0.3, maxval = 10.0, step = 0.1, group = igroup_risk)
+
+igroup_cool = "⏱️ Trade Management"
+i_entryCooldown = input.int(2,     "Entry Cooldown (bars)",       minval = 1,   maxval = 50,  group = igroup_cool)
+i_maxTradesDay  = input.int(30,    "Max Trades per Day",          minval = 1,   maxval = 200, group = igroup_cool)
+i_useTimeFilter = input.bool(false, "Time Filter",                 group = igroup_cool)
+
+igroup_zec = "⚡ ZEC-Specific Filters"
+i_useWickFilter = input.bool(true,  "Use Wick Filter",             group = igroup_zec)
+i_maxWickRatio  = input.float(0.15, "Max Body/Range Ratio",       minval = 0.01, maxval = 0.5, step = 0.01, group = igroup_zec)
+i_useFundingFilter = input.bool(false, "Avoid Funding Time (±5min)", group = igroup_zec)
+i_fundingWindow = input.int(5,     "Funding Avoidance (minutes)",   minval = 1, maxval = 30, group = igroup_zec)
+
+igroup_regime = "🧠 Regime Detector"
+i_useRegimeFilter = input.bool(true,  "Use Regime Filter",          group = igroup_regime)
+i_regLookback    = input.int(40,    "Percentile Lookback",         minval=20,  maxval=500, group=igroup_regime)
+i_regErLen      = input.int(8,     "Efficiency Ratio Length",      minval=2,   maxval=100, group=igroup_regime)
+i_regEmaLen     = input.int(13,    "Regime EMA Length",            minval=5,   maxval=200, group=igroup_regime)
+i_regAtrLen     = input.int(10,    "Regime ATR Length",            minval=2,   maxval=100, group=igroup_regime)
+i_regBbLen      = input.int(14,    "Regime BB Length",             minval=5,   maxval=100, group=igroup_regime)
+i_trendPct      = input.float(55,  "Trend Percentile Threshold",   minval=50,  maxval=95,  step=1,   group=igroup_regime)
+i_volPct        = input.float(60,  "Volatility Pct Threshold",     minval=50,  maxval=95,  step=1,   group=igroup_regime)
+i_confirmN      = input.int(1,     "Confirmation Bars",            minval=1,   maxval=20,  group=igroup_regime)
+
+igroup_regime_perm = "🧠 Regime Permissions"
+i_allowTrendVol   = input.bool(true,  "Allow ORR in TREND+VOL (1)",  group=igroup_regime_perm)
+i_allowTrendCalm  = input.bool(true,  "Allow ORR in TREND (2)",     group=igroup_regime_perm)
+i_allowChop       = input.bool(true,  "Allow ORR in CHOP (3)",      group=igroup_regime_perm)
+i_allowQuiet      = input.bool(false, "Allow ORR in QUIET (4)",     group=igroup_regime_perm)
+
+igroup_vwap = "🧠 Anchored VWAP"
+i_showVWAP      = input.bool(true,  "Show Anchored VWAP",          group=igroup_vwap)
+i_vwapAnchor    = input.string("Trend start", "Auto-anchor on",    options=["Trend start","Regime change","Session open"], group=igroup_vwap)
+i_dimOutside    = input.bool(true,  "Dim VWAP outside trending",      group=igroup_vwap)
+i_vwapCol       = input.color(#f0883e, "VWAP Color",               group=igroup_vwap)
+i_vwapWidth     = input.int(2,     "VWAP Line Width",              minval=1, maxval=4, group=igroup_vwap)
+
+igroup_z = "🧠 Volume Z-Score"
+i_showZ         = input.bool(true,  "Show Volume Z-Score",          group=igroup_z)
+i_zSessions     = input.int(10,    "Sessions for Z Baseline",       minval=5, maxval=100, group=igroup_z)
+
+emaFast = ta.ema(close, i_emaFastLen)
+emaSlow = ta.ema(close, i_emaSlowLen)
+trendUp = emaFast > emaSlow
+trendDown = emaFast < emaSlow
+rsi = ta.rsi(close, i_rsiLen)
+sto = ta.stoch(close, high, low, i_stochK)
+stochK = ta.sma(sto, i_stochSmooth)
+stochD = ta.sma(stochK, i_stochD)
+vwapValue = ta.vwap(hlc3)
+volMa = ta.sma(volume, i_volMaLen)
+volSpike = volume > volMa * i_volMultiplier
+atr = ta.atr(i_atrLen)
+timeOk = true
+bodySize = math.abs(close - open)
+rangeSize = high - low
+wickRatio = rangeSize > 0 ? bodySize / rangeSize : 1.0
+wickBomb = i_useWickFilter and wickRatio < i_maxWickRatio
+utcHour = hour
+utcMin = minute
+utcTime = utcHour * 60 + utcMin
+isFundingTime = i_useFundingFilter and ((utcHour == 0 or utcHour == 8 or utcHour == 16) and utcMin <= i_fundingWindow)
+var int tradesToday = 0
+var int lastDay = na
+currentDay = year * 10000 + month * 100 + dayofmonth
+if currentDay != lastDay
+    tradesToday := 0
+    lastDay := currentDay
+var float dailyStartEquity = na
+var int lastDDDay = na
+if currentDay != lastDDDay
+    dailyStartEquity := strategy.equity
+    lastDDDay := currentDay
+currentDDpct = (dailyStartEquity - strategy.equity) / dailyStartEquity * 100
+ddBreached = currentDDpct > i_maxDrawdownPct
+cTrendCalm = color.new(#3fb950, 0)
+cTrendVol = color.new(#58a6ff, 0)
+cRangeCalm = color.new(#8b949e, 0)
+cRangeVol = color.new(#f85149, 0)
+pctRank(src, len) =>
+    cnt = 0
+    for i = 1 to len
+        if src[i] <= src
+            cnt := cnt + 1
+    100.0 * cnt / len
+changeER = math.abs(close - close[i_regErLen])
+volatilityER = math.sum(math.abs(close - close[1]), i_regErLen)
+er = volatilityER != 0 ? changeER / volatilityER : 0.0
+emaReg = ta.ema(close, i_regEmaLen)
+atrReg = ta.atr(i_regAtrLen)
+slopeRaw = (emaReg - emaReg[3]) / 3
+slopeNrm = atrReg != 0 ? math.abs(slopeRaw) / atrReg : 0.0
+trendRaw = er * 0.6 + slopeNrm * 0.4
+trendScore = pctRank(trendRaw, i_regLookback)
+atrPct = pctRank(atrReg, i_regLookback)
+basis = ta.sma(close, i_regBbLen)
+dev = ta.stdev(close, i_regBbLen)
+bbWidth = basis != 0 ? (4 * dev) / basis : 0.0
+bbPct = pctRank(bbWidth, i_regLookback)
+volScore = (atrPct + bbPct) / 2
+upReg = emaReg > emaReg[3]
+isTrend = trendScore >= i_trendPct
+isVol = volScore >= i_volPct
+rawState = isTrend and isVol ? 1 : isTrend and not isVol ? 2 : not isTrend and isVol ? 3 : 4
+var int regime = 4
+var int pending = 4
+var int pendCnt = 0
+if rawState == regime
+    pendCnt := 0
+    pending := regime
+else
+    if rawState == pending
+        pendCnt := pendCnt + 1
+    else
+        pending := rawState
+        pendCnt := 1
+    if pendCnt >= i_confirmN
+        regime := pending
+        pendCnt := 0
+trendDist = math.min(100.0, math.abs(trendScore - i_trendPct) / (100 - i_trendPct) * 100)
+volDist = math.min(100.0, math.abs(volScore - i_volPct) / (100 - i_volPct) * 100)
+confidence = math.round(math.max(trendDist, volDist))
+regimeShort = regime == 1 ? "TREND+VOL" : regime == 2 ? "TREND" : regime == 3 ? "CHOP" : "QUIET"
+regimeCol = regime == 1 ? cTrendVol : regime == 2 ? cTrendCalm : regime == 3 ? cRangeVol : cRangeCalm
+scalpNote = regime == 1 ? "Momentum burst - fade overextension" : regime == 2 ? "Clean trend - ORR at range extremes" : regime == 3 ? "Choppy - pure mean reversion mode" : "Quiet - reduce size or stand down"
+isTrendingRegime = regime == 1 or regime == 2
+trendStart = isTrendingRegime and not (regime[1] == 1 or regime[1] == 2)
+sessionStart = ta.change(time("D")) != 0
+anchorReset = i_vwapAnchor == "Trend start" ? trendStart : i_vwapAnchor == "Regime change" ? (regime != regime[1]) : sessionStart
+var float vwapPV = 0.0
+var float vwapV = 0.0
+var float vwapPV2 = 0.0
+if anchorReset
+    vwapPV := 0.0
+    vwapV := 0.0
+    vwapPV2 := 0.0
+vwapSrc = hlc3
+vwapPV := vwapPV + vwapSrc * volume
+vwapV := vwapV + volume
+vwapPV2 := vwapPV2 + vwapSrc * vwapSrc * volume
+vwapVal = vwapV > 0 ? vwapPV / vwapV : na
+vwapVar = vwapV > 0 ? math.max(0, (vwapPV2 / vwapV) - (vwapVal * vwapVal)) : 0.0
+vwapStd = math.sqrt(vwapVar)
+vwapPlotCol = (i_dimOutside and not isTrendingRegime) ? color.new(i_vwapCol, 70) : i_vwapCol
+type VolHist
+    array<float> vols
+var map<int, VolHist> volHistory = map.new<int, VolHist>()
+var int sessionSlot = 0
+newSession = ta.change(time("D")) != 0
+sessionSlot := newSession ? 0 : sessionSlot + 1
+if not map.contains(volHistory, sessionSlot)
+    hist = VolHist.new(array.new<float>(0))
+    map.put(volHistory, sessionSlot, hist)
+slotHist = map.get(volHistory, sessionSlot)
+slotArr = slotHist.vols
+zScore = 0.0
+zValid = false
+if array.size(slotArr) >= 5
+    zMean = array.avg(slotArr)
+    zStdev = array.stdev(slotArr)
+    if zStdev > 0
+        zScore := (volume - zMean) / zStdev
+        zValid := true
+array.push(slotArr, volume)
+if array.size(slotArr) > i_zSessions
+    array.shift(slotArr)
+zAbs = math.abs(zScore)
+zCol = not zValid ? #8b949e : zAbs >= 3.0 ? #f85149 : zAbs >= 2.0 ? #f0883e : zAbs >= 1.0 ? #58a6ff : #8b949e
+var float orHigh = na
+var float orLow = na
+var float orMid = na
+var bool orSet = false
+newSessionOR = ta.change(time("D")) != 0
+if i_useSessionOr
+    if newSessionOR
+        orHigh := high
+        orLow := low
+        orSet := false
+    else
+        orHigh := math.max(nz(orHigh, high), high)
+        orLow := math.min(nz(orLow, low), low)
+        orMid := (orHigh + orLow) / 2.0
+        if bar_index - ta.valuewhen(newSessionOR, bar_index, 0) >= i_orLookback
+            orSet := true
+else
+    orHigh := ta.highest(high, i_orLookback)
+    orLow := ta.lowest(low, i_orLookback)
+    orMid := (orHigh + orLow) / 2.0
+    orSet := true
+orRange = orHigh - orLow
+orExtUp = orHigh + orRange * i_orExtension
+orExtDown = orLow - orRange * i_orExtension
+minBreakout = orRange * i_orBreakoutMin
+brokeAbove = (high > orHigh + minBreakout) and (high[1] <= orHigh + minBreakout)
+brokeBelow = (low < orLow - minBreakout) and (low[1] >= orLow - minBreakout)
+rejectedBackInsideLong = close < orHigh and close < high
+rejectedBackInsideShort = close > orLow and close > low
+var int barsSinceBreakAbove = na
+var int barsSinceBreakBelow = na
+if brokeAbove
+    barsSinceBreakAbove := 0
+else if not na(barsSinceBreakAbove)
+    barsSinceBreakAbove := barsSinceBreakAbove + 1
+if brokeBelow
+    barsSinceBreakBelow := 0
+else if not na(barsSinceBreakBelow)
+    barsSinceBreakBelow := barsSinceBreakBelow + 1
+orrWindow = i_orLookback * 2
+regimePermitted = (not i_useRegimeFilter or (regime == 1 and i_allowTrendVol) or (regime == 2 and i_allowTrendCalm) or (regime == 3 and i_allowChop) or (regime == 4 and i_allowQuiet))
+isOrrLong = (orSet and regimePermitted and not wickBomb and not isFundingTime and not na(barsSinceBreakAbove) and barsSinceBreakAbove > 0 and barsSinceBreakAbove <= orrWindow and close < orHigh and high > orHigh and rejectedBackInsideLong and rsi > i_rsiOverbought and rsi < i_rsiMaxShort and (not i_useStoch or (stochK > i_stochOb and stochK < stochK[1])) and (not i_volConfirm or volSpike) and timeOk)
+isOrrShort = (orSet and regimePermitted and not wickBomb and not isFundingTime and not na(barsSinceBreakBelow) and barsSinceBreakBelow > 0 and barsSinceBreakBelow <= orrWindow and close > orLow and low < orLow and rejectedBackInsideShort and rsi < i_rsiOversold and rsi > i_rsiMinLong and (not i_useStoch or (stochK < i_stochOs and stochK > stochK[1])) and (not i_volConfirm or volSpike) and timeOk)
+longOk = not i_trendFilter or i_counterTrend or trendDown
+shortOk = not i_trendFilter or i_counterTrend or trendUp
+var int barsSinceEntry = i_entryCooldown + 1
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    barsSinceEntry := 0
+else if not na(barsSinceEntry)
+    barsSinceEntry := barsSinceEntry + 1
+cooldownOk = barsSinceEntry >= i_entryCooldown
+tradesOk = tradesToday < i_maxTradesDay
+enterLong = isOrrLong and longOk and cooldownOk and tradesOk and not ddBreached and strategy.position_size <= 0
+enterShort = isOrrShort and shortOk and cooldownOk and tradesOk and not ddBreached and strategy.position_size >= 0
+meanVwap = nz(vwapVal, vwapValue)
+longTarget = i_useVwap and i_useOrMid ? math.min(meanVwap, orMid) : i_useVwap ? meanVwap : orMid
+shortTarget = i_useVwap and i_useOrMid ? math.max(meanVwap, orMid) : i_useVwap ? meanVwap : orMid
+longDist = close - longTarget
+shortDist = shortTarget - close
+minDistMult = atr * 0.5
+longHasDistance = longDist > minDistMult
+shortHasDistance = shortDist > minDistMult
+enterLong := enterLong and longHasDistance
+enterShort := enterShort and shortHasDistance
+accountRiskAmt = strategy.equity * i_riskPercent / 100
+atrRisk = atr * i_atrStopMult
+posSize = atrRisk > 0 ? math.floor(accountRiskAmt / atrRisk) : 0
+longStop = close + atr * i_atrStopMult
+longTp = longTarget
+shortStop = close - atr * i_atrStopMult
+shortTp = shortTarget
+if enterLong
+    strategy.entry("Short", strategy.short, qty = posSize)
+    tradesToday := tradesToday + 1
+if enterShort
+    strategy.entry("Long", strategy.long, qty = posSize)
+    tradesToday := tradesToday + 1
+if strategy.position_size < 0
+    strategy.exit("Short SL/TP", "Short", stop = longStop, limit = longTp, comment_loss = "SL", comment_profit = "TP MR")
+if strategy.position_size > 0
+    strategy.exit("Long SL/TP", "Long", stop = shortStop, limit = shortTp, comment_loss = "SL", comment_profit = "TP MR")
+var float trailStopPrice = na
+if i_useTrailing
+    if strategy.position_size < 0
+        newTrail = high + atr * i_trailMult
+        if na(trailStopPrice) or newTrail < trailStopPrice
+            trailStopPrice := newTrail
+    else
+        trailStopPrice := na
+    if strategy.position_size > 0
+        newTrail = low - atr * i_trailMult
+        if na(trailStopPrice) or newTrail > trailStopPrice
+            trailStopPrice := newTrail
+    else if strategy.position_size == 0
+        trailStopPrice := na
+    if strategy.position_size < 0 and not na(trailStopPrice) and trailStopPrice < longStop
+        strategy.exit("Short Trail", "Short", stop = trailStopPrice, comment_loss = "Trail")
+    if strategy.position_size > 0 and not na(trailStopPrice) and trailStopPrice > shortStop
+        strategy.exit("Long Trail", "Long", stop = trailStopPrice, comment_loss = "Trail")
+var box orBox = na
+if i_useSessionOr and newSessionOR and bar_index > 0
+    if not na(orBox)
+        box.delete(orBox)
+    orBox := box.new(bar_index - i_orLookback, orHigh, bar_index + i_orLookback, orLow, bgcolor = color.new(color.blue, 90), border_color = color.new(color.blue, 60), border_width = 1)
+plot(orHigh, title="OR High", color=color.new(color.blue, 30), style=plot.style_line, linewidth=2)
+plot(orLow, title="OR Low", color=color.new(color.blue, 30), style=plot.style_line, linewidth=2)
+plot(orMid, title="OR Mid", color=color.new(color.teal, 40), style=plot.style_line, linewidth=1)
+plot(vwapValue, title="VWAP", color=color.new(color.orange, 20), style=plot.style_line, linewidth=1)
+plot(i_showVWAP ? vwapVal : na, "Anchored VWAP", color=vwapPlotCol, linewidth=i_vwapWidth)
+pExtUp = plot(orExtUp, title="OR Ext Up", color=color.new(color.blue, 80), style=plot.style_line)
+pExtDown = plot(orExtDown, title="OR Ext Down", color=color.new(color.blue, 80), style=plot.style_line)
+fill(pExtUp, plot(orHigh, title="ORH fill", color=na), color=color.new(color.blue, 95), title="Ext Up Zone")
+fill(pExtDown, plot(orLow, title="ORL fill", color=na), color=color.new(color.blue, 95), title="Ext Down Zone")
+plot(emaFast, title="EMA Fast", color=color.new(color.purple, 30), linewidth=1)
+plot(emaSlow, title="EMA Slow", color=color.new(color.red, 30), linewidth=1)
+plotshape(isOrrLong, title="ORR Short Entry", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small, text="ORR▼")
+plotshape(isOrrShort, title="ORR Long Entry", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small, text="ORR▲")
+plotarrow(enterLong ? -1 : enterShort ? 1 : 0, title="Entry Arrow", colorup = color.green, colordown = color.red, offset = 0)
+if isOrrLong and not isOrrLong[1]
+    label.new(bar_index, high, "ORR: Break Above → Reject\nTarget: " + str.tostring(longTarget, "#.##") + "\nRegime: " + regimeShort + (wickBomb ? "\n⚠ WICK" : "") + (isFundingTime ? "\n⏸ FUNDING" : ""), color=color.new(color.red, 80), textcolor=color.white, style=label.style_label_down, size=size.small)
+if isOrrShort and not isOrrShort[1]
+    label.new(bar_index, low, "ORR: Break Below → Reject\nTarget: " + str.tostring(shortTarget, "#.##") + "\nRegime: " + regimeShort + (wickBomb ? "\n⚠ WICK" : "") + (isFundingTime ? "\n⏸ FUNDING" : ""), color=color.new(color.green, 80), textcolor=color.white, style=label.style_label_up, size=size.small)
+bgCol = i_useRegimeFilter ? color.new(regimeCol, 92) : na
+bgcolor(bgCol, title="Regime BG")
+regimeChanged = regime != regime[1]
+if regimeChanged and bar_index > 1
+    label.new(bar_index, close, regimeShort + "\n" + str.tostring(confidence) + "%", color=color.new(regimeCol, 70), textcolor=color.white, style=label.style_label_center, size=size.tiny, textalign=text.align_center)
+plotshape(wickBomb, title="Wick Bomb", location=location.abovebar, color=color.gray, style=shape.xcross, size=size.tiny, text="W")
+var table dash = table.new(position.top_right, 4, 15, bgcolor = color.new(color.black, 80), border_width = 1, border_color = color.gray, frame_width = 1)
+if barstate.islast
+    dash.cell(0, 0, "ORR ZEC.P 1m", text_color = color.white, text_size = size.small, bgcolor = color.new(color.blue, 50))
+    dash.cell(1, 0, "Value", text_color = color.white, text_size = size.small, bgcolor = color.new(color.blue, 50))
+    dash.cell(2, 0, "Signal", text_color = color.white, text_size = size.small, bgcolor = color.new(color.blue, 50))
+    dash.cell(3, 0, "Status", text_color = color.white, text_size = size.small, bgcolor = color.new(color.blue, 50))
+    dash.cell(0, 1, "OR High", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 1, str.tostring(orHigh, "#.##"), text_color = color.silver, text_size = size.tiny)
+    dash.cell(2, 1, high > orHigh ? "⚡ BREAK" : "-", text_color = high > orHigh ? color.yellow : color.gray, text_size = size.tiny)
+    dash.cell(3, 1, orSet ? "✓ SET" : "⏳ SETTING", text_color = orSet ? color.green : color.orange, text_size = size.tiny)
+    dash.cell(0, 2, "OR Low", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 2, str.tostring(orLow, "#.##"), text_color = color.silver, text_size = size.tiny)
+    dash.cell(2, 2, low < orLow ? "⚡ BREAK" : "-", text_color = low < orLow ? color.yellow : color.gray, text_size = size.tiny)
+    dash.cell(3, 2, "", text_color = color.gray, text_size = size.tiny)
+    dash.cell(0, 3, "Mean Target", text_color = color.silver, text_size = size.tiny)
+    meanLabel = i_useVwap and i_useOrMid ? "MIN(VWAP,OR)" : i_useVwap ? "VWAP" : "OR Mid"
+    dash.cell(1, 3, str.tostring(i_useVwap and i_useOrMid ? math.min(meanVwap, orMid) : i_useVwap ? meanVwap : orMid, "#.##"), text_color = color.silver, text_size = size.tiny)
+    dash.cell(2, 3, meanLabel, text_color = color.teal, text_size = size.tiny)
+    dash.cell(3, 3, "", text_color = color.gray, text_size = size.tiny)
+    dash.cell(0, 4, "RSI", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 4, str.tostring(rsi, "#.#"), text_color = rsi > i_rsiOverbought ? color.red : rsi < i_rsiOversold ? color.green : color.silver, text_size = size.tiny)
+    dash.cell(2, 4, rsi > i_rsiOverbought ? "OVERBOUGHT" : rsi < i_rsiOversold ? "OVERSOLD" : "NEUTRAL", text_color = rsi > i_rsiOverbought ? color.red : rsi < i_rsiOversold ? color.green : color.gray, text_size = size.tiny)
+    dash.cell(3, 4, "", text_color = color.gray, text_size = size.tiny)
+    stochText = i_useStoch ? str.tostring(stochK, "#.#") + " / " + str.tostring(stochD, "#.#") : "OFF"
+    dash.cell(0, 5, "Stoch K/D", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 5, stochText, text_color = i_useStoch ? color.silver : color.gray, text_size = size.tiny)
+    dash.cell(2, 5, i_useStoch and stochK > i_stochOb ? "OB" : i_useStoch and stochK < i_stochOs ? "OS" : "-", text_color = i_useStoch and stochK > i_stochOb ? color.red : i_useStoch and stochK < i_stochOs ? color.green : color.gray, text_size = size.tiny)
+    dash.cell(3, 5, "", text_color = color.gray, text_size = size.tiny)
+    dash.cell(0, 6, "Trend", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 6, str.tostring(i_emaFastLen) + "/" + str.tostring(i_emaSlowLen), text_color = color.silver, text_size = size.tiny)
+    dash.cell(2, 6, trendUp ? "↗ UP" : trendDown ? "↘ DOWN" : "→ SIDE", text_color = trendUp ? color.green : trendDown ? color.red : color.gray, text_size = size.tiny)
+    dash.cell(3, 6, i_counterTrend ? "Counter OK" : "With Trend", text_color = i_counterTrend ? color.green : color.yellow, text_size = size.tiny)
+    dash.cell(0, 7, "ORR Short", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 7, isOrrLong ? "ACTIVE" : "-", text_color = isOrrLong ? color.red : color.gray, text_size = size.tiny)
+    dash.cell(2, 7, isOrrLong ? "🔥 ENTRY" : "", text_color = isOrrLong ? color.red : color.gray, text_size = size.tiny)
+    dash.cell(3, 7, enterLong ? "➤ EXEC" : "", text_color = enterLong ? color.red : color.gray, text_size = size.tiny)
+    dash.cell(0, 8, "ORR Long", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 8, isOrrShort ? "ACTIVE" : "-", text_color = isOrrShort ? color.green : color.gray, text_size = size.tiny)
+    dash.cell(2, 8, isOrrShort ? "🔥 ENTRY" : "", text_color = isOrrShort ? color.green : color.gray, text_size = size.tiny)
+    dash.cell(3, 8, enterShort ? "➤ EXEC" : "", text_color = enterShort ? color.green : color.gray, text_size = size.tiny)
+    dash.cell(0, 9, "REGIME", text_color = color.white, text_size = size.small, bgcolor = color.new(regimeCol, 60))
+    dash.cell(1, 9, regimeShort, text_color = color.white, text_size = size.small, bgcolor = color.new(regimeCol, 60))
+    dash.cell(2, 9, upReg ? "↗ UP" : "↘ DOWN", text_color = upReg ? color.green : color.red, text_size = size.small, bgcolor = color.new(regimeCol, 60))
+    dash.cell(3, 9, str.tostring(confidence) + "%", text_color = color.white, text_size = size.small, bgcolor = color.new(regimeCol, 60))
+    dash.cell(0, 10, "Trend/Vol", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 10, str.tostring(math.round(trendScore)) + " / " + str.tostring(math.round(volScore)), text_color = color.silver, text_size = size.tiny)
+    dash.cell(2, 10, scalpNote, text_color = #58a6ff, text_size = size.tiny)
+    dash.cell(3, 10, i_useRegimeFilter ? (regimePermitted ? "✓ PERMIT" : "❌ BLOCK") : "OFF", text_color = i_useRegimeFilter ? (regimePermitted ? color.green : color.red) : color.gray, text_size = size.tiny)
+    zLabel = not zValid ? "-" : (zScore >= 0 ? "+" : "") + str.tostring(zScore, "#.0")
+    dash.cell(0, 11, "Vol Z-Score", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 11, zLabel, text_color = zCol, text_size = size.tiny)
+    dash.cell(2, 11, zValid and zAbs >= 2.0 ? "HIGH CONV" : "", text_color = zCol, text_size = size.tiny)
+    dash.cell(3, 11, "", text_color = color.gray, text_size = size.tiny)
+    dash.cell(0, 12, "ZEC Filters", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 12, wickBomb ? "WICK BOMB" : isFundingTime ? "FUNDING" : "CLEAR", text_color = wickBomb ? color.orange : isFundingTime ? color.purple : color.green, text_size = size.tiny)
+    dash.cell(2, 12, "Body/Range: " + str.tostring(wickRatio, "#.##"), text_color = color.silver, text_size = size.tiny)
+    dash.cell(3, 12, i_useWickFilter ? (wickBomb ? "BLOCKED" : "PASS") : "OFF", text_color = i_useWickFilter ? (wickBomb ? color.red : color.green) : color.gray, text_size = size.tiny)
+    posColor = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    dash.cell(0, 13, "Position", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 13, str.tostring(strategy.position_size), text_color = posColor, text_size = size.tiny)
+    dash.cell(2, 13, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color = posColor, text_size = size.tiny)
+    dash.cell(3, 13, "", text_color = color.gray, text_size = size.tiny)
+    dash.cell(0, 14, "ATR / Stop / Trades", text_color = color.silver, text_size = size.tiny)
+    dash.cell(1, 14, str.tostring(atr, "#.###") + " / " + str.tostring(i_atrStopMult) + "x", text_color = color.silver, text_size = size.tiny)
+    dash.cell(2, 14, "RR 1:" + str.tostring(i_atrTpMult / i_atrStopMult, "#.#"), text_color = color.silver, text_size = size.tiny)
+    dash.cell(3, 14, str.tostring(tradesToday) + "/" + str.tostring(i_maxTradesDay), text_color = tradesToday >= i_maxTradesDay ? color.red : color.silver, text_size = size.tiny)

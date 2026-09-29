@@ -1,0 +1,102 @@
+=== Multi-Symbol Trading (v3.2) ===
+TradeMultipleSymbols=true||false||0||true||N
+TradingSymbols=EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD
+MaxPositionsPerSymbol=2||2||1||20||Y
+AllowHedging=false||false||0||true||Y
+MaxTotalPositions=5||5||1||50||Y
+MaxFloatingEquityPercent=5.0||5.0||0.5||50.0||Y
+; === Strategy Selection ===
+UseMAStrategy=false||false||0||true||Y
+UseRSIStrategy=false||false||0||true||Y
+UseBBStrategy=false||false||0||true||Y
+UseMACDStrategy=false||false||0||true||Y
+MinSignalScore=35||35||1||350||Y
+; === Multi-Timeframe Analysis ===
+UseMultiTimeframe=false||false||0||true||Y
+TimeFrame1=0||0||0||49153||Y
+TimeFrame2=0||0||0||49153||Y
+TimeFrame3=0||0||0||49153||Y
+MinTFConfirmation=2||2||1||20||Y
+; === Moving Average Strategy ===
+FastMA_Period=10||10||1||100||Y
+SlowMA_Period=50||50||1||500||Y
+MA_Method=0||0||0||3||Y
+MA_Price=1||1||0||7||Y
+MA_SlopeMinimum=5.0||5.0||0.5||50.0||Y
+; === RSI Strategy ===
+RSI_Period=14||14||1||140||Y
+RSI_Oversold=30.0||30.0||3.0||300.0||Y
+RSI_Overbought=70.0||70.0||7.0||700.0||Y
+RSI_Price=1||1||0||7||Y
+; === Bollinger Bands Strategy ===
+BB_Period=20||20||1||200||Y
+BB_Deviation=2.0||2.0||0.2||20.0||Y
+BB_AppliedPrice=1||1||0||7||Y
+; === MACD Strategy ===
+MACD_FastEMA=12||12||1||120||Y
+MACD_SlowEMA=26||26||1||260||Y
+MACD_Signal=9||9||1||90||Y
+MACD_Price=1||1||0||7||Y
+; === Signal Filters ===
+UseADXFilter=false||false||0||true||Y
+ADX_Period=14||14||1||140||Y
+ADX_Minimum=20.0||20.0||2.0||200.0||Y
+UseATRFilter=false||false||0||true||Y
+ATR_Period=14||14||1||140||Y
+ATR_MinimumPips=10.0||10.0||1.0||100.0||Y
+ATR_MaximumPips=100.0||100.0||10.0||1000.0||Y
+; === Portfolio Risk Management ===
+MaxPortfolioRisk=10.0||10.0||1.0||100.0||Y
+BaseRiskPercent=1.5||1.5||0.15||15.0||Y
+UseDynamicRisk=false||false||0||true||Y
+MinRiskPercent=0.5||0.5||0.05||5.0||Y
+MaxRiskPercent=3.0||3.0||0.3||30.0||Y
+MaxDrawdownPercent=30.0||30.0||3.0||300.0||Y
+DailyDrawdownPercent=5.0||5.0||0.5||50.0||Y
+; === Position Sizing ===
+StopLossPips=40.0||40.0||4.000000||400.000000||N
+TakeProfitPips=80.0||80.0||8.000000||800.000000||N
+UseATRSizing=true||false||0||true||N
+ATR_SL_Multiplier=2.0||2.0||0.200000||20.000000||N
+ATR_TP_Multiplier=4.0||4.0||0.400000||40.000000||N
+MaxSpreadPips=5.0||5.0||0.500000||50.000000||N
+; === Position Management ===
+UseBreakeven=false||false||0||true||Y
+BreakevenTriggerPips=20.0||20.0||2.0||200.0||Y
+BreakevenOffsetPips=2.0||2.0||0.2||20.0||Y
+UsePartialTP=false||false||0||true||Y
+PartialTP_Pips=40.0||40.0||4.0||400.0||Y
+PartialTP_Percent=50.0||50.0||5.0||500.0||Y
+UseTrailingStop=false||false||0||true||Y
+TrailingStopPips=30.0||30.0||3.0||300.0||Y
+TrailingStepPips=5.0||5.0||0.5||50.0||Y
+TrailingActivationPips=20.0||20.0||2.0||200.0||Y
+; === Trading Controls ===
+MaxDailyTrades=50||50||1||500||Y
+MaxConcurrentPositions=5||5||1||50||Y
+CooldownMinutes=3||3||1||30||Y
+SeparateCooldownByDirection=false||false||0||true||Y
+PostCloseCooldownMinutes=2||2||1||20||Y
+; === Session Filters ===
+UseSessionFilter=false||false||0||true||N
+TradeAsianSession=true||false||0||true||N
+TradeLondonSession=true||false||0||true||N
+TradeNYSession=true||false||0||true||N
+AsianStartHour=0||0||1||10||N
+AsianEndHour=8||8||1||80||N
+LondonStartHour=7||7||1||70||N
+LondonEndHour=16||16||1||160||N
+NYStartHour=12||12||1||120||N
+NYEndHour=21||21||1||210||N
+; === Money Management ===
+MaxLotSize=5.0||5.0||0.5||50.0||Y
+MinLotSize=0.01||0.01||0.001||0.1||Y
+UseCompounding=false||false||0||true||Y
+UseFixedLot=false||false||0||true||Y
+FixedLotSize=0.1||0.1||0.01||1.0||Y
+; === Advanced Settings ===
+MagicNumber=234567||234567||1||2345670||Y
+TradeComment=ForexTrader_v3.2_Multi
+Slippage=30||30||1||300||Y
+MaxRetries=3||3||1||30||Y
+RetryDelayMs=1000||1000||1||10000||Y

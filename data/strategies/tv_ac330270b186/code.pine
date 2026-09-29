@@ -1,0 +1,35 @@
+//@version=5
+strategy("LuxAlgo BTC 5m Scalper", overlay=true, initial_capital=10000, default_qty_type=strategy.cash, default_qty_value=10000)
+
+// --- Inputs ---
+// Wir nutzen hier die Logik der Standardeinstellungen (Sensitivity 12)
+sensitivity = input.int(12, "Signal Sensitivity")
+
+// --- Indikatoren & Logik (Platzhalter für die Toolkit-Berechnung) ---
+// Hinweis: Da die internen LuxAlgo-Berechnungen proprietär sind, 
+// nutzt man in TradingView die "External Indicators" Funktion oder das generierte Skript.
+// Dies ist die strukturelle Logik für deine Strategie-Befehle:
+
+bool longCondition  = ta.crossover(ta.sma(close, 14), ta.sma(close, 28)) // Beispielhafte Trigger-Logik
+bool shortCondition = ta.crossunder(ta.sma(close, 14), ta.sma(close, 28))
+
+// --- Strategie Ausführung ---
+
+// Nachricht für den Alert (dein Payload)
+alert_msg = '{"data": {"action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}"}, "price": "{{close}}", "signal_param": "{}", "signal_type": "4dade7f0-1909-4da2-905f-99f7c486c356", "symbol": "{{ticker}}", "time": "{{timenow}}"}'
+
+// Long Entry
+if (longCondition)
+    strategy.entry("Long", strategy.long, alert_message=alert_msg)
+
+// Short Entry
+if (shortCondition)
+    strategy.entry("Short", strategy.short, alert_message=alert_msg)
+
+// Exits (Built-in Exit Logik)
+// Ein Exit wird ausgelöst, wenn die Trend-Erschöpfung eintritt (das rote/orange 'x')
+if (strategy.position_size > 0 and shortCondition) // Vereinfachte Exit-Logik
+    strategy.exit("Exit Long", "Long", alert_message=alert_msg)
+
+if (strategy.position_size < 0 and longCondition)
+    strategy.exit("Exit Short", "Short", alert_message=alert_msg)

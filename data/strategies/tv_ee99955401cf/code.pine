@@ -1,0 +1,132 @@
+//@version=6
+// =================================================================================================
+// Psychology Trader Bot (Based on "8 Levels of a Trader" Video)
+// =================================================================================================
+// PIONEX MASTER RULES APPLIED:
+// - initial_capital = 100
+// - default_qty_type = strategy.cash
+// - default_qty_value = 1 (bis 100 USDT)
+// - pyramiding = 1
+// - calc_on_every_tick = false
+// - margin_long = 0, margin_short = 0
+// - process_orders_on_close = true
+// - Webhook Payload: Pionex Standard Format (signal_listener)
+// =================================================================================================
+
+strategy(
+    title             = "Psychology Trader Bot",
+    shorttitle        = "PsyTrader",
+    overlay           = true,
+    initial_capital   = 100,
+    default_qty_type  = strategy.cash,
+    default_qty_value = 1,
+    pyramiding        = 1,
+    calc_on_every_tick= false,
+    margin_long       = 0,
+    margin_short      = 0,
+    process_orders_on_close = true,
+    commission_type   = strategy.commission.percent,
+    commission_value  = 0.05,
+    slippage          = 2
+)
+
+// =================================================================================================
+// 1. EINSTELLUNGEN
+// =================================================================================================
+grp_main   = "Haupt-Einstellungen"
+uuid       = input.string("8a17bcf9-0d9c-4a09-92ae-27adf755d95d", "Pionex Signal Bot UUID", group=grp_main)
+use_shorts = input.bool(true, "Short-Trades erlauben", group=grp_main)
+
+grp_risk   = "Risiko & Exit (Video: 1:2.1 RRR)"
+sl_atr_mul = input.float(1.0, "SL ATR Multiplikator", step=0.1, minval=0.1, group=grp_risk)
+// Das Video erwähnt ein Risk-Reward-Ratio von 1:2.1
+tp_atr_mul = input.float(2.1, "TP ATR Multiplikator", step=0.1, minval=0.1, group=grp_risk)
+
+grp_session = "Session Filter (Video: 15min Wait)"
+use_session = input.bool(true, "Session-Filter aktivieren", group=grp_session)
+// 0945-1600 (US Market Time, überspringt die ersten 15 Minuten)
+session_time = input.session("0945-1600", "Trading Session (EST)", group=grp_session)
+
+grp_strat = "Strategie-Parameter (Support/Resistance, EMA)"
+ema_fast_len = input.int(20, "EMA Fast", group=grp_strat)
+ema_slow_len = input.int(50, "EMA Slow", group=grp_strat)
+rsi_len = input.int(14, "RSI Length", group=grp_strat)
+
+// =================================================================================================
+// 2. SYSTEM STATUS (Session Check)
+// =================================================================================================
+// Session Check (Der Trader im Video handelt nicht in den ersten 15 Minuten)
+bool in_session = not use_session or not na(time(timeframe.period, session_time, "America/New_York"))
+
+// =================================================================================================
+// 3. INDIKATOREN & SETUP LOGIK
+// =================================================================================================
+// Im Video werden Support/Resistance, EMA, RSI und MACD erwähnt.
+// Wir bauen ein robustes Trend-Following Setup (EMA Crossover + RSI Filter)
+ema_fast = ta.ema(close, ema_fast_len)
+ema_slow = ta.ema(close, ema_slow_len)
+rsi = ta.rsi(close, rsi_len)
+atr = ta.atr(14)
+atr_safe = math.max(atr, close * 0.0001)
+
+// Setup-Bedingungen (Das "Eine" Setup aus Level 4)
+// Long: Fast EMA kreuzt Slow EMA nach oben, RSI ist nicht überkauft (< 70)
+bool setup_long = ta.crossover(ema_fast, ema_slow) and rsi < 70
+// Short: Fast EMA kreuzt Slow EMA nach unten, RSI ist nicht überverkauft (> 30)
+bool setup_short = ta.crossunder(ema_fast, ema_slow) and rsi > 30
+
+// =================================================================================================
+// 4. ENTRY / EXIT LOGIK
+// =================================================================================================
+bool confirmed = barstate.isconfirmed
+
+bool go_long = confirmed and setup_long and in_session and strategy.position_size == 0
+bool go_short = confirmed and setup_short and in_session and strategy.position_size == 0 and use_shorts
+
+float sl_long_price = close - (atr_safe * sl_atr_mul)
+float tp_long_price = close + (atr_safe * tp_atr_mul)
+float sl_short_price = close + (atr_safe * sl_atr_mul)
+float tp_short_price = close - (atr_safe * tp_atr_mul)
+
+if go_long
+    strategy.entry("Long", strategy.long, comment="L")
+    strategy.exit("Long Exit", "Long", stop=sl_long_price, limit=tp_long_price, comment_loss="SL", comment_profit="TP")
+
+if go_short
+    strategy.entry("Short", strategy.short, comment="S")
+    strategy.exit("Short Exit", "Short", stop=sl_short_price, limit=tp_short_price, comment_loss="SL", comment_profit="TP")
+
+plotshape(go_long, "Long Signal", shape.triangleup, location.belowbar, color.lime, size=size.small)
+plotshape(go_short, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// =================================================================================================
+// 5. WEBHOOK ALERTS (PIONEX MASTER FORMAT)
+// =================================================================================================
+// WEBHOOK URL:
+// https://www.pionex.com/signal/api/v1/signal_listener/trading_view?token=70d3780a-eabe-403b-b238-dde8df402233
+string pionex_payload = '{ "data": { "action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_param": "{}", "signal_type": "' + uuid + '", "symbol": "{{ticker}}", "time": "{{timenow}}" }'
+
+if go_long or go_short
+    alert(pionex_payload, alert.freq_once_per_bar_close)
+
+// =================================================================================================
+// 6. DASHBOARD (Psychology Stats)
+// =================================================================================================
+var table dash = table.new(position.top_right, 2, 5, bgcolor=color.new(#0f172a, 10), border_width=1, border_color=color.new(#334155, 0))
+
+if barstate.islast
+    table.cell(dash, 0, 0, "Psychology Trader Bot", text_color=color.white, text_size=size.small, bgcolor=color.new(#1e293b, 0))
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=color.new(#38bdf8, 0), text_size=size.small, bgcolor=color.new(#1e293b, 0))
+
+    table.cell(dash, 0, 1, "Session (Wait 15m)", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 1, in_session ? "ACTIVE" : "CLOSED", text_color=in_session ? color.new(#10b981, 0) : color.new(#f43f5e, 0), text_size=size.small)
+
+    table.cell(dash, 0, 2, "Risk-Reward", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 2, "1 : " + str.tostring(tp_atr_mul), text_color=color.white, text_size=size.small)
+
+    table.cell(dash, 0, 3, "Win Rate (Target ~51%)", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    float wr = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades * 100) : 0
+    table.cell(dash, 1, 3, str.tostring(wr, "#.#") + "%", text_color=wr >= 50 ? color.new(#10b981, 0) : color.new(#f59e0b, 0), text_size=size.small)
+
+    table.cell(dash, 0, 4, "Net Profit", text_color=color.new(#94a3b8, 0), text_size=size.small)
+    table.cell(dash, 1, 4, str.tostring(strategy.netprofit, "#.##") + " $", text_color=strategy.netprofit >= 0 ? color.new(#10b981, 0) : color.new(#f43f5e, 0), text_size=size.small)

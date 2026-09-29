@@ -1,0 +1,79 @@
+//@version=6
+strategy("Riley Coleman Reversal Challenge [v6] – $50 → $3754 Style", 
+         overlay = true, 
+         initial_capital = 1000,
+         default_qty_type = 1,
+         currency = currency.EUR,
+         pyramiding = 0,
+         commission_type = strategy.commission.percent,
+         commission_value = 0.075)
+
+// ────────────── INPUTS (genau wie im Video) ──────────────
+riskPercent         = input.float(50.0, "Risk % pro Trade (Challenge-Style)", minval=1, maxval=100, group="Risikomanagement")
+use15mFilter        = input.bool(true,  "✅ 15m Trendfilter (wie Riley)", group="Trendfilter")
+useChandelier       = input.bool(true,  "✅ Chandelier Trailing Stop", group="Exit Strategy")
+ChandelierMult      = input.float(2.0,  "Chandelier ATR Multiplikator", group="Exit Strategy")
+TP1_Ratio           = input.float(1.0,  "TP1 Ratio (Teil-Exit)", group="Risikomanagement")
+TP2_Ratio           = input.float(2.0,  "TP2 Ratio (Rest)", group="Risikomanagement")
+ATR_Length          = input.int(14,     "ATR Länge", group="Indikatoren")
+
+// ────────────── INDIKATOREN + MULTI-TIMEFRAME ──────────────
+atr = ta.atr(ATR_Length)
+ema15 = request.security(syminfo.tickerid, "15", ta.ema(close, 89))
+
+// ────────────── DOUBLE BOTTOM + BREAKOUT DETECTION (Video-Logik) ──────────────
+leftBars   = 5
+rightBars  = 5
+pivotLow   = ta.pivotlow(low, leftBars, rightBars)
+pivotHigh  = ta.pivothigh(high, leftBars, rightBars)
+
+// Double Bottom Erkennung
+var float bottom1 = na
+var float middleHigh = na
+var float bottom2 = na
+
+if not na(pivotLow)
+    if na(bottom1)
+        bottom1 := low
+    else if na(bottom2) and math.abs(low - bottom1) / bottom1 <= 0.008   // max 0.8 % Abweichung
+        bottom2 := low
+        middleHigh := ta.highest(high, 10)   // Hoch zwischen den beiden Tiefs
+
+doubleBottom = not na(bottom2) and not na(middleHigh)
+breakout     = doubleBottom and close > middleHigh and close > open
+plotshape(breakout, 
+          title="DOUBLE BOTTOM BREAKOUT", 
+          location=location.belowbar, 
+          color=color.new(color.green, 0), 
+          style=shape.triangleup, 
+          size=size.large, 
+          text="LONG")
+// ────────────── POSITIONSGRÖSSE (aggressiv wie im Video) ──────────────
+accountSize = strategy.equity > 0 ? strategy.equity : 50.0   // startet bei 50$ wie im Video
+riskAmount  = accountSize * (riskPercent / 100)
+qty         = math.floor(riskAmount / (close * 0.01))   // grobe Futures-Approx (anpassen bei ES/GC)
+
+// ────────────── ENTRY + EXITS ──────────────
+var float slLevel = na
+var float tp1Level = na
+var float tp2Level = na
+var float highestSinceEntry = 0.0
+
+// ────────────── ENTRY + EXITS (korrigiert & bombensicher) ──────────────
+if breakout and strategy.position_size == 0 and (not use15mFilter or close > ema15)
+    strategy.entry("LongEntry", strategy.long, qty = qty)
+    
+    if not na(bottom2)  // Sicherheits-Check gegen na-Werte
+        slLevel := bottom2 - atr * 0.5          // ← Klammern entfernt + sicher
+        float risk = close - slLevel            // ← jetzt explizit float
+        tp1Level := close + risk * TP1_Ratio
+        tp2Level := close + risk * TP2_Ratio
+        highestSinceEntry := high
+        
+        halfQty = math.max(math.round(qty / 2), 1)
+        
+        strategy.exit("Initial SL", from_entry="LongEntry", stop=slLevel)
+        strategy.exit("TP1",        from_entry="LongEntry", qty=halfQty,  limit=tp1Level, comment="TP1")
+        strategy.exit("TP2",        from_entry="LongEntry", qty=qty - halfQty, limit=tp2Level, comment="TP2")
+        
+        alert("🟢 RILEY LONG ENTRY - Double Bottom Breakout | Qty: " + str.tostring(qty), alert.freq_once_per_bar_close)

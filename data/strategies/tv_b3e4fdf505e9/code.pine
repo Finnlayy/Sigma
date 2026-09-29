@@ -1,0 +1,19 @@
+//@version=6
+indicator('Flag Detector mit Alarm', overlay = true)
+
+// ---------------------------------------------------------
+// Beispiel: Flag‑Erkennung (DUMMY‑LOGIK – hier ersetzt du deine)
+// ---------------------------------------------------------
+
+
+// ---------------------------------------------------------
+// Plot der Flags
+// ---------------------------------------------------------
+plotshape(flagUp, title = 'Long Flag', style = shape.labelup, color = color.green, text = 'LONG')
+plotshape(flagDown, title = 'Short Flag', style = shape.labeldown, color = color.red, text = 'SHORT')
+
+// ---------------------------------------------------------
+// Alarmbedingungen
+// ---------------------------------------------------------
+alertcondition(flagUp, title = 'Long Flag erkannt', message = 'LONG Flag erkannt – Einstieg möglich')
+alertcondition(flagDown, title = 'Short Flag erkannt', message = 'SHORT Flag erkannt – Einstieg möglich')

@@ -1,0 +1,143 @@
+//@version=6
+strategy(
+     "Adaptive Scalping ⚡",
+     overlay=true,
+     pyramiding=0,                               // nur eine offene Position pro Richtung
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=5,                        // 5 % des Kapitals pro Trade
+     calc_on_order_fills=true,
+     calc_on_every_tick=true
+)
+
+// ──────────────────────────────────────────────────
+//  INPUTS – flexibel einstellbar
+// ──────────────────────────────────────────────────
+useVolumeFilter   = input.bool(true,  "Volumen‑Filter aktivieren")
+volMultiplier     = input.float(1.5,  "Volumen‑Multiplikator (x)", minval=0.1, step=0.1)
+
+useSessionFilter  = input.bool(true,  "Session‑Filter aktivieren")
+sessionHours      = input.session("0900-1600", "Handelssession (HHMM‑HHMM)")
+
+emaFastLen        = input.int(9,   "EMA Fast",  minval=1)
+emaSlowLen        = input.int(21,  "EMA Slow",  minval=1)
+
+atrLen            = input.int(14,  "ATR‑Länge", minval=1)
+atrMultStop       = input.float(1.0, "ATR‑Stop‑Multiplikator",  minval=0.1, step=0.1)
+atrMultTrail      = input.float(0.5, "ATR‑Trailing‑Multiplikator", minval=0.1, step=0.1)
+
+breakEvenPct      = input.float(0.5, "Break‑Even‑Trigger (%)", minval=0.0, step=0.1)
+partialTPpct      = input.float(0.5, "Partial‑TP (rel. zu Ziel‑RR)", minval=0.0, step=0.1)
+
+riskRewardRatio   = input.float(2.0, "Risiko‑Reward‑Verhältnis", minval=0.1, step=0.1)
+
+// ──────────────────────────────────────────────────
+//  INDICATORS
+// ──────────────────────────────────────────────────
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+
+atr = ta.atr(atrLen)
+
+// Volumen‑Filter
+volOK = not useVolumeFilter or volume > (ta.sma(volume, 20) * volMultiplier)
+
+// Session‑Filter (true wenn die aktuelle Bar in der gewünschten Session liegt)
+sessionOK = not useSessionFilter or not na(time(timeframe.period, sessionHours))
+
+// Signale
+longSignal  = ta.crossover(emaFast, emaSlow) and volOK and sessionOK
+shortSignal = ta.crossunder(emaFast, emaSlow) and volOK and sessionOK
+
+// ──────────────────────────────────────────────────
+//  VARIABLEN für aktuelle Position
+// ──────────────────────────────────────────────────
+var float entryPrice = na          // Einstiegskurs der offenen Position
+var bool  entrySide  = na          // true = long, false = short
+
+// ──────────────────────────────────────────────────
+//  ENTRY – sofortige Ausführung (Market‑Order, ggf. minimaler Limit‑Offset)
+// ──────────────────────────────────────────────────
+if longSignal
+    strategy.entry(id="L", direction=strategy.long,
+                   comment="Long", limit=close - syminfo.mintick)   // kleiner Tick unterhalb des Ask
+    entrySide  := true
+    entryPrice := close
+
+if shortSignal
+    strategy.entry(id="S", direction=strategy.short,
+                   comment="Short", limit=close + syminfo.mintick)   // kleiner Tick oberhalb des Bid
+    entrySide  := false
+    entryPrice := close
+
+// ──────────────────────────────────────────────────
+//  DYNAMIC STOP & TAKE‑PROFIT (initial)
+// ──────────────────────────────────────────────────
+var float stopLevel   = na
+var float targetLevel = na
+
+if strategy.position_size != 0
+    // Stop‑ und Ziel‑Level anhand von ATR und dem gewünschten RR berechnen
+    stopLevel   := entrySide ? entryPrice - atrMultStop * atr : entryPrice + atrMultStop * atr
+    targetLevel := entrySide ?
+         entryPrice + riskRewardRatio * (entryPrice - stopLevel) :
+         entryPrice - riskRewardRatio * (stopLevel - entryPrice)
+
+    // Nur beim ersten Bar nach dem Einstieg OCO‑Exit setzen
+    if not strategy.opentrades.entry_id(0) != ""   // keine bestehende Exit‑Order
+       .exit(id=entrySide ? "L_exit" : "S_exit",
+                      from_entry=entrySide ? "L" : "S",
+                      stop=stopLevel,
+                      limit=targetLevel,
+                      comment="Initial SL/TP")
+
+// ──────────────────────────────────────────────────
+//  TRAILING STOP & BREAK‑EVEN (laufend)
+// ──────────────────────────────────────────────────
+if strategy.position_size != 0
+    // Prozentuale un‑realised P/L
+    float unrealPct = (close - strategy.position_avg_price) / strategy.position_avg_price * 100
+
+    // Break‑Even aktivieren
+    if entrySide and unrealPct >= breakEvenPct
+        stopLevel := math.max(stopLevel, strategy.position_avg_price)
+    if not entrySide and unrealPct <= -breakEvenPct   // bei Shorts ist Gewinn negativ
+        stopLevel := math.min(stopLevel, strategy.position_avg_price)
+
+    // Trailing‑Stop (ATR‑basiert)
+    float trail = atrMultTrail * atr
+    if entrySide
+        stopLevel := math.max(stopLevel, close - trail)
+    else
+        stopLevel := math.min(stopLevel, close + trail)
+
+    // Aktualisiere nur den Stop‑Teil des bestehenden Exit‑Orders
+    strategy.exit(id=entrySide ? "L_exit" : "S_exit",
+                  from_entry=entrySide ? "L" : "S",
+                  stop=stopLevel,
+                  limit=targetLevel)
+
+// ──────────────────────────────────────────────────
+//  PARTIAL TAKE‑PROFIT (nach Erreichen X % des RR)
+// ──────────────────────────────────────────────────
+if strategy.position_size != 0
+    float distToTarget   = math.abs(targetLevel - entryPrice)
+    float distToCurrent  = math.abs(close - entryPrice)
+    bool  partialHit     = distToCurrent >= partialTPpct * distToTarget
+
+    if partialHit
+        // 50 % der Position schließen, Rest bleibt offen
+        float halfQty = math.abs(strategy.position_size) * 0.5
+        strategy.close(id=entrySide ? "L" : "S", qty=halfQty, comment="Partial TP")
+
+// ──────────────────────────────────────────────────
+//  PLOTTING (zur Übersicht)
+// ──────────────────────────────────────────────────
+plot(emaFast,  title="EMA Fast",  color=color.yellow)
+plot(emaSlow,  title="EMA Slow",  color=color.orange)
+plot(stopLevel,   title="Dynamic Stop",   color=color.red,   style=plot.style_linebr, linewidth=1)
+plot(targetLevel, title="Dynamic Target", color=color.lime,  style=plot.style_linebr, linewidth=1)
+
+plotshape(longSignal,  title="Long Signal",  location=location.belowbar,
+          color=color.green, style=shape.arrowup,   size=size.tiny, text="L")
+plotshape(shortSignal, title="Short Signal", location=location.abovebar,
+          color=color.red,   style=shape.arrowdown, size=size.tiny, text="S")

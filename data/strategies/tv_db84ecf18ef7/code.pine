@@ -1,0 +1,85 @@
+//@version=6
+strategy("MOS - Muhamad Official Strategy (SNRZ Multi-Timeframe) Ultimate v3.0", overlay=true, max_boxes_count=500, max_labels_count=500, 
+         initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=500, margin_long=20, margin_short=20)
+
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║ DATEI:     MOS_Retest_Zones_Ultimate_v3.pine                         ║
+// ║ ZWECK:     SNRZ MTF & Strong Retest Zones Fusion mit Hurst & Kelly   ║
+// ║ VERSION:   3.0 (Pine Script v6 - High-Performance Fusion)             ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+
+//---------------------------------------------------------------------------------------------------------------------}
+// STRATEGY INPUTS & DISPLAY CONTROLS
+//---------------------------------------------------------------------------------------------------------------------{
+group_disp      = "═══ Display & Visualization ═══"
+mode            = input.string("Bullish AND Bearish", "Zone Side", options = ["Bullish OR Bearish", "Bullish AND Bearish", "Bearish", "Bullish"], group=group_disp)
+markMode        = input.string("All", "Touch Markers", options = ["All", "Last", "None"], group=group_disp)
+showInfo        = input.bool(true, "Show Strength Labels", group=group_disp)
+labSizeS        = input.string("Large", "Label Size", options = ["Tiny", "Small", "Normal", "Large"], group=group_disp)
+lookbackBars    = input.int(2000, "Lookback (bars, 0 = all)", minval=0, group=group_disp)
+maxZones        = input.int(60, "Max Zones Kept (history)", minval=1, maxval=200, group=group_disp)
+hideOverlap     = input.bool(true, "Hide Overlapping Zones", group=group_disp)
+overlapThr      = input.int(10, "Overlap Threshold (%)", minval=1, maxval=100, group=group_disp)
+OFFSET_LABELS   = input.bool(false, "Offset S/R Labels in Past", group=group_disp, tooltip="Wenn DEAKTIVIERT, siehst du das Echtzeit-Signal dort, wo es tatsächlich erkannt wurde (empfohlen!).")
+SHOW_DASHBOARD  = input.bool(true, "Show Performance Dashboard", group=group_disp)
+
+group_swing     = "═══ Swing Detection & Height ═══"
+leftBars        = input.int(10, "Pivot Left", minval=1, group=group_swing)
+rightBars       = input.int(5,  "Pivot Right", minval=1, group=group_swing)
+maxLife         = input.int(500, "Max Zone Life (bars)", minval=10, group=group_swing)
+normHeight      = input.bool(true, "Normalize All Zone Heights", group=group_swing)
+heightMod       = input.string("ATR Based", "Height Method", options = ["ATR Based", "Fixed Percentage"], group=group_swing)
+heightAtr       = input.float(0.5, "Zone Height (ATR Mult)", minval=0.05, maxval=10.0, step=0.05, group=group_swing)
+heightPct       = input.float(0.30, "Zone Height (% of Price)", minval=0.01, maxval=5.0, step=0.05, group=group_swing)
+atrLen          = input.int(200, "ATR Length (S/R Height)", minval=1, maxval=500, group=group_swing)
+
+group_str       = "═══ Strength Scoring (0–10) ═══"
+onlyStrong      = input.bool(false, "Show Only Strong Zones", group=group_str)
+strongThr       = input.float(5.0, "Strong Threshold (score)", minval=0, maxval=10, step=0.5, group=group_str)
+ONLY_TRD_STRONG = input.bool(false, "Only Trade Strong Zones", group=group_str, tooltip="Blockiert Trades, deren Zonenstärke unter dem Schwellenwert liegt.")
+volLen          = input.int(20, "Volume Baseline Length", minval=1, group=group_str)
+touchNorm       = input.float(4.0, "Touches For Full Score", minval=1, step=0.5, group=group_str)
+wTouch          = input.float(0.40, "Weight: Touches / Retests", minval=0, maxval=1, step=0.05, group=group_str)
+wVol            = input.float(0.30, "Weight: Volume", minval=0, maxval=1, step=0.05, group=group_str)
+wWick           = input.float(0.30, "Weight: Rejection Wick", minval=0, maxval=1, step=0.05, group=group_str)
+useDecay        = input.bool(true, "Decay Strength While Ignored", group=group_str)
+decayBars       = input.int(300, "Full Decay Over (idle bars)", minval=20, maxval=5000, group=group_str)
+decayFloor      = input.float(0.65, "Decay Floor", minval=0.1, maxval=1.0, step=0.05, group=group_str)
+
+group_color     = "═══ Style ═══"
+supCol          = input.color(#089981, "Tone A (Zone Holding)", group=group_color)
+resCol          = input.color(#f23645, "Tone B (After Break)", group=group_color)
+fillTransp      = input.int(80, "Zone Transparency", minval=50, maxval=96, group=group_color)
+showBord        = input.bool(true, "Show Zone Borders", group=group_color)
+bordTransp      = input.int(35, "Border Transparency", minval=0, maxval=100, group=group_color)
+
+group_exec      = "═══ Strategy Execution & Filters ═══"
+SL_PARAM        = input.float(1.14, "SL Parameter (ATR Multiplier)", group=group_exec, tooltip="ATR-Multiplikator für den Stop-Loss")
+TP_PARAM        = input.float(9.55, "TP Parameter (ATR Multiplier)", group=group_exec, tooltip="ATR-Multiplikator für den Take-Profit")
+ATR_LEN         = input.int(14, "ATR Length (Strategy SL/TP)", group=group_exec)
+USE_TRAILING    = input.bool(false, "Use Trailing Stop Loss", group=group_exec)
+REVERSE_ON_OPP  = input.bool(true, "Reverse on Opposite Signal", group=group_exec, tooltip="Wenn deaktiviert, werden Gegensignale ignoriert, bis SL oder TP des aktuellen Trades getroffen wird.")
+USE_REGIME_FLT  = input.bool(false, "Use Hurst Regime Filter", group=group_exec, tooltip="Trendfolge-Trades nur im Trendmarkt (H > 0.52). Reversals im Seitwärtsmarkt. (Standard: Aus)")
+USE_DER_FILTER  = input.bool(false, "Use DER Trend Energy Filter", group=group_exec, tooltip="Filtert Trades basierend auf der Richtungs-Volumen-Energie. (Standard: Aus)")
+DER_LOOKBACK    = input.int(20, "DER Lookback Period", group=group_exec)
+DER_SMOOTH      = input.int(5, "DER Smoothing Period", group=group_exec)
+
+group_risk      = "═══ Position Sizing & Portfolio Risk ═══"
+SIZING_MODE     = input.string("Leverage", "Position Sizing Mode", options=["Leverage", "Kelly Risk Parity", "Fixed Percent"], group=group_risk)
+LEVERAGE_VAL    = input.float(500.0, "Leverage Value (% of Equity)", group=group_risk, tooltip="Original-Einstellung ist 500% (5x Hebel).")
+SCALE_BY_SCORE  = input.bool(true, "Scale Capital Risk by Zone Score", group=group_risk, tooltip="Skaliert das eingesetzte Risiko proportional zur Zonenqualität (0-10).")
+USE_KELLY       = input.bool(true, "Use Dynamic Kelly (only for Kelly Mode)", group=group_risk)
+KELLY_MULT      = input.float(0.5, "Kelly Multiplier (Half-Kelly)", minval=0.1, maxval=1.0, step=0.1, group=group_risk)
+DEFAULT_RISK    = input.float(1.5, "Fixed Risk % (or Fallback Risk)", minval=0.1, maxval=10.0, step=0.1, group=group_risk)
+
+// Color Constants
+COLOR_DARK   = #1e222d
+COLOR_PANEL  = #2a2e39
+COLOR_GREEN  = #089981
+COLOR_RED    = #f23645
+COLOR_BLUE   = #2962ff
+markGap      = 5
+markCap      = 50
+setBack      = false
+
+// System Implementation ...

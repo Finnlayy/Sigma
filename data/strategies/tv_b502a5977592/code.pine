@@ -1,0 +1,417 @@
+//@version=6
+// Mem-derived Pine Script v6 conversion.
+// Core: true MTF CISD, OB/FVG structure, deterministic Monte Carlo gate, ATR risk, Pionex order alerts.
+// TradingView alert setup:
+// 1. Condition: this strategy
+// 2. Trigger: Order fills only
+// 3. Webhook URL: paste the Pionex Signal Bot URL from Pionex
+// 4. Message: {{strategy.order.alert_message}}
+strategy(
+    title="Mem MTF CISD Monte Carlo - Pionex Direct v6",
+    shorttitle="Mem CISD MC Px",
+    overlay=true,
+    initial_capital=100,
+    default_qty_type=strategy.cash,
+    default_qty_value=1,
+    currency=currency.USDT,
+    pyramiding=0,
+    calc_on_every_tick=false,
+    margin_long=0,
+    margin_short=0,
+    process_orders_on_close=true,
+    commission_type=strategy.commission.percent,
+    commission_value=0.05,
+    slippage=2,
+    max_boxes_count=120,
+    max_lines_count=120,
+    max_labels_count=120
+)
+
+string GRP_EXEC = "Execution"
+string bot_uuid = input.string("", "Pionex Signal Bot UUID", group=GRP_EXEC)
+bool allow_long = input.bool(true, "Allow longs", group=GRP_EXEC)
+bool allow_short = input.bool(true, "Allow shorts", group=GRP_EXEC)
+bool send_close_alerts = input.bool(true, "Send close alerts", group=GRP_EXEC)
+float qty_step = input.float(0.001, "Qty step", minval=0.000001, group=GRP_EXEC)
+int warmup_bars = input.int(100, "Warmup bars", minval=20, maxval=1000, group=GRP_EXEC)
+
+string GRP_MTF = "MTF CISD"
+string tf_1 = input.timeframe("240", "TF 1 direction", group=GRP_MTF)
+string tf_2 = input.timeframe("60", "TF 2 trend", group=GRP_MTF)
+string tf_3 = input.timeframe("15", "TF 3 context", group=GRP_MTF)
+string tf_4 = input.timeframe("5", "TF 4 timing", group=GRP_MTF)
+bool use_tf_1 = input.bool(true, "Use TF 1", group=GRP_MTF)
+bool use_tf_2 = input.bool(true, "Use TF 2", group=GRP_MTF)
+bool use_tf_3 = input.bool(true, "Use TF 3", group=GRP_MTF)
+bool use_tf_4 = input.bool(false, "Use TF 4", group=GRP_MTF)
+int min_alignment = input.int(3, "Minimum aligned TFs", minval=1, maxval=4, group=GRP_MTF)
+
+string GRP_STRUCTURE = "Structure"
+int cisd_pivot = input.int(3, "CISD pivot memory", minval=2, maxval=20, group=GRP_STRUCTURE)
+int ob_pivot = input.int(6, "Order block pivot", minval=2, maxval=30, group=GRP_STRUCTURE)
+float ob_max_atr = input.float(1.8, "Max OB size ATR", minval=0.2, maxval=6.0, step=0.1, group=GRP_STRUCTURE)
+float fvg_min_atr = input.float(0.15, "Min FVG size ATR", minval=0.0, maxval=3.0, step=0.05, group=GRP_STRUCTURE)
+bool require_structure_touch = input.bool(false, "Require OB/FVG touch", group=GRP_STRUCTURE)
+
+string GRP_MC = "Monte Carlo Gate"
+bool use_monte_carlo = input.bool(true, "Use Monte Carlo probability gate", group=GRP_MC)
+int mc_lookback = input.int(180, "Return lookback", minval=30, maxval=500, group=GRP_MC)
+int mc_paths = input.int(80, "Simulation paths", minval=20, maxval=300, group=GRP_MC)
+int mc_steps = input.int(8, "Steps per path", minval=3, maxval=40, group=GRP_MC)
+float mc_threshold = input.float(0.56, "TP-before-SL threshold", minval=0.50, maxval=0.80, step=0.01, group=GRP_MC)
+float mc_noise_mult = input.float(1.0, "Volatility multiplier", minval=0.25, maxval=3.0, step=0.05, group=GRP_MC)
+
+string GRP_FILTER = "Filters"
+int min_score = input.int(70, "Minimum score", minval=1, maxval=100, group=GRP_FILTER)
+bool use_session = input.bool(false, "Use session filter", group=GRP_FILTER)
+int session_start = input.int(0, "Session start HHMM", minval=0, maxval=2359, group=GRP_FILTER)
+int session_end = input.int(2359, "Session end HHMM", minval=0, maxval=2359, group=GRP_FILTER)
+string session_tz = input.string("UTC", "Session timezone", options=["Exchange", "UTC", "Europe/Berlin", "America/New_York"], group=GRP_FILTER)
+bool use_volume = input.bool(true, "Use volume filter", group=GRP_FILTER)
+int vol_len = input.int(20, "Volume SMA", minval=5, maxval=200, group=GRP_FILTER)
+float vol_mult = input.float(1.15, "Volume multiplier", minval=0.5, maxval=5.0, step=0.05, group=GRP_FILTER)
+int ema_fast_len = input.int(9, "Fast EMA", minval=1, maxval=100, group=GRP_FILTER)
+int ema_slow_len = input.int(21, "Slow EMA", minval=2, maxval=200, group=GRP_FILTER)
+int ema_regime_len = input.int(200, "Regime EMA", minval=20, maxval=500, group=GRP_FILTER)
+float min_atr_pct = input.float(0.05, "Min ATR %", minval=0.0, maxval=2.0, step=0.01, group=GRP_FILTER)
+
+string GRP_RISK = "Risk"
+float risk_pct = input.float(1.0, "Risk per trade %", minval=0.1, maxval=5.0, step=0.1, group=GRP_RISK)
+float sl_atr_mult = input.float(1.4, "Stop ATR", minval=0.3, maxval=6.0, step=0.1, group=GRP_RISK)
+float tp_step_atr = input.float(1.0, "TP step ATR", minval=0.2, maxval=5.0, step=0.1, group=GRP_RISK)
+float tp1_pct = input.float(20, "TP1 %", minval=0, maxval=100, group=GRP_RISK)
+float tp2_pct = input.float(20, "TP2 %", minval=0, maxval=100, group=GRP_RISK)
+float tp3_pct = input.float(20, "TP3 %", minval=0, maxval=100, group=GRP_RISK)
+float tp4_pct = input.float(20, "TP4 %", minval=0, maxval=100, group=GRP_RISK)
+float tp5_pct = input.float(20, "TP5 %", minval=0, maxval=100, group=GRP_RISK)
+bool use_daily_loss = input.bool(true, "Daily loss breaker", group=GRP_RISK)
+float daily_loss_pct = input.float(3.0, "Daily loss %", minval=0.5, maxval=20.0, step=0.5, group=GRP_RISK)
+bool use_max_dd = input.bool(true, "Max drawdown breaker", group=GRP_RISK)
+float max_dd_pct = input.float(8.0, "Max drawdown %", minval=1.0, maxval=50.0, step=0.5, group=GRP_RISK)
+bool exit_on_bias_flip = input.bool(true, "Exit on MTF/MC bias flip", group=GRP_RISK)
+
+string GRP_VIS = "Visuals"
+bool show_levels = input.bool(true, "Show levels", group=GRP_VIS)
+bool show_dashboard = input.bool(true, "Show dashboard", group=GRP_VIS)
+
+float PI = 3.141592653589793
+
+f_norm_hhmm(int hhmm) =>
+    int h = int(math.floor(hhmm / 100.0))
+    int m = hhmm % 100
+    h := math.max(0, math.min(23, h))
+    m := math.max(0, math.min(59, m))
+    h * 100 + m
+
+f_in_session(int start_hhmm, int end_hhmm, string tz) =>
+    string effective_tz = tz == "Exchange" ? syminfo.timezone : tz
+    int now_hhmm = hour(time, effective_tz) * 100 + minute(time, effective_tz)
+    bool regular_window = start_hhmm <= end_hhmm
+    regular_window ? (now_hhmm >= start_hhmm and now_hhmm <= end_hhmm) : (now_hhmm >= start_hhmm or now_hhmm <= end_hhmm)
+
+f_round_qty(float qty, float step) =>
+    step > 0 ? math.floor(qty / step) * step : qty
+
+f_fmt(float v) =>
+    na(v) ? "na" : str.tostring(v, format.mintick)
+
+f_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + bot_uuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+
+f_cisd(float o, float c, float h, float l) =>
+    var int state = 0
+    bool inside = h < h[1] and l > l[1]
+    bool bull = c > o and c > o[1] and not inside
+    bool bear = c < o and c < o[1] and not inside
+    bool bull_trigger = false
+    bool bear_trigger = false
+    if bull and state != 1
+        state := 1
+        bull_trigger := true
+    if bear and state != -1
+        state := -1
+        bear_trigger := true
+    [state, bull_trigger, bear_trigger]
+
+f_htf_cisd(simple string tf) =>
+    [o, c, h, l] = request.security(syminfo.tickerid, tf, [open[1], close[1], high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+    [state, bull_trigger, bear_trigger] = f_cisd(o, c, h, l)
+    state
+
+f_rand(int seed) =>
+    float raw = math.sin((seed + 1) * 12.9898 + bar_index * 78.233) * 43758.5453
+    raw - math.floor(raw)
+
+f_norm(int seed) =>
+    float u1 = math.max(f_rand(seed), 0.0001)
+    float u2 = math.max(f_rand(seed + 10007), 0.0001)
+    math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * PI * u2)
+
+f_mc_prob(bool is_long, float entry, float stop_price, float target_price, float mean_ret, float sd_ret, int paths, int steps, float noise_mult) =>
+    int wins = 0
+    int total = 0
+    for p = 0 to paths - 1
+        float sim_price = entry
+        bool done = false
+        bool win = false
+        for s = 0 to steps - 1
+            float z = f_norm(p * 1009 + s * 37)
+            sim_price := sim_price * math.exp(mean_ret + sd_ret * noise_mult * z)
+            if not done
+                if is_long
+                    if sim_price <= stop_price
+                        done := true
+                        win := false
+                    else if sim_price >= target_price
+                        done := true
+                        win := true
+                else
+                    if sim_price >= stop_price
+                        done := true
+                        win := false
+                    else if sim_price <= target_price
+                        done := true
+                        win := true
+        if not done
+            win := is_long ? sim_price > entry : sim_price < entry
+        wins += win ? 1 : 0
+        total += 1
+    total > 0 ? wins * 1.0 / total : 0.5
+
+float atr = ta.atr(14)
+float atr_pct = close != 0 ? atr / close * 100.0 : 0.0
+float ema_fast = ta.ema(close, ema_fast_len)
+float ema_slow = ta.ema(close, ema_slow_len)
+float ema_regime = ta.ema(close, ema_regime_len)
+float vwap_val = ta.vwap(hlc3)
+float vol_sma = ta.sma(volume, vol_len)
+float body = math.abs(close - open)
+float ret = close[1] > 0 ? math.log(close / close[1]) : 0.0
+float ret_mean = ta.sma(ret, mc_lookback)
+float ret_sd = ta.stdev(ret, mc_lookback)
+
+int state_1 = use_tf_1 ? f_htf_cisd(tf_1) : 0
+int state_2 = use_tf_2 ? f_htf_cisd(tf_2) : 0
+int state_3 = use_tf_3 ? f_htf_cisd(tf_3) : 0
+int state_4 = use_tf_4 ? f_htf_cisd(tf_4) : 0
+[local_state, local_bull_cisd, local_bear_cisd] = f_cisd(open, close, high, low)
+float cisd_high_pivot = ta.pivothigh(high, cisd_pivot, cisd_pivot)
+float cisd_low_pivot = ta.pivotlow(low, cisd_pivot, cisd_pivot)
+var float last_cisd_high = na
+var float last_cisd_low = na
+if not na(cisd_high_pivot)
+    last_cisd_high := cisd_high_pivot
+if not na(cisd_low_pivot)
+    last_cisd_low := cisd_low_pivot
+bool raw_pivot_cisd_bull = ta.crossover(close, last_cisd_high)
+bool raw_pivot_cisd_bear = ta.crossunder(close, last_cisd_low)
+bool pivot_cisd_bull = not na(last_cisd_high) and raw_pivot_cisd_bull
+bool pivot_cisd_bear = not na(last_cisd_low) and raw_pivot_cisd_bear
+bool cisd_bull_trigger = local_bull_cisd or pivot_cisd_bull
+bool cisd_bear_trigger = local_bear_cisd or pivot_cisd_bear
+
+int active_tfs = (use_tf_1 ? 1 : 0) + (use_tf_2 ? 1 : 0) + (use_tf_3 ? 1 : 0) + (use_tf_4 ? 1 : 0)
+int bull_tfs = (use_tf_1 and state_1 == 1 ? 1 : 0) + (use_tf_2 and state_2 == 1 ? 1 : 0) + (use_tf_3 and state_3 == 1 ? 1 : 0) + (use_tf_4 and state_4 == 1 ? 1 : 0)
+int bear_tfs = (use_tf_1 and state_1 == -1 ? 1 : 0) + (use_tf_2 and state_2 == -1 ? 1 : 0) + (use_tf_3 and state_3 == -1 ? 1 : 0) + (use_tf_4 and state_4 == -1 ? 1 : 0)
+bool bull_aligned = bull_tfs >= min_alignment
+bool bear_aligned = bear_tfs >= min_alignment
+
+float pivot_high = ta.pivothigh(high, ob_pivot, ob_pivot)
+float pivot_low = ta.pivotlow(low, ob_pivot, ob_pivot)
+var float bull_ob_top = na
+var float bull_ob_bot = na
+var float bear_ob_top = na
+var float bear_ob_bot = na
+if not na(pivot_low)
+    float ob_top = high[ob_pivot]
+    float ob_bot = low[ob_pivot]
+    if ob_top - ob_bot <= atr * ob_max_atr
+        bull_ob_top := ob_top
+        bull_ob_bot := ob_bot
+if not na(pivot_high)
+    float ob_top = high[ob_pivot]
+    float ob_bot = low[ob_pivot]
+    if ob_top - ob_bot <= atr * ob_max_atr
+        bear_ob_top := ob_top
+        bear_ob_bot := ob_bot
+
+bool bull_ob_touch = not na(bull_ob_top) and low <= bull_ob_top and high >= bull_ob_bot
+bool bear_ob_touch = not na(bear_ob_top) and high >= bear_ob_bot and low <= bear_ob_top
+
+var float bull_fvg_top = na
+var float bull_fvg_bot = na
+var float bear_fvg_top = na
+var float bear_fvg_bot = na
+bool bull_fvg_new = low > high[2] and close[1] > open[1] and (low - high[2]) >= atr * fvg_min_atr
+bool bear_fvg_new = high < low[2] and close[1] < open[1] and (low[2] - high) >= atr * fvg_min_atr
+if bull_fvg_new
+    bull_fvg_top := low
+    bull_fvg_bot := high[2]
+if bear_fvg_new
+    bear_fvg_top := low[2]
+    bear_fvg_bot := high
+bool bull_fvg_touch = not na(bull_fvg_top) and low <= bull_fvg_top and high >= bull_fvg_bot
+bool bear_fvg_touch = not na(bear_fvg_top) and high >= bear_fvg_bot and low <= bear_fvg_top
+
+bool trend_long = close > ema_fast and ema_fast > ema_slow and close > ema_regime and close > vwap_val
+bool trend_short = close < ema_fast and ema_fast < ema_slow and close < ema_regime and close < vwap_val
+bool volume_ok = not use_volume or volume > vol_sma * vol_mult
+bool body_long = close > open and body >= atr * 0.35
+bool body_short = close < open and body >= atr * 0.35
+bool atr_ok = atr_pct >= min_atr_pct
+bool time_ok = not use_session or f_in_session(f_norm_hhmm(session_start), f_norm_hhmm(session_end), session_tz)
+
+var float day_start_equity = strategy.equity
+bool new_day = ta.change(time("D")) != 0
+if new_day
+    day_start_equity := strategy.equity
+float day_pnl_pct = day_start_equity != 0 ? (strategy.equity - day_start_equity) / day_start_equity * 100.0 : 0.0
+bool daily_ok = not use_daily_loss or day_pnl_pct > -daily_loss_pct
+
+var float equity_peak = strategy.equity
+equity_peak := math.max(equity_peak, strategy.equity)
+float dd_pct = equity_peak != 0 ? (equity_peak - strategy.equity) / equity_peak * 100.0 : 0.0
+bool dd_ok = not use_max_dd or dd_pct < max_dd_pct
+
+float long_stop_hint = close - atr * sl_atr_mult
+float short_stop_hint = close + atr * sl_atr_mult
+float long_target_hint = close + atr * tp_step_atr * 2.0
+float short_target_hint = close - atr * tp_step_atr * 2.0
+bool mc_ready = not use_monte_carlo or (not na(ret_mean) and not na(ret_sd))
+float mc_long_prob = mc_ready and use_monte_carlo ? f_mc_prob(true, close, long_stop_hint, long_target_hint, ret_mean, ret_sd, mc_paths, mc_steps, mc_noise_mult) : (use_monte_carlo ? na : 1.0)
+float mc_short_prob = mc_ready and use_monte_carlo ? f_mc_prob(false, close, short_stop_hint, short_target_hint, ret_mean, ret_sd, mc_paths, mc_steps, mc_noise_mult) : (use_monte_carlo ? na : 1.0)
+bool mc_long_ok = not use_monte_carlo or (mc_long_prob >= mc_threshold and mc_long_prob > mc_short_prob)
+bool mc_short_ok = not use_monte_carlo or (mc_short_prob >= mc_threshold and mc_short_prob > mc_long_prob)
+
+bool structure_long_ok = not require_structure_touch or bull_ob_touch or bull_fvg_touch
+bool structure_short_ok = not require_structure_touch or bear_ob_touch or bear_fvg_touch
+
+int long_score = 0
+long_score += bull_aligned ? 20 : 0
+long_score += cisd_bull_trigger ? 20 : 0
+long_score += mc_long_ok ? 20 : 0
+long_score += (bull_ob_touch or bull_fvg_touch) ? 15 : 0
+long_score += volume_ok ? 10 : 0
+long_score += trend_long ? 10 : 0
+long_score += body_long ? 5 : 0
+
+int short_score = 0
+short_score += bear_aligned ? 20 : 0
+short_score += cisd_bear_trigger ? 20 : 0
+short_score += mc_short_ok ? 20 : 0
+short_score += (bear_ob_touch or bear_fvg_touch) ? 15 : 0
+short_score += volume_ok ? 10 : 0
+short_score += trend_short ? 10 : 0
+short_score += body_short ? 5 : 0
+
+bool ready = barstate.isconfirmed and bar_index >= warmup_bars and mc_ready and time_ok and atr_ok and daily_ok and dd_ok
+bool long_condition = ready and allow_long and strategy.position_size <= 0 and bull_aligned and cisd_bull_trigger and trend_long and mc_long_ok and structure_long_ok and long_score >= min_score
+bool short_condition = ready and allow_short and strategy.position_size >= 0 and bear_aligned and cisd_bear_trigger and trend_short and mc_short_ok and structure_short_ok and short_score >= min_score
+
+float risk_cash = strategy.equity * risk_pct * 0.01
+float stop_dist = math.max(atr * sl_atr_mult, syminfo.mintick)
+float risk_per_unit = stop_dist * syminfo.pointvalue
+float raw_qty = risk_per_unit > 0 ? risk_cash / risk_per_unit : 0.0
+float order_qty = math.max(qty_step, f_round_qty(raw_qty, qty_step))
+string alert_message = str.length(bot_uuid) > 0 ? f_payload() : ""
+
+var float entry_atr = na
+bool new_long = strategy.position_size > 0 and strategy.position_size[1] <= 0
+bool new_short = strategy.position_size < 0 and strategy.position_size[1] >= 0
+if new_long or new_short
+    entry_atr := atr
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    entry_atr := na
+
+float active_atr = nz(entry_atr, atr)
+float long_stop = strategy.position_avg_price - active_atr * sl_atr_mult
+float short_stop = strategy.position_avg_price + active_atr * sl_atr_mult
+float long_tp1 = strategy.position_avg_price + active_atr * tp_step_atr * 1
+float long_tp2 = strategy.position_avg_price + active_atr * tp_step_atr * 2
+float long_tp3 = strategy.position_avg_price + active_atr * tp_step_atr * 3
+float long_tp4 = strategy.position_avg_price + active_atr * tp_step_atr * 4
+float long_tp5 = strategy.position_avg_price + active_atr * tp_step_atr * 5
+float short_tp1 = strategy.position_avg_price - active_atr * tp_step_atr * 1
+float short_tp2 = strategy.position_avg_price - active_atr * tp_step_atr * 2
+float short_tp3 = strategy.position_avg_price - active_atr * tp_step_atr * 3
+float short_tp4 = strategy.position_avg_price - active_atr * tp_step_atr * 4
+float short_tp5 = strategy.position_avg_price - active_atr * tp_step_atr * 5
+
+float q1 = math.max(0.0, math.min(100.0, tp1_pct))
+float q2 = math.max(0.0, math.min(100.0 - q1, tp2_pct))
+float q3 = math.max(0.0, math.min(100.0 - q1 - q2, tp3_pct))
+float q4 = math.max(0.0, math.min(100.0 - q1 - q2 - q3, tp4_pct))
+float q5 = math.max(0.0, math.min(100.0 - q1 - q2 - q3 - q4, tp5_pct))
+
+if long_condition
+    strategy.entry("Long", strategy.long, qty=order_qty, alert_message=alert_message)
+else if short_condition
+    strategy.entry("Short", strategy.short, qty=order_qty, alert_message=alert_message)
+
+if strategy.position_size > 0
+    if q1 > 0
+        strategy.exit("Long TP1", "Long", qty_percent=q1, stop=long_stop, limit=long_tp1, alert_message=send_close_alerts ? alert_message : "")
+    if q2 > 0
+        strategy.exit("Long TP2", "Long", qty_percent=q2, stop=long_stop, limit=long_tp2, alert_message=send_close_alerts ? alert_message : "")
+    if q3 > 0
+        strategy.exit("Long TP3", "Long", qty_percent=q3, stop=long_stop, limit=long_tp3, alert_message=send_close_alerts ? alert_message : "")
+    if q4 > 0
+        strategy.exit("Long TP4", "Long", qty_percent=q4, stop=long_stop, limit=long_tp4, alert_message=send_close_alerts ? alert_message : "")
+    if q5 > 0
+        strategy.exit("Long TP5", "Long", qty_percent=q5, stop=long_stop, limit=long_tp5, alert_message=send_close_alerts ? alert_message : "")
+
+if strategy.position_size < 0
+    if q1 > 0
+        strategy.exit("Short TP1", "Short", qty_percent=q1, stop=short_stop, limit=short_tp1, alert_message=send_close_alerts ? alert_message : "")
+    if q2 > 0
+        strategy.exit("Short TP2", "Short", qty_percent=q2, stop=short_stop, limit=short_tp2, alert_message=send_close_alerts ? alert_message : "")
+    if q3 > 0
+        strategy.exit("Short TP3", "Short", qty_percent=q3, stop=short_stop, limit=short_tp3, alert_message=send_close_alerts ? alert_message : "")
+    if q4 > 0
+        strategy.exit("Short TP4", "Short", qty_percent=q4, stop=short_stop, limit=short_tp4, alert_message=send_close_alerts ? alert_message : "")
+    if q5 > 0
+        strategy.exit("Short TP5", "Short", qty_percent=q5, stop=short_stop, limit=short_tp5, alert_message=send_close_alerts ? alert_message : "")
+
+bool force_close_long = exit_on_bias_flip and strategy.position_size > 0 and (bear_aligned or mc_short_ok or not trend_long)
+bool force_close_short = exit_on_bias_flip and strategy.position_size < 0 and (bull_aligned or mc_long_ok or not trend_short)
+if ready and force_close_long
+    strategy.close("Long", alert_message=send_close_alerts ? alert_message : "")
+if ready and force_close_short
+    strategy.close("Short", alert_message=send_close_alerts ? alert_message : "")
+
+plot(show_levels ? ema_regime : na, "Regime EMA", color=color.new(color.blue, 35), linewidth=2)
+plot(show_levels ? vwap_val : na, "VWAP", color=color.new(color.orange, 20), linewidth=1)
+plot(show_levels and strategy.position_size > 0 ? long_stop : na, "Long Stop", color=color.red, style=plot.style_linebr)
+plot(show_levels and strategy.position_size > 0 ? long_tp1 : na, "Long TP1", color=color.green, style=plot.style_linebr)
+plot(show_levels and strategy.position_size < 0 ? short_stop : na, "Short Stop", color=color.red, style=plot.style_linebr)
+plot(show_levels and strategy.position_size < 0 ? short_tp1 : na, "Short TP1", color=color.green, style=plot.style_linebr)
+plotshape(long_condition, title="Long", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small, text="L")
+plotshape(short_condition, title="Short", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="S")
+bgcolor(str.length(bot_uuid) == 0 ? color.new(color.orange, 92) : bull_aligned ? color.new(color.green, 94) : bear_aligned ? color.new(color.red, 94) : na)
+
+var table dash = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 80), border_width=1)
+if show_dashboard and barstate.islast
+    table.cell(dash, 0, 0, "Mem CISD MC", text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(dash, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(dash, 0, 1, "MTF", text_color=color.white)
+    table.cell(dash, 1, 1, str.tostring(bull_tfs) + "B / " + str.tostring(bear_tfs) + "S / " + str.tostring(active_tfs), text_color=bull_aligned ? color.lime : bear_aligned ? color.red : color.gray)
+    table.cell(dash, 0, 2, "Local CISD", text_color=color.white)
+    table.cell(dash, 1, 2, local_state == 1 ? "BULL" : local_state == -1 ? "BEAR" : "FLAT", text_color=local_state == 1 ? color.lime : local_state == -1 ? color.red : color.gray)
+    table.cell(dash, 0, 3, "MC Long", text_color=color.white)
+    table.cell(dash, 1, 3, str.tostring(mc_long_prob * 100.0, "#.0") + "%", text_color=mc_long_ok ? color.lime : color.gray)
+    table.cell(dash, 0, 4, "MC Short", text_color=color.white)
+    table.cell(dash, 1, 4, str.tostring(mc_short_prob * 100.0, "#.0") + "%", text_color=mc_short_ok ? color.red : color.gray)
+    table.cell(dash, 0, 5, "Score L/S", text_color=color.white)
+    table.cell(dash, 1, 5, str.tostring(long_score) + " / " + str.tostring(short_score), text_color=long_score >= min_score ? color.lime : short_score >= min_score ? color.red : color.gray)
+    table.cell(dash, 0, 6, "OB/FVG", text_color=color.white)
+    table.cell(dash, 1, 6, (bull_ob_touch or bull_fvg_touch ? "BULL " : "") + (bear_ob_touch or bear_fvg_touch ? "BEAR" : ""), text_color=color.white)
+    table.cell(dash, 0, 7, "Volume", text_color=color.white)
+    table.cell(dash, 1, 7, volume_ok ? "OK" : "LOW", text_color=volume_ok ? color.lime : color.orange)
+    table.cell(dash, 0, 8, "ATR %", text_color=color.white)
+    table.cell(dash, 1, 8, str.tostring(atr_pct, "#.###"), text_color=atr_ok ? color.white : color.orange)
+    table.cell(dash, 0, 9, "Daily / DD", text_color=color.white)
+    table.cell(dash, 1, 9, str.tostring(day_pnl_pct, "#.0") + "% / " + str.tostring(dd_pct, "#.0") + "%", text_color=daily_ok and dd_ok ? color.white : color.red)
+    table.cell(dash, 0, 10, "Pionex", text_color=color.white)
+    table.cell(dash, 1, 10, str.length(bot_uuid) > 0 ? "UUID SET" : "UUID MISSING", text_color=str.length(bot_uuid) > 0 ? color.lime : color.orange)
+    table.cell(dash, 0, 11, "Position", text_color=color.white)
+    table.cell(dash, 1, 11, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray)

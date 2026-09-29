@@ -1,0 +1,463 @@
+// ============================================================================
+// CleanTradeQuantum v7.2 OB/FVG INTEGRATED (15-MINUTEN PROFIT OPTIMIZED)
+// ============================================================================
+//@version=6
+strategy("CleanTradeQuantum_15m_Optimized", overlay=true, pyramiding=0,
+         calc_on_every_tick=true, calc_on_order_fills=false, process_orders_on_close=true,        default_qty_type=strategy.percent_of_equity, default_qty_value=100, initial_capital=1000,
+         commission_type=strategy.commission.percent, commission_value=0.05, slippage=1,
+         max_labels_count=500, max_lines_count=500, max_boxes_count=100)
+
+// ============================================================================
+// === EINGABEN & WFO-ROUTING (Optimiert für 15m)
+// ============================================================================
+useGuidedWfo = input.bool(true, "Use Guided WFO (bar_index routing)")
+
+// FIX 2: WFO Intervalle verlängert (500 Bars = 5 Tage ist zu kurz für 15m, jetzt 5000 Bars = 50 Tage)
+int wfoSet = 0
+if useGuidedWfo
+    wfoSet := bar_index < 5000 ? 1 : bar_index < 10000 ? 2 : bar_index < 15000 ? 3 : bar_index < 20000 ? 4 : 5
+
+// Auf 15m Chart: 96 Bars = exakt 24 Stunden Historie
+int historyBars = wfoSet == 0 ? 96 : wfoSet == 1 ? 100 : 96
+float memoryDecay = wfoSet == 0 ? 0.88 : 0.88
+float memoryThreshold = wfoSet == 0 ? 0.05 : 0.05
+float chopAdxMax = wfoSet == 0 ? 20.0 : 20.0
+float chopEmaSlopeAtrMax = wfoSet == 0 ? 0.05 : 0.05
+
+// ============================================================================
+// === BASIS INDIKATOREN & FILTER
+// ============================================================================
+float atr = ta.atr(14)
+float atrSma = ta.sma(atr, 21)
+float vwapValue = ta.vwap(hlc3)
+float volSma = ta.sma(volume, 30)
+float ema34 = ta.ema(close, 34)
+float ema9 = ta.ema(close, 9)
+float ema21 = ta.ema(close, 21)
+[macdMain, macdSignal, _] = ta.macd(close, 12, 26, 9)
+float rsi14 = ta.rsi(close, 14)
+[dmiPlus, dmiMinus, adx] = ta.dmi(14, 14) 
+
+// MTF Upgrade: Schaut jetzt auf den 1-Stunden (60m) Chart
+float rsi1h = request.security(syminfo.tickerid, "60", ta.rsi(close, 14), lookahead=barmerge.lookahead_off)
+bool mtfBull = request.security(syminfo.tickerid, "60", close > ta.ema(close, 34) and ta.ema(close, 34) > ta.ema(close[1], 34), lookahead=barmerge.lookahead_off)
+bool mtfBear = request.security(syminfo.tickerid, "60", close < ta.ema(close, 34) and ta.ema(close, 34) < ta.ema(close[1], 34), lookahead=barmerge.lookahead_off)
+
+bool volOk = volume > volSma * 1.00
+bool atrOk = atr >= atrSma * 0.95
+float candleRange = math.max(high - low, syminfo.mintick)
+// FIX 3: Auf 25% gesenkt, damit Reversal-Dojis/Hammers an OBs nicht gefiltert werden
+bool bodyOk = (math.abs(close - open) / candleRange) >= 0.25
+
+// ============================================================================
+// === CHOP REGIME GUARD
+// ============================================================================
+float emaSlope = ema34 - nz(ema34[1])
+float vwapCrossCount = math.sum(ta.cross(close, vwapValue) ? 1 : 0, 12)
+bool chopRaw = adx <= chopAdxMax and math.abs(emaSlope) <= atr * chopEmaSlopeAtrMax and vwapCrossCount >= 3
+
+var int chopHysteresisCount = 0
+chopHysteresisCount := chopRaw ? chopHysteresisCount + 1 : math.max(0, chopHysteresisCount - 1)
+bool chopRegimeConfirmed = chopHysteresisCount >= 3
+
+// ============================================================================
+// === QUANTUM ANALYSIS
+// ============================================================================
+float upCount = 0.0
+float downCount = 0.0
+for i = 1 to historyBars
+    float weight = 1.0 + ((historyBars - i) / historyBars)
+    float chg = nz(close[i]) - nz(close[i+1])
+    if chg > 0
+        upCount += weight
+    else if chg < 0
+        downCount += weight
+
+float totalMoves = upCount + downCount
+float bullProb = totalMoves > 0 ? upCount / totalMoves : 0.0
+float bearProb = totalMoves > 0 ? downCount / totalMoves : 0.0
+int trendDir = bullProb > bearProb ? 1 : bearProb > bullProb ? -1 : 0
+float stateMomentum = math.abs(bullProb - bearProb)
+
+var float qMemory = 0.0
+float memInput = trendDir == 1 ? 0.18 + stateMomentum * 0.30 : trendDir == -1 ? -(0.18 + stateMomentum * 0.30) : 0.0
+qMemory := math.max(-1.0, math.min(1.0, nz(qMemory[1]) * memoryDecay + memInput))
+int memoryBias = qMemory > memoryThreshold ? 1 : qMemory < -memoryThreshold ? -1 : 0
+
+// ============================================================================
+// === TMA TREND & PATTERNS (SMMA / RMA)
+// ============================================================================
+float tma21 = ta.rma(close, 21)
+float tma50 = ta.rma(close, 50)
+float tma100 = ta.rma(close, 100)
+float tma200 = ta.rma(close, 200)
+
+bool tmaBullTrend = close > tma50 and tma21 > tma50 and tma50 > tma200
+bool tmaBearTrend = close < tma50 and tma21 < tma50 and tma50 < tma200
+
+bool tmaBullStrike = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
+bool tmaBearStrike = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
+
+bool tmaBullEngulfing = open <= close[1] and open < open[1] and close > open[1]
+bool tmaBearEngulfing = open >= close[1] and open > open[1] and close < open[1]
+
+bool tmaBullPattern = tmaBullStrike or tmaBullEngulfing
+bool tmaBearPattern = tmaBearStrike or tmaBearEngulfing
+
+// ============================================================================
+// === KAMA FILTER (Kaufman Adaptive Moving Average)
+// ============================================================================
+float kamaChange = math.abs(close - nz(close[8], close))
+float kamaVol = math.sum(math.abs(close - nz(close[1], close)), 8)
+float kamaER = kamaVol != 0 ? kamaChange / kamaVol : 0
+float kamaFast = 2.0 / (2 + 1)
+float kamaSlow = 2.0 / (24 + 1)
+float kamaSC = math.pow(kamaER * (kamaFast - kamaSlow) + kamaSlow, 2)
+var float kama = na
+kama := na(kama[1]) ? close : nz(kama[1]) + kamaSC * (close - nz(kama[1]))
+
+bool kamaLongOK = close > kama and kama > nz(kama[1])
+bool kamaShortOK = close < kama and kama < nz(kama[1])
+
+// ============================================================================
+// === UT BOT TRIGGER
+// ============================================================================
+float utAtr = ta.atr(10) * 0.9
+var float utTrail = na
+float prevUt = nz(utTrail[1], close)
+utTrail := close > prevUt and nz(close[1]) > prevUt ? math.max(prevUt, close - utAtr) : close < prevUt and nz(close[1]) < prevUt ? math.min(prevUt, close + utAtr) : close > prevUt ? close - utAtr : close + utAtr
+
+bool utLongTrigger = close > utTrail and ta.crossover(close, utTrail)
+bool utShortTrigger = close < utTrail and ta.crossunder(close, utTrail)
+
+// ============================================================================
+// === CISD (Change in State of Delivery)
+// ============================================================================
+f_cisdState() =>
+    var float bTarget = na
+    var float sTarget = na
+    bool isInside = high < nz(high[1]) and low > nz(low[1])
+    if close < open and not isInside
+        bTarget := open
+    if close > open and not isInside
+        sTarget := open
+    
+    int state = 0
+    if not na(bTarget) and close > bTarget
+        state := 1
+    else if not na(sTarget) and close < sTarget
+        state := -1
+    state
+
+int cisdCurrent = f_cisdState()
+// FIX 4: 240m (4H) war zu langsam für 15m Entries. Geändert auf 120m (2H) für agilere Bestätigung.
+int cisd1h = request.security(syminfo.tickerid, "60", f_cisdState(), lookahead=barmerge.lookahead_off)
+int cisd2h = request.security(syminfo.tickerid, "120", f_cisdState(), lookahead=barmerge.lookahead_off)
+
+bool cisdLongOK = cisdCurrent == 1 and cisd1h == 1 and cisd2h == 1
+bool cisdShortOK = cisdCurrent == -1 and cisd1h == -1 and cisd2h == -1
+
+// ============================================================================
+// === SMART MONEY CONCEPTS (OB / FVG)
+// ============================================================================
+float ph = ta.pivothigh(high, 6, 6)
+float pl = ta.pivotlow(low, 6, 6)
+bool bullOBtouch = false
+bool bearOBtouch = false
+
+if not na(pl)
+    int obBar = bar_index - 6
+    float obTop = nz(high[6])
+    float obBot = nz(low[6])
+    if (obTop - obBot) <= atr * 1.6 and (bar_index - obBar) <= 25 and low <= obTop and high >= obBot
+        bullOBtouch := true
+
+if not na(ph)
+    int obBarBear = bar_index - 6
+    float obTopBear = nz(high[6])
+    float obBotBear = nz(low[6])
+    if (obTopBear - obBotBear) <= atr * 1.6 and (bar_index - obBarBear) <= 25 and high >= obBotBear and low <= obTopBear
+        bearOBtouch := true
+
+bool bullFVGtouch = low > nz(high[2]) and nz(close[1]) > nz(open[1])
+bool bearFVGtouch = high < nz(low[2]) and nz(close[1]) < nz(open[1])
+
+// ============================================================================
+// === SNIPER BIAS & CLUSTER
+// ============================================================================
+float bullSniperScore = 0.0
+bullSniperScore += close > vwapValue ? 1.0 : 0.0
+bullSniperScore += rsi14 > 50 ? 1.0 : 0.0
+bullSniperScore += macdMain > macdSignal ? 1.0 : 0.0
+bullSniperScore += ema9 > ema21 ? 1.0 : 0.0
+bullSniperScore += adx > 25 and close > ema9 ? 1.0 : 0.0
+bullSniperScore += volume > volSma and close > open ? 1.0 : 0.0
+bullSniperScore += rsi1h > 50 ? 1.0 : 0.0 
+
+float bearSniperScore = 0.0
+bearSniperScore += close < vwapValue ? 1.0 : 0.0
+bearSniperScore += rsi14 < 50 ? 1.0 : 0.0
+bearSniperScore += macdMain < macdSignal ? 1.0 : 0.0
+bearSniperScore += ema9 < ema21 ? 1.0 : 0.0
+bearSniperScore += adx > 25 and close < ema9 ? 1.0 : 0.0
+bearSniperScore += volume > volSma and close < open ? 1.0 : 0.0
+bearSniperScore += rsi1h < 50 ? 1.0 : 0.0 
+
+float bullPct = bullSniperScore / 7.0 * 100.0
+float bearPct = bearSniperScore / 7.0 * 100.0
+
+float bullCluster = 0.0
+float bearCluster = 0.0
+
+// Trend & Memory
+bullCluster += trendDir == 1 ? 12 : 0
+bearCluster += trendDir == -1 ? 12 : 0
+bullCluster += memoryBias == 1 ? 8 : 0
+bearCluster += memoryBias == -1 ? 8 : 0
+
+// EMA & MTF Trend
+bullCluster += (close > ema34 and emaSlope > 0) ? 8 : 0
+bearCluster += (close < ema34 and emaSlope < 0) ? 8 : 0
+bullCluster += mtfBull ? 10 : 0
+bearCluster += mtfBear ? 10 : 0
+
+// Momentum & Vol
+bullCluster += close > vwapValue ? 8 : 0
+bearCluster += close < vwapValue ? 8 : 0
+bullCluster += macdMain > macdSignal ? 8 : 0
+bearCluster += macdMain < macdSignal ? 8 : 0
+bullCluster += (adx > 20 and ema9 > ema21) ? 6 : 0
+bearCluster += (adx > 20 and ema9 < ema21) ? 6 : 0
+bullCluster += close > open ? 6 : 0
+bearCluster += close < open ? 6 : 0
+
+// Sniper & SMC
+bullCluster += bullPct >= 58.0 ? 10 : 0
+bearCluster += bearPct >= 58.0 ? 10 : 0
+bullCluster += bullOBtouch ? 5 : 0
+bearCluster += bearOBtouch ? 5 : 0
+bullCluster += bullFVGtouch ? 5 : 0
+bearCluster += bearFVGtouch ? 5 : 0
+
+// ============================================================================
+// === SIGNAL GENERIERUNG (Vollständige Scores inkl. Cooldown)
+// ============================================================================
+var float lastSigPrice = na
+var int lastSigTime = na
+
+// Distanz Cooldown & Zeit Cooldown (30 Min = 2 Bars auf 15m)
+bool cooldownDistOK = na(lastSigPrice) or math.abs(close - lastSigPrice) >= (atr * 0.40)
+bool cooldownTimeOK = na(lastSigTime) or (time - lastSigTime) >= (30 * 60 * 1000)
+bool signalReady = cooldownDistOK or cooldownTimeOK
+
+// Organischer Basis-Score
+int longScore = (trendDir == 1 ? 1 : 0) + (memoryBias == 1 ? 1 : 0) + (close > vwapValue ? 1 : 0) + (macdMain > macdSignal ? 1 : 0) + (ema9 > ema21 ? 1 : 0) + (tmaBullPattern ? 2 : 0) + (bullCluster >= 54.0 ? 3 : 0) + (utLongTrigger ? 1 : 0)
+int shortScore = (trendDir == -1 ? 1 : 0) + (memoryBias == -1 ? 1 : 0) + (close < vwapValue ? 1 : 0) + (macdMain < macdSignal ? 1 : 0) + (ema9 < ema21 ? 1 : 0) + (tmaBearPattern ? 2 : 0) + (bearCluster >= 54.0 ? 3 : 0) + (utShortTrigger ? 1 : 0)
+
+// Standard-Signale
+bool rawLongSignal = signalReady and longScore >= 7 and (longScore - shortScore) >= 2 and not chopRegimeConfirmed and atrOk and bodyOk and volOk
+bool rawShortSignal = signalReady and shortScore >= 7 and (shortScore - longScore) >= 2 and not chopRegimeConfirmed and atrOk and bodyOk and volOk
+
+// HFT Turbo Layer
+bool hftLongSignal = signalReady and longScore >= 5 and (longScore - shortScore) >= 1 and kamaLongOK and cisdLongOK and tmaBullTrend
+bool hftShortSignal = signalReady and shortScore >= 5 and (shortScore - longScore) >= 1 and kamaShortOK and cisdShortOK and tmaBearTrend
+
+bool finalLong = rawLongSignal or hftLongSignal
+bool finalShort = rawShortSignal or hftShortSignal
+
+// Update Cooldown Tracker
+if finalLong or finalShort
+    lastSigPrice := close
+    lastSigTime := time
+
+// ============================================================================
+// === ADAPTIVE ERROR GUARD & TRADE TRACKING
+// ============================================================================
+var int lastErrorDir = 0
+var int consecutiveLosses = 0
+var int blockLongUntil = na
+var int blockShortUntil = na
+var float lastBadLongPrice = na
+var float lastBadShortPrice = na
+
+var float[] pastProfits = array.new_float()
+var int[] pastTimes = array.new_int()
+
+bool tradeJustClosed = ta.change(strategy.closedtrades) > 0
+float lastProfit = strategy.netprofit - nz(strategy.netprofit[1])
+
+if tradeJustClosed
+    // Tracking für das Dashboard
+    array.push(pastProfits, lastProfit)
+    array.push(pastTimes, time)
+    if array.size(pastProfits) > 5000
+        array.shift(pastProfits)
+        array.shift(pastTimes)
+
+    // Error Guard Logik (Verlust-Re-Entry Blockade)
+    if lastProfit < 0
+        int dir = close < nz(lastBadLongPrice, close) ? 1 : -1 
+        consecutiveLosses := math.min(consecutiveLosses + 1, 4)
+        int penalty = chopRegimeConfirmed ? 16 : 8
+        if dir == 1
+            blockLongUntil := bar_index + (penalty * consecutiveLosses)
+            lastBadLongPrice := close
+        else
+            blockShortUntil := bar_index + (penalty * consecutiveLosses)
+            lastBadShortPrice := close
+    else
+        consecutiveLosses := 0 
+
+// 15m Zonen-Blocker: Muss mindestens 0.50 ATR vom letzten "schlechten" Preis weg sein
+bool errorGuardLongOK = na(blockLongUntil) or bar_index > blockLongUntil and math.abs(close - nz(lastBadLongPrice, 0)) > atr * 0.50
+bool errorGuardShortOK = na(blockShortUntil) or bar_index > blockShortUntil and math.abs(close - nz(lastBadShortPrice, 0)) > atr * 0.50
+
+// ============================================================================
+// === ENTRY GATES & EXECUTION
+// ============================================================================
+bool entryFlat = strategy.position_size == 0
+bool goLong = finalLong and entryFlat and errorGuardLongOK
+bool goShort = finalShort and entryFlat and errorGuardShortOK
+
+var float tpRiskBasis = na
+var float slPrice = na
+var float tp1Price = na, var float tp2Price = na, var float tp3Price = na, var float tp4Price = na, var float tp5Price = na
+var bool tp1Hit = false
+var float trailPrice = na
+
+float swingLow = ta.lowest(low, 6)
+float swingHigh = ta.highest(high, 6)
+
+if goLong
+    float atrSl = close - atr * 1.8
+    float structSl = swingLow - atr * 0.2
+    slPrice := math.max(atrSl, structSl) - (syminfo.mintick * 1) 
+    tpRiskBasis := close - slPrice
+    tp1Price := close + tpRiskBasis * 2.0
+    tp2Price := close + tpRiskBasis * 3.0
+    tp3Price := close + tpRiskBasis * 4.0
+    tp4Price := close + tpRiskBasis * 5.0
+    tp5Price := close + tpRiskBasis * 6.0
+    tp1Hit := false
+    trailPrice := na
+    strategy.entry("Long", strategy.long)
+
+if goShort
+    float atrSl = close + atr * 1.8
+    float structSl = swingHigh + atr * 0.2
+    slPrice := math.min(atrSl, structSl) + (syminfo.mintick * 1)
+    tpRiskBasis := slPrice - close
+    tp1Price := close - tpRiskBasis * 2.0
+    tp2Price := close - tpRiskBasis * 3.0
+    tp3Price := close - tpRiskBasis * 4.0
+    tp4Price := close - tpRiskBasis * 5.0
+    tp5Price := close - tpRiskBasis * 6.0
+    tp1Hit := false
+    trailPrice := na
+    strategy.entry("Short", strategy.short)
+
+// ============================================================================
+// === TRAILING LOGIC & OCA EXITS (FIX 1: Trailing-Stop verbreitert)
+// ============================================================================
+bool posReduced = (strategy.position_size > 0 and strategy.position_size < nz(strategy.position_size[1])) or (strategy.position_size < 0 and strategy.position_size > nz(strategy.position_size[1]))
+
+if posReduced
+    tp1Hit := true
+
+if strategy.position_size > 0
+    if not tp1Hit
+        strategy.exit("TP1_L", from_entry="Long", qty_percent=30, limit=tp1Price, stop=slPrice)
+        strategy.exit("Rest_L", from_entry="Long", stop=slPrice)
+    else
+        // FIX 1: Trailing Abstand auf 1.5 ATR hochgesetzt + Sicherung, dass Trail nie schlechter als Initial SL ist!
+        float rawTrail = high - atr * 1.5
+        trailPrice := na(trailPrice) ? math.max(slPrice, rawTrail) : math.max(trailPrice, rawTrail)
+        strategy.exit("Rest_L", from_entry="Long", stop=trailPrice)
+
+if strategy.position_size < 0
+    if not tp1Hit
+        strategy.exit("TP1_S", from_entry="Short", qty_percent=30, limit=tp1Price, stop=slPrice)
+        strategy.exit("Rest_S", from_entry="Short", stop=slPrice)
+    else
+        // FIX 1: Trailing Abstand auf 1.5 ATR hochgesetzt + Sicherung
+        float rawTrail = low + atr * 1.5
+        trailPrice := na(trailPrice) ? math.min(slPrice, rawTrail) : math.min(trailPrice, rawTrail)
+        strategy.exit("Rest_S", from_entry="Short", stop=trailPrice)
+
+// ============================================================================
+// === VISUALS & DASHBOARD (Rolling Stats)
+// ============================================================================
+bool inTrade = strategy.position_size != 0
+
+// Plot TPs and SLs
+plot(inTrade ? (tp1Hit ? trailPrice : slPrice) : na, color=color.red, style=plot.style_linebr, linewidth=2, title="SL / Trail")
+plot(inTrade and not tp1Hit ? tp1Price : na, color=color.green, style=plot.style_linebr, linewidth=2, title="TP1")
+plot(inTrade ? tp2Price : na, color=color.rgb(100, 255, 100, 50), style=plot.style_linebr, linewidth=1, title="TP2")
+plot(inTrade ? tp3Price : na, color=color.rgb(100, 255, 100, 50), style=plot.style_linebr, linewidth=1, title="TP3")
+plot(inTrade ? tp4Price : na, color=color.rgb(100, 255, 100, 50), style=plot.style_linebr, linewidth=1, title="TP4")
+plot(inTrade ? tp5Price : na, color=color.rgb(100, 255, 100, 50), style=plot.style_linebr, linewidth=1, title="TP5")
+
+// Dashboard (Tabelle)
+var table dash = table.new(position.middle_right, 2, 5, bgcolor=color.new(color.black, 80), border_color=color.gray, border_width=1)
+
+if barstate.islast
+    float pnl24h = 0.0, int trades24h = 0, int wins24h = 0
+    float pnl7d = 0.0, int trades7d = 0, int wins7d = 0
+    float pnl30d = 0.0, int trades30d = 0, int wins30d = 0
+    
+    int ms24h = 86400000
+    int ms7d = 604800000
+    int ms30d = 2592000000
+    
+    int arrSize = array.size(pastProfits)
+    if arrSize > 0
+        for i = 0 to arrSize - 1
+            int idx = arrSize - 1 - i 
+            int tTime = array.get(pastTimes, idx)
+            float tProf = array.get(pastProfits, idx)
+            bool isWin = tProf > 0
+            
+            int timeDiff = time - tTime
+            
+            if timeDiff <= ms30d
+                pnl30d += tProf
+                trades30d += 1
+                if isWin
+                    wins30d += 1
+                    
+                if timeDiff <= ms7d
+                    pnl7d += tProf
+                    trades7d += 1
+                    if isWin
+                        wins7d += 1
+                        
+                    if timeDiff <= ms24h
+                        pnl24h += tProf
+                        trades24h += 1
+                        if isWin
+                            wins24h += 1
+            else
+                break 
+
+    float wr24h = trades24h > 0 ? (wins24h / trades24h) * 100 : 0
+    float wr7d = trades7d > 0 ? (wins7d / trades7d) * 100 : 0
+    float wr30d = trades30d > 0 ? (wins30d / trades30d) * 100 : 0
+    float totalWr = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100 : 0
+    
+    string statusText = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "NONE"
+    color statusCol = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    
+    table.cell(dash, 0, 0, "Status", text_color=color.white)
+    table.cell(dash, 1, 0, statusText, text_color=statusCol)
+    
+    table.cell(dash, 0, 1, "24h PnL | WR", text_color=color.white)
+    table.cell(dash, 1, 1, str.tostring(pnl24h, "#.##") + " | " + str.tostring(wr24h, "#.#") + "%", text_color=pnl24h >= 0 ? color.green : color.red)
+    
+    table.cell(dash, 0, 2, "7d PnL | WR", text_color=color.white)
+    table.cell(dash, 1, 2, str.tostring(pnl7d, "#.##") + " | " + str.tostring(wr7d, "#.#") + "%", text_color=pnl7d >= 0 ? color.green : color.red)
+    
+    table.cell(dash, 0, 3, "30d PnL | WR", text_color=color.white)
+    table.cell(dash, 1, 3, str.tostring(pnl30d, "#.##") + " | " + str.tostring(wr30d, "#.#") + "%", text_color=pnl30d >= 0 ? color.green : color.red)
+    
+    table.cell(dash, 0, 4, "Total PnL | WR", text_color=color.white)
+    table.cell(dash, 1, 4, str.tostring(strategy.netprofit, "#.##") + " | " + str.tostring(totalWr, "#.#") + "%", text_color=strategy.netprofit >= 0 ? color.green : color.red)

@@ -1,0 +1,386 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Jules_Engineer
+
+//@version=6
+strategy("SOL 5m Multi-Agent Strategy", overlay=true, margin_long=100, margin_short=100, precision=2, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=2)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+// --- Global Settings ---
+grp_global = "Global Settings"
+use_ml_filter = input.bool(true, "Use ML Filter", group=grp_global)
+risk_profile = input.string("Moderate", "Risk Profile", options=["Conservative", "Moderate", "Aggressive"], group=grp_global)
+
+// --- Market Structure ---
+grp_ms = "Market Structure"
+pivot_left = input.int(5, "Pivot Left Bars", minval=1, group=grp_ms)
+pivot_right = input.int(5, "Pivot Right Bars", minval=1, group=grp_ms)
+ema_trend_len = input.int(200, "EMA Trend Length", minval=1, group=grp_ms)
+
+// --- OB / LSOB / FVG ---
+grp_ob = "Order Block / FVG"
+ob_min_body_atr_mult = input.float(0.3, "OB Min Body (ATR Mult)", step=0.1, group=grp_ob)
+fvg_min_size_perc = input.float(0.01, "FVG Min Size (%)", step=0.01, group=grp_ob)
+
+// --- SOL Patterns ---
+grp_pat = "SOL Specific Patterns"
+orb_minutes = input.int(30, "ORB Minutes", minval=5, group=grp_pat)
+vol_ema_len = input.int(20, "Volume EMA Length", group=grp_pat)
+vol_mult = input.float(1.2, "Volume Multiplier", step=0.1, group=grp_pat)
+
+// --- Risk Management ---
+grp_risk = "Risk Management"
+sl_mult = input.float(1.5, "SL ATR Multiplier", step=0.1, group=grp_risk)
+tp_mult = input.float(3.0, "TP ATR Multiplier", step=0.1, group=grp_risk)
+max_daily_loss = input.float(5.0, "Max Daily Loss (%)", step=0.1, group=grp_risk)
+
+// --- ML Export ---
+grp_ml = "ML Integration"
+ml_export_enabled = input.bool(true, "Export ML Features via Alert", group=grp_ml)
+
+// =============================================================================
+// TYPES & ARRAYS
+// =============================================================================
+type OB
+    float top
+    float bottom
+    float body_top
+    float body_bottom
+    bool is_bullish
+    int start_index
+    bool active
+    box box_id
+
+type FVG
+    float top
+    float bottom
+    bool is_bullish
+    int start_index
+    bool active
+    box box_id
+
+var ob_array = array.new<OB>()
+var fvg_array = array.new<FVG>()
+
+// =============================================================================
+// PHASE 1: MARKET STRUCTURE
+// =============================================================================
+
+float ph = ta.pivothigh(high, pivot_left, pivot_right)
+float pl = ta.pivotlow(low, pivot_left, pivot_right)
+
+var float[] swing_highs = array.new_float(0)
+var float[] swing_lows = array.new_float(0)
+
+if not na(ph)
+    array.push(swing_highs, ph)
+    if array.size(swing_highs) > 5
+        array.shift(swing_highs)
+
+if not na(pl)
+    array.push(swing_lows, pl)
+    if array.size(swing_lows) > 5
+        array.shift(swing_lows)
+
+float ema_trend = ta.ema(close, ema_trend_len)
+int trend_direction = close > ema_trend ? 1 : close < ema_trend ? -1 : 0
+
+// Market Structure Reversal Logic
+bool is_hh = ph > (array.size(swing_highs) > 1 ? array.get(swing_highs, array.size(swing_highs) - 2) : 0)
+bool is_ll = pl < (array.size(swing_lows) > 1 ? array.get(swing_lows, array.size(swing_lows) - 2) : 10e10)
+
+// =============================================================================
+// PHASE 2 & 3: OB, LSOB, FVG
+// =============================================================================
+
+float atr = ta.atr(14)
+float body_size = math.abs(close - open)
+
+// --- Order Block Detection ---
+bool is_bullish_impulse = close > open and body_size > atr * ob_min_body_atr_mult
+bool is_bearish_impulse = close < open and body_size > atr * ob_min_body_atr_mult
+
+if is_bullish_impulse and close[1] < open[1]
+    color_ob = color.new(color.green, 80)
+    new_box = box.new(left=bar_index - 1, top=high[1], right=bar_index, bottom=low[1], bgcolor=color_ob, border_color=color_ob)
+    array.push(ob_array, OB.new(high[1], low[1], math.max(open[1], close[1]), math.min(open[1], close[1]), true, bar_index - 1, true, new_box))
+
+if is_bearish_impulse and close[1] > open[1]
+    color_ob = color.new(color.red, 80)
+    new_box = box.new(left=bar_index - 1, top=high[1], right=bar_index, bottom=low[1], bgcolor=color_ob, border_color=color_ob)
+    array.push(ob_array, OB.new(high[1], low[1], math.max(open[1], close[1]), math.min(open[1], close[1]), false, bar_index - 1, true, new_box))
+
+// Clean up old OBs
+if array.size(ob_array) > 50
+    old_ob = array.shift(ob_array)
+    box.delete(old_ob.box_id)
+
+// --- FVG Detection ---
+bool fvg_up = low > high[2] and (low - high[2]) > close * fvg_min_size_perc / 100
+bool fvg_down = high < low[2] and (low[2] - high) > close * fvg_min_size_perc / 100
+
+if fvg_up
+    color_fvg = color.new(color.green, 90)
+    new_box = box.new(left=bar_index - 2, top=low, right=bar_index, bottom=high[2], bgcolor=color_fvg, border_style=line.style_dashed, border_color=color_fvg)
+    array.push(fvg_array, FVG.new(low, high[2], true, bar_index - 1, true, new_box))
+
+if fvg_down
+    color_fvg = color.new(color.red, 90)
+    new_box = box.new(left=bar_index - 2, top=low[2], right=bar_index, bottom=high, bgcolor=color_fvg, border_style=line.style_dashed, border_color=color_fvg)
+    array.push(fvg_array, FVG.new(low[2], high, false, bar_index - 1, true, new_box))
+
+// Clean up old FVGs
+if array.size(fvg_array) > 50
+    old_fvg = array.shift(fvg_array)
+    box.delete(old_fvg.box_id)
+
+// --- Liquidity Sweep Detection ---
+bool sweep_low = false
+bool sweep_high = false
+float last_low_val = array.size(swing_lows) > 0 ? array.get(swing_lows, array.size(swing_lows) - 1) : na
+float last_high_val = array.size(swing_highs) > 0 ? array.get(swing_highs, array.size(swing_highs) - 1) : na
+
+if not na(last_low_val)
+    sweep_low := low < last_low_val and close > last_low_val
+if not na(last_high_val)
+    sweep_high := high > last_high_val and close < last_high_val
+
+// --- Validation and Updates ---
+for i = 0 to (array.size(ob_array) > 0 ? array.size(ob_array) - 1 : -1)
+    ob = array.get(ob_array, i)
+    if ob.active
+        box.set_right(ob.box_id, bar_index)
+        if ob.is_bullish and low < ob.bottom
+            ob.active := false
+        else if not ob.is_bullish and high > ob.top
+            ob.active := false
+
+for i = 0 to (array.size(fvg_array) > 0 ? array.size(fvg_array) - 1 : -1)
+    fvg = array.get(fvg_array, i)
+    if fvg.active
+        box.set_right(fvg.box_id, bar_index)
+        if fvg.is_bullish and low < fvg.bottom
+            fvg.active := false
+        else if not fvg.is_bullish and high > fvg.top
+            fvg.active := false
+
+// =============================================================================
+// PHASE 4: SOL SPECIFIC PATTERNS
+// =============================================================================
+
+// 1. Opening-Range Breakout (ORB)
+is_new_day = ta.change(time("D")) != 0
+var float orb_high = na
+var float orb_low = na
+var bool orb_active = false
+
+if is_new_day
+    orb_high := high
+    orb_low := low
+    orb_active := true
+else if orb_active and ta.barssince(is_new_day) < (orb_minutes / 5)
+    orb_high := math.max(orb_high, high)
+    orb_low := math.min(orb_low, low)
+else
+    orb_active := false
+
+bool orb_break_up = ta.crossover(close, orb_high) and volume > ta.ema(volume, vol_ema_len) * vol_mult
+bool orb_break_down = ta.crossunder(close, orb_low) and volume > ta.ema(volume, vol_ema_len) * vol_mult
+
+// 2. VWAP-Pullback
+vwap_val = ta.vwap(close)
+bool vwap_pullback_long = close > vwap_val and low <= vwap_val and close > open
+bool vwap_pullback_short = close < vwap_val and high >= vwap_val and close < open
+
+// 3. Volatility Compression (Bollinger Band Squeeze)
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, 20, 2.0)
+float bb_width = (bb_upper - bb_lower) / bb_mid
+bool is_compressed = bb_width < ta.ema(bb_width, 50)
+bool compression_break_up = is_compressed[1] and close > bb_upper[1]
+bool compression_break_down = is_compressed[1] and close < bb_lower[1]
+
+// 4. Sweep-and-Reclaim
+bool sweep_reclaim_long = sweep_low and close > last_low_val
+bool sweep_reclaim_short = sweep_high and close < last_high_val
+
+// 5. Breakout-Pullback-Continuation
+var float last_broken_ph = na
+var float last_broken_pl = na
+var bool waiting_for_retest_long = false
+var bool waiting_for_retest_short = false
+
+if not na(ph) and close > ph
+    last_broken_ph := ph
+    waiting_for_retest_long := true
+if not na(pl) and close < pl
+    last_broken_pl := pl
+    waiting_for_retest_short := true
+
+bool bpc_long = false
+if waiting_for_retest_long and low <= last_broken_ph and close > last_broken_ph
+    waiting_for_retest_long := false
+    bpc_long := true
+
+bool bpc_short = false
+if waiting_for_retest_short and high >= last_broken_pl and close < last_broken_pl
+    waiting_for_retest_short := false
+    bpc_short := true
+
+// 6. Regime-based Mean Reversion to VWAP
+bool is_range_regime = bb_width < ta.ema(bb_width, 100)
+bool mean_reversion_long = is_range_regime and low < bb_lower and close > bb_lower
+bool mean_reversion_short = is_range_regime and high > bb_upper and close < bb_upper
+
+// Aggregated Pattern Score
+float pattern_score = 0
+if orb_break_up or compression_break_up or sweep_reclaim_long or vwap_pullback_long or bpc_long or mean_reversion_long
+    pattern_score += 100
+if orb_break_down or compression_break_down or sweep_reclaim_short or vwap_pullback_short or bpc_short or mean_reversion_short
+    pattern_score -= 100
+
+// =============================================================================
+// PHASE 5: ML FEATURE ENGINEERING
+// =============================================================================
+
+// 1. ema_trend (+1 bullish, -1 bearish, 0 neutral)
+float f1 = float(trend_direction)
+
+// 2. rsi_norm — RSI(14) auf [-1, 1] skaliert
+float rsi_val = ta.rsi(close, 14)
+float f2 = (rsi_val - 50) / 50
+
+// 3. atr_percent — ATR(14) / close
+float f3 = ta.atr(14) / close
+
+// 4. ob_score — +1 wenn frischer Bull-OB nahe close, -1 bei Bear-OB
+float f4 = 0.0
+for i = 0 to (array.size(ob_array) > 0 ? array.size(ob_array) - 1 : -1)
+    ob = array.get(ob_array, i)
+    if ob.active
+        if ob.is_bullish and close > ob.bottom and close < ob.top * 1.01
+            f4 := 1.0
+        else if not ob.is_bullish and close < ob.top and close > ob.bottom * 0.99
+            f4 := -1.0
+
+// 5. lsob_score — +1/-1 bei validem Sweep + OB
+float f5 = 0.0
+if sweep_low and f4 == 1.0
+    f5 := 1.0
+if sweep_high and f4 == -1.0
+    f5 := -1.0
+
+// 6. fvg_score — +1 bei frischem FVG-up, -1 bei FVG-down
+float f6 = 0.0
+for i = 0 to (array.size(fvg_array) > 0 ? array.size(fvg_array) - 1 : -1)
+    fvg = array.get(fvg_array, i)
+    if fvg.active
+        if fvg.is_bullish and close > fvg.bottom and close < fvg.top * 1.01
+            f6 := 1.0
+        else if not fvg.is_bullish and close < fvg.top and close > fvg.bottom * 0.99
+            f6 := -1.0
+
+// 7. pattern_score — aggregierter Candle-Pattern-Score / 100
+float f7 = pattern_score / 100.0
+
+// 8. volume_ratio — aktuelles Volumen / SMA(20, volume)
+float f8 = volume / ta.sma(volume, 20)
+
+// 9. swing_position — Position des Close relativ zum letzten Swing-Range (0...1)
+float swing_range = last_high_val - last_low_val
+float f9 = swing_range != 0 ? (close - last_low_val) / swing_range : 0.5
+
+// 10. bb_position — Position innerhalb Bollinger Bands (-1...1)
+float bb_half_width = bb_upper - bb_mid
+float f10 = bb_half_width != 0 ? (close - bb_mid) / bb_half_width : 0.0
+
+// 11. macd_signal — MACD-Histogramm normalisiert (-1...1)
+[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
+float f11 = histLine / ta.atr(14) // Normalizing by ATR for scale
+
+// 12. session_score — +1 wenn in London/NY Session, -1 wenn Asien, 0 sonst
+t = time("UTC", "0000-2400")
+is_london = not na(time(timeframe.period, "0800-1600:1234567", "UTC"))
+is_ny = not na(time(timeframe.period, "1300-2100:1234567", "UTC"))
+is_asia = not na(time(timeframe.period, "0000-0800:1234567", "UTC"))
+float f12 = (is_london or is_ny) ? 1.0 : is_asia ? -1.0 : 0.0
+
+feature_vector = array.from(f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12)
+
+// ML Export Alert
+if ml_export_enabled and barstate.isconfirmed
+    alert_msg = '{"features":' + str.tostring(feature_vector) + ', "symbol":"' + syminfo.ticker + '", "close":' + str.tostring(close) + ', "time":' + str.tostring(time) + '}'
+    alert(alert_msg, alert.freq_all_bars)
+
+// =============================================================================
+// PHASE 6: STRATEGY LOGIC & EXECUTION
+// =============================================================================
+
+// Entry conditions
+bool long_condition = false
+bool short_condition = false
+
+// Weighted scoring (simplified for this script, but configurable)
+float weight_ob = 0.3
+float weight_fvg = 0.2
+float weight_pattern = 0.3
+float weight_lsob = 0.2
+
+float long_score = (f4 > 0 ? weight_ob : 0) + (f6 > 0 ? weight_fvg : 0) + (f7 > 0 ? weight_pattern : 0) + (f5 > 0 ? weight_lsob : 0)
+float short_score = (f4 < 0 ? weight_ob : 0) + (f6 < 0 ? weight_fvg : 0) + (f7 < 0 ? weight_pattern : 0) + (f5 < 0 ? weight_lsob : 0)
+
+float threshold = 0.5
+
+long_condition := long_score >= threshold and trend_direction >= 0 and barstate.isconfirmed
+short_condition := short_score >= threshold and trend_direction <= 0 and barstate.isconfirmed
+
+// Risk Management Calculations
+var float sl_price = na
+var float tp_price = na
+
+if long_condition and strategy.position_size == 0
+    sl_price := close - atr * sl_mult
+    tp_price := close + atr * tp_mult
+    strategy.entry("Long", strategy.long, comment="Score: " + str.tostring(long_score))
+    alert_payload = '{"action":"open_long", "symbol":"' + syminfo.ticker + '", "sl":' + str.tostring(sl_price) + ', "tp":' + str.tostring(tp_price) + '}'
+    alert(alert_payload, alert.freq_once_per_bar_close)
+
+if short_condition and strategy.position_size == 0
+    sl_price := close + atr * sl_mult
+    tp_price := close - atr * tp_mult
+    strategy.entry("Short", strategy.short, comment="Score: " + str.tostring(short_score))
+    alert_payload = '{"action":"open_short", "symbol":"' + syminfo.ticker + '", "sl":' + str.tostring(sl_price) + ', "tp":' + str.tostring(tp_price) + '}'
+    alert(alert_payload, alert.freq_once_per_bar_close)
+
+// Exit Logic
+if strategy.position_size > 0
+    strategy.exit("Exit Long", "Long", stop=sl_price, limit=tp_price, comment_loss="SL", comment_profit="TP")
+    if (f4 < 0 or f6 < 0) and strategy.open_profit > 0
+        strategy.close("Long", comment="Reversal Close")
+        alert('{"action":"exit", "symbol":"' + syminfo.ticker + '", "reason":"reversal"}', alert.freq_once_per_bar_close)
+
+if strategy.position_size < 0
+    strategy.exit("Exit Short", "Short", stop=sl_price, limit=tp_price, comment_loss="SL", comment_profit="TP")
+    if (f4 > 0 or f6 > 0) and strategy.open_profit > 0
+        strategy.close("Short", comment="Reversal Close")
+        alert('{"action":"exit", "symbol":"' + syminfo.ticker + '", "reason":"reversal"}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// PHASE 7: VISUALIZATION
+// =============================================================================
+
+// Visualization is handled within the OB/FVG update loops for efficiency and to respect limits.
+
+// --- Plot Patterns ---
+plotshape(orb_break_up, "ORB Break Up", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(orb_break_down, "ORB Break Down", shape.triangledown, location.abovebar, color.red, size=size.small)
+plotshape(sweep_reclaim_long, "Sweep Reclaim Long", shape.circle, location.belowbar, color.blue, size=size.tiny)
+plotshape(sweep_reclaim_short, "Sweep Reclaim Short", shape.circle, location.abovebar, color.orange, size=size.tiny)
+
+// --- Plot Trend ---
+plot(ema_trend, "Trend EMA", color.new(color.gray, 50))
+
+// --- Entry Markers ---
+plotshape(long_condition, "Long Entry", shape.arrowup, location.belowbar, color.lime, size=size.normal)
+plotshape(short_condition, "Short Entry", shape.arrowdown, location.abovebar, color.maroon, size=size.normal)

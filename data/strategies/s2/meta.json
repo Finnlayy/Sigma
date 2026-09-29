@@ -1,0 +1,8 @@
+{
+  "original_csv_filename": "s2_properties.csv",
+  "exact_csv_header": [
+    "Parameter",
+    "Value"
+  ],
+  "delimiter": ","
+}

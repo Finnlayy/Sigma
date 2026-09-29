@@ -1,0 +1,220 @@
+//@version=5
+strategy("Multi-Strat Session Template • RR Trailing 1:5", 
+     overlay = true, 
+     margin_long = 100, margin_short = 100,
+     pyramiding = 0, 
+     default_qty_type = strategy.percent_of_equity, 
+     default_qty_value = 100, 
+     currency = currency.USD)
+
+// ────────────────────────────────────────
+// 1. INPUTS
+// ────────────────────────────────────────
+
+htf_tf     = input.timeframe("240", "HTF Trend Timeframe (H4)")
+ema_fast   = input.int(20, "EMA Fast")
+ema_slow   = input.int(50, "EMA Slow")
+
+atr_len    = input.int(14, "ATR Length")
+atr_mult_sl= input.float(1.4, "SL ATR Multiplier")
+rr_ratio   = input.float(5.0, "Fixed RR Target")
+
+use_session = input.bool(true, "Use Session Filter")
+session_str = input.session("0800-1600", "Trading Session (exchange time)")
+
+// Strategie-Auswahl pro Session (0 = EMA, 1 = Breakout, 2 = Sweep)
+strat_mode_input = input.int(0, "Force Strategy (0=auto,1=EMA,2=Breakout,3=Sweep)", minval=0, maxval=3)
+
+// Confidence Mindestwert (0–10)
+min_conf   = input.int(6, "Min Confidence Score (0-10)")
+
+show_dash  = input.bool(true, "Show Dashboard")
+
+// ────────────────────────────────────────
+// 2. HELPER FUNCTIONS
+// ────────────────────────────────────────
+
+// Höherer Timeframe Trend (einfach: Preis über/unter H4 EMA50)
+htf_ema = request.security(syminfo.tickerid, htf_tf, ta.ema(close, 50), lookahead=barmerge.lookahead_on)
+htf_trend_up   = close > htf_ema
+htf_trend_down = close < htf_ema
+
+// ATR für SL & dynamisches Risk
+atr = ta.atr(atr_len)
+
+// Kerzenmuster
+bull_engulf = close > open[1] and open < close[1] and close > open[1] + (close[1] - open[1])
+bear_engulf = close < open[1] and open > close[1] and close < open[1] - (open[1] - close[1])
+
+bull_pin    = (high - low > atr*1.5) and (close - low) / (high - low) > 0.66 and close > open
+bear_pin    = (high - low > atr*1.5) and (high - close) / (high - low) > 0.66 and close < open
+
+candle_confirm_long  = bull_engulf or bull_pin
+candle_confirm_short = bear_engulf or bear_pin
+
+// Session prüfen
+in_session = not use_session or time(timeframe.period, session_str)
+
+// ────────────────────────────────────────
+// 3. STRATEGIEN-LOGIK (Beispiele)
+// ────────────────────────────────────────
+
+emaFast = ta.ema(close, ema_fast)
+emaSlow = ta.ema(close, ema_slow)
+
+// Strategie 1: EMA Trend + Retest
+ema_cross_up   = ta.crossover(emaFast, emaSlow)
+ema_cross_down = ta.crossunder(emaFast, emaSlow)
+ema_retest_long  = ema_cross_up[1] and low <= emaSlow and close > emaSlow
+ema_retest_short = ema_cross_down[1] and high >= emaSlow and close < emaSlow
+
+ema_long  = ema_retest_long  and htf_trend_up  and candle_confirm_long
+ema_short = ema_retest_short and htf_trend_down and candle_confirm_short
+
+// Strategie 2: Range Breakout + Retest (einfach 20-Bar Range)
+range_high = ta.highest(high, 20)
+range_low  = ta.lowest(low, 20)
+breakout_up   = ta.crossover(close, range_high[1])
+breakout_down = ta.crossunder(close, range_low[1])
+
+breakout_retest_long  = breakout_up[1]   and low <= range_high[1] and close > range_high[1]
+breakout_retest_short = breakout_down[1] and high >= range_low[1]  and close < range_low[1]
+
+bo_long  = breakout_retest_long  and htf_trend_up  and candle_confirm_long
+bo_short = breakout_retest_short and htf_trend_down and candle_confirm_short
+
+// Strategie 3: Liquidity Sweep (einfach: Fakeout über/unter 10-Bar High/Low + Reversal)
+swing_high = ta.highest(high, 10)
+swing_low  = ta.lowest(low, 10)
+
+sweep_up   = high > swing_high[1] and close < swing_high[1]   // Stop-Hunt oben + Rejection
+sweep_down = low  < swing_low[1]  and close > swing_low[1]    // Stop-Hunt unten + Rejection
+
+sweep_long  = sweep_down and candle_confirm_long  and htf_trend_up
+sweep_short = sweep_up   and candle_confirm_short and htf_trend_down
+
+// ────────────────────────────────────────
+// 4. SESSION-BASIERTER STRATEGIE-SELECTOR (sehr einfach)
+// ────────────────────────────────────────
+
+var int active_strategy = 0   // 0=EMA, 1=Breakout, 2=Sweep
+
+if barstate.isfirst
+    active_strategy := strat_mode_input > 0 ? strat_mode_input : 0
+
+// Hier könnte man später Winrate-Logik einbauen (var float winrate_ema etc.)
+// Für jetzt: fixe Auswahl oder manuelle Umschaltung
+
+long_condition  = false
+short_condition = false
+string strat_name = "None"
+
+if active_strategy == 1 or (active_strategy == 0 and strat_mode_input == 0)
+    long_condition  := ema_long
+    short_condition := ema_short
+    strat_name := "EMA Trend"
+else if active_strategy == 2
+    long_condition  := bo_long
+    short_condition := bo_short
+    strat_name := "Breakout Retest"
+else if active_strategy == 3
+    long_condition  := sweep_long
+    short_condition := sweep_short
+    strat_name := "Liq Sweep"
+
+long_condition  := long_condition  and in_session
+short_condition := short_condition and in_session
+
+// ────────────────────────────────────────
+// 5. CONFIDENCE SCORE (dummy – erweiterbar)
+// ────────────────────────────────────────
+
+conf_score = 0
+conf_score += htf_trend_up or htf_trend_down ? 4 : 0
+conf_score += candle_confirm_long or candle_confirm_short ? 4 : 0
+conf_score += ta.rsi(close,14) > 55 and long_condition ? 2 : 0
+conf_score += ta.rsi(close,14) < 45 and short_condition ? 2 : 0
+
+high_prob_long  = long_condition  and conf_score >= min_conf
+high_prob_short = short_condition and conf_score >= min_conf
+
+// ────────────────────────────────────────
+// 6. ENTRY + RR TRAILING LOGIK
+// ────────────────────────────────────────
+
+if high_prob_long
+    strategy.entry("Long", strategy.long)
+
+if high_prob_short
+    strategy.entry("Short", strategy.short)
+
+// SL & TP initial setzen (wird später getrailt)
+sl_long  = close - atr * atr_mult_sl
+tp_long  = close + (close - sl_long) * rr_ratio
+
+sl_short = close + atr * atr_mult_sl
+tp_short = close - (sl_short - close) * rr_ratio
+
+strategy.exit("Exit Long",  "Long",  stop = sl_long,  limit = tp_long)
+strategy.exit("Exit Short", "Short", stop = sl_short, limit = tp_short)
+
+// Trailing nach RR-Stufen (vereinfacht – in echt mit var tracken)
+var float entry_price = na
+var float initial_sl  = na
+
+if strategy.position_size > 0 and strategy.position_size[1] <= 0
+    entry_price := strategy.position_avg_price
+    initial_sl  := sl_long
+
+if strategy.position_size < 0 and strategy.position_size[1] >= 0
+    entry_price := strategy.position_avg_price
+    initial_sl  := sl_short
+
+// RR-basierte Anpassungen (Beispiel long)
+if strategy.position_size > 0
+    unrealized_rr = (close - entry_price) / (entry_price - initial_sl)
+    
+    if unrealized_rr >= 2.0
+        strategy.exit("BE Long", "Long", stop = entry_price)           // 1:2 → BE
+    
+    if unrealized_rr >= 3.0
+        strategy.exit("1:2 Trail", "Long", trail_points = (2 * (entry_price - initial_sl)) / syminfo.mintick, trail_offset = 0)
+    
+    // 1:4 → aggressiver Trail (kann man feiner machen)
+
+// ────────────────────────────────────────
+// 7. VISUALS & DASHBOARD
+// ────────────────────────────────────────
+
+plot(emaFast, "EMA Fast", color=#2962FF)
+plot(emaSlow, "EMA Slow", color=#FF6D00)
+plot(htf_ema, "H4 EMA50", color=color.purple, linewidth=3)
+
+plotshape(high_prob_long,  "Long",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
+plotshape(high_prob_short, "Short", shape.triangledown, location.abovebar, color.red,    size=size.small)
+
+// Dashboard
+if show_dash and barstate.islast
+    var table dash = table.new(position.top_right, 2, 6, bgcolor=color.new(color.gray, 85), border_width=1)
+    
+    table.cell(dash, 0, 0, "Trend", text_color=color.white)
+    table.cell(dash, 1, 0, htf_trend_up ? "↑ Long" : htf_trend_down ? "↓ Short" : "—", text_color=htf_trend_up ? color.green : htf_trend_down ? color.red : color.gray)
+    
+    table.cell(dash, 0, 1, "Active Strat", text_color=color.white)
+    table.cell(dash, 1, 1, strat_name, text_color=color.orange)
+    
+    table.cell(dash, 0, 2, "Conf Score", text_color=color.white)
+    table.cell(dash, 1, 2, str.tostring(conf_score), text_color=conf_score >= min_conf ? color.green : color.orange)
+    
+    table.cell(dash, 0, 3, "Position", text_color=color.white)
+    table.cell(dash, 1, 3, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray)
+
+// ────────────────────────────────────────
+// Alerts (Beispiel)
+// ────────────────────────────────────────
+
+if high_prob_long
+    alert("Long Entry • " + strat_name + " • Conf: " + str.tostring(conf_score), alert.freq_once_per_bar_close)
+
+if high_prob_short
+    alert("Short Entry • " + strat_name + " • Conf: " + str.tostring(conf_score), alert.freq_once_per_bar_close)

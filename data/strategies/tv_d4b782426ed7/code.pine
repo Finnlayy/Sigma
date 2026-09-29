@@ -1,0 +1,718 @@
+//@version=6
+strategy(
+     "EMH LAC Random-Walk Regime Strategy - Unified Crypto/Forex/Metals",
+     overlay = true,
+     initial_capital = 100000,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     pyramiding = 0,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     slippage = 1
+)
+
+// =============================================================================
+// Pine-taugliche Operationalisierung der LAC-/EMH-Logik
+// Erweitert für Crypto, Forex & Precious Metals
+// =============================================================================
+
+// ----------------------------- Asset Class Inputs ----------------------------
+group_asset = "Asset Class"
+asset_class = input.string("Crypto", "Asset Class", options = ["Crypto", "Forex", "Metals"], group = group_asset)
+crypto_type = input.string("BTC", "Crypto Sub-Type", options = ["BTC", "ETH", "Altcoin"], group = group_asset)
+fx_type     = input.string("Majors", "FX Sub-Type", options = ["Majors", "Minors", "Exotics"], group = group_asset)
+metal_type  = input.string("Gold", "Metal Sub-Type", options = ["Gold", "Silver"], group = group_asset)
+
+// ----------------------------- Inputs ----------------------------------------
+group_data = "Studiennahe Analyse"
+full_len   = input.int(252, "Volles Analysefenster", minval = 80, maxval = 600, group = group_data)
+short_len  = input.int(63, "Kurzes Analysefenster", minval = 20, maxval = 200, group = group_data)
+mode       = input.string("Adaptive", "Aktives Fenster", options = ["Full", "Short", "Adaptive"], group = group_data)
+alpha      = input.float(0.05, "Signifikanzniveau", minval = 0.01, maxval = 0.10, step = 0.01, group = group_data)
+lb_lags    = input.int(12, "Ljung-Box-Lags", minval = 2, maxval = 20, group = group_data)
+arch_lags  = input.int(10, "ARCH-/LB²-Lags", minval = 2, maxval = 20, group = group_data)
+vr_k1      = input.int(2, "Variance-Ratio k1", minval = 2, maxval = 20, group = group_data)
+vr_k2      = input.int(4, "Variance-Ratio k2", minval = 2, maxval = 20, group = group_data)
+vr_k3      = input.int(8, "Variance-Ratio k3", minval = 2, maxval = 20, group = group_data)
+vr_k4      = input.int(16, "Variance-Ratio k4", minval = 2, maxval = 30, group = group_data)
+bool show_ann_vol = input.bool(false, "Show Annualized Vol (separate pane)", group = group_data)
+
+group_trade = "Signal-Engine"
+fast_len       = input.int(20, "Schneller Trendfilter", minval = 5, maxval = 100, group = group_trade)
+slow_len       = input.int(50, "Langsamer Trendfilter", minval = 10, maxval = 200, group = group_trade)
+breakout_len   = input.int(20, "Breakout-Lookback", minval = 5, maxval = 100, group = group_trade)
+meanrev_len    = input.int(20, "Mean-Reversion-Lookback", minval = 5, maxval = 100, group = group_trade)
+allow_rw1_trades = input.bool(false, "Defensive Trades in RW1/RW2 erlauben", group = group_trade)
+show_daily_warning = input.bool(true, "Warnung auf Nicht-Daily-Charts anzeigen", group = group_trade)
+
+group_peer = "Peer- / Contagion-Filter"
+use_peer_filter = input.bool(false, "Peer-Filter verwenden", group = group_peer)
+peer_symbol     = input.symbol("AMEX:SPY", "Peer-/Benchmark-Symbol", group = group_peer)
+corr_base_len   = input.int(120, "Baseline-Korrelation", minval = 20, maxval = 300, group = group_peer)
+corr_event_len  = input.int(40, "Event-Korrelation", minval = 10, maxval = 150, group = group_peer)
+corr_z_thresh   = input.float(1.65, "z-Schwelle für Korrelationssprung", minval = 1.0, maxval = 3.5, step = 0.05, group = group_peer)
+
+group_risk = "Risikomanagement"
+atr_len     = input.int(14, "ATR-Länge", minval = 5, maxval = 100, group = group_risk)
+stop_atr    = input.float(2.0, "Stop in ATR", minval = 0.5, maxval = 10.0, step = 0.1, group = group_risk)
+target_atr  = input.float(3.0, "Ziel in ATR", minval = 0.5, maxval = 15.0, step = 0.1, group = group_risk)
+risk_pct    = input.float(1.0, "Risiko % je Trade", minval = 0.10, maxval = 5.0, step = 0.1, group = group_risk)
+min_qty     = input.float(1.0, "Mindest-Qty", minval = 0.0001, step = 0.1, group = group_risk)
+
+// ----------------------------- Effective Presets ------------------------------
+// Auto-populated parameter matrix based on asset class & sub-type.
+// The strategy logic uses these effective values instead of raw inputs.
+// -----------------------------------------------------------------------------
+int eff_full_len      = full_len
+int eff_short_len     = short_len
+float eff_alpha       = alpha
+float eff_hurst_trend_thr = 0.55
+float eff_hurst_mr_thr    = 0.45
+float eff_crisis_vol_mult = 1.5
+int eff_atr_len       = atr_len
+float eff_stop_atr    = stop_atr
+float eff_target_atr  = target_atr
+float eff_risk_pct    = risk_pct
+int eff_lb_lags       = lb_lags
+int eff_arch_lags     = arch_lags
+bool eff_allow_rw1    = allow_rw1_trades
+string eff_peer_symbol = peer_symbol
+float eff_atr_pct_threshold = 0.08
+int eff_max_hold_bars = 5
+float eff_crisis_ann_vol = 0.35
+
+if asset_class == "Crypto"
+    if crypto_type == "BTC"
+        eff_full_len      := 180
+        eff_short_len     := 60
+        eff_hurst_trend_thr := 0.62
+        eff_hurst_mr_thr    := 0.42
+        eff_crisis_vol_mult := 2.5
+        eff_atr_len       := 20
+        eff_stop_atr      := 3.0
+        eff_target_atr    := 2.0
+        eff_risk_pct      := 1.0
+        eff_lb_lags       := 12
+        eff_arch_lags     := 10
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "BINANCE:BTCUSDT"
+        eff_atr_pct_threshold := 0.07
+        eff_max_hold_bars := 7
+    else if crypto_type == "ETH"
+        eff_full_len      := 180
+        eff_short_len     := 60
+        eff_hurst_trend_thr := 0.60
+        eff_hurst_mr_thr    := 0.42
+        eff_crisis_vol_mult := 2.5
+        eff_atr_len       := 20
+        eff_stop_atr      := 2.8
+        eff_target_atr    := 2.2
+        eff_risk_pct      := 1.25
+        eff_lb_lags       := 12
+        eff_arch_lags     := 10
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "BINANCE:BTCUSDT"
+        eff_atr_pct_threshold := 0.08
+        eff_max_hold_bars := 5
+    else
+        // Altcoin
+        eff_full_len      := 120
+        eff_short_len     := 40
+        eff_hurst_trend_thr := 0.58
+        eff_hurst_mr_thr    := 0.40
+        eff_crisis_vol_mult := 2.5
+        eff_atr_len       := 20
+        eff_stop_atr      := 2.5
+        eff_target_atr    := 2.5
+        eff_risk_pct      := 1.5
+        eff_lb_lags       := 10
+        eff_arch_lags     := 8
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "BINANCE:BTCUSDT"
+        eff_atr_pct_threshold := 0.10
+        eff_max_hold_bars := 3
+else if asset_class == "Forex"
+    if fx_type == "Majors"
+        eff_full_len      := 126
+        eff_short_len     := 42
+        eff_alpha         := 0.10
+        eff_hurst_trend_thr := 0.55
+        eff_hurst_mr_thr    := 0.45
+        eff_crisis_vol_mult := 1.4
+        eff_atr_len       := 14
+        eff_stop_atr      := 1.8
+        eff_target_atr    := 2.5
+        eff_risk_pct      := 1.0
+        eff_lb_lags       := 12
+        eff_arch_lags     := 10
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "TVC:DXY"
+    else if fx_type == "Minors"
+        eff_full_len      := 126
+        eff_short_len     := 42
+        eff_alpha         := 0.08
+        eff_hurst_trend_thr := 0.54
+        eff_hurst_mr_thr    := 0.45
+        eff_crisis_vol_mult := 1.5
+        eff_atr_len       := 14
+        eff_stop_atr      := 2.0
+        eff_target_atr    := 2.5
+        eff_risk_pct      := 1.0
+        eff_lb_lags       := 12
+        eff_arch_lags     := 10
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "TVC:DXY"
+    else
+        // Exotics
+        eff_full_len      := 90
+        eff_short_len     := 30
+        eff_alpha         := 0.05
+        eff_hurst_trend_thr := 0.53
+        eff_hurst_mr_thr    := 0.48
+        eff_crisis_vol_mult := 1.6
+        eff_atr_len       := 14
+        eff_stop_atr      := 2.3
+        eff_target_atr    := 2.0
+        eff_risk_pct      := 0.75
+        eff_lb_lags       := 10
+        eff_arch_lags     := 8
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "TVC:DXY"
+else if asset_class == "Metals"
+    if metal_type == "Gold"
+        eff_full_len      := 90
+        eff_short_len     := 30
+        eff_hurst_trend_thr := 0.55
+        eff_hurst_mr_thr    := 0.45
+        eff_crisis_vol_mult := 1.5
+        eff_atr_len       := 14
+        eff_stop_atr      := 2.0
+        eff_target_atr    := 3.0
+        eff_risk_pct      := 0.5
+        eff_lb_lags       := 12
+        eff_arch_lags     := 10
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "TVC:DXY"
+        eff_crisis_ann_vol := 0.35
+    else
+        // Silver
+        eff_full_len      := 90
+        eff_short_len     := 30
+        eff_hurst_trend_thr := 0.53
+        eff_hurst_mr_thr    := 0.47
+        eff_crisis_vol_mult := 1.6
+        eff_atr_len       := 14
+        eff_stop_atr      := 2.5
+        eff_target_atr    := 2.5
+        eff_risk_pct      := 0.35
+        eff_lb_lags       := 10
+        eff_arch_lags     := 8
+        eff_allow_rw1     := false
+        eff_peer_symbol   := "TVC:DXY"
+        eff_crisis_ann_vol := 0.60
+
+// ----------------------------- Helpers ---------------------------------------
+clamp(x, lo, hi) =>
+    math.max(lo, math.min(hi, x))
+
+abs_safe(x) =>
+    na(x) ? 1e10 : math.abs(x)
+
+z_critical(sig) =>
+    sig <= 0.01 ? 2.576 : sig >= 0.10 ? 1.645 : 1.96
+
+chi2_critical(df, sig) =>
+    bool a01 = sig <= 0.01
+    bool a10 = sig >= 0.10
+    if a01
+        df == 1  ? 6.635  :
+        df == 2  ? 9.210  :
+        df == 3  ? 11.345 :
+        df == 4  ? 13.277 :
+        df == 5  ? 15.086 :
+        df == 6  ? 16.812 :
+        df == 7  ? 18.475 :
+        df == 8  ? 20.090 :
+        df == 9  ? 21.666 :
+        df == 10 ? 23.209 :
+        df == 11 ? 24.725 :
+        df == 12 ? 26.217 :
+        df == 16 ? 32.000 :
+        df == 20 ? 37.566 : 23.209
+    else if a10
+        df == 1  ? 2.706  :
+        df == 2  ? 4.605  :
+        df == 3  ? 6.251  :
+        df == 4  ? 7.779  :
+        df == 5  ? 9.236  :
+        df == 6  ? 10.645 :
+        df == 7  ? 12.017 :
+        df == 8  ? 13.362 :
+        df == 9  ? 14.684 :
+        df == 10 ? 15.987 :
+        df == 11 ? 17.275 :
+        df == 12 ? 18.549 :
+        df == 16 ? 23.542 :
+        df == 20 ? 28.412 : 15.987
+    else
+        df == 1  ? 3.841  :
+        df == 2  ? 5.991  :
+        df == 3  ? 7.815  :
+        df == 4  ? 9.488  :
+        df == 5  ? 11.070 :
+        df == 6  ? 12.592 :
+        df == 7  ? 14.067 :
+        df == 8  ? 15.507 :
+        df == 9  ? 16.919 :
+        df == 10 ? 18.307 :
+        df == 11 ? 19.675 :
+        df == 12 ? 21.026 :
+        df == 16 ? 26.296 :
+        df == 20 ? 31.410 : 18.307
+
+normal_cdf(x) =>
+    float ax = math.abs(x)
+    float t  = 1.0 / (1.0 + 0.2316419 * ax)
+    float d  = 0.3989423 * math.exp(-0.5 * ax * ax)
+    float p  = 1.0 - d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))))
+    x >= 0 ? p : 1.0 - p
+
+fisher_z(rho) =>
+    float r = clamp(rho, -0.999999, 0.999999)
+    0.5 * math.log((1.0 + r) / (1.0 - r))
+
+regime_name(code) =>
+    code == 1 ? "RW1/RW2" :
+    code == 2 ? "RW3" :
+    code == 3 ? "INEFFICIENT" : "WARMUP"
+
+memory_name(m) =>
+    na(m) ? "na" :
+    m > eff_hurst_trend_thr ? "persistent" :
+    m < eff_hurst_mr_thr ? "anti-persistent" : "neutral"
+
+// ------------------------- Statistical functions -----------------------------
+ret = math.log(close / close[1])
+
+auto_corr(src, len, lag) =>
+    ta.correlation(src, src[lag], len)
+
+ljung_box(src, len, max_lag) =>
+    float n = len
+    float q = 0.0
+    for lag = 1 to max_lag
+        float rho = auto_corr(src, len, lag)
+        q += not na(rho) and n > lag ? (rho * rho) / (n - lag) : 0.0
+    n * (n + 2.0) * q
+
+runs_test_zero(src, len) =>
+    int runs = 0
+    int n_pos = 0
+    int n_neg = 0
+    int prev_sign = 0
+
+    for i = 0 to len - 1
+        float v = src[i]
+        int s = na(v) ? 0 : v > 0 ? 1 : v < 0 ? -1 : 0
+        if s != 0
+            if prev_sign == 0
+                runs := 1
+            else if s != prev_sign
+                runs += 1
+
+            if s > 0
+                n_pos += 1
+            else
+                n_neg += 1
+
+            prev_sign := s
+
+    int n = n_pos + n_neg
+    float exp_runs = n > 0 ? (2.0 * n_pos * n_neg) / n + 1.0 : na
+    float var_runs = n > 1 ? (2.0 * n_pos * n_neg * (2.0 * n_pos * n_neg - n)) / (n * n * (n - 1.0)) : na
+    float z = not na(var_runs) and var_runs > 0 ? (runs - exp_runs) / math.sqrt(var_runs) : na
+    float p = not na(z) ? 2.0 * (1.0 - normal_cdf(math.abs(z))) : na
+    [runs, z, p]
+
+vr_test_homo(src, len, k) =>
+    float var1 = math.pow(ta.stdev(src, len), 2)
+    float rk   = ta.sum(src, k)
+    float vark = math.pow(ta.stdev(rk, len), 2)
+    float vr = na
+    float z  = na
+    if not na(var1) and var1 > 0 and not na(vark)
+        vr := vark / (k * var1)
+        float se = math.sqrt(2.0 * (2.0 * k - 1.0) * (k - 1.0) / (3.0 * k * len))
+        z  := se > 0 ? (vr - 1.0) / se : na
+    [vr, z]
+
+vr_test_rw3_proxy(src, len, k, arch_q, arch_crit) =>
+    [vr, z_homo] = vr_test_homo(src, len, k)
+    float arch_strength = arch_crit > 0 ? math.max(arch_q / arch_crit, 1.0) : 1.0
+    float scale = math.sqrt(arch_strength)
+    float z_rw3 = not na(z_homo) ? z_homo / scale : na
+    [vr, z_rw3]
+
+hurst_rs(src, len) =>
+    float m = ta.sma(src, len)
+    float s = ta.stdev(src, len)
+    float cum = 0.0
+    float max_cum = -1e10
+    float min_cum =  1e10
+    for i = 0 to len - 1
+        float dv = nz(src[len - 1 - i]) - m
+        cum += dv
+        max_cum := math.max(max_cum, cum)
+        min_cum := math.min(min_cum, cum)
+    float rs = s > 0 ? (max_cum - min_cum) / s : na
+    float h = not na(rs) and rs > 0 and len > 1 ? math.log(rs) / math.log(len) : 0.5
+    clamp(h, 0.0, 1.0)
+
+// --------- Regime classification: RW1/RW2 bucket, RW3, inefficient ----------
+classify_regime(src, len, sig, lb_n, arch_n, k1, k2, k3, k4) =>
+    int warmup = len + math.max(math.max(lb_n, arch_n), k4) + 5
+    if bar_index < warmup
+        [0, na, na, na, na, na, na, na, na]
+    else
+        float z_cut = z_critical(sig)
+
+        float lb_q    = ljung_box(src, len, lb_n)
+        float lb_crit = chi2_critical(lb_n, sig)
+        bool lb_pass  = lb_q < lb_crit
+
+        [vr1_1, z1_1] = vr_test_homo(src, len, k1)
+        [vr1_2, z1_2] = vr_test_homo(src, len, k2)
+        [vr1_3, z1_3] = vr_test_homo(src, len, k3)
+        [vr1_4, z1_4] = vr_test_homo(src, len, k4)
+        float vr1_max_abs = math.max(math.max(abs_safe(z1_1), abs_safe(z1_2)), math.max(abs_safe(z1_3), abs_safe(z1_4)))
+        bool vr1_pass = vr1_max_abs < z_cut
+
+        float sq = math.pow(src - ta.sma(src, len), 2)
+        float arch_q    = ljung_box(sq, len, arch_n)
+        float arch_crit = chi2_critical(arch_n, sig)
+        bool arch_exists = arch_q > arch_crit
+
+        [runs_n, runs_z, runs_p] = runs_test_zero(src, len)
+
+        [vr3_1, z3_1] = vr_test_rw3_proxy(src, len, k1, arch_q, arch_crit)
+        [vr3_2, z3_2] = vr_test_rw3_proxy(src, len, k2, arch_q, arch_crit)
+        [vr3_3, z3_3] = vr_test_rw3_proxy(src, len, k3, arch_q, arch_crit)
+        [vr3_4, z3_4] = vr_test_rw3_proxy(src, len, k4, arch_q, arch_crit)
+        float vr3_max_abs = math.max(math.max(abs_safe(z3_1), abs_safe(z3_2)), math.max(abs_safe(z3_3), abs_safe(z3_4)))
+        bool vr3_pass = vr3_max_abs < z_cut
+
+        bool uncorr_pass = lb_pass and vr1_pass
+
+        int regime = 0
+        if not uncorr_pass
+            regime := 3
+        else if arch_exists
+            regime := 2
+        else
+            regime := not na(runs_p) and runs_p > sig ? 1 : vr3_pass ? 2 : 3
+
+        float mem = hurst_rs(src, len)
+        [regime, lb_q, lb_crit, arch_q, arch_crit, runs_p, vr1_max_abs, vr3_max_abs, mem]
+
+// ----------------------- Regime calculations ---------------------------------
+[reg_full, lb_q_full, lb_crit_full, arch_q_full, arch_crit_full, runs_p_full, vr1_full, vr3_full, mem_full] =
+    classify_regime(ret, eff_full_len, eff_alpha, eff_lb_lags, eff_arch_lags, vr_k1, vr_k2, vr_k3, vr_k4)
+
+[reg_short, lb_q_short, lb_crit_short, arch_q_short, arch_crit_short, runs_p_short, vr1_short, vr3_short, mem_short] =
+    classify_regime(ret, eff_short_len, eff_alpha, eff_lb_lags, eff_arch_lags, vr_k1, vr_k2, vr_k3, vr_k4)
+
+float vol_full  = ta.stdev(ret, eff_full_len)
+float vol_short = ta.stdev(ret, eff_short_len)
+bool crisis_mode = not na(vol_full) and not na(vol_short) and vol_short > vol_full * eff_crisis_vol_mult
+
+int active_regime = reg_full
+float active_mem = mem_full
+float active_lb_q = lb_q_full
+float active_lb_crit = lb_crit_full
+float active_arch_q = arch_q_full
+float active_arch_crit = arch_crit_full
+float active_runs_p = runs_p_full
+float active_vr1 = vr1_full
+float active_vr3 = vr3_full
+
+if mode == "Short"
+    active_regime := reg_short
+    active_mem := mem_short
+    active_lb_q := lb_q_short
+    active_lb_crit := lb_crit_short
+    active_arch_q := arch_q_short
+    active_arch_crit := arch_crit_short
+    active_runs_p := runs_p_short
+    active_vr1 := vr1_short
+    active_vr3 := vr3_short
+else if mode == "Adaptive"
+    if crisis_mode and reg_short != 0
+        active_regime := reg_short
+        active_mem := mem_short
+        active_lb_q := lb_q_short
+        active_lb_crit := lb_crit_short
+        active_arch_q := arch_q_short
+        active_arch_crit := arch_crit_short
+        active_runs_p := runs_p_short
+        active_vr1 := vr1_short
+        active_vr3 := vr3_short
+
+// ------------------- Peer / contagion proxy ----------------------------------
+float peer_close = request.security(eff_peer_symbol, timeframe.period, close, lookahead = barmerge.lookahead_off)
+float peer_ret   = math.log(peer_close / peer_close[1])
+
+float corr_base  = ta.correlation(ret, peer_ret, corr_base_len)
+float corr_event = ta.correlation(ret, peer_ret, corr_event_len)
+float corr_z = na
+if not na(corr_base) and not na(corr_event) and corr_base_len > 3 and corr_event_len > 3
+    corr_z := (fisher_z(corr_event) - fisher_z(corr_base)) / math.sqrt(1.0 / (corr_event_len - 3) + 1.0 / (corr_base_len - 3))
+
+// Crypto-specific: hard correlation > 0.90 triggers contagion flag
+bool crypto_peer_shock = asset_class == "Crypto" and use_peer_filter and not na(corr_base) and corr_base > 0.90
+
+bool corr_shock = (use_peer_filter and not na(corr_z) and corr_event > corr_base and corr_z > corr_z_thresh) or crypto_peer_shock
+
+// ------------------- Metals-specific market data -----------------------------
+float sp500_close = request.security("SPX", timeframe.period, close, lookahead = barmerge.lookahead_off)
+float sp500_ret = na(sp500_close) or na(sp500_close[1]) ? na : math.log(sp500_close / sp500_close[1])
+
+string metal_secondary_peer = metal_type == "Gold" ? "TVC:SILVER" : "TVC:GOLD"
+float metal_secondary_close = request.security(metal_secondary_peer, timeframe.period, close, lookahead = barmerge.lookahead_off)
+
+// ------------------- FX gap detector -----------------------------------------
+var int gap_freeze_cnt = 0
+float ret_stdev_20 = ta.stdev(ret, 20)
+bool large_gap = asset_class == "Forex" and not na(ret) and not na(ret_stdev_20) and ret_stdev_20 > 0 and math.abs(ret) > ret_stdev_20 * 3.0
+if large_gap
+    gap_freeze_cnt := 2
+else if gap_freeze_cnt > 0
+    gap_freeze_cnt -= 1
+bool gap_freeze = gap_freeze_cnt > 0
+
+// ------------------- Metals liquidity crisis ---------------------------------
+var int liquidity_crisis_cnt = 0
+bool metals_crisis_trigger = asset_class == "Metals" and not na(sp500_ret) and sp500_ret < -0.02 and not na(ret) and ret < -0.01
+if metals_crisis_trigger
+    liquidity_crisis_cnt := 3
+else if liquidity_crisis_cnt > 0
+    liquidity_crisis_cnt -= 1
+bool liquidity_crisis = liquidity_crisis_cnt > 0
+
+// ------------------- Circuit breaker (trailing 2% drawdown) ------------------
+var float peak_equity = strategy.equity
+if strategy.equity > peak_equity
+    peak_equity := strategy.equity
+bool circuit_breaker = strategy.equity < peak_equity * 0.98
+
+// ------------------- Annualized volatility -----------------------------------
+float ann_vol = not na(ta.stdev(ret, 20)) ? ta.stdev(ret, 20) * math.sqrt(252) : na
+
+// ------------------------ Trading features -----------------------------------
+float ema_fast = ta.ema(close, fast_len)
+float ema_slow = ta.ema(close, slow_len)
+float basis    = ta.sma(close, meanrev_len)
+float dev      = ta.stdev(close, meanrev_len)
+float z_px     = dev > 0 ? (close - basis) / dev : 0.0
+float rsi_val  = ta.rsi(close, 14)
+float atr_val  = ta.atr(eff_atr_len)
+
+float break_high_prev = ta.highest(high, breakout_len)[1]
+float break_low_prev  = ta.lowest(low, breakout_len)[1]
+
+float vol_now   = ta.stdev(ret, 20)
+float vol_base2 = ta.stdev(ret, 60)
+bool vol_expanding = not na(vol_now) and not na(vol_base2) and vol_now > vol_base2 * 1.2
+
+bool trend_up = ema_fast > ema_slow and close > ema_slow
+bool trend_dn = ema_fast < ema_slow and close < ema_slow
+
+bool persistent      = not na(active_mem) and active_mem > eff_hurst_trend_thr
+bool anti_persistent = not na(active_mem) and active_mem < eff_hurst_mr_thr
+
+// --- Metals crisis override: force persistent if vol spike + memory > 0.52 ---
+if asset_class == "Metals" and not na(ann_vol) and ann_vol > eff_crisis_ann_vol and not na(active_mem) and active_mem > 0.52
+    persistent := true
+
+bool ready = active_regime != 0 and not na(active_mem) and not na(atr_val) and not na(ema_slow) and not na(basis)
+
+// --- Safe-haven override for Metals ---
+bool safe_haven_long = false
+if asset_class == "Metals" and not na(sp500_ret) and sp500_ret < -0.02 and not na(ret) and ret > 0.005 and active_regime == 3 and anti_persistent
+    safe_haven_long := true
+
+bool long_signal = false
+bool short_signal = false
+
+if ready
+    if active_regime == 3
+        if persistent
+            long_signal  := trend_up and not na(break_high_prev) and close > break_high_prev
+            short_signal := trend_dn and not na(break_low_prev)  and close < break_low_prev
+        else if anti_persistent
+            if safe_haven_long
+                long_signal  := trend_up and not na(break_high_prev) and close > break_high_prev
+                short_signal := false
+            else
+                long_signal  := z_px[1] < -1.5 and ta.crossover(close, basis)
+                short_signal := z_px[1] >  1.5 and ta.crossunder(close, basis)
+        else
+            long_signal  := ta.crossover(ema_fast, ema_slow)
+            short_signal := ta.crossunder(ema_fast, ema_slow)
+
+    else if active_regime == 2
+        long_signal  := vol_expanding and trend_up and not na(break_high_prev) and close > break_high_prev
+        short_signal := vol_expanding and trend_dn and not na(break_low_prev)  and close < break_low_prev
+
+    else if active_regime == 1 and eff_allow_rw1
+        long_signal  := z_px < -2.0 and rsi_val < 25
+        short_signal := z_px >  2.0 and rsi_val > 75
+
+// ------------------------ Position sizing ------------------------------------
+float regime_mult = active_regime == 1 ? 0.20 : active_regime == 2 ? 0.60 : active_regime == 3 ? 1.00 : 0.0
+float memory_mult = persistent or anti_persistent ? 1.00 : 0.80
+float peer_mult   = corr_shock ? 0.50 : 1.00
+
+float stop_dist   = atr_val * eff_stop_atr
+float target_dist = atr_val * eff_target_atr
+float risk_cash   = strategy.equity * eff_risk_pct / 100.0
+
+float qty = stop_dist > 0 ? math.max(min_qty, (risk_cash / stop_dist) * regime_mult * memory_mult * peer_mult) : min_qty
+
+// --- Crypto ATR percentile guard ---
+bool atr_extreme = false
+if asset_class == "Crypto"
+    float atr_pct = close > 0 ? atr_val / close : 0.0
+    atr_extreme := atr_pct > eff_atr_pct_threshold
+if atr_extreme
+    qty := qty * 0.5
+
+// --- Leverage cap (per asset class) ---
+float max_lev = asset_class == "Forex" ? 20.0 : asset_class == "Crypto" ? 3.0 : 10.0
+float max_qty_lev = close > 0 ? (max_lev * strategy.equity) / close : 0.0
+qty := math.min(qty, max_qty_lev)
+
+// --- Combined risk block ---
+bool block_new_risk = (corr_shock and active_regime != 3) or liquidity_crisis or gap_freeze or circuit_breaker
+
+// ------------------------ Entry bar tracking ---------------------------------
+var int entry_bar_idx = na
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    entry_bar_idx := bar_index
+else if strategy.position_size == 0
+    entry_bar_idx := na
+
+// ------------------------ Time-based exits -----------------------------------
+bool time_exit = false
+if asset_class == "Crypto" and not na(entry_bar_idx) and (bar_index - entry_bar_idx) >= eff_max_hold_bars
+    time_exit := true
+
+// ------------------------ Orders ---------------------------------------------
+if ready and barstate.isconfirmed and not block_new_risk
+    if long_signal and strategy.position_size <= 0
+        strategy.entry("Long", strategy.long, qty = qty)
+    if short_signal and strategy.position_size >= 0
+        strategy.entry("Short", strategy.short, qty = qty)
+
+if time_exit
+    strategy.close_all(comment = "Crypto time exit")
+    entry_bar_idx := na
+
+if asset_class == "Forex" and fx_type == "Exotics" and not na(entry_bar_idx) and (bar_index - entry_bar_idx) >= 5
+    strategy.close_all(comment = "Exotic swap exit")
+    entry_bar_idx := na
+
+if liquidity_crisis
+    strategy.close_all(comment = "Liquidity crisis")
+    entry_bar_idx := na
+
+float long_stop   = strategy.position_avg_price - stop_dist
+float long_limit  = strategy.position_avg_price + target_dist
+float short_stop  = strategy.position_avg_price + stop_dist
+float short_limit = strategy.position_avg_price - target_dist
+
+strategy.exit("Long Exit",  from_entry = "Long",  stop = long_stop,  limit = long_limit)
+strategy.exit("Short Exit", from_entry = "Short", stop = short_stop, limit = short_limit)
+
+if strategy.position_size > 0 and ((active_regime == 1 and not eff_allow_rw1) or block_new_risk)
+    strategy.close("Long", comment = "Regime/Peer filter")
+
+if strategy.position_size < 0 and ((active_regime == 1 and not eff_allow_rw1) or block_new_risk)
+    strategy.close("Short", comment = "Regime/Peer filter")
+
+// ------------------------ Visuals --------------------------------------------
+color reg_color =
+     active_regime == 1 ? color.new(color.green, 86) :
+     active_regime == 2 ? color.new(color.yellow, 86) :
+     active_regime == 3 ? color.new(color.red, 88) : na
+
+bgcolor(reg_color)
+
+plot(ema_fast, "EMA Fast", color = color.aqua)
+plot(ema_slow, "EMA Slow", color = color.orange)
+
+plotshape(long_signal and ready and not safe_haven_long, title = "Long signal", style = shape.triangleup, location = location.belowbar, color = color.lime, size = size.tiny, text = "L")
+plotshape(short_signal and ready, title = "Short signal", style = shape.triangledown, location = location.abovebar, color = color.red, size = size.tiny, text = "S")
+plotshape(safe_haven_long and long_signal and ready, title = "Safe-Haven Long", style = shape.triangleup, location = location.belowbar, color = color.blue, size = size.small, text = "SH")
+
+plot(show_ann_vol ? ann_vol : na, "Ann Vol", color = color.purple, display = display.pane)
+
+// ------------------------ Dashboard ------------------------------------------
+var table dash = table.new(position.top_right, 2, 15, bgcolor = color.new(color.black, 20), border_width = 1)
+
+if barstate.islast
+    table.cell(dash, 0, 0, "EMH-LAC Dashboard", text_color = color.white, text_size = size.small)
+    table.cell(dash, 1, 0, regime_name(active_regime), text_color = active_regime == 1 ? color.lime : active_regime == 2 ? color.yellow : active_regime == 3 ? color.red : color.gray, text_size = size.small)
+    table.cell(dash, 0, 1, "Memory", text_color = color.silver)
+    table.cell(dash, 1, 1, str.tostring(active_mem, "#.###") + " | " + memory_name(active_mem), text_color = color.white)
+    table.cell(dash, 0, 2, "LB Q / Krit", text_color = color.silver)
+    table.cell(dash, 1, 2, str.tostring(active_lb_q, "#.##") + " / " + str.tostring(active_lb_crit, "#.##"), text_color = active_lb_q < active_lb_crit ? color.lime : color.red)
+    table.cell(dash, 0, 3, "ARCH Q / Krit", text_color = color.silver)
+    table.cell(dash, 1, 3, str.tostring(active_arch_q, "#.##") + " / " + str.tostring(active_arch_crit, "#.##"), text_color = active_arch_q > active_arch_crit ? color.yellow : color.gray)
+    table.cell(dash, 0, 4, "Runs p", text_color = color.silver)
+    table.cell(dash, 1, 4, str.tostring(active_runs_p, "#.###"), text_color = not na(active_runs_p) and active_runs_p > eff_alpha ? color.lime : color.red)
+    table.cell(dash, 0, 5, "VR RW1 max|z|", text_color = color.silver)
+    table.cell(dash, 1, 5, str.tostring(active_vr1, "#.##"), text_color = active_vr1 < z_critical(eff_alpha) ? color.lime : color.red)
+    table.cell(dash, 0, 6, "VR RW3 max|z|", text_color = color.silver)
+    table.cell(dash, 1, 6, str.tostring(active_vr3, "#.##"), text_color = active_vr3 < z_critical(eff_alpha) ? color.lime : color.red)
+    table.cell(dash, 0, 7, "Krisenmodus", text_color = color.silver)
+    table.cell(dash, 1, 7, crisis_mode ? "JA" : "NEIN", text_color = crisis_mode ? color.orange : color.gray)
+    table.cell(dash, 0, 8, "Peer z", text_color = color.silver)
+    table.cell(dash, 1, 8, use_peer_filter ? str.tostring(corr_z, "#.##") : "aus", text_color = corr_shock ? color.orange : color.white)
+    table.cell(dash, 0, 9, "Qty", text_color = color.silver)
+    table.cell(dash, 1, 9, str.tostring(qty, "#.##"), text_color = color.white)
+    
+    // Row 10: Asset Class / Sub-type
+    string sub_type = asset_class == "Crypto" ? crypto_type : asset_class == "Forex" ? fx_type : metal_type
+    table.cell(dash, 0, 10, "Asset Class", text_color = color.silver)
+    table.cell(dash, 1, 10, asset_class + " | " + sub_type, text_color = color.white)
+    
+    // Row 11: ATR % of price
+    float atr_pct_disp = close > 0 ? atr_val / close : 0.0
+    table.cell(dash, 0, 11, "ATR % Price", text_color = color.silver)
+    table.cell(dash, 1, 11, str.tostring(atr_pct_disp * 100, "#.##") + "%", text_color = atr_extreme ? color.orange : color.white)
+    
+    // Row 12: Flags (safe-haven, liquidity crisis, gap freeze, circuit breaker, time exit)
+    string flag_txt = (safe_haven_long ? "SH " : "") + (liquidity_crisis ? "LC " : "") + (gap_freeze ? "GF " : "") + (circuit_breaker ? "CB " : "") + (time_exit ? "TE " : "")
+    table.cell(dash, 0, 12, "Flags", text_color = color.silver)
+    table.cell(dash, 1, 12, flag_txt == "" ? "none" : flag_txt, text_color = flag_txt != "" ? color.orange : color.gray)
+    
+    // Row 13: Annualized Volatility
+    table.cell(dash, 0, 13, "Ann Vol", text_color = color.silver)
+    table.cell(dash, 1, 13, str.tostring(ann_vol, "#.###"), text_color = color.white)
+    
+    // Row 14: Signal
+    string sig_txt = long_signal ? "LONG" : short_signal ? "SHORT" : safe_haven_long ? "SAFE-HAVEN" : "NONE"
+    color sig_col = long_signal ? color.lime : short_signal ? color.red : safe_haven_long ? color.blue : color.gray
+    table.cell(dash, 0, 14, "Signal", text_color = color.silver)
+    table.cell(dash, 1, 14, sig_txt, text_color = sig_col)
+
+if barstate.islast and show_daily_warning and not timeframe.isdaily
+    label.new(
+         bar_index,
+         high,
+         "Hinweis: Die Paper-Logik wurde auf Daily-Daten entwickelt.\nIntraday läuft das Skript technisch, ist aber methodisch weiter vom Paper entfernt.",
+         style = label.style_label_down,
+         textcolor = color.white,
+         color = color.new(color.blue, 60),
+         size = size.small
+    )

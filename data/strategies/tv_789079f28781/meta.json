@@ -1,0 +1,9 @@
+{
+  "bytes": 16006,
+  "name": "BPRC PRO - Institutional Indicator Pionex",
+  "persisted_at": "2026-09-08T00:06:30Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "tv_789079f28781",
+  "tv_script_id": "USER;b9879d4e46fb4ecca2142421ea9b143c"
+}

@@ -1,0 +1,450 @@
+//@version=6
+strategy("Fractal Breakout with ATR-Based Risk Management",
+     overlay=true,
+     pyramiding=0,
+     initial_capital=100000,
+     currency="USD",
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100.0,
+     commission_value=0.075,
+     commission_type=strategy.commission.percent,
+     slippage=2,
+     process_orders_on_close=true)
+
+// =============================================================================
+// SECTION 1: INPUT PARAMETERS
+// =============================================================================
+
+// --- Fractal Settings ---
+leftBars               = input.int(2,   "Left Bars",                  minval=1,  maxval=10,  group="Fractal Settings")
+rightBars              = input.int(2,   "Right Bars",                 minval=1,  maxval=10,  group="Fractal Settings")
+maxFractalAge          = input.int(100, "Max Fractal Age (bars)",     minval=10, maxval=500, group="Fractal Settings")
+minFractalAge          = input.int(5,   "Min Fractal Age (bars)",     minval=0,  maxval=50,  group="Fractal Settings")
+
+// --- ATR Settings ---
+fastATRPeriod          = input.int(5,   "Fast ATR Period",            minval=2,  maxval=20,  group="ATR Settings")
+slowATRPeriod          = input.int(14,  "Slow ATR Period",            minval=5,  maxval=50,  group="ATR Settings")
+percentileLookback     = input.int(100, "Percentile Lookback",        minval=50, maxval=500, group="ATR Settings")
+longEntryPercentile    = input.int(30,  "Long Entry Percentile",      minval=5,  maxval=50,  group="ATR Settings")
+shortEntryPercentile   = input.int(70,  "Short Entry Percentile",     minval=50, maxval=95,  group="ATR Settings")
+
+// --- Risk Management ---
+stopMultiplier         = input.float(2.0,  "Stop ATR Multiplier",       minval=0.5, maxval=5.0, step=0.1, group="Risk Management")
+trailMultiplier        = input.float(1.5,  "Trail ATR Multiplier",      minval=0.5, maxval=5.0, step=0.1, group="Risk Management")
+riskPercent            = input.float(1.0,  "Risk Per Trade (%)",        minval=0.1, maxval=5.0, step=0.1, group="Risk Management")
+useBreakeven           = input.bool(true, "Use Breakeven",                                        group="Risk Management")
+breakevenTrigger       = input.float(1.0,  "Breakeven Trigger (ATR multiple)", minval=0.5, maxval=3.0, step=0.1, group="Risk Management")
+useVolatilityAdj       = input.bool(true, "Volatility-Adjusted Sizing",                           group="Risk Management")
+maxPositionPct         = input.float(10.0, "Max Position Size (% of equity)",  minval=1.0, maxval=100.0, step=1.0, group="Risk Management")
+
+// --- Visual Settings ---
+showFractals           = input.bool(true, "Show Fractal Levels",      group="Visual Settings")
+showSignals            = input.bool(true, "Show Entry Signals",       group="Visual Settings")
+
+
+// =============================================================================
+// SECTION 2: STATE VARIABLES
+// =============================================================================
+
+var float entryPrice       = na
+var float entryATR         = na
+var float initialStop      = na
+var float trailStop        = na
+var bool  breakevenActive  = false
+var int   barsInTrade      = 0
+var float highestInTrade   = na
+var float lowestInTrade    = na
+var bool  wasInPosition    = false
+
+// --- Fractal level arrays ---
+var float[] resistanceLevels     = array.new_float(0)
+var float[] supportLevels        = array.new_float(0)
+var int[]   resistanceBarIndices = array.new_int(0)
+var int[]   supportBarIndices    = array.new_int(0)
+
+// --- Visualization objects ---
+var line supportLine    = na
+var line resistanceLine = na
+
+
+// =============================================================================
+// SECTION 3: CORE CALCULATION FUNCTIONS
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// 3.1 Fractal (Pivot) Detection
+// ---------------------------------------------------------------------------
+// Uses built-in pivot functions to identify swing highs and lows.
+// Pivots are confirmed after 'right' bars have elapsed.
+// ---------------------------------------------------------------------------
+calcFractals(int left, int right) =>
+    float ph = ta.pivothigh(high, left, right)
+    float pl = ta.pivotlow(low, left, right)
+    int   phBar = not na(ph) ? bar_index - right : na
+    int   plBar = not na(pl) ? bar_index - right : na
+    [ph, pl, phBar, plBar]
+
+// ---------------------------------------------------------------------------
+// 3.2 ATR Divergence: Ratio + Percentile Rank
+// ---------------------------------------------------------------------------
+// Computes the ratio of fast/slow ATR and its percentile rank over the
+// lookback period. Low percentile = compressed volatility (favorable for
+// long breakouts). High percentile = expanded volatility (favorable for
+// short breakouts).
+// ---------------------------------------------------------------------------
+calcATRDivergence(int fast, int slow, int lookback) =>
+    float fastATRval = ta.atr(fast)
+    float slowATRval = ta.atr(slow)
+    float ratio      = slowATRval > 0 ? fastATRval / slowATRval : 1.0
+    float percentile = na(ratio) ? 50.0 : ta.percentrank(ratio, lookback)
+    bool  isLowVol   = not na(percentile) and percentile < longEntryPercentile
+    bool  isHighVol  = not na(percentile) and percentile > shortEntryPercentile
+    [ratio, percentile, isLowVol, isHighVol]
+
+// ---------------------------------------------------------------------------
+// 3.3 Dynamic Trailing Stop with Optional Breakeven
+// ---------------------------------------------------------------------------
+// Updates the trailing stop level based on:
+//   - Highest/high watermark since entry (for longs)
+//   - Lowest/low watermark since entry (for shorts)
+//   - ATR-based trail offset
+//   - Breakeven trigger (irreversible once activated)
+// ---------------------------------------------------------------------------
+updateTrailingStop(float currentStop, float highestPrice, float lowestPrice,
+     float atrOffset, bool isLong, bool beActive, float ep) =>
+    float newStop     = currentStop
+    bool  newBeActive = beActive
+    if isLong
+        // Long: trail stop never moves down
+        newStop := math.max(currentStop, highestPrice - atrOffset)
+        // Breakeven logic
+        if useBreakeven and not beActive and atrOffset > 0
+            float profitMultiple = (close - ep) / atrOffset
+            if profitMultiple >= breakevenTrigger
+                newStop     := math.max(newStop, ep)
+                newBeActive := true
+    else
+        // Short: trail stop never moves up
+        newStop := math.min(currentStop, lowestPrice + atrOffset)
+        // Breakeven logic
+        if useBreakeven and not beActive and atrOffset > 0
+            float profitMultiple = (ep - close) / atrOffset
+            if profitMultiple >= breakevenTrigger
+                newStop     := math.min(newStop, ep)
+                newBeActive := true
+    [newStop, newBeActive]
+
+
+// =============================================================================
+// SECTION 4: FRACTAL LEVEL MANAGEMENT
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Maintain active support/resistance arrays, pruning stale and invalidated
+// entries each bar.  Arrays are rebuilt in-place by filtering out entries
+// that have expired or been violated by price action.
+// ---------------------------------------------------------------------------
+manageFractalLevels(float ph, float pl, int phBar, int plBar) =>
+    // --- 1) Filter resistance levels: remove expired or violated ---
+    int resSize = array.size(resistanceLevels)
+    if resSize > 0
+        int i = resSize - 1
+        while i >= 0
+            int   formationBar = array.get(resistanceBarIndices, i)
+            float level        = array.get(resistanceLevels, i)
+            int   age          = bar_index - formationBar
+            // Remove if too old OR price closed above resistance
+            if age > maxFractalAge or age < 0 or close > level
+                array.remove(resistanceLevels, i)
+                array.remove(resistanceBarIndices, i)
+            i -= 1
+
+    // --- 2) Filter support levels: remove expired or violated ---
+    int supSize = array.size(supportLevels)
+    if supSize > 0
+        int i = supSize - 1
+        while i >= 0
+            int   formationBar = array.get(supportBarIndices, i)
+            float level        = array.get(supportLevels, i)
+            int   age          = bar_index - formationBar
+            // Remove if too old OR price closed below support
+            if age > maxFractalAge or age < 0 or close < level
+                array.remove(supportLevels, i)
+                array.remove(supportBarIndices, i)
+            i -= 1
+
+    // --- 3) Cap array sizes to prevent unbounded growth ---
+    int maxArrSize = 50
+    while array.size(resistanceLevels) > maxArrSize
+        array.shift(resistanceLevels)
+        array.shift(resistanceBarIndices)
+    while array.size(supportLevels) > maxArrSize
+        array.shift(supportLevels)
+        array.shift(supportBarIndices)
+
+    // --- 4) Add newly confirmed pivots ---
+    if not na(ph) and not na(phBar)
+        array.push(resistanceLevels, ph)
+        array.push(resistanceBarIndices, phBar)
+    if not na(pl) and not na(plBar)
+        array.push(supportLevels, pl)
+        array.push(supportBarIndices, plBar)
+
+    // --- 5) Retrieve most recent valid levels ---
+    float mostRecentResistance = na
+    float mostRecentSupport    = na
+    int   resFormationBar      = na
+    int   supFormationBar      = na
+
+    int finalResSize = array.size(resistanceLevels)
+    if finalResSize > 0
+        mostRecentResistance := array.get(resistanceLevels, finalResSize - 1)
+        resFormationBar      := array.get(resistanceBarIndices, finalResSize - 1)
+
+    int finalSupSize = array.size(supportLevels)
+    if finalSupSize > 0
+        mostRecentSupport := array.get(supportLevels, finalSupSize - 1)
+        supFormationBar   := array.get(supportBarIndices, finalSupSize - 1)
+
+    [mostRecentResistance, mostRecentSupport, resFormationBar, supFormationBar]
+
+
+// =============================================================================
+// SECTION 5: POSITION SIZING
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Fixed-fractional position sizing with optional volatility adjustment.
+// Risk per trade is a fixed percentage of equity.  Volatility adjustment
+// reduces size when realized volatility is above the 50-bar average.
+// ---------------------------------------------------------------------------
+calcPositionSize(float atrValue, float normATR) =>
+    float posSize = 0.0
+    if not na(atrValue) and atrValue > 0
+        float stopDistPoints = atrValue * stopMultiplier
+        if stopDistPoints > 0
+            float dollarRisk = strategy.equity * riskPercent / 100.0
+            float baseSize   = dollarRisk / stopDistPoints
+
+            // Volatility adjustment
+            if useVolatilityAdj
+                float normalATR = normATR
+                if not na(normalATR) and normalATR > 0
+                    float volFactor = math.min(1.0, math.sqrt(normalATR / atrValue))
+                    baseSize := baseSize * volFactor
+
+            // Hard cap as % of equity
+            float maxSize   = close > 0 ? (strategy.equity * maxPositionPct / 100.0) / close : 0
+            posSize := math.min(baseSize, maxSize)
+            // Safety floor: ensure non-negative
+            posSize := math.max(posSize, 0.0)
+    posSize
+
+
+// =============================================================================
+// SECTION 6: MAIN EXECUTION LOGIC
+// =============================================================================
+
+// Only process on confirmed closed bars to prevent repainting
+if barstate.isconfirmed
+
+    // --- 6.1 Detect position transitions ---
+    bool inPosition      = strategy.position_size != 0
+    bool positionOpened  = inPosition and not wasInPosition
+    bool positionClosed  = not inPosition and wasInPosition
+    bool isLong          = strategy.position_size > 0
+
+    // --- 6.2 Capture state on position open ---
+    if positionOpened
+        entryPrice     := strategy.position_avg_price
+        entryATR       := ta.atr(14)
+        float atrSnap  = nz(entryATR)
+        initialStop    := isLong ? entryPrice - atrSnap * stopMultiplier : entryPrice + atrSnap * stopMultiplier
+        trailStop      := initialStop
+        breakevenActive := false
+        barsInTrade    := 0
+        highestInTrade := high
+        lowestInTrade  := low
+
+    // --- 6.3 Reset state on position close ---
+    if positionClosed
+        entryPrice      := na
+        entryATR        := na
+        initialStop     := na
+        trailStop       := na
+        breakevenActive := false
+        barsInTrade     := 0
+        highestInTrade  := na
+        lowestInTrade   := na
+
+    // --- 6.4 Update trade-tracking variables while in position ---
+    if inPosition
+        barsInTrade    += 1
+        highestInTrade := math.max(nz(highestInTrade), high)
+        lowestInTrade  := math.min(nz(lowestInTrade), low)
+
+    // --- 6.5 Fractal detection ---
+    [ph, pl, phBar, plBar] = calcFractals(leftBars, rightBars)
+
+    // --- 6.6 Fractal level management ---
+    [mostRecentResistance, mostRecentSupport, resFormationBar, supFormationBar] = manageFractalLevels(ph, pl, phBar, plBar)
+
+    // --- 6.7 ATR divergence calculation ---
+    [atrRatio, atrPercentile, isLowVol, isHighVol] = calcATRDivergence(fastATRPeriod, slowATRPeriod, percentileLookback)
+
+    // --- 6.8 Long entry conditions ---
+    // NOTE: crossedUp/crossedDown use manual comparison because mostRecentSupport
+    // and mostRecentResistance are scalar values (not series). We compare the
+    // previous bar's close against the CURRENT bar's support/resistance level to
+    // detect a breakout — this is the intended behavior.
+    int   supportAge      = not na(supFormationBar) ? bar_index - supFormationBar : na
+    bool  ageOkLong       = not na(supportAge) and supportAge >= minFractalAge and supportAge <= maxFractalAge
+    bool  priceAtSupport  = not na(mostRecentSupport) and close >= mostRecentSupport
+    bool  crossedUp       = not na(mostRecentSupport) and close >= mostRecentSupport and close[1] < mostRecentSupport
+    bool  longSignal      = priceAtSupport and crossedUp and isLowVol and ageOkLong and not inPosition
+
+    // --- 6.9 Short entry conditions ---
+    int   resistanceAge   = not na(resFormationBar) ? bar_index - resFormationBar : na
+    bool  ageOkShort      = not na(resistanceAge) and resistanceAge >= minFractalAge and resistanceAge <= maxFractalAge
+    bool  priceAtResist   = not na(mostRecentResistance) and close <= mostRecentResistance
+    bool  crossedDown     = not na(mostRecentResistance) and close <= mostRecentResistance and close[1] > mostRecentResistance
+    bool  shortSignal     = priceAtResist and crossedDown and isHighVol and ageOkShort and not inPosition
+
+    // --- 6.10 Calculate effective stop (for entries and updates) ---
+    float effectiveStop = na
+    if inPosition
+        float atrSnap  = nz(entryATR)
+        float trailOff = atrSnap * trailMultiplier
+        if trailOff > 0
+            [newTrail, newBE] = updateTrailingStop(nz(trailStop), nz(highestInTrade), nz(lowestInTrade),
+                 trailOff, isLong, breakevenActive, nz(entryPrice))
+            trailStop       := newTrail
+            breakevenActive := newBE
+        effectiveStop := isLong ? math.max(nz(initialStop), nz(trailStop)) : math.min(nz(initialStop), nz(trailStop))
+
+    // --- 6.11 Execute long entry ---
+    if longSignal
+        float signalATR  = ta.atr(14)
+        float normalATR  = ta.sma(ta.atr(14), 50)
+        float posSize    = calcPositionSize(signalATR, normalATR)
+        float stopDist   = nz(signalATR) * stopMultiplier
+        float longStop   = close - stopDist
+        if posSize > 0 and not na(longStop)
+            strategy.entry("Long", strategy.long, qty=posSize)
+            strategy.exit("Long Exit", "Long", stop=longStop)
+
+    // --- 6.12 Execute short entry ---
+    if shortSignal
+        float signalATR  = ta.atr(14)
+        float normalATR  = ta.sma(ta.atr(14), 50)
+        float posSize    = calcPositionSize(signalATR, normalATR)
+        float stopDist   = nz(signalATR) * stopMultiplier
+        float shortStop  = close + stopDist
+        if posSize > 0 and not na(shortStop)
+            strategy.entry("Short", strategy.short, qty=posSize)
+            strategy.exit("Short Exit", "Short", stop=shortStop)
+
+    // --- 6.13 Update trailing stop when in position ---
+    if inPosition and not na(effectiveStop)
+        if isLong
+            strategy.exit("Long Exit", "Long", stop=effectiveStop)
+        else
+            strategy.exit("Short Exit", "Short", stop=effectiveStop)
+
+    // --- 6.14 Save position state for next bar ---
+    wasInPosition := inPosition
+
+
+// =============================================================================
+// SECTION 7: VISUALIZATIONS
+// =============================================================================
+
+// --- 7.1 Fractal level lines ---
+if showFractals and barstate.isconfirmed
+    // Support line (most recent valid)
+    int supSize = array.size(supportLevels)
+    if supSize > 0
+        float sLevel = array.get(supportLevels, supSize - 1)
+        int   sBar   = array.get(supportBarIndices, supSize - 1)
+        if not na(supportLine)
+            line.delete(supportLine)
+        supportLine := line.new(sBar, sLevel, bar_index, sLevel,
+             color=color.new(color.green, 50),
+             style=line.style_dashed,
+             width=1)
+    else if not na(supportLine)
+        line.delete(supportLine)
+        supportLine := na
+
+    // Resistance line (most recent valid)
+    int resSize = array.size(resistanceLevels)
+    if resSize > 0
+        float rLevel = array.get(resistanceLevels, resSize - 1)
+        int   rBar   = array.get(resistanceBarIndices, resSize - 1)
+        if not na(resistanceLine)
+            line.delete(resistanceLine)
+        resistanceLine := line.new(rBar, rLevel, bar_index, rLevel,
+             color=color.new(color.red, 50),
+             style=line.style_dashed,
+             width=1)
+    else if not na(resistanceLine)
+        line.delete(resistanceLine)
+        resistanceLine := na
+
+// --- 7.2 Entry signal shapes ---
+plotshape(showSignals and (strategy.position_size > 0) and (strategy.position_size[1] == 0),
+     style=shape.triangleup,
+     location=location.belowbar,
+     color=color.new(color.green, 0),
+     size=size.small,
+     title="Long Entry")
+
+plotshape(showSignals and (strategy.position_size < 0) and (strategy.position_size[1] == 0),
+     style=shape.triangledown,
+     location=location.abovebar,
+     color=color.new(color.red, 0),
+     size=size.small,
+     title="Short Entry")
+
+// --- 7.3 Effective stop line (when in position) ---
+float plotStop = strategy.position_size != 0 ? (strategy.position_size > 0 ?
+     math.max(nz(initialStop), nz(trailStop)) : math.min(nz(initialStop), nz(trailStop))) : na
+plot(plotStop, title="Effective Stop", color=color.new(color.orange, 0), style=plot.style_linebr, linewidth=2)
+
+// --- 7.4 Background coloring for volatility regime ---
+// Recalculate ATR divergence metrics here (outside the if barstate.isconfirmed block)
+// so they are accessible to both bgcolor() and the info table below.
+[atrRatio, pct, lowVol, highVol] = calcATRDivergence(fastATRPeriod, slowATRPeriod, percentileLookback)
+bgcolor(lowVol ? color.new(color.green, 88) : highVol ? color.new(color.red, 88) : na,
+     title="Volatility Regime Background")
+
+// --- 7.5 Fractal pivot labels (drawn when pivots are confirmed) ---
+[phPlot, plPlot, _, _] = calcFractals(leftBars, rightBars)
+plotshape(showFractals and not na(phPlot), style=shape.labeldown,
+     location=location.abovebar, color=color.new(color.red, 80),
+     text="R", textcolor=color.red, size=size.tiny, title="Resistance Fractal")
+plotshape(showFractals and not na(plPlot), style=shape.labelup,
+     location=location.belowbar, color=color.new(color.green, 80),
+     text="S", textcolor=color.green, size=size.tiny, title="Support Fractal")
+
+// --- 7.6 Info Panel (table) ---
+var table infoTable = table.new(position.top_right, 2, 4,
+     bgcolor=color.new(color.black, 80),
+     border_color=color.new(color.gray, 50),
+     border_width=1,
+     frame_color=color.new(color.gray, 50),
+     frame_width=1)
+
+if barstate.islastconfirmedhistory
+    table.cell(infoTable, 0, 0, "ATR Ratio",     text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, str.tostring(atrRatio,   "#.###"), text_color=color.yellow, text_size=size.small)
+    table.cell(infoTable, 0, 1, "Percentile",    text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(pct,        "#.") + "%", text_color=color.yellow, text_size=size.small)
+    table.cell(infoTable, 0, 2, "Vol Regime",    text_color=color.white, text_size=size.small)
+    string regimeStr = lowVol ? "LOW (Long Favorable)" : highVol ? "HIGH (Short Favorable)" : "NEUTRAL"
+    color  regimeClr = lowVol ? color.green : highVol ? color.red : color.gray
+    table.cell(infoTable, 1, 2, regimeStr,       text_color=regimeClr,   text_size=size.small)
+    table.cell(infoTable, 0, 3, "Position",      text_color=color.white, text_size=size.small)
+    string posStr = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    color  posClr = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    table.cell(infoTable, 1, 3, posStr,          text_color=posClr,      text_size=size.small)

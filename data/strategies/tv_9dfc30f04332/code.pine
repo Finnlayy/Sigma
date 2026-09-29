@@ -1,0 +1,134 @@
+//@version=6
+strategy(
+     "CCI Scalping – ATR-Risiko-Strategie v6",
+     overlay = true,
+     pyramiding = 0,
+     initial_capital = 10000,
+     default_qty_type = strategy.fixed,
+     default_qty_value = 1,
+     process_orders_on_close = true,
+     calc_on_order_fills = false)
+
+// ────────────────────────────────────────────────────────────────────────────
+// 1) SIGNALLOGIK
+// CCI/WMA-Scalping-Logik: Trendfilter über WMA und Mean-Reversion-Trigger
+// über die CCI-Schwellen. Alle Werte sind als Eingaben konfigurierbar.
+// ────────────────────────────────────────────────────────────────────────────
+groupSignal = "1. CCI-Signal"
+cciLength = input.int(20, "CCI-Länge", minval = 2, group = groupSignal)
+wmaLength = input.int(20, "WMA-Trendfilter", minval = 2, group = groupSignal)
+cciLongLevel = input.float(-100.0, "CCI Long-Schwelle", group = groupSignal)
+cciShortLevel = input.float(100.0, "CCI Short-Schwelle", group = groupSignal)
+allowShorts = input.bool(true, "Short-Signale zulassen", group = groupSignal)
+
+cci = ta.cci(hlc3, cciLength)
+wma = ta.wma(close, wmaLength)
+
+longSignal = close > wma and ta.crossover(cci, cciLongLevel)
+shortSignal = allowShorts and close < wma and ta.crossunder(cci, cciShortLevel)
+
+// ────────────────────────────────────────────────────────────────────────────
+// 2) ATR-STOP UND RISIKOBASIERTE POSITIONSGRÖSSE
+// Der finale Stop ist die konservativere (weiter entfernte) Wahl aus einem
+// ATR-Stop und einem lokalen Swing-Stop. Zu breite Stops werden übersprungen.
+// ────────────────────────────────────────────────────────────────────────────
+groupRisk = "2. ATR-Risiko"
+atrLength = input.int(14, "ATR-Länge", minval = 2, group = groupRisk)
+atrMultiple = input.float(1.8, "ATR-Multiplikator", minval = 0.5, step = 0.1, group = groupRisk)
+useStructure = input.bool(true, "Lokalen Swing als Stop-Referenz nutzen", group = groupRisk)
+swingBars = input.int(3, "Swing-Rückblick (Bars)", minval = 1, group = groupRisk)
+minStopATR = input.float(1.0, "Minimaler Stop (ATR)", minval = 0.25, step = 0.1, group = groupRisk)
+maxStopATR = input.float(2.5, "Maximaler Stop (ATR) – Signal sonst überspringen", minval = 0.5, step = 0.1, group = groupRisk)
+targetR = input.float(1.5, "Take-Profit in R", minval = 0.5, step = 0.1, group = groupRisk)
+riskPerTradePct = input.float(0.25, "Kontorisiko je Trade (%)", minval = 0.01, maxval = 2.0, step = 0.01, group = groupRisk)
+qtyStep = input.float(0.001, "Mengen-Schritt", minval = 0.000001, step = 0.001, group = groupRisk)
+minQty = input.float(0.001, "Minimale Menge", minval = 0.000001, step = 0.001, group = groupRisk)
+
+atr = ta.atr(atrLength)
+pointValue = math.max(syminfo.pointvalue, 0.00000001)
+riskCash = strategy.equity * riskPerTradePct / 100.0
+
+swingLow = ta.lowest(low, swingBars)
+swingHigh = ta.highest(high, swingBars)
+
+longAtrStop = close - atr * atrMultiple
+shortAtrStop = close + atr * atrMultiple
+longStructuralStop = swingLow - syminfo.mintick
+shortStructuralStop = swingHigh + syminfo.mintick
+
+longStopCandidate = useStructure ? math.min(longAtrStop, longStructuralStop) : longAtrStop
+shortStopCandidate = useStructure ? math.max(shortAtrStop, shortStructuralStop) : shortAtrStop
+
+longRiskPerUnit = close - longStopCandidate
+shortRiskPerUnit = shortStopCandidate - close
+longStopInATR = longRiskPerUnit / atr
+shortStopInATR = shortRiskPerUnit / atr
+
+longStopIsValid = longRiskPerUnit > 0 and longStopInATR >= minStopATR and longStopInATR <= maxStopATR
+shortStopIsValid = shortRiskPerUnit > 0 and shortStopInATR >= minStopATR and shortStopInATR <= maxStopATR
+
+longRawQty = longStopIsValid ? riskCash / (longRiskPerUnit * pointValue) : 0.0
+shortRawQty = shortStopIsValid ? riskCash / (shortRiskPerUnit * pointValue) : 0.0
+longQty = math.floor(longRawQty / qtyStep) * qtyStep
+shortQty = math.floor(shortRawQty / qtyStep) * qtyStep
+
+// ────────────────────────────────────────────────────────────────────────────
+// 3) ORDERS UND ZEIT-EXIT
+// Bracket-Orders werden mit dem Signal festgelegt. Dadurch bleibt das
+// maximale Verlustbudget je Trade vor dem Einstieg definiert.
+// ────────────────────────────────────────────────────────────────────────────
+groupTrade = "3. Handelsverwaltung"
+maxBarsInTrade = input.int(12, "Maximale Haltedauer (Bars, 0 = aus)", minval = 0, group = groupTrade)
+
+var int entryBar = na
+var float activeStop = na
+var float activeTarget = na
+
+canLong = longSignal and strategy.position_size == 0 and longStopIsValid and longQty >= minQty
+canShort = shortSignal and strategy.position_size == 0 and shortStopIsValid and shortQty >= minQty
+
+if canLong
+    activeStop := longStopCandidate
+    activeTarget := close + longRiskPerUnit * targetR
+    strategy.entry("Long", strategy.long, qty = longQty)
+    strategy.exit("Long ATR Exit", from_entry = "Long", stop = activeStop, limit = activeTarget)
+
+if canShort
+    activeStop := shortStopCandidate
+    activeTarget := close - shortRiskPerUnit * targetR
+    strategy.entry("Short", strategy.short, qty = shortQty)
+    strategy.exit("Short ATR Exit", from_entry = "Short", stop = activeStop, limit = activeTarget)
+
+// Die Ausstiegsorders werden auf jeder offenen Kerze erneut ausgegeben.
+if strategy.position_size > 0 and not na(activeStop) and not na(activeTarget)
+    strategy.exit("Long ATR Exit", from_entry = "Long", stop = activeStop, limit = activeTarget)
+
+if strategy.position_size < 0 and not na(activeStop) and not na(activeTarget)
+    strategy.exit("Short ATR Exit", from_entry = "Short", stop = activeStop, limit = activeTarget)
+
+newPosition = strategy.position_size != 0 and strategy.position_size[1] == 0
+flat = strategy.position_size == 0
+
+if newPosition
+    entryBar := bar_index
+
+if maxBarsInTrade > 0 and strategy.position_size != 0 and not na(entryBar) and bar_index - entryBar >= maxBarsInTrade
+    strategy.close_all(comment = "Zeit-Exit")
+
+if flat and strategy.position_size[1] != 0
+    entryBar := na
+    activeStop := na
+    activeTarget := na
+
+// ────────────────────────────────────────────────────────────────────────────
+// 4) VISUALISIERUNG
+// ────────────────────────────────────────────────────────────────────────────
+plot(wma, "WMA-Trendfilter", color = color.orange, linewidth = 2)
+plot(strategy.position_size != 0 ? activeStop : na, "Aktiver ATR-/Swing-Stop", color = color.red, style = plot.style_linebr, linewidth = 2)
+plot(strategy.position_size != 0 ? activeTarget : na, "Aktives Ziel", color = color.lime, style = plot.style_linebr, linewidth = 2)
+plotshape(canLong, title = "Long-Signal", style = shape.triangleup, location = location.belowbar, color = color.lime, size = size.tiny, text = "L")
+plotshape(canShort, title = "Short-Signal", style = shape.triangledown, location = location.abovebar, color = color.red, size = size.tiny, text = "S")
+
+// Die Plots dienen nur der Kontrolle; die Kontorisikorechnung setzt voraus,
+// dass pointValue, Mengen-Schritt und Mindestmenge für den konkreten Markt
+// korrekt konfiguriert sind.

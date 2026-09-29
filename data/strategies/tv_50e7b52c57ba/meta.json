@@ -1,0 +1,9 @@
+{
+  "bytes": 36548,
+  "name": "ZECUSDT.P 5m Weighted Multi-Filter Kelly Strategy",
+  "persisted_at": "2026-09-08T00:06:30Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "tv_50e7b52c57ba",
+  "tv_script_id": "USER;02cc5ac4139e4d94b02833df2b6ed43d"
+}

@@ -1,0 +1,45 @@
+//@version=6
+strategy(title="WTI/USDT PERP MTF CISD + OB/FVG - Pionex Signal Bot [v2.3.2]",
+         shorttitle="WTI CISD+OB/FVG 3m",
+         overlay=true,
+         initial_capital=100,
+         currency=currency.USDT,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=100,
+         pyramiding=1,
+         margin_long=0,
+         margin_short=0,
+         calc_on_every_tick=false,
+         process_orders_on_close=false,
+         max_boxes_count=500,
+         max_lines_count=500,
+         max_labels_count=500)
+
+// ============================================================================
+// RELATED_CONSTANTS & REUSABLE_FUNCTIONS
+// ============================================================================
+string GRP_EXEC = "Execution"
+
+f_norm_hhmm(int hhmm) =>
+    int h = int(math.floor(hhmm / 100.0))
+    int m = hhmm % 100
+    h := math.max(0, math.min(23, h))
+    m := math.max(0, math.min(59, m))
+    h * 100 + m
+
+f_in_session(int start_hhmm, int end_hhmm, string tz) =>
+    string effective_tz = tz == "Exchange" ? syminfo.timezone : tz
+    int now_hhmm = hour(time, effective_tz) * 100 + minute(time, effective_tz)
+    bool regular_window = start_hhmm <= end_hhmm
+    regular_window ? (now_hhmm >= start_hhmm and now_hhmm <= end_hhmm) : (now_hhmm >= start_hhmm or now_hhmm <= end_hhmm)
+
+f_round_qty(float qty, float step) =>
+    math.floor(qty / step) * step
+
+// ============================================================================
+// GRUPPE 1: Core Settings - Multi-Timeframe
+// ============================================================================
+string GRP_MTF = "Multi-Timeframe Settings"
+int tf_h4  = input.int(48, "TF 1 - 48m (Richtung)", minval=1, group=GRP_MTF)
+int tf_h1  = input.int(12, "TF 2 - 12m (Trend)", minval=1, group=GRP_MTF)
+int tf_m15 = input.int(3,  "TF 3 - 3m (Kontext)", minval=1, group=GRP_MTF)

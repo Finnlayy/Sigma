@@ -1,0 +1,369 @@
+# =========================================================
+# Datei:      the_rule_book.py
+# Strategie:  The Rule Book
+# Zweck:      Trading-Framework mit kombinierten Regel-Ketten,
+#             Konfidenz-Sizing und dynamischem ATR- & Volumen-
+#             abhängigem Trailing Take Profit (TTP).
+# Knoten:     Jaune (Carrera-Engine)
+# Abhängig.:  enum, typing (Python Standard Library)
+# =========================================================
+
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
+STRATEGY_NAME = "The Rule Book"
+
+
+# =========================================================
+# ENUMS & ZUSTÄNDE
+# =========================================================
+
+
+class LogicalOperator(Enum):
+    AND = "AND"
+    OR = "OR"
+    AND_NOT = "AND_NOT"
+
+
+class ComparisonOperator(Enum):
+    EQUALS = "=="
+    NOT_EQUALS = "!="
+    GREATER_THAN = ">"
+    LESS_THAN = "<"
+    GREATER_EQUAL = ">="
+    LESS_EQUAL = "<="
+
+
+class TradeDirection(Enum):
+    LONG = "LONG"
+    SHORT = "SHORT"
+
+
+class ExitReason(Enum):
+    NONE = "NONE"
+    TRAILING_TAKE_PROFIT = "TRAILING_TAKE_PROFIT"
+    MAX_BARS_REACHED = "MAX_BARS_REACHED"
+
+
+class SizingMode(Enum):
+    CONFIDENCE_RISK = "CONFIDENCE_RISK"
+    FIXED_RISK = "FIXED_RISK"
+    FIXED_LOT = "FIXED_LOT"
+
+
+# =========================================================
+# 1. EINSTIEGS-ENGINE (HAUPT- & SUBREGELN)
+# =========================================================
+
+
+class SubRule:
+    def __init__(
+        self,
+        val1_key: str,
+        operator: ComparisonOperator,
+        val2: Any,
+        is_val2_key: bool = False,
+    ):
+        self.val1_key = val1_key
+        self.operator = operator
+        self.val2 = val2
+        self.is_val2_key = is_val2_key
+
+    def evaluate(self, state: Dict[str, Any]) -> bool:
+        v1 = state.get(self.val1_key)
+        v2 = state.get(self.val2) if self.is_val2_key else self.val2
+
+        if v1 is None and self.operator != ComparisonOperator.NOT_EQUALS:
+            return False
+
+        if self.operator == ComparisonOperator.EQUALS:
+            return v1 == v2
+        elif self.operator == ComparisonOperator.NOT_EQUALS:
+            return v1 != v2
+        elif self.operator == ComparisonOperator.GREATER_THAN:
+            return v1 > v2 if v1 is not None and v2 is not None else False
+        elif self.operator == ComparisonOperator.LESS_THAN:
+            return v1 < v2 if v1 is not None and v2 is not None else False
+        elif self.operator == ComparisonOperator.GREATER_EQUAL:
+            return v1 >= v2 if v1 is not None and v2 is not None else False
+        elif self.operator == ComparisonOperator.LESS_EQUAL:
+            return v1 <= v2 if v1 is not None and v2 is not None else False
+        return False
+
+
+class SubRuleGroup:
+    def __init__(self, initial_subrule: SubRule):
+        self.items: List[Tuple[LogicalOperator, SubRule]] = [
+            (LogicalOperator.AND, initial_subrule)
+        ]
+
+    def add_subrule(self, operator: LogicalOperator, subrule: SubRule):
+        self.items.append((operator, subrule))
+
+    def evaluate(self, state: Dict[str, Any]) -> bool:
+        if not self.items:
+            return False
+
+        res = self.items[0][1].evaluate(state)
+
+        for op, subrule in self.items[1:]:
+            val = subrule.evaluate(state)
+            if op == LogicalOperator.AND:
+                res = res and val
+            elif op == LogicalOperator.OR:
+                res = res or val
+            elif op == LogicalOperator.AND_NOT:
+                res = res and (not val)
+        return res
+
+
+class Rule:
+    def __init__(self, name: str, subrule_group: SubRuleGroup):
+        self.name = name
+        self.subrule_group = subrule_group
+
+    def evaluate(self, state: Dict[str, Any]) -> bool:
+        return self.subrule_group.evaluate(state)
+
+
+class CompositeRuleEngine:
+    def __init__(self):
+        self.rules: List[Tuple[LogicalOperator, Rule]] = []
+
+    def add_rule(self, operator: LogicalOperator, rule: Rule):
+        self.rules.append((operator, rule))
+
+    def evaluate(self, state: Dict[str, Any]) -> bool:
+        if not self.rules:
+            return False
+
+        res = self.rules[0][1].evaluate(state)
+
+        for op, rule in self.rules[1:]:
+            val = rule.evaluate(state)
+            if op == LogicalOperator.AND:
+                res = res and val
+            elif op == LogicalOperator.OR:
+                res = res or val
+            elif op == LogicalOperator.AND_NOT:
+                res = res and (not val)
+        return res
+
+
+# =========================================================
+# 2. DYNAMISCHES ATR- & VOLUMEN-DYNAMISCHES TRAILING TAKE PROFIT
+# =========================================================
+
+
+class TradeState:
+    def __init__(
+        self, direction: TradeDirection, entry_price: float, entry_bar: int
+    ):
+        self.direction = direction
+        self.entry_price = entry_price
+        self.entry_bar = entry_bar
+        self.highest_price = entry_price
+        self.lowest_price = entry_price
+        self.is_ttp_activated = False
+
+    def update(self, current_price: float):
+        if current_price > self.highest_price:
+            self.highest_price = current_price
+        if current_price < self.lowest_price:
+            self.lowest_price = current_price
+
+
+class ATRVolumeTrailingTakeProfitEngine:
+    """Dynamisches Trailing Take Profit Modul, kombiniert aus ATR und Volumen.
+
+    Einstellbare Parameter:
+    - atr_activation_multiplier: Aktivierungsgewinn in Vielfachen der ATR (z.B. 2.0 * ATR)
+    - atr_callback_multiplier:   Basis-Callback-Abstand in Vielfachen der ATR (z.B. 1.0 * ATR)
+    - use_volume_scaling:        Aktiviert/Deaktiviert die dynamische Volumen-Anpassung
+    - volume_sensitivity:        Sensitivitäts-Exponent (z.B. 0.5; 0.0 = deaktiviert, 1.0 = linear)
+    - min_volume_factor:         Unterer Grenzwert für den Volumenfaktor (z.B. 0.5)
+    - max_volume_factor:         Oberer Grenzwert für den Volumenfaktor (z.B. 2.0)
+    """
+
+    def __init__(
+        self,
+        use_trailing_tp: bool = True,
+        # ATR Parameter
+        atr_activation_multiplier: float = 2.0,
+        atr_callback_multiplier: float = 1.0,
+        # Volumen Parameter
+        use_volume_scaling: bool = True,
+        volume_sensitivity: float = 0.5,
+        min_volume_factor: float = 0.5,
+        max_volume_factor: float = 2.0,
+    ):
+        self.use_trailing_tp = use_trailing_tp
+        self.atr_activation_multiplier = atr_activation_multiplier
+        self.atr_callback_multiplier = atr_callback_multiplier
+        self.use_volume_scaling = use_volume_scaling
+        self.volume_sensitivity = volume_sensitivity
+        self.min_volume_factor = min_volume_factor
+        self.max_volume_factor = max_volume_factor
+
+    def calculate_dynamic_distances(
+        self, atr: float, current_volume: float, avg_volume: float
+    ) -> Tuple[float, float, float]:
+        """Berechnet Aktivierungsabstand, Callback-Abstand und den Volumenfaktor."""
+        # 1. Basis-Abstände basierend auf ATR
+        activation_dist = atr * self.atr_activation_multiplier
+        base_callback_dist = atr * self.atr_callback_multiplier
+
+        # 2. Volumenfaktor berechnen
+        if self.use_volume_scaling and avg_volume > 0:
+            rel_volume = current_volume / avg_volume
+            raw_factor = rel_volume**self.volume_sensitivity
+            volume_factor = max(
+                self.min_volume_factor,
+                min(self.max_volume_factor, raw_factor),
+            )
+        else:
+            volume_factor = 1.0
+
+        # Dynamischer Callback-Abstand: Hohes Volumen Weitet den Korridor aus,
+        # niedriges Volumen verengt ihn zur schnellen Gewinnsicherung.
+        dynamic_callback_dist = base_callback_dist * volume_factor
+
+        return activation_dist, dynamic_callback_dist, volume_factor
+
+    def evaluate_exit(
+        self,
+        trade: TradeState,
+        current_price: float,
+        atr: float,
+        current_volume: float = 1.0,
+        avg_volume: float = 1.0,
+    ) -> Tuple[bool, ExitReason, str, Dict[str, Any]]:
+        trade.update(current_price)
+
+        if not self.use_trailing_tp or atr <= 0:
+            return (
+                False,
+                ExitReason.NONE,
+                "Trailing TP inaktiv oder ungültiger ATR-Wert.",
+                {},
+            )
+
+        act_dist, cb_dist, vol_factor = self.calculate_dynamic_distances(
+            atr, current_volume, avg_volume
+        )
+
+        meta_info = {
+            "atr": round(atr, 4),
+            "activation_distance": round(act_dist, 4),
+            "callback_distance": round(cb_dist, 4),
+            "volume_factor": round(vol_factor, 2),
+            "is_activated": trade.is_ttp_activated,
+        }
+
+        if trade.direction == TradeDirection.LONG:
+            current_profit = trade.highest_price - trade.entry_price
+            if current_profit >= act_dist:
+                trade.is_ttp_activated = True
+                meta_info["is_activated"] = True
+
+            if trade.is_ttp_activated:
+                trigger_price = trade.highest_price - cb_dist
+                meta_info["trigger_price"] = round(trigger_price, 4)
+                if current_price <= trigger_price:
+                    msg = (
+                        f"TTP Ausgelöst (LONG)! Kurs ({current_price:.2f}) <= Trigger ({trigger_price:.2f}) "
+                        f"[Peak: {trade.highest_price:.2f}, ATR: {atr:.2f}, Vol-Faktor: {vol_factor:.2f}, CB-Distanz: {cb_dist:.2f}]"
+                    )
+                    return True, ExitReason.TRAILING_TAKE_PROFIT, msg, meta_info
+
+        elif trade.direction == TradeDirection.SHORT:
+            current_profit = trade.entry_price - trade.lowest_price
+            if current_profit >= act_dist:
+                trade.is_ttp_activated = True
+                meta_info["is_activated"] = True
+
+            if trade.is_ttp_activated:
+                trigger_price = trade.lowest_price + cb_dist
+                meta_info["trigger_price"] = round(trigger_price, 4)
+                if current_price >= trigger_price:
+                    msg = (
+                        f"TTP Ausgelöst (SHORT)! Kurs ({current_price:.2f}) >= Trigger ({trigger_price:.2f}) "
+                        f"[Peak: {trade.lowest_price:.2f}, ATR: {atr:.2f}, Vol-Faktor: {vol_factor:.2f}, CB-Distanz: {cb_dist:.2f}]"
+                    )
+                    return True, ExitReason.TRAILING_TAKE_PROFIT, msg, meta_info
+
+        return (
+            False,
+            ExitReason.NONE,
+            "Kein Trailing Take Profit Ausstiegssignal.",
+            meta_info,
+        )
+
+
+# =========================================================
+# DEMO RUN: ATR + VOLUMEN TRAILING TAKE PROFIT TEST
+# =========================================================
+if __name__ == "__main__":
+    print(
+        f"=== {STRATEGY_NAME}: Dynamic ATR & Volume Trailing Take Profit Demo ==="
+    )
+
+    # Trade Einstieg: LONG bei 100.0 USD
+    trade = TradeState(
+        direction=TradeDirection.LONG, entry_price=100.0, entry_bar=1
+    )
+
+    # Engine Instanziierung mit explizit eingestellten Parametern
+    ttp_manager = ATRVolumeTrailingTakeProfitEngine(
+        use_trailing_tp=True,
+        atr_activation_multiplier=2.0,  # Aktivierung bei 2x ATR Gewinn
+        atr_callback_multiplier=1.0,  # Basis-Callback von 1x ATR
+        use_volume_scaling=True,
+        volume_sensitivity=0.5,  # Exponent zur Volumenskalierung
+        min_volume_factor=0.5,  # Min. Faktor bei sehr geringem Volumen
+        max_volume_factor=2.0,  # Max. Faktor bei extremem Volumen
+    )
+
+    # Simulationsdaten: (Kurs, ATR, Aktuelles Volumen, Durchschnittsvolumen)
+    sim_data = [
+        (100.0, 2.0, 1000, 1000),  # Einstieg
+        (
+            103.0,
+            2.0,
+            1200,
+            1000,
+        ),  # Profit +3.0 < Aktivierung (4.0 = 2*ATR) -> Inaktiv
+        (
+            105.0,
+            2.0,
+            2000,
+            1000,
+        ),  # Profit +5.0 >= 4.0 -> TTP AKTIVIERT! Hohes Vol (Factor ~1.41) -> CB = 2.83
+        (
+            108.0,
+            2.0,
+            500,
+            1000,
+        ),  # Neuer Peak 108.0! Geringes Vol (Factor ~0.71) -> CB verengt sich auf 1.41 -> Trigger = 106.59
+        (
+            106.0,
+            2.0,
+            500,
+            1000,
+        ),  # Kurs fällt auf 106.0 <= Trigger (106.59) -> AUSSTIEG!
+    ]
+
+    print("\nSimulationsverlauf:")
+    for price, atr, vol, avg_vol in sim_data:
+        exit_triggered, reason, msg, meta = ttp_manager.evaluate_exit(
+            trade, price, atr, vol, avg_vol
+        )
+        status = "SCHARF" if meta.get("is_activated") else "INAKTIV"
+        cb_dist = meta.get("callback_distance", 0.0)
+        vol_f = meta.get("volume_factor", 1.0)
+        print(
+            f"Kurs: {price:5.1f} | Status: {status:7s} | Vol-Faktor: {vol_f:4.2f} | CB-Distanz: {cb_dist:4.2f} | Resultat: {reason.value}"
+        )
+        if exit_triggered:
+            print(f"\n--> SL/TP AUSFÜHRUNG: {msg}")
+            break

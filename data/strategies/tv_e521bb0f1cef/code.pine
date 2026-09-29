@@ -1,0 +1,424 @@
+//@version=6
+strategy("ATM — ZECUSDT.P 15m Optimized",
+     shorttitle="ATM_ZEC_15m",
+     overlay=true,
+     initial_capital=1000,
+     currency=currency.USDT,
+     default_qty_type=strategy.cash,
+     default_qty_value=100,
+     pyramiding=0, // 0 = Strict single-position management
+     calc_on_every_tick=false,
+     margin_long=10,
+     margin_short=10,
+     process_orders_on_close=true,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     max_boxes_count=100,
+     max_labels_count=200)
+
+// ============================================================================
+// 01. PIONEX WEBHOOK INTEGRATION
+// ============================================================================
+string GRP_WEB = "=== 01. Pionex Webhook ==="
+string uuid = input.string("8a17bcf9-0d9c-4a09-92ae-27adf755d95d", "Pionex Signal Bot UUID", group=GRP_WEB)
+string pionex_payload = '{ "data": { "action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_param": "{}", "signal_type": "' + uuid + '", "symbol": "{{ticker}}", "time": "{{timenow}}" }'
+
+// ============================================================================
+// 02. ZECUSDT.P CANDLE PATTERN RECOGNITION (CALIBRATED FOR 15M)
+// ============================================================================
+string GRP_CANDLE = "=== 02. 15m Kerzen-Erkennung ==="
+bool  use_doji             = input.bool(true, "Doji aktivieren", group=GRP_CANDLE)
+bool  use_rejection        = input.bool(true, "Rejection Candles aktivieren", group=GRP_CANDLE)
+bool  use_momentum         = input.bool(true, "High Momentum aktivieren", group=GRP_CANDLE)
+bool  use_cluster          = input.bool(true, "Low Momentum Cluster aktivieren", group=GRP_CANDLE)
+
+float doji_max_body_pct    = input.float(12.0, "Doji: Max Body %", minval=1.0, maxval=30.0, step=1.0, group=GRP_CANDLE)
+float rej_min_wick_ratio   = input.float(2.2,  "Rejection: Min Wick/Body", minval=0.5, maxval=6.0, step=0.2, group=GRP_CANDLE)
+float rej_max_body_pct     = input.float(25.0, "Rejection: Max Body %", minval=5.0, maxval=50.0, step=2.5, group=GRP_CANDLE)
+
+float mom_min_atr_mult     = input.float(1.3,  "Momentum: Min Body/ATR", minval=0.5, maxval=4.0, step=0.1, group=GRP_CANDLE)
+float mom_max_wick_pct     = input.float(22.0, "Momentum: Max Wick/Body %", minval=5.0, maxval=50.0, step=2.0, group=GRP_CANDLE)
+int   cluster_min_candles  = input.int(4,      "Cluster: Min Kerzen", minval=2, maxval=8, group=GRP_CANDLE)
+float cluster_max_atr_mult = input.float(1.8,  "Cluster: Max Gesamt-Spanne (ATR-Mult)", minval=0.5, maxval=4.0, step=0.1, group=GRP_CANDLE)
+
+// ============================================================================
+// 03. ADAPTIVE ZONE SETTINGS (VOLATILITY-SCALED)
+// ============================================================================
+string GRP_ZONE = "=== 03. Zonen-Einstellungen (ATR-basiert) ==="
+int   zone_max_age         = input.int(96,     "Zone: Max Alter in Bars (96 = 24h im 15m)", minval=20, maxval=400, group=GRP_ZONE)
+float zone_merge_atr       = input.float(0.35, "Zone: Merge Abstand (ATR-Mult)", minval=0.1, maxval=1.5, step=0.05, group=GRP_ZONE)
+int   zone_max_count       = input.int(16,     "Zone: Max aktive Zonen", minval=6, maxval=40, group=GRP_ZONE)
+
+// ============================================================================
+// 04. ZEC 15M TREND & REGIME FILTERS
+// ============================================================================
+string GRP_FILTER = "=== 04. Trend & Regime Filter ==="
+bool  use_ema_filter       = input.bool(true,  "EMA Trend-Filter aktiv", group=GRP_FILTER)
+int   ema_fast_len         = input.int(50,     "EMA Fast Länge", minval=10, maxval=200, group=GRP_FILTER)
+int   ema_slow_len         = input.int(200,    "EMA Slow Länge (Trend Baseline)", minval=50, maxval=400, group=GRP_FILTER)
+bool  use_adx_filter       = input.bool(true,  "ADX Volatilitäts-Gate aktiv (Kein Chop)", group=GRP_FILTER)
+int   adx_len              = input.int(14,     "ADX Länge", minval=5, maxval=30, group=GRP_FILTER)
+float adx_min_thresh       = input.float(18.0, "ADX Mindest-Schwelle", minval=10.0, maxval=40.0, step=1.0, group=GRP_FILTER)
+
+// ============================================================================
+// 05. ENTRY, POSITION SIZING & RISK MANAGEMENT
+// ============================================================================
+string GRP_TRADE = "=== 05. Trading & Risikomanagement ==="
+bool  use_zone_entries     = input.bool(true,  "Zone-basierte Entries", group=GRP_TRADE)
+bool  use_breakout         = input.bool(false, "Breakout-Entries (Zusatz-Signal)", group=GRP_TRADE)
+float entry_atr_buffer     = input.float(0.20, "Entry: Zone-Buffer ATR-Mult", minval=0.05, maxval=1.0, step=0.05, group=GRP_TRADE)
+float risk_per_trade_pct   = input.float(1.5,  "Risiko pro Trade (% des Kontos)", minval=0.25, maxval=10.0, step=0.25, group=GRP_TRADE)
+float sl_atr_mult          = input.float(1.6,  "Stop-Loss ATR-Mult", minval=0.5, maxval=4.0, step=0.1, group=GRP_TRADE)
+float tp_atr_mult          = input.float(3.2,  "Take-Profit ATR-Mult (Standard/Minimum)", minval=1.0, maxval=10.0, step=0.2, group=GRP_TRADE)
+bool  use_break_even       = input.bool(true,  "Auto-Break-Even bei +1.2R aktivieren", group=GRP_TRADE)
+float be_trigger_rrr       = input.float(1.2,  "Break-Even Trigger RRR", minval=0.5, maxval=3.0, step=0.1, group=GRP_TRADE)
+
+// ============================================================================
+// 06. VISUALS
+// ============================================================================
+string GRP_VIS = "=== 06. Visualisierung ==="
+bool show_zones            = input.bool(true,  "Zonen anzeigen", group=GRP_VIS)
+bool show_zone_labels      = input.bool(true,  "Zone-Labels anzeigen", group=GRP_VIS)
+bool show_entry_markers    = input.bool(true,  "Entry-Marker anzeigen", group=GRP_VIS)
+bool show_dashboard        = input.bool(true,  "Dashboard anzeigen", group=GRP_VIS)
+bool show_signals          = input.bool(false, "Kerzen-Pattern Icons anzeigen", group=GRP_VIS)
+
+// ============================================================================
+// TYPES & ARRAYS
+// ============================================================================
+type Zone
+    float top
+    float bottom
+    int   ztype // 1: Demand, 2: Supply
+    int   strength
+    int   start_bar
+    string source
+    int   touches = 0
+    bool  neutralized = false
+    box   box_id
+    label label_id
+
+var Zone[] active_zones = array.new<Zone>(0)
+
+// ============================================================================
+// INDICATORS
+// ============================================================================
+float atr     = ta.atr(14)
+float emaFast = ta.ema(close, ema_fast_len)
+float emaSlow = ta.ema(close, ema_slow_len)
+
+// ADX Calculation
+[dmiPlus, dmiMinus, adxVal] = ta.dmi(adx_len, adx_len)
+bool  adx_ok    = not use_adx_filter or (adxVal >= adx_min_thresh)
+bool  trend_long_ok  = not use_ema_filter or (close > emaSlow and emaFast >= emaSlow[1])
+bool  trend_short_ok = not use_ema_filter or (close < emaSlow and emaFast <= emaSlow[1])
+
+// ============================================================================
+// CANDLE 1: DOJI
+// ============================================================================
+float c_range   = high - low
+float c_body    = math.abs(close - open)
+float body_pct  = c_range > 0.0 ? (c_body / c_range) * 100.0 : 100.0
+bool  is_doji   = use_doji and body_pct <= doji_max_body_pct and c_range > (atr * 0.2)
+
+float doji_top    = close >= open ? open : high
+float doji_bottom = close >= open ? low  : close
+int   doji_str    = body_pct < 5.0 ? 5 : body_pct < 8.0 ? 4 : 3
+
+// ============================================================================
+// CANDLE 2: REJECTION CANDLE
+// ============================================================================
+float upper_wick = high - math.max(open, close)
+float lower_wick = math.min(open, close) - low
+float uw_ratio   = c_body > 0.0 ? upper_wick / c_body : 999.0
+float lw_ratio   = c_body > 0.0 ? lower_wick / c_body : 999.0
+
+bool  is_bull_rej = use_rejection and lw_ratio >= rej_min_wick_ratio and body_pct <= rej_max_body_pct and lower_wick > upper_wick * 0.6
+bool  is_bear_rej = use_rejection and uw_ratio >= rej_min_wick_ratio and body_pct <= rej_max_body_pct and upper_wick > lower_wick * 0.6
+
+float rej_top    = is_bull_rej ? low + lower_wick * 0.5 : high
+float rej_bottom = is_bull_rej ? low : high - upper_wick * 0.5
+int   rej_str    = int(math.min(5.0, is_bull_rej ? lw_ratio : uw_ratio))
+
+// ============================================================================
+// CANDLE 3: HIGH MOMENTUM
+// ============================================================================
+float body_atr_ratio = atr > 0.0 ? c_body / atr : 0.0
+bool  small_wicks    = c_body > 0.0 and (upper_wick / c_body <= mom_max_wick_pct / 100.0) and (lower_wick / c_body <= mom_max_wick_pct / 100.0)
+bool  is_mom         = use_momentum and body_atr_ratio >= mom_min_atr_mult and small_wicks
+bool  is_mom_bull    = is_mom and close > open
+
+float mom_top    = is_mom_bull ? open : high
+float mom_bottom = is_mom_bull ? low  : close
+int   mom_str    = int(math.min(5.0, body_atr_ratio))
+
+// ============================================================================
+// CANDLE 4: LOW MOMENTUM CLUSTER
+// ============================================================================
+var float cl_high      = 0.0
+var float cl_low       = 0.0
+var int   cl_count     = 0
+var bool  in_cluster   = false
+var bool  cl_just_done = false
+
+bool is_small_candle = body_pct <= 45.0 and c_range <= (atr * 0.8)
+
+if is_small_candle
+    if not in_cluster
+        cl_high  := high
+        cl_low   := low
+        cl_count := 1
+        in_cluster := true
+    else
+        cl_high  := math.max(cl_high, high)
+        cl_low   := math.min(cl_low, low)
+        cl_count += 1
+    cl_just_done := false
+else
+    if in_cluster and cl_count >= cluster_min_candles
+        cl_just_done := true
+    else
+        cl_just_done := false
+    in_cluster := false
+
+bool  is_cluster = cl_just_done and ((cl_high - cl_low) <= atr * cluster_max_atr_mult)
+
+// ============================================================================
+// ATR-VOLATILITY SCALED ZONE MANAGER
+// ============================================================================
+f_add_zone(float zt, float zb, int ztype, int zstr, string zsrc) =>
+    if zt > zb and (zt - zb) >= (atr * 0.1)
+        bool merged = false
+        float merge_dist = atr * zone_merge_atr
+        for z in active_zones
+            if z.ztype != ztype or z.neutralized
+                continue
+            float mid_exist = (z.top + z.bottom) / 2.0
+            float mid_new   = (zt + zb) / 2.0
+            if math.abs(mid_exist - mid_new) <= merge_dist
+                z.top      := math.max(z.top, zt)
+                z.bottom   := math.min(z.bottom, zb)
+                z.strength := math.max(z.strength, zstr)
+                if show_zones and not na(z.box_id)
+                    box.set_top(z.box_id, z.top)
+                    box.set_bottom(z.box_id, z.bottom)
+                merged := true
+                break
+        
+        if not merged and active_zones.size() < zone_max_count
+            color bcol = ztype == 1 ? color.new(#00BCD4, 78) : color.new(#FF5722, 78)
+            box   new_box   = show_zones ? box.new(bar_index, zt, bar_index, zb, border_color=na, bgcolor=bcol) : na
+            label new_label = (show_zones and show_zone_labels) ? label.new(bar_index, (zt + zb) / 2.0, (ztype == 1 ? "D:" : "S:") + zsrc + " (" + str.tostring(zstr) + ")", color=color.new(bcol, 40), textcolor=color.white, size=size.tiny, style=label.style_label_left) : na
+            array.push(active_zones, Zone.new(zt, zb, ztype, zstr, bar_index, zsrc, box_id=new_box, label_id=new_label))
+
+if barstate.isconfirmed
+    if is_doji
+        f_add_zone(doji_top, doji_bottom, close >= open ? 1 : 2, doji_str, "Doji")
+    if is_bull_rej
+        f_add_zone(rej_top, rej_bottom, 1, rej_str, "Rej")
+    if is_bear_rej
+        f_add_zone(rej_top, rej_bottom, 2, rej_str, "Rej")
+    if is_mom
+        f_add_zone(mom_top, mom_bottom, is_mom_bull ? 1 : 2, mom_str, "Mom")
+    if is_cluster
+        f_add_zone(cl_high, cl_low, 1, math.min(5, cl_count), "Clust")
+        f_add_zone(cl_high, cl_low, 2, math.min(5, cl_count), "Clust")
+
+    // Update & Clean up old/neutralized zones
+    int idx = 0
+    while idx < active_zones.size()
+        Zone z = active_zones.get(idx)
+        bool remove = false
+        if bar_index - z.start_bar > zone_max_age
+            remove := true
+        
+        // Sweep/Neutralization check (closed through opposite border)
+        if not z.neutralized
+            if z.ztype == 1 and close < (z.bottom - atr * 0.1)
+                z.neutralized := true
+            else if z.ztype == 2 and close > (z.top + atr * 0.1)
+                z.neutralized := true
+            
+            if z.neutralized and show_zones
+                box.set_bgcolor(z.box_id, color.new(color.gray, 92))
+                if not na(z.label_id)
+                    label.set_color(z.label_id, color.new(color.gray, 60))
+                    label.set_textcolor(z.label_id, color.new(color.white, 60))
+        
+        if remove
+            if not na(z.box_id)
+                box.delete(z.box_id)
+            if not na(z.label_id)
+                label.delete(z.label_id)
+            active_zones.remove(idx)
+        else
+            if show_zones and not na(z.box_id)
+                box.set_right(z.box_id, bar_index)
+            if show_zones and not na(z.label_id)
+                label.set_x(z.label_id, bar_index)
+            idx += 1
+
+// ============================================================================
+// ZONE TOUCHES & TRADE SIGNALS
+// ============================================================================
+bool  demand_tested     = false
+bool  supply_tested     = false
+float active_demand_zb  = 0.0
+float active_supply_zt  = 0.0
+float target_supply_zb  = 0.0
+float target_demand_zt  = 0.0
+
+float buf = atr * entry_atr_buffer
+
+for z in active_zones
+    if z.neutralized
+        continue
+    if z.ztype == 1
+        if low <= (z.top + buf) and close >= z.bottom
+            demand_tested    := true
+            active_demand_zb := z.bottom
+            z.touches        += 1
+        else if close > z.top and (na(target_supply_zb) or target_demand_zt == 0.0 or z.top > target_demand_zt)
+            target_demand_zt := z.top
+    else if z.ztype == 2
+        if high >= (z.bottom - buf) and close <= z.top
+            supply_tested    := true
+            active_supply_zt := z.top
+            z.touches        += 1
+        else if close < z.bottom and (target_supply_zb == 0.0 or z.bottom < target_supply_zb)
+            target_supply_zb := z.bottom
+
+bool long_zone_sig  = use_zone_entries and demand_tested and close > open and strategy.position_size == 0
+bool short_zone_sig = use_zone_entries and supply_tested and close < open and strategy.position_size == 0
+
+bool long_breakout  = use_breakout and strategy.position_size == 0 and close > high[1] and close > open and ta.rising(close, 3)
+bool short_breakout = use_breakout and strategy.position_size == 0 and close < low[1] and close < open and ta.falling(close, 3)
+
+bool final_long  = (long_zone_sig or long_breakout)  and trend_long_ok  and adx_ok and strategy.position_size == 0
+bool final_short = (short_zone_sig or short_breakout) and trend_short_ok and adx_ok and strategy.position_size == 0
+
+bool enter_long  = final_long  and not final_long[1]
+bool enter_short = final_short and not final_short[1]
+
+// ============================================================================
+// DYNAMIC RISK-BASED POSITION SIZING
+// ============================================================================
+f_calc_qty(float sl_dist_usdt) =>
+    float risk_usdt = strategy.equity * (risk_per_trade_pct / 100.0)
+    float raw_qty   = sl_dist_usdt > 0.0 ? (risk_usdt / sl_dist_usdt) : 0.0
+    // Round to 3 decimal places for ZECUSDT.P (e.g. 1.250 ZEC)
+    math.floor(raw_qty * 1000.0) / 1000.0
+
+// ============================================================================
+// ORDER EXECUTION & ACTIVE TRADE MANAGEMENT
+// ============================================================================
+var float trade_sl = na
+var float trade_tp = na
+var float trade_be = na
+var bool  be_moved = false
+
+if strategy.position_size == 0
+    trade_sl := na
+    trade_tp := na
+    trade_be := na
+    be_moved := false
+
+if enter_long
+    float sl_dist = atr * sl_atr_mult
+    trade_sl := close - sl_dist
+    if active_demand_zb > 0.0 and active_demand_zb < close
+        trade_sl := math.min(close - sl_dist, active_demand_zb - atr * 0.2)
+    
+    // Check if opposing supply zone offers >= 1.5 RRR, otherwise fallback to tp_atr_mult
+    float min_tp_price = close + sl_dist * 1.5
+    if target_supply_zb >= min_tp_price
+        trade_tp := target_supply_zb
+    else
+        trade_tp := close + atr * tp_atr_mult
+    
+    trade_be := close + sl_dist * be_trigger_rrr
+    float qty_long = f_calc_qty(close - trade_sl)
+
+    if qty_long > 0.01
+        strategy.entry("Long", strategy.long, qty=qty_long, comment="L_Zone", alert_message=pionex_payload)
+        strategy.exit("L_Exit", "Long", stop=trade_sl, limit=trade_tp, comment_loss="SL", comment_profit="TP", alert_message=pionex_payload)
+
+if enter_short
+    float sl_dist = atr * sl_atr_mult
+    trade_sl := close + sl_dist
+    if active_supply_zt > 0.0 and active_supply_zt > close
+        trade_sl := math.max(close + sl_dist, active_supply_zt + atr * 0.2)
+    
+    float min_tp_price = close - sl_dist * 1.5
+    if target_demand_zt > 0.0 and target_demand_zt <= min_tp_price
+        trade_tp := target_demand_zt
+    else
+        trade_tp := close - atr * tp_atr_mult
+    
+    trade_be := close - sl_dist * be_trigger_rrr
+    float qty_short = f_calc_qty(trade_sl - close)
+
+    if qty_short > 0.01
+        strategy.entry("Short", strategy.short, qty=qty_short, comment="S_Zone", alert_message=pionex_payload)
+        strategy.exit("S_Exit", "Short", stop=trade_sl, limit=trade_tp, comment_loss="SL", comment_profit="TP", alert_message=pionex_payload)
+
+// --- Auto-Break-Even Manager ---
+if use_break_even and strategy.position_size > 0 and not be_moved and high >= trade_be
+    trade_sl := math.max(trade_sl, strategy.position_avg_price)
+    be_moved := true
+    strategy.exit("L_Exit", "Long", stop=trade_sl, limit=trade_tp, comment_loss="BE", comment_profit="TP", alert_message=pionex_payload)
+
+if use_break_even and strategy.position_size < 0 and not be_moved and low <= trade_be
+    trade_sl := math.min(trade_sl, strategy.position_avg_price)
+    be_moved := true
+    strategy.exit("S_Exit", "Short", stop=trade_sl, limit=trade_tp, comment_loss="BE", comment_profit="TP", alert_message=pionex_payload)
+
+// ============================================================================
+// VISUALS & EVALUATION DASHBOARD
+// ============================================================================
+plot(use_ema_filter ? emaFast : na, "EMA 50 Fast", color=color.new(color.red, 20), linewidth=1)
+plot(use_ema_filter ? emaSlow : na, "EMA 200 Slow", color=color.new(color.orange, 10), linewidth=2)
+plot(strategy.position_size != 0 ? trade_sl : na, "Active Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size != 0 ? trade_tp : na, "Active Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+
+plotshape(show_entry_markers and enter_long,  style=shape.triangleup,   location=location.belowbar, color=color.lime, size=size.normal, title="Long",  text="L", textcolor=color.white)
+plotshape(show_entry_markers and enter_short, style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.normal, title="Short", text="S", textcolor=color.white)
+
+// Dashboard Overlay
+var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 78), border_width=1, border_color=color.gray)
+if show_dashboard and barstate.islast
+    table.cell(dash, 0, 0, "ZECUSDT.P (15m)", text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(dash, 1, 0, "Optimized v6.0",  text_color=color.white, bgcolor=color.new(color.blue, 55))
+    
+    table.cell(dash, 0, 1, "Net Profit / WR", text_color=color.white, text_size=size.small)
+    float wr = strategy.closedtrades > 0 ? (strategy.wintrades / strategy.closedtrades) * 100.0 : 0.0
+    table.cell(dash, 1, 1, str.tostring(strategy.netprofit, "#.##") + " USDT (" + str.tostring(wr, "#.#") + "%)", text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
+    
+    table.cell(dash, 0, 2, "Profit Factor", text_color=color.white, text_size=size.small)
+    float pf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    table.cell(dash, 1, 2, na(pf) ? "N/A" : str.tostring(pf, "#.##"), text_color=na(pf) ? color.gray : pf >= 1.5 ? color.lime : color.yellow, text_size=size.small)
+    
+    table.cell(dash, 0, 3, "Trend Regime", text_color=color.white, text_size=size.small)
+    string reg_txt = not adx_ok ? "CHOP (ADX < " + str.tostring(adx_min_thresh, "#") + ")" : close > emaSlow ? "BULLISH" : "BEARISH"
+    color  reg_col = not adx_ok ? color.orange : close > emaSlow ? color.lime : color.red
+    table.cell(dash, 1, 3, reg_txt, text_color=reg_col, text_size=size.small)
+    
+    table.cell(dash, 0, 4, "Active Zones (D/S)", text_color=color.white, text_size=size.small)
+    int d_cnt = 0
+    int s_cnt = 0
+    for z in active_zones
+        if not z.neutralized
+            if z.ztype == 1
+                d_cnt += 1
+            else
+                s_cnt += 1
+    table.cell(dash, 1, 4, str.tostring(d_cnt) + " D / " + str.tostring(s_cnt) + " S", text_color=color.red, text_size=size.small)
+    
+    table.cell(dash, 0, 5, "15m ATR ($)", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, str.tostring(atr, "#.###"), text_color=color.white, text_size=size.small)
+    
+    table.cell(dash, 0, 6, "Position / Qty", text_color=color.white, text_size=size.small)
+    string pos_txt = strategy.position_size > 0 ? "LONG (" + str.tostring(strategy.position_size, "#.###") + ")" : strategy.position_size < 0 ? "SHORT (" + str.tostring(math.abs(strategy.position_size), "#.###") + ")" : "FLAT"
+    color  pos_col = strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray
+    table.cell(dash, 1, 6, pos_txt, text_color=pos_col, text_size=size.small)

@@ -1,0 +1,776 @@
+// ============================================================================
+// Datei: MTF_CISD_OB_FVG_v3_AGGRESSIVE_HEADLESS.pine
+// Zweck: Enterprise Live-Engine — Aggressiv | Fractal SL/TP | ML-Adaptiv | Error-Handling
+// Abhaengig: Pine Script v6, TradingView, Pionex Signal Bot
+// Markte: HYPERUSDT.P, BTCUSDT.P, WTIUSDT.P, SIRENUSDT.P, RAVENUSDT.P, etc.
+// ============================================================================
+//@version=6
+strategy(title="MTF CISD + OB/FVG — AGGRESSIVE FRACTAL [v3.0 ENTERPRISE]", shorttitle="F-35 v3", overlay=true, initial_capital=100, currency=currency.USDT, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=1, margin_long=0, margin_short=0, calc_on_every_tick=false, process_orders_on_close=false, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+// ============================================================================
+// GRUPPE 0: SYSTEM DIAGNOSTICS & ERROR HANDLING
+// ============================================================================
+string GRP_SYS = "System Diagnostics"
+bool en_diag = input.bool(true, "Enable Error-Handling & Diagnostics", group=GRP_SYS)
+int max_err_log = input.int(50, "Max Error Log Entries", minval=10, maxval=200, group=GRP_SYS)
+bool en_recovery = input.bool(true, "Enable Auto-Recovery Mode", group=GRP_SYS)
+int recovery_cooldown = input.int(5, "Recovery Cooldown (Bars)", minval=1, maxval=50, group=GRP_SYS)
+
+// Error Logging Arrays
+var array<string> err_log = array.new<string>()
+var array<int> err_bars = array.new<int>()
+var array<int> err_codes = array.new<int>()
+var int last_err_bar = na
+
+// Error Code Registry
+int ERR_NONE = 0
+int ERR_MTF_TIMEOUT = 1
+int ERR_ATR_ZERO = 2
+int ERR_PRICE_NAN = 3
+int ERR_OB_OVERFLOW = 4
+int ERR_SLTP_INVALID = 5
+int ERR_MARGIN_CALL = 6
+int ERR_VOL_SPIKE = 7
+int ERR_RECOVERY_TRIGGER = 8
+
+f_log_error(int code, string msg) => if en_diag
+    array.push(err_log, msg)
+    array.push(err_bars, bar_index)
+    array.push(err_codes, code)
+
+f_has_recent_error(int code, int lookback) =>
+    bool found = false
+    int sz = array.size(err_codes)
+    if sz > 0
+        for i = 0 to math.min(lookback, sz) - 1
+            int idx = sz - 1 - i
+            if array.get(err_codes, idx) == code and bar_index - array.get(err_bars, idx) <= lookback
+                found := true
+                break
+    found
+
+f_recovery_active() => en_recovery and not na(last_err_bar) and (bar_index - last_err_bar) < recovery_cooldown
+
+// ============================================================================
+// GRUPPE 1: Core Settings — AGGRESSIVE MULTI-TIMEFRAME
+// ============================================================================
+string GRP_MTF = "Multi-Timeframe Settings (AGGRESSIVE)"
+int tf_h4 = input.int(240, "TF 1 — H4 (Macro Direction)", minval=1, group=GRP_MTF)
+int tf_h1 = input.int(60, "TF 2 — H1 (Trend Anchor)", minval=1, group=GRP_MTF)
+int tf_m15 = input.int(15, "TF 3 — M15 (Execution Context)", minval=1, group=GRP_MTF)
+int tf_m5 = input.int(5, "TF 4 — M5 (Micro Entry)", minval=1, group=GRP_MTF)
+int tf_m1 = input.int(1, "TF 5 — M1 (Scalp Precision)", minval=1, group=GRP_MTF)
+bool en_h4 = input.bool(true, "H4 aktiviert", group=GRP_MTF)
+bool en_h1 = input.bool(true, "H1 aktiviert", group=GRP_MTF)
+bool en_m15 = input.bool(true, "M15 aktiviert", group=GRP_MTF)
+bool en_m5 = input.bool(true, "M5 aktiviert", group=GRP_MTF)
+bool en_m1 = input.bool(false, "M1 aktiviert (Ultra-Aggressive)", group=GRP_MTF)
+int min_alignment = input.int(3, "Mindest-TF-Alignment", minval=1, maxval=5, group=GRP_MTF)
+int super_alignment = input.int(4, "Super-Alignment Threshold", minval=2, maxval=5, group=GRP_MTF)
+
+// ============================================================================
+// GRUPPE 2: Order Block / FVG / LIQUIDITY SWEEP — AGGRESSIVE DETECTION
+// ============================================================================
+string GRP_OB = "Order Block / FVG / Liquidity Settings"
+float ob_atr_mul = input.float(2.2, "OB ATR Multiplikator (Aggressive)", minval=0.5, maxval=8.0, step=0.1, group=GRP_OB)
+int ob_pivot = input.int(5, "OB Pivot Lookback (Tight)", minval=2, maxval=20, group=GRP_OB)
+int max_ob_boxes = input.int(35, "Max Zonen Memory (Expanded)", minval=5, maxval=150, group=GRP_OB)
+bool en_liq_sweep = input.bool(true, "Enable Liquidity Sweep Detection", group=GRP_OB)
+int liq_lookback = input.int(20, "Liquidity Lookback", minval=5, maxval=100, group=GRP_OB)
+float liq_atr_mul = input.float(0.8, "Liquidity Sweep ATR Mult", minval=0.1, maxval=3.0, step=0.1, group=GRP_OB)
+bool en_fvg_aggressive = input.bool(true, "Aggressive FVG Validation", group=GRP_OB)
+float fvg_min_size = input.float(0.3, "Min FVG Size (ATR %)", minval=0.05, maxval=2.0, step=0.05, group=GRP_OB)
+
+// ============================================================================
+// GRUPPE 3: FRACTAL SL/TP MANAGEMENT WITH ML ADAPTIVITY
+// ============================================================================
+string GRP_FRACTAL = "Fractal SL/TP & ML Adaptivity"
+bool use_fractal_sl = input.bool(true, "Enable Fractal Stop-Loss", group=GRP_FRACTAL)
+bool use_fractal_tp = input.bool(true, "Enable Fractal Take-Profit", group=GRP_FRACTAL)
+float sl_base_atr = input.float(1.2, "Base SL ATR Multiplikator", minval=0.3, maxval=5.0, step=0.1, group=GRP_FRACTAL)
+float tp_base_atr = input.float(3.5, "Base TP ATR Multiplikator", minval=1.0, maxval=12.0, step=0.1, group=GRP_FRACTAL)
+float tp_max_atr = input.float(8.0, "Max TP ATR Multiplikator", minval=2.0, maxval=20.0, step=0.1, group=GRP_FRACTAL)
+bool use_ml_adaptive = input.bool(true, "Enable ML Adaptive SL/TP", group=GRP_FRACTAL)
+int ml_lookback = input.int(100, "ML Training Window (Bars)", minval=20, maxval=500, group=GRP_FRACTAL)
+float ml_lr = input.float(0.15, "ML Learning Rate", minval=0.01, maxval=1.0, step=0.01, group=GRP_FRACTAL)
+bool use_fractal_tp_scale = input.bool(true, "Enable Fractal TP Scaling (1→2→3)", group=GRP_FRACTAL)
+float tp_scale_1 = input.float(1.5, "TP Scale 1 (ATR)", minval=0.5, maxval=5.0, step=0.1, group=GRP_FRACTAL)
+float tp_scale_2 = input.float(3.0, "TP Scale 2 (ATR)", minval=1.0, maxval=8.0, step=0.1, group=GRP_FRACTAL)
+float tp_scale_3 = input.float(5.5, "TP Scale 3 (ATR)", minval=2.0, maxval=15.0, step=0.1, group=GRP_FRACTAL)
+float tp_partial_1 = input.float(0.33, "Close % at TP1", minval=0.1, maxval=1.0, step=0.05, group=GRP_FRACTAL)
+float tp_partial_2 = input.float(0.33, "Close % at TP2", minval=0.1, maxval=1.0, step=0.05, group=GRP_FRACTAL)
+bool use_breakeven = input.bool(true, "Auto Breakeven nach TP1", group=GRP_FRACTAL)
+float be_offset = input.float(0.3, "Breakeven Offset (ATR)", minval=0.0, maxval=2.0, step=0.1, group=GRP_FRACTAL)
+
+// ============================================================================
+// GRUPPE 4: AGGRESSIVE RISK MANAGEMENT
+// ============================================================================
+string GRP_RISK = "Aggressive Risk Management"
+bool use_trail = input.bool(true, "Trailing Stop (Aggressive)", group=GRP_RISK)
+float trail_atr = input.float(0.9, "Trailing Stop ATR Mult (Tight)", minval=0.2, maxval=3.0, step=0.1, group=GRP_RISK)
+bool use_max_dd = input.bool(true, "Max Drawdown Breaker", group=GRP_RISK)
+float max_dd_pct = input.float(12.0, "Max Drawdown % (Aggressive)", minval=1.0, maxval=50.0, step=0.5, group=GRP_RISK)
+bool use_max_bars = input.bool(true, "Max Bars Held Exit", group=GRP_RISK)
+int max_bars_held = input.int(36, "Max Bars in Position", minval=3, maxval=500, group=GRP_RISK)
+bool use_time_decay = input.bool(true, "Time-Decay Position Exit", group=GRP_RISK)
+float decay_start = input.float(0.6, "Decay Start (% of max_bars)", minval=0.1, maxval=1.0, step=0.05, group=GRP_RISK)
+
+// ============================================================================
+// GRUPPE 5: AGGRESSIVE SIGNAL FILTER
+// ============================================================================
+string GRP_FILTER = "Aggressive Signal Filter"
+int min_conf = input.int(13, "Min. Confidence Score (High)", minval=1, maxval=25, group=GRP_FILTER)
+bool use_vol = input.bool(true, "Volumen-Filter", group=GRP_FILTER)
+float vol_mult = input.float(1.15, "Volumen-Multiplikator", minval=1.0, maxval=5.0, step=0.05, group=GRP_FILTER)
+int vol_period = input.int(14, "Volumen SMA Perioden", minval=5, maxval=100, group=GRP_FILTER)
+bool use_time = input.bool(false, "Session-Zeitfilter", group=GRP_FILTER)
+int sess_start = input.int(0, "Session Start (UTC)", minval=0, maxval=23, group=GRP_FILTER)
+int sess_end = input.int(23, "Session Ende (UTC)", minval=0, maxval=23, group=GRP_FILTER)
+bool use_daily = input.bool(true, "Daily Loss Limit", group=GRP_FILTER)
+float daily_lim = input.float(5.0, "Daily Loss Limit % (Aggressive)", minval=0.5, maxval=25.0, step=0.5, group=GRP_FILTER)
+bool use_ema_filter = input.bool(true, "EMA 200 Trendfilter", group=GRP_FILTER)
+bool use_rsi_filter = input.bool(true, "RSI Extremzonen-Filter", group=GRP_FILTER)
+float rsi_ob = input.float(82.0, "RSI Overbought (Aggressive)", minval=60.0, maxval=98.0, step=1.0, group=GRP_FILTER)
+float rsi_os = input.float(18.0, "RSI Oversold (Aggressive)", minval=2.0, maxval=40.0, step=1.0, group=GRP_FILTER)
+bool use_atr_filter = input.bool(true, "ATR Volatilitaets-Filter", group=GRP_FILTER)
+float atr_min_pct = input.float(0.2, "ATR Min % vom Preis", minval=0.01, maxval=2.0, step=0.01, group=GRP_FILTER)
+bool allow_short = input.bool(true, "Shorts erlauben (Futures Aggressive)", group=GRP_FILTER)
+bool use_momentum = input.bool(true, "Momentum Burst Filter", group=GRP_FILTER)
+int mom_period = input.int(10, "Momentum Period", minval=3, maxval=50, group=GRP_FILTER)
+float mom_threshold = input.float(2.5, "Momentum Threshold (ATR)", minval=0.5, maxval=10.0, step=0.1, group=GRP_FILTER)
+bool use_vwap = input.bool(true, "VWAP Deviation Filter", group=GRP_FILTER)
+float vwap_dev = input.float(1.5, "VWAP Deviation (StdDev)", minval=0.5, maxval=5.0, step=0.1, group=GRP_FILTER)
+
+// ============================================================================
+// GRUPPE 6: PIONEX SIGNAL BOT
+// ============================================================================
+string GRP_PIONEX = "Pionex Signal Bot"
+string contracts = input.string("0.001", "Contracts (Fallback)", group=GRP_PIONEX)
+bool send_close = input.bool(true, "Close-Alerts senden", group=GRP_PIONEX)
+bool send_tp_alert = input.bool(true, "TP-Alerts senden", group=GRP_PIONEX)
+string p_sec = input.string("DEIN_PIONEX_SECRET", "Pionex Secret", group=GRP_PIONEX)
+
+// ============================================================================
+// CORE CALCULATIONS & SAFEGUARDS
+// ============================================================================
+float atr_val = ta.atr(14)
+float ema200 = ta.ema(close, 200)
+float rsi_val = ta.rsi(close, 14)
+float vol_sma = ta.sma(volume, vol_period)
+float vwap_val = ta.vwap(hlc3)
+float momentum = close - close[mom_period]
+
+// Error-Handling: ATR Sanity Check
+if atr_val <= 0 or na(atr_val)
+    f_log_error(ERR_ATR_ZERO, "ATR ist Null oder NA — Fallback auf letzten gueltigen Wert")
+    atr_val := nz(atr_val[1], close * 0.01)
+
+// Error-Handling: Price Sanity Check
+if close <= 0 or na(close)
+    f_log_error(ERR_PRICE_NAN, "Preis ist ungueltig — Trade-Engine pausiert")
+
+// ============================================================================
+// FRACTAL ANALYSIS ENGINE
+// ============================================================================
+float fractal_high = ta.pivothigh(high, 5, 5)
+float fractal_low = ta.pivotlow(low, 5, 5)
+
+var array<float> fractal_highs = array.new<float>()
+var array<float> fractal_lows = array.new<float>()
+
+if not na(fractal_high)
+    array.push(fractal_highs, fractal_high)
+    if array.size(fractal_highs) > 20
+        array.shift(fractal_highs)
+
+if not na(fractal_low)
+    array.push(fractal_lows, fractal_low)
+    if array.size(fractal_lows) > 20
+        array.shift(fractal_lows)
+
+// Nearest Fractal Levels
+float nearest_fractal_high = na
+float nearest_fractal_low = na
+
+if array.size(fractal_highs) > 0
+    float min_dist = 999999.0
+    for i = 0 to array.size(fractal_highs) - 1
+        float fh = array.get(fractal_highs, i)
+        float dist = math.abs(close - fh)
+        if dist < min_dist and fh > close
+            min_dist := dist
+            nearest_fractal_high := fh
+
+if array.size(fractal_lows) > 0
+    float min_dist = 999999.0
+    for i = 0 to array.size(fractal_lows) - 1
+        float fl = array.get(fractal_lows, i)
+        float dist = math.abs(close - fl)
+        if dist < min_dist and fl < close
+            min_dist := dist
+            nearest_fractal_low := fl
+
+// ============================================================================
+// ML ADAPTIVE SL/TP ENGINE
+// ============================================================================
+var array<float> trade_results = array.new<float>()
+var array<float> sl_multipliers = array.new<float>()
+var array<float> tp_multipliers = array.new<float>()
+var float current_sl_mult = sl_base_atr
+var float current_tp_mult = tp_base_atr
+var float ml_bias = 0.0
+
+// Record trade outcomes
+if strategy.closedtrades > 0 and strategy.closedtrades != strategy.closedtrades[1]
+    float last_pnl = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    array.push(trade_results, last_pnl)
+    array.push(sl_multipliers, current_sl_mult)
+    array.push(tp_multipliers, current_tp_mult)
+    if array.size(trade_results) > ml_lookback
+        array.shift(trade_results)
+        array.shift(sl_multipliers)
+        array.shift(tp_multipliers)
+
+// ML Gradient Descent for SL/TP Optimization
+if use_ml_adaptive and array.size(trade_results) >= 20 and bar_index % 5 == 0
+    float grad_sl = 0.0
+    float grad_tp = 0.0
+    int sz = array.size(trade_results)
+    int window = math.min(ml_lookback, sz)
+    for i = 0 to window - 1
+        float pnl = array.get(trade_results, sz - 1 - i)
+        float sl_m = array.get(sl_multipliers, sz - 1 - i)
+        float tp_m = array.get(tp_multipliers, sz - 1 - i)
+        float weight = math.exp(-i * 0.05)
+        grad_sl += weight * pnl * (sl_m - sl_base_atr) * 0.01
+        grad_tp += weight * pnl * (tp_m - tp_base_atr) * 0.01
+    grad_sl := grad_sl / window
+    grad_tp := grad_tp / window
+    current_sl_mult := math.max(0.5, math.min(4.0, current_sl_mult + ml_lr * grad_sl))
+    current_tp_mult := math.max(1.5, math.min(tp_max_atr, current_tp_mult + ml_lr * grad_tp))
+    ml_bias := ml_bias * 0.95 + (grad_tp - grad_sl) * 0.05
+
+// ============================================================================
+// CISD STATE MACHINE (Enhanced)
+// ============================================================================
+f_cisd(float src_open, float src_close, float src_high, float src_low) =>
+    var int state = 0
+    bool is_bull_candle = src_close > src_open
+    bool is_bear_candle = src_close < src_open
+    bool bull_cisd = false
+    bool bear_cisd = false
+    bool cisd_strength = false
+    if is_bear_candle and state != -1
+        if src_close < src_open[1] and not (src_high < src_high[1] and src_low > src_low[1])
+            state := -1
+            bear_cisd := true
+            cisd_strength := (src_open - src_close) > (atr_val * 0.7)
+    if is_bull_candle and state != 1
+        if src_close > src_open[1] and not (src_high < src_high[1] and src_low > src_low[1])
+            state := 1
+            bull_cisd := true
+            cisd_strength := (src_close - src_open) > (atr_val * 0.7)
+    [state, bull_cisd, bear_cisd, cisd_strength]
+
+// ============================================================================
+// MTF CISD (Root-Level) — With Error Handling
+// ============================================================================
+[htf_o_h4, htf_c_h4, htf_h_h4, htf_l_h4] = request.security(syminfo.tickerid, str.tostring(tf_h4), [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+[state_raw_h4, _, _, strength_h4] = f_cisd(htf_o_h4, htf_c_h4, htf_h_h4, htf_l_h4)
+int state_h4 = en_h4 ? state_raw_h4 : 0
+
+[htf_o_h1, htf_c_h1, htf_h_h1, htf_l_h1] = request.security(syminfo.tickerid, str.tostring(tf_h1), [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+[state_raw_h1, _, _, strength_h1] = f_cisd(htf_o_h1, htf_c_h1, htf_h_h1, htf_l_h1)
+int state_h1 = en_h1 ? state_raw_h1 : 0
+
+[htf_o_m15, htf_c_m15, htf_h_m15, htf_l_m15] = request.security(syminfo.tickerid, str.tostring(tf_m15), [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+[state_raw_m15, _, _, strength_m15] = f_cisd(htf_o_m15, htf_c_m15, htf_h_m15, htf_l_m15)
+int state_m15 = en_m15 ? state_raw_m15 : 0
+
+[htf_o_m5, htf_c_m5, htf_h_m5, htf_l_m5] = request.security(syminfo.tickerid, str.tostring(tf_m5), [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+[state_raw_m5, _, _, strength_m5] = f_cisd(htf_o_m5, htf_c_m5, htf_h_m5, htf_l_m5)
+int state_m5 = en_m5 ? state_raw_m5 : 0
+
+[htf_o_m1, htf_c_m1, htf_h_m1, htf_l_m1] = request.security(syminfo.tickerid, str.tostring(tf_m1), [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+[state_raw_m1, _, _, strength_m1] = f_cisd(htf_o_m1, htf_c_m1, htf_h_m1, htf_l_m1)
+int state_m1 = en_m1 ? state_raw_m1 : 0
+
+[local_state, local_bull_cisd, local_bear_cisd, local_strength] = f_cisd(open, close, high, low)
+
+// ============================================================================
+// MTF ALIGNMENT — AGGRESSIVE SCORING
+// ============================================================================
+int bull_count = (en_h4 and state_h4 == 1 ? 1 : 0) + (en_h1 and state_h1 == 1 ? 1 : 0) + (en_m15 and state_m15 == 1 ? 1 : 0) + (en_m5 and state_m5 == 1 ? 1 : 0) + (en_m1 and state_m1 == 1 ? 1 : 0)
+int bear_count = (en_h4 and state_h4 == -1 ? 1 : 0) + (en_h1 and state_h1 == -1 ? 1 : 0) + (en_m15 and state_m15 == -1 ? 1 : 0) + (en_m5 and state_m5 == -1 ? 1 : 0) + (en_m1 and state_m1 == -1 ? 1 : 0)
+int active_tfs = (en_h4 ? 1 : 0) + (en_h1 ? 1 : 0) + (en_m15 ? 1 : 0) + (en_m5 ? 1 : 0) + (en_m1 ? 1 : 0)
+
+bool bull_aligned = bull_count >= min_alignment
+bool bear_aligned = bear_count >= min_alignment
+bool super_bull = bull_count >= super_alignment
+bool super_bear = bear_count >= super_alignment
+
+// ============================================================================
+// ZONE MANAGEMENT ENGINE (OB/FVG/LIQUIDITY)
+// ============================================================================
+f_push_zone(array<float> tops, array<float> bottoms, float raw_top, float raw_bottom, int max_items) =>
+    array.push(tops, math.max(raw_top, raw_bottom))
+    array.push(bottoms, math.min(raw_top, raw_bottom))
+    if array.size(tops) > max_items
+        array.shift(tops)
+        array.shift(bottoms)
+
+f_zone_touch(array<float> tops, array<float> bottoms, int recent_count) =>
+    bool touched = false
+    int zone_count = array.size(tops)
+    if zone_count > 0
+        for offset = 0 to math.min(recent_count, zone_count) - 1
+            int idx = zone_count - 1 - offset
+            if low <= array.get(tops, idx) and high >= array.get(bottoms, idx)
+                touched := true
+                break
+    touched
+
+f_zone_proximity(array<float> tops, array<float> bottoms, int recent_count) =>
+    float proximity = 999999.0
+    int zone_count = array.size(tops)
+    if zone_count > 0
+        for offset = 0 to math.min(recent_count, zone_count) - 1
+            int idx = zone_count - 1 - offset
+            float zone_mid = (array.get(tops, idx) + array.get(bottoms, idx)) / 2
+            float dist = math.abs(close - zone_mid)
+            if dist < proximity
+                proximity := dist
+    proximity
+
+// ============================================================================
+// HEADLESS OB/FVG/LIQUIDITY ENGINE
+// ============================================================================
+var array<float> bull_ob_tops = array.new<float>()
+var array<float> bull_ob_bots = array.new<float>()
+var array<float> bear_ob_tops = array.new<float>()
+var array<float> bear_ob_bots = array.new<float>()
+var array<float> bull_fvg_tops = array.new<float>()
+var array<float> bull_fvg_bots = array.new<float>()
+var array<float> bear_fvg_tops = array.new<float>()
+var array<float> bear_fvg_bots = array.new<float>()
+var array<float> liq_highs = array.new<float>()
+var array<float> liq_lows = array.new<float>()
+
+float pivot_high = ta.pivothigh(high, ob_pivot, ob_pivot)
+float pivot_low = ta.pivotlow(low, ob_pivot, ob_pivot)
+float ob_atr = atr_val * ob_atr_mul
+
+// Order Blocks
+if not na(pivot_low) and bar_index - ob_pivot >= 0
+    float top = math.max(high[ob_pivot], low[ob_pivot])
+    float bot = math.min(high[ob_pivot], low[ob_pivot])
+    if (top - bot) <= ob_atr
+        f_push_zone(bull_ob_tops, bull_ob_bots, top, bot, max_ob_boxes)
+
+if not na(pivot_high) and bar_index - ob_pivot >= 0
+    float top = math.max(high[ob_pivot], low[ob_pivot])
+    float bot = math.min(high[ob_pivot], low[ob_pivot])
+    if (top - bot) <= ob_atr
+        f_push_zone(bear_ob_tops, bear_ob_bots, top, bot, max_ob_boxes)
+
+// FVG Detection (Aggressive)
+if low > high[2] and close[1] > open[1]
+    float fvg_size = low - high[2]
+    if not en_fvg_aggressive or fvg_size >= atr_val * fvg_min_size
+        f_push_zone(bull_fvg_tops, bull_fvg_bots, low, high[2], max_ob_boxes)
+
+if high < low[2] and close[1] < open[1]
+    float fvg_size = low[2] - high
+    if not en_fvg_aggressive or fvg_size >= atr_val * fvg_min_size
+        f_push_zone(bear_fvg_tops, bear_fvg_bots, low[2], high, max_ob_boxes)
+
+// Liquidity Sweeps
+if en_liq_sweep
+    float swing_high = ta.highest(high, liq_lookback)
+    float swing_low = ta.lowest(low, liq_lookback)
+    if high > swing_high[1] and close < swing_high[1]
+        array.push(liq_highs, swing_high[1])
+        if array.size(liq_highs) > 15
+            array.shift(liq_highs)
+    if low < swing_low[1] and close > swing_low[1]
+        array.push(liq_lows, swing_low[1])
+        if array.size(liq_lows) > 15
+            array.shift(liq_lows)
+
+// Zone Touch Detection
+bool bull_ob_touch = f_zone_touch(bull_ob_tops, bull_ob_bots, 7)
+bool bear_ob_touch = f_zone_touch(bear_ob_tops, bear_ob_bots, 7)
+bool bull_fvg_touch = f_zone_touch(bull_fvg_tops, bull_fvg_bots, 7)
+bool bear_fvg_touch = f_zone_touch(bear_fvg_tops, bear_fvg_bots, 7)
+
+float bull_zone_prox = f_zone_proximity(bull_ob_tops, bull_ob_bots, 5)
+float bear_zone_prox = f_zone_proximity(bear_ob_tops, bear_ob_bots, 5)
+
+// ============================================================================
+// AGGRESSIVE CONFIDENCE SCORING (0-25)
+// ============================================================================
+int bull_conf = 0
+bull_conf += (bull_count == active_tfs and active_tfs >= 3) ? 5 : (bull_count >= min_alignment ? 3 : 0)
+bull_conf += (super_bull ? 3 : 0)
+bull_conf += (local_bull_cisd ? 3 : 0)
+bull_conf += (local_strength ? 2 : 0)
+bull_conf += (bull_ob_touch ? 3 : 0)
+bull_conf += (bull_fvg_touch ? 3 : 0)
+bull_conf += (bull_zone_prox < atr_val * 0.5 ? 2 : 0)
+bull_conf += ((use_vol and volume > vol_sma * vol_mult) ? 2 : (not use_vol ? 2 : 0))
+bull_conf += ((close > open and (close - open) > atr_val * 0.6) ? 2 : 0)
+bull_conf += (use_momentum and momentum > atr_val * mom_threshold ? 2 : 0)
+bull_conf += (use_vwap and close > vwap_val + ta.stdev(close, 20) * vwap_dev ? 1 : 0)
+
+int bear_conf = 0
+bear_conf += (bear_count == active_tfs and active_tfs >= 3) ? 5 : (bear_count >= min_alignment ? 3 : 0)
+bear_conf += (super_bear ? 3 : 0)
+bear_conf += (local_bear_cisd ? 3 : 0)
+bear_conf += (local_strength ? 2 : 0)
+bear_conf += (bear_ob_touch ? 3 : 0)
+bear_conf += (bear_fvg_touch ? 3 : 0)
+bear_conf += (bear_zone_prox < atr_val * 0.5 ? 2 : 0)
+bear_conf += ((use_vol and volume > vol_sma * vol_mult) ? 2 : (not use_vol ? 2 : 0))
+bear_conf += ((open > close and (open - close) > atr_val * 0.6) ? 2 : 0)
+bear_conf += (use_momentum and momentum < -atr_val * mom_threshold ? 2 : 0)
+bear_conf += (use_vwap and close < vwap_val - ta.stdev(close, 20) * vwap_dev ? 1 : 0)
+
+// ============================================================================
+// FILTER ENGINE — AGGRESSIVE
+// ============================================================================
+int current_hour = hour(time, "UTC")
+bool time_ok = use_time ? (sess_start < sess_end ? (current_hour >= sess_start and current_hour < sess_end) : (current_hour >= sess_start or current_hour < sess_end)) : true
+
+bool all_filters_long = time_ok and (use_ema_filter ? (close > ema200) : true) and (use_rsi_filter ? (rsi_val < rsi_ob) : true) and (use_atr_filter ? ((atr_val / close) * 100 >= atr_min_pct) : true) and (use_vol ? (volume > vol_sma * vol_mult) : true) and (use_momentum ? (momentum > -atr_val * mom_threshold * 0.5) : true) and (use_vwap ? (close > vwap_val - ta.stdev(close, 20) * vwap_dev * 2) : true)
+
+bool all_filters_short = time_ok and (use_ema_filter ? (close < ema200) : true) and (use_rsi_filter ? (rsi_val > rsi_os) : true) and (use_atr_filter ? ((atr_val / close) * 100 >= atr_min_pct) : true) and (use_vol ? (volume > vol_sma * vol_mult) : true) and (use_momentum ? (momentum < atr_val * mom_threshold * 0.5) : true) and (use_vwap ? (close < vwap_val + ta.stdev(close, 20) * vwap_dev * 2) : true)
+
+// ============================================================================
+// RISK BREAKERS — AGGRESSIVE
+// ============================================================================
+var float daily_start_price = close
+var float equity_peak = close
+var float daily_pnl_pct = 0.0
+
+if dayofmonth != dayofmonth[1]
+    daily_start_price := close
+    equity_peak := close
+
+equity_peak := math.max(equity_peak, close)
+daily_pnl_pct := ((close - daily_start_price) / daily_start_price) * 100
+float current_dd_pct = ((equity_peak - close) / equity_peak) * 100
+
+bool risk_ok = (use_daily ? (daily_pnl_pct > -daily_lim) : true) and (use_max_dd ? (current_dd_pct < max_dd_pct) : true) and not f_recovery_active()
+
+// ============================================================================
+// POSITION & STATE MACHINE — ENHANCED
+// ============================================================================
+var int position = 0
+var int pending_entry_side = 0
+var float entry_price = na
+var float sl_price = na
+var float tp_price_1 = na
+var float tp_price_2 = na
+var float tp_price_3 = na
+var float trail_price = na
+var int bars_in_pos = 0
+var int tp_level = 0
+var float be_price = na
+
+float strategy_pos_size = strategy.position_size
+float strategy_prev_pos_size = nz(strategy.position_size[1], 0.0)
+int current_position = strategy_pos_size > 0 ? 1 : strategy_pos_size < 0 ? -1 : 0
+position := current_position
+
+if position != 0
+    entry_price := strategy.position_avg_price
+
+if current_position != 0 and strategy_prev_pos_size == 0
+    pending_entry_side := 0
+    tp_level := 0
+    be_price := na
+
+bars_in_pos := position != 0 ? (position != (strategy_prev_pos_size > 0 ? 1 : strategy_prev_pos_size < 0 ? -1 : 0) ? 0 : bars_in_pos + 1) : 0
+
+if ta.change(strategy.closedtrades) > 0
+    entry_price := na
+    sl_price := na
+    tp_price_1 := na
+    tp_price_2 := na
+    tp_price_3 := na
+    trail_price := na
+    pending_entry_side := 0
+    bars_in_pos := 0
+    tp_level := 0
+    be_price := na
+
+// ============================================================================
+// FRACTAL SL/TP CALCULATION ENGINE
+// ============================================================================
+float long_sl_fractal = use_fractal_sl and not na(nearest_fractal_low) ? nearest_fractal_low - atr_val * 0.3 : close - atr_val * current_sl_mult
+float short_sl_fractal = use_fractal_sl and not na(nearest_fractal_high) ? nearest_fractal_high + atr_val * 0.3 : close + atr_val * current_sl_mult
+
+float long_sl_atr = close - atr_val * current_sl_mult
+float short_sl_atr = close + atr_val * current_sl_mult
+
+float long_sl = use_fractal_sl ? math.max(long_sl_fractal, long_sl_atr * 0.7) : long_sl_atr
+float short_sl = use_fractal_sl ? math.min(short_sl_fractal, short_sl_atr * 1.3) : short_sl_atr
+
+float long_tp_1 = close + atr_val * tp_scale_1
+float long_tp_2 = close + atr_val * tp_scale_2
+float long_tp_3 = close + atr_val * tp_scale_3
+
+float short_tp_1 = close - atr_val * tp_scale_1
+float short_tp_2 = close - atr_val * tp_scale_2
+float short_tp_3 = close - atr_val * tp_scale_3
+
+if use_ml_adaptive
+    long_tp_1 := close + atr_val * math.min(tp_max_atr, current_tp_mult * 0.5)
+    long_tp_2 := close + atr_val * math.min(tp_max_atr, current_tp_mult * 0.9)
+    long_tp_3 := close + atr_val * math.min(tp_max_atr, current_tp_mult * 1.4)
+    short_tp_1 := close - atr_val * math.min(tp_max_atr, current_tp_mult * 0.5)
+    short_tp_2 := close - atr_val * math.min(tp_max_atr, current_tp_mult * 0.9)
+    short_tp_3 := close - atr_val * math.min(tp_max_atr, current_tp_mult * 1.4)
+
+// ============================================================================
+// TRAILING STOP — AGGRESSIVE TIGHT TRAIL
+// ============================================================================
+if position == 1 and use_trail and not na(trail_price)
+    trail_price := math.max(trail_price, high - atr_val * trail_atr)
+    if use_breakeven and tp_level >= 1 and not na(be_price)
+        trail_price := math.max(trail_price, be_price)
+
+if position == -1 and use_trail and not na(trail_price)
+    trail_price := math.min(trail_price, low + atr_val * trail_atr)
+    if use_breakeven and tp_level >= 1 and not na(be_price)
+        trail_price := math.min(trail_price, be_price)
+
+float active_long_stop = use_trail and not na(trail_price) ? math.max(sl_price, trail_price) : sl_price
+float active_short_stop = use_trail and not na(trail_price) ? math.min(sl_price, trail_price) : sl_price
+
+// ============================================================================
+// TIME DECAY EXIT
+// ============================================================================
+float decay_factor = 1.0
+if use_time_decay and bars_in_pos > int(max_bars_held * decay_start)
+    decay_factor := 1.0 - ((bars_in_pos - int(max_bars_held * decay_start)) / float(max_bars_held)) * 0.5
+    decay_factor := math.max(0.3, decay_factor)
+
+// ============================================================================
+// SIGNAL GENERATION — AGGRESSIVE ENTRY
+// ============================================================================
+bool recovery_block = f_recovery_active()
+
+bool long_signal = bull_aligned and local_bull_cisd and bull_conf >= min_conf and all_filters_long and risk_ok and barstate.isconfirmed and position == 0 and pending_entry_side == 0 and not recovery_block and not f_has_recent_error(ERR_ATR_ZERO, 10) and not f_has_recent_error(ERR_PRICE_NAN, 10)
+
+bool short_signal = allow_short and bear_aligned and local_bear_cisd and bear_conf >= min_conf and all_filters_short and risk_ok and barstate.isconfirmed and position == 0 and pending_entry_side == 0 and not recovery_block and not f_has_recent_error(ERR_ATR_ZERO, 10) and not f_has_recent_error(ERR_PRICE_NAN, 10)
+
+// ============================================================================
+// POSITION SIZING — AGGRESSIVE 40% MARGIN
+// ============================================================================
+float risk_per_trade = 0.02
+float sl_dist_long = math.abs(close - long_sl)
+float sl_dist_short = math.abs(close - short_sl)
+float risk_amount = strategy.equity * risk_per_trade
+
+float calc_qty_long = sl_dist_long > 0 ? risk_amount / sl_dist_long : 0.0
+float calc_qty_short = sl_dist_short > 0 ? risk_amount / sl_dist_short : 0.0
+
+float max_margin_qty = close > 0 ? (strategy.equity * 0.40) / close : 0.0
+float entry_qty_long = math.min(calc_qty_long > 0 ? calc_qty_long : nz(str.tonumber(contracts), 0.0), max_margin_qty)
+float entry_qty_short = math.min(calc_qty_short > 0 ? calc_qty_short : nz(str.tonumber(contracts), 0.0), max_margin_qty)
+
+// ============================================================================
+// FORCED EXIT CONDITIONS
+// ============================================================================
+bool forced_exit_long = position == 1 and barstate.isconfirmed and ((use_max_bars and bars_in_pos >= max_bars_held) or (use_time_decay and bars_in_pos >= int(max_bars_held * decay_start) and not bull_aligned) or not bull_aligned)
+
+bool forced_exit_short = position == -1 and barstate.isconfirmed and ((use_max_bars and bars_in_pos >= max_bars_held) or (use_time_decay and bars_in_pos >= int(max_bars_held * decay_start) and not bear_aligned) or not bear_aligned)
+
+// ============================================================================
+// PIONEX ALERT MESSAGES
+// ============================================================================
+string m_b = '{"pair":"' + syminfo.basecurrency + '' + syminfo.currency + '","action":"ENTER_LONG","secret":"' + p_sec + '"}'
+string m_s = '{"pair":"' + syminfo.basecurrency + '' + syminfo.currency + '","action":"EXIT_LONG","secret":"' + p_sec + '"}'
+string m_sb = '{"pair":"' + syminfo.basecurrency + '' + syminfo.currency + '","action":"ENTER_SHORT","secret":"' + p_sec + '"}'
+string m_ss = '{"pair":"' + syminfo.basecurrency + '' + syminfo.currency + '","action":"EXIT_SHORT","secret":"' + p_sec + '"}'
+string m_tp1 = '{"pair":"' + syminfo.basecurrency + '' + syminfo.currency + '","action":"TP1_HIT","secret":"' + p_sec + '"}'
+string m_tp2 = '{"pair":"' + syminfo.basecurrency + '' + syminfo.currency + '","action":"TP2_HIT","secret":"' + p_sec + '"}'
+string m_tp3 = '{"pair":"' + syminfo.basecurrency + '' + syminfo.currency + '","action":"TP3_HIT","secret":"' + p_sec + '"}'
+
+// ============================================================================
+// EXECUTION ENGINE — LONG
+// ============================================================================
+if position == 1 and barstate.isconfirmed
+    if tp_level == 0 and high >= tp_price_1
+        tp_level := 1
+        if use_breakeven
+            be_price := entry_price + atr_val * be_offset
+        if send_tp_alert
+            alert(m_tp1, alert.freq_once_per_bar_close)
+        if use_fractal_tp_scale
+            strategy.close("Long", qty=math.round(entry_qty_long * tp_partial_1 / syminfo.mintick) * syminfo.mintick, comment="TP1")
+    if tp_level == 1 and high >= tp_price_2
+        tp_level := 2
+        if send_tp_alert
+            alert(m_tp2, alert.freq_once_per_bar_close)
+        if use_fractal_tp_scale
+            strategy.close("Long", qty=math.round(entry_qty_long * tp_partial_2 / syminfo.mintick) * syminfo.mintick, comment="TP2")
+    if tp_level == 2 and high >= tp_price_3
+        tp_level := 3
+        if send_tp_alert
+            alert(m_tp3, alert.freq_once_per_bar_close)
+        strategy.close("Long", comment="TP3 FULL")
+
+if forced_exit_long or (position == 1 and barstate.isconfirmed and low <= active_long_stop)
+    if send_close
+        alert(m_s, alert.freq_once_per_bar_close)
+    if forced_exit_long
+        strategy.close("Long", comment="FORCED")
+    else
+        strategy.close("Long", comment="SL")
+    f_log_error(ERR_SLTP_INVALID, "Long Position geschlossen — SL oder Forced Exit")
+
+// ============================================================================
+// EXECUTION ENGINE — SHORT
+// ============================================================================
+if position == -1 and barstate.isconfirmed
+    if tp_level == 0 and low <= tp_price_1
+        tp_level := 1
+        if use_breakeven
+            be_price := entry_price - atr_val * be_offset
+        if send_tp_alert
+            alert(m_tp1, alert.freq_once_per_bar_close)
+        if use_fractal_tp_scale
+            strategy.close("Short", qty=math.round(entry_qty_short * tp_partial_1 / syminfo.mintick) * syminfo.mintick, comment="TP1")
+    if tp_level == 1 and low <= tp_price_2
+        tp_level := 2
+        if send_tp_alert
+            alert(m_tp2, alert.freq_once_per_bar_close)
+        if use_fractal_tp_scale
+            strategy.close("Short", qty=math.round(entry_qty_short * tp_partial_2 / syminfo.mintick) * syminfo.mintick, comment="TP2")
+    if tp_level == 2 and low <= tp_price_3
+        tp_level := 3
+        if send_tp_alert
+            alert(m_tp3, alert.freq_once_per_bar_close)
+        strategy.close("Short", comment="TP3 FULL")
+
+if forced_exit_short or (position == -1 and barstate.isconfirmed and high >= active_short_stop)
+    if send_close
+        alert(m_ss, alert.freq_once_per_bar_close)
+    if forced_exit_short
+        strategy.close("Short", comment="FORCED")
+    else
+        strategy.close("Short", comment="SL")
+    f_log_error(ERR_SLTP_INVALID, "Short Position geschlossen — SL oder Forced Exit")
+
+// ============================================================================
+// ENTRY EXECUTION — LONG
+// ============================================================================
+if long_signal
+    pending_entry_side := 1
+    sl_price := long_sl
+    tp_price_1 := long_tp_1
+    tp_price_2 := long_tp_2
+    tp_price_3 := long_tp_3
+    trail_price := use_trail ? long_sl : na
+    bars_in_pos := 0
+    tp_level := 0
+    be_price := na
+    strategy.entry("Long", strategy.long, qty=entry_qty_long)
+    strategy.exit("Long SL", from_entry="Long", stop=sl_price)
+    alert(m_b, alert.freq_once_per_bar_close)
+
+// ============================================================================
+// ENTRY EXECUTION — SHORT
+// ============================================================================
+if short_signal
+    pending_entry_side := -1
+    sl_price := short_sl
+    tp_price_1 := short_tp_1
+    tp_price_2 := short_tp_2
+    tp_price_3 := short_tp_3
+    trail_price := use_trail ? short_sl : na
+    bars_in_pos := 0
+    tp_level := 0
+    be_price := na
+    strategy.entry("Short", strategy.short, qty=entry_qty_short)
+    strategy.exit("Short SL", from_entry="Short", stop=sl_price)
+    alert(m_sb, alert.freq_once_per_bar_close)
+
+// ============================================================================
+// VISUALIZATION — AGGRESSIVE ZONES
+// ============================================================================
+if barstate.islast
+    int ob_draw_count = math.min(array.size(bull_ob_tops), 5)
+    for i = 0 to ob_draw_count - 1
+        int idx = array.size(bull_ob_tops) - 1 - i
+        float t = array.get(bull_ob_tops, idx)
+        float b = array.get(bull_ob_bots, idx)
+        box.new(bar_index - 20, t, bar_index, b, bgcolor=color.new(color.green, 85), border_color=color.new(color.green, 60), border_width=1)
+    int bear_ob_draw = math.min(array.size(bear_ob_tops), 5)
+    for i = 0 to bear_ob_draw - 1
+        int idx = array.size(bear_ob_tops) - 1 - i
+        float t = array.get(bear_ob_tops, idx)
+        float b = array.get(bear_ob_bots, idx)
+        box.new(bar_index - 20, t, bar_index, b, bgcolor=color.new(color.red, 85), border_color=color.new(color.red, 60), border_width=1)
+
+if not na(nearest_fractal_high)
+    line.new(bar_index - 10, nearest_fractal_high, bar_index, nearest_fractal_high, color=color.new(color.red, 50), style=line.style_dashed, width=2)
+if not na(nearest_fractal_low)
+    line.new(bar_index - 10, nearest_fractal_low, bar_index, nearest_fractal_low, color=color.new(color.green, 50), style=line.style_dashed, width=2)
+
+// ============================================================================
+// ENTERPRISE DASHBOARD
+// ============================================================================
+var table dash = table.new(position.top_right, 2, 24, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.new(color.gray, 60))
+
+if barstate.islast
+    table.cell(dash, 0, 0, "F-35 FRACTAL v3.0", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=color.yellow, text_size=size.small)
+    table.cell(dash, 0, 1, "H4/H1/M15/M5/M1", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 1, str.tostring(state_h4) + "/" + str.tostring(state_h1) + "/" + str.tostring(state_m15) + "/" + str.tostring(state_m5) + "/" + str.tostring(state_m1), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 2, "Alignment", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(math.max(bull_count, bear_count)) + "/" + str.tostring(active_tfs), text_color=bull_aligned or bear_aligned ? color.green : color.gray, text_size=size.tiny)
+    table.cell(dash, 0, 3, "Confidence", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 3, str.tostring(math.max(bull_conf, bear_conf)) + "/25", text_color=math.max(bull_conf, bear_conf) >= min_conf ? color.green : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 4, "Position", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 4, position == 1 ? "LONG" : position == -1 ? "SHORT" : "FLAT", text_color=position == 1 ? color.green : position == -1 ? color.red : color.gray, text_size=size.tiny)
+    table.cell(dash, 0, 5, "Entry", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 5, not na(entry_price) ? str.tostring(entry_price, format.mintick) : "---", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 6, "Stop Loss", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 6, not na(sl_price) ? str.tostring(sl_price, format.mintick) : "---", text_color=color.red, text_size=size.tiny)
+    table.cell(dash, 0, 7, "TP1 / TP2 / TP3", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 7, (not na(tp_price_1) ? str.tostring(tp_price_1, format.mintick) : "-") + " / " + (not na(tp_price_2) ? str.tostring(tp_price_2, format.mintick) : "-") + " / " + (not na(tp_price_3) ? str.tostring(tp_price_3, format.mintick) : "-"), text_color=color.green, text_size=size.tiny)
+    table.cell(dash, 0, 8, "TP Level", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 8, str.tostring(tp_level) + "/3", text_color=tp_level > 0 ? color.green : color.gray, text_size=size.tiny)
+    table.cell(dash, 0, 9, "Bars Held", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 9, position != 0 ? str.tostring(bars_in_pos) + "/" + str.tostring(max_bars_held) : "---", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 10, "ATR(14)", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 10, str.tostring(atr_val, format.mintick), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 11, "RSI(14)", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 11, str.tostring(rsi_val, "#.#"), text_color=rsi_val > rsi_ob ? color.red : rsi_val < rsi_os ? color.green : color.white, text_size=size.tiny)
+    table.cell(dash, 0, 12, "Daily PnL", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 12, str.tostring(daily_pnl_pct, "#.##") + "%", text_color=daily_pnl_pct >= 0 ? color.green : color.red, text_size=size.tiny)
+    table.cell(dash, 0, 13, "Max DD", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 13, str.tostring(current_dd_pct, "#.##") + "% / " + str.tostring(max_dd_pct, "#.#") + "%", text_color=current_dd_pct < max_dd_pct ? color.green : color.red, text_size=size.tiny)
+    table.cell(dash, 0, 14, "Shorts", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 14, allow_short ? "ON (Futures)" : "OFF (Spot)", text_color=allow_short ? color.yellow : color.gray, text_size=size.tiny)
+    table.cell(dash, 0, 15, "Sizing", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 15, "40% Marge | " + (na(entry_qty_long) ? "0" : str.tostring(entry_qty_long, "#.####")), text_color=color.aqua, text_size=size.tiny)
+    table.cell(dash, 0, 16, "ML SL/TP Mult", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 16, str.tostring(current_sl_mult, "#.##") + " / " + str.tostring(current_tp_mult, "#.##"), text_color=use_ml_adaptive ? color.purple : color.gray, text_size=size.tiny)
+    table.cell(dash, 0, 17, "ML Bias", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 17, str.tostring(ml_bias, "#.###"), text_color=ml_bias > 0 ? color.green : ml_bias < 0 ? color.red : color.gray, text_size=size.tiny)
+    table.cell(dash, 0, 18, "Fractal H/L", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 18, (not na(nearest_fractal_high) ? str.tostring(nearest_fractal_high, format.mintick) : "-") + " / " + (not na(nearest_fractal_low) ? str.tostring(nearest_fractal_low, format.mintick) : "-"), text_color=color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 19, "Recovery", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 19, f_recovery_active() ? "ACTIVE (" + str.tostring(recovery_cooldown - (bar_index - last_err_bar)) + ")" : "READY", text_color=f_recovery_active() ? color.red : color.green, text_size=size.tiny)
+    table.cell(dash, 0, 20, "Error Count", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 20, str.tostring(array.size(err_log)), text_color=array.size(err_log) > 0 ? color.orange : color.gray, text_size=size.tiny)
+    table.cell(dash, 0, 21, "Momentum", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 21, str.tostring(momentum, format.mintick), text_color=momentum > 0 ? color.green : color.red, text_size=size.tiny)
+    table.cell(dash, 0, 22, "VWAP Dev", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 22, str.tostring((close - vwap_val) / ta.stdev(close, 20), "#.##") + "σ", text_color=close > vwap_val ? color.green : color.red, text_size=size.tiny)
+    table.cell(dash, 0, 23, "Mode", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 23, "AGGRESSIVE", text_color=color.fuchsia, text_size=size.tiny)

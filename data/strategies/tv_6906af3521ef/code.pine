@@ -1,0 +1,224 @@
+//@version=6
+// LuxAlgo Connector Strategy Bridge.
+// Reiner Connector: externe LuxAlgo-Signale rein, echte strategy.entry/strategy.close Orders raus.
+strategy(
+    title="LuxAlgo Connector Strategie Bridge",
+    shorttitle="Lux Connector",
+    overlay=true,
+    initial_capital=100,
+    currency=currency.USDT,
+    default_qty_type=strategy.cash,
+    default_qty_value=100,
+    pyramiding=0,
+    calc_on_every_tick=false,
+    process_orders_on_close=true,
+    commission_type=strategy.commission.percent,
+    commission_value=0.05,
+    slippage=2,
+    margin_long=0,
+    margin_short=0,
+    max_labels_count=200
+)
+
+string GRP_CONN = "1. LuxAlgo Verbindung"
+bool lux_quellen_verbunden = input.bool(false, "Lux Quellen verbunden", group=GRP_CONN, tooltip="Aktiviere dies erst, nachdem die LuxAlgo-Plots in den Quellen unten wirklich ausgewaehlt wurden.")
+string ausloese_modus = input.string("Nur neues Signal", "Ausloese-Modus", options=["Nur neues Signal", "Aktiver Zustand"], group=GRP_CONN, tooltip="Nur neues Signal: Order nur beim frischen Alignment. Aktiver Zustand: Order kann entstehen, solange die verbundenen Quellen aktiv sind und die Strategie flat ist.")
+float signal_schwelle = input.float(0.5, "Signal-Schwelle", minval=-10.0, maxval=10.0, step=0.1, group=GRP_CONN, tooltip="Ein Lux-Plot zaehlt als aktiv, wenn sein Wert groesser/gleich dieser Schwelle ist. Fuer 0/1-Flags meistens 0.5.")
+int signal_gedaechtnis = input.int(0, "Signal-Gedaechtnis Kerzen", minval=0, maxval=20, group=GRP_CONN, tooltip="0 bedeutet nur aktuelle Kerze. Hoehere Werte erlauben, dass mehrere Lux-Signale innerhalb weniger Kerzen zusammen als Alignment zaehlen.")
+
+string GRP_ENTRY = "2. Entry Signale"
+int long_mindest_alignment = input.int(1, "Long: Mindest-Alignment", minval=1, maxval=4, group=GRP_ENTRY, tooltip="So viele aktivierte Long-Quellen muessen gleichzeitig aktiv sein, damit ein Long-Entry erlaubt ist.")
+int short_mindest_alignment = input.int(1, "Short: Mindest-Alignment", minval=1, maxval=4, group=GRP_ENTRY, tooltip="So viele aktivierte Short-Quellen muessen gleichzeitig aktiv sein, damit ein Short-Entry erlaubt ist.")
+bool long_1_aktiv = input.bool(false, "Long Signal 1 aktiv", group=GRP_ENTRY, tooltip="Aktiviere diese Quelle nur, wenn du hier einen LuxAlgo Long/Bullish-Plot ausgewaehlt hast.")
+float long_1_quelle = input.source(close, "Long Signal 1 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den ersten LuxAlgo Long/Bullish Connector-Plot.")
+bool long_2_aktiv = input.bool(false, "Long Signal 2 aktiv", group=GRP_ENTRY, tooltip="Optionaler zweiter Long-Connector fuer zusaetzliche Lux-Confluence.")
+float long_2_quelle = input.source(close, "Long Signal 2 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den zweiten LuxAlgo Long/Bullish Connector-Plot.")
+bool long_3_aktiv = input.bool(false, "Long Signal 3 aktiv", group=GRP_ENTRY, tooltip="Optionaler dritter Long-Connector fuer zusaetzliche Lux-Confluence.")
+float long_3_quelle = input.source(close, "Long Signal 3 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den dritten LuxAlgo Long/Bullish Connector-Plot.")
+bool long_4_aktiv = input.bool(false, "Long Signal 4 aktiv", group=GRP_ENTRY, tooltip="Optionaler vierter Long-Connector fuer zusaetzliche Lux-Confluence.")
+float long_4_quelle = input.source(close, "Long Signal 4 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den vierten LuxAlgo Long/Bullish Connector-Plot.")
+bool short_1_aktiv = input.bool(false, "Short Signal 1 aktiv", group=GRP_ENTRY, tooltip="Aktiviere diese Quelle nur, wenn du hier einen LuxAlgo Short/Bearish-Plot ausgewaehlt hast.")
+float short_1_quelle = input.source(close, "Short Signal 1 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den ersten LuxAlgo Short/Bearish Connector-Plot.")
+bool short_2_aktiv = input.bool(false, "Short Signal 2 aktiv", group=GRP_ENTRY, tooltip="Optionaler zweiter Short-Connector fuer zusaetzliche Lux-Confluence.")
+float short_2_quelle = input.source(close, "Short Signal 2 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den zweiten LuxAlgo Short/Bearish Connector-Plot.")
+bool short_3_aktiv = input.bool(false, "Short Signal 3 aktiv", group=GRP_ENTRY, tooltip="Optionaler dritter Short-Connector fuer zusaetzliche Lux-Confluence.")
+float short_3_quelle = input.source(close, "Short Signal 3 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den dritten LuxAlgo Short/Bearish Connector-Plot.")
+bool short_4_aktiv = input.bool(false, "Short Signal 4 aktiv", group=GRP_ENTRY, tooltip="Optionaler vierter Short-Connector fuer zusaetzliche Lux-Confluence.")
+float short_4_quelle = input.source(close, "Short Signal 4 Quelle", group=GRP_ENTRY, tooltip="Waehle hier den vierten LuxAlgo Short/Bearish Connector-Plot.")
+
+string GRP_EXIT = "3. Exit und Reversal"
+bool reversal_aktiv = input.bool(false, "Reversal", group=GRP_EXIT, tooltip="Ein: ein gegnerisches Entry-Alignment dreht die Position. Aus: ein gegnerisches Entry-Alignment kann nur schliessen.")
+bool bei_gegensignal_schliessen = input.bool(true, "Bei Gegensignal schliessen", group=GRP_EXIT, tooltip="Wenn Reversal aus ist, schliesst ein gegnerisches Entry-Alignment die offene Position.")
+bool bei_exit_signal_schliessen = input.bool(true, "Bei Exit-Signal schliessen", group=GRP_EXIT, tooltip="Aktiviert die separaten Lux Exit-Quellen unten.")
+int long_exit_mindest_alignment = input.int(1, "Long Exit: Mindest-Alignment", minval=1, maxval=4, group=GRP_EXIT, tooltip="So viele aktivierte Long-Exit-Quellen muessen aktiv sein, um einen Long zu schliessen.")
+int short_exit_mindest_alignment = input.int(1, "Short Exit: Mindest-Alignment", minval=1, maxval=4, group=GRP_EXIT, tooltip="So viele aktivierte Short-Exit-Quellen muessen aktiv sein, um einen Short zu schliessen.")
+bool long_exit_1_aktiv = input.bool(false, "Long Exit 1 aktiv", group=GRP_EXIT, tooltip="Optional: Lux Exit-Plot, der Long-Positionen schliessen soll.")
+float long_exit_1_quelle = input.source(close, "Long Exit 1 Quelle", group=GRP_EXIT, tooltip="Waehle hier den ersten LuxAlgo Exit-Plot fuer Long-Positionen.")
+bool long_exit_2_aktiv = input.bool(false, "Long Exit 2 aktiv", group=GRP_EXIT, tooltip="Optionaler zweiter Long-Exit Connector.")
+float long_exit_2_quelle = input.source(close, "Long Exit 2 Quelle", group=GRP_EXIT, tooltip="Waehle hier den zweiten LuxAlgo Exit-Plot fuer Long-Positionen.")
+bool long_exit_3_aktiv = input.bool(false, "Long Exit 3 aktiv", group=GRP_EXIT, tooltip="Optionaler dritter Long-Exit Connector.")
+float long_exit_3_quelle = input.source(close, "Long Exit 3 Quelle", group=GRP_EXIT, tooltip="Waehle hier den dritten LuxAlgo Exit-Plot fuer Long-Positionen.")
+bool long_exit_4_aktiv = input.bool(false, "Long Exit 4 aktiv", group=GRP_EXIT, tooltip="Optionaler vierter Long-Exit Connector.")
+float long_exit_4_quelle = input.source(close, "Long Exit 4 Quelle", group=GRP_EXIT, tooltip="Waehle hier den vierten LuxAlgo Exit-Plot fuer Long-Positionen.")
+bool short_exit_1_aktiv = input.bool(false, "Short Exit 1 aktiv", group=GRP_EXIT, tooltip="Optional: Lux Exit-Plot, der Short-Positionen schliessen soll.")
+float short_exit_1_quelle = input.source(close, "Short Exit 1 Quelle", group=GRP_EXIT, tooltip="Waehle hier den ersten LuxAlgo Exit-Plot fuer Short-Positionen.")
+bool short_exit_2_aktiv = input.bool(false, "Short Exit 2 aktiv", group=GRP_EXIT, tooltip="Optionaler zweiter Short-Exit Connector.")
+float short_exit_2_quelle = input.source(close, "Short Exit 2 Quelle", group=GRP_EXIT, tooltip="Waehle hier den zweiten LuxAlgo Exit-Plot fuer Short-Positionen.")
+bool short_exit_3_aktiv = input.bool(false, "Short Exit 3 aktiv", group=GRP_EXIT, tooltip="Optionaler dritter Short-Exit Connector.")
+float short_exit_3_quelle = input.source(close, "Short Exit 3 Quelle", group=GRP_EXIT, tooltip="Waehle hier den dritten LuxAlgo Exit-Plot fuer Short-Positionen.")
+bool short_exit_4_aktiv = input.bool(false, "Short Exit 4 aktiv", group=GRP_EXIT, tooltip="Optionaler vierter Short-Exit Connector.")
+float short_exit_4_quelle = input.source(close, "Short Exit 4 Quelle", group=GRP_EXIT, tooltip="Waehle hier den vierten LuxAlgo Exit-Plot fuer Short-Positionen.")
+
+string GRP_SIZE = "4. Positionsgroesse und Kelly"
+string groessen_modus = input.string("Fester Einsatz", "Positionsgroessen-Modus", options=["Fester Einsatz", "Manuelles Kelly", "Auto Kelly"], group=GRP_SIZE, tooltip="Fester Einsatz nutzt einen festen USDT-Betrag. Kelly nutzt einen Prozentanteil des Eigenkapitals.")
+float fester_einsatz_usdt = input.float(100.0, "Fester Einsatz USDT", minval=0.0, step=1.0, group=GRP_SIZE, tooltip="Orderwert in USDT, wenn Positionsgroessen-Modus auf Fester Einsatz steht.")
+float manuell_kelly_trefferquote = input.float(50.0, "Manuelles Kelly Trefferquote %", minval=1.0, maxval=99.0, step=0.1, group=GRP_SIZE, tooltip="Deine angenommene Trefferquote fuer manuelles Kelly.")
+float manuell_kelly_win_loss = input.float(1.5, "Manuelles Kelly Gewinn/Verlust", minval=0.1, maxval=20.0, step=0.1, group=GRP_SIZE, tooltip="Durchschnittlicher Gewinn geteilt durch durchschnittlichen Verlust. Beispiel: 1.5 bedeutet Gewinn ist 1.5x Verlust.")
+int auto_kelly_lookback = input.int(50, "Auto Kelly geschlossene Trades", minval=5, maxval=500, group=GRP_SIZE, tooltip="Auto Kelly berechnet Trefferquote und Gewinn/Verlust aus den letzten N geschlossenen Trades.")
+float kelly_anteil = input.float(0.25, "Kelly Anteil", minval=0.05, maxval=1.0, step=0.05, group=GRP_SIZE, tooltip="Bruchteil des vollen Kelly-Werts. 0.25 ist konservativer als volles Kelly.")
+float kelly_min_prozent = input.float(0.0, "Kelly Minimum %", minval=0.0, maxval=20.0, step=0.1, group=GRP_SIZE, tooltip="Minimaler Eigenkapital-Anteil fuer Kelly. 0 bedeutet: kein Trade, wenn Kelly keinen Vorteil erkennt.")
+float kelly_max_prozent = input.float(10.0, "Kelly Maximum %", minval=0.1, maxval=100.0, step=0.1, group=GRP_SIZE, tooltip="Maximaler Eigenkapital-Anteil fuer Kelly, damit die Positionsgroesse begrenzt bleibt.")
+float mengen_schritt = input.float(0.000001, "Mengen-Schritt", minval=0.000001, step=0.000001, group=GRP_SIZE, tooltip="Rundet die Ordermenge auf diesen Schritt ab. Passe es an die Lot-/Contract-Regeln deiner Boerse an.")
+
+string GRP_PIONEX = "5. Pionex Webhook"
+string pionex_uuid = input.string("", "Pionex Signal Bot UUID", group=GRP_PIONEX, tooltip="Fuege hier die UUID deines Pionex Signal Bots ein. Leer lassen, wenn du nur backtestest.")
+bool close_alerts_senden = input.bool(true, "Close-Alerts senden", group=GRP_PIONEX, tooltip="Wenn aktiv, bekommen strategy.close Orders ebenfalls die Pionex Webhook-Nachricht.")
+bool status_anzeigen = input.bool(true, "Status-Tabelle anzeigen", group=GRP_PIONEX, tooltip="Zeigt Verbindung, Alignment, Groesse und aktuelle Position rechts oben im Chart.")
+
+f_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + pionex_uuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+
+f_flag(float quelle) =>
+    not na(quelle) and quelle >= signal_schwelle
+
+f_recent(bool bedingung, int kerzen) =>
+    int seit = ta.barssince(bedingung)
+    kerzen == 0 ? bedingung : not na(seit) and seit <= kerzen
+
+f_alignment_event(bool aligned, string modus) =>
+    modus == "Aktiver Zustand" ? aligned : aligned and not aligned[1]
+
+f_round_qty(float menge, float schritt) =>
+    schritt > 0 ? math.floor(menge / schritt) * schritt : menge
+
+f_kelly_prozent(float trefferquote, float win_loss, float anteil, float min_prozent, float max_prozent) =>
+    float raw = win_loss > 0 ? trefferquote - (1.0 - trefferquote) / win_loss : 0.0
+    float positiv = math.max(0.0, raw)
+    float prozent = positiv > 0 ? positiv * anteil * 100.0 : min_prozent
+    math.min(max_prozent, math.max(0.0, prozent))
+
+f_auto_kelly_prozent(int lookback, float anteil, float min_prozent, float max_prozent) =>
+    int trade_count = strategy.closedtrades
+    int sample_size = math.min(trade_count, lookback)
+    float wins = 0.0
+    float losses = 0.0
+    float gross_win = 0.0
+    float gross_loss = 0.0
+    if sample_size > 0
+        int first_trade = trade_count - sample_size
+        int last_trade = trade_count - 1
+        for trade_no = first_trade to last_trade
+            float trade_profit = strategy.closedtrades.profit(trade_no)
+            if trade_profit > 0
+                wins += 1.0
+                gross_win += trade_profit
+            else if trade_profit < 0
+                losses += 1.0
+                gross_loss += math.abs(trade_profit)
+    float total = wins + losses
+    float trefferquote = total > 0 ? wins / total : 0.0
+    float avg_win = wins > 0 ? gross_win / wins : na
+    float avg_loss = losses > 0 ? gross_loss / losses : na
+    float win_loss = not na(avg_win) and not na(avg_loss) and avg_loss > 0 ? avg_win / avg_loss : 0.0
+    f_kelly_prozent(trefferquote, win_loss, anteil, min_prozent, max_prozent)
+
+bool long_1 = long_1_aktiv and f_recent(f_flag(long_1_quelle), signal_gedaechtnis)
+bool long_2 = long_2_aktiv and f_recent(f_flag(long_2_quelle), signal_gedaechtnis)
+bool long_3 = long_3_aktiv and f_recent(f_flag(long_3_quelle), signal_gedaechtnis)
+bool long_4 = long_4_aktiv and f_recent(f_flag(long_4_quelle), signal_gedaechtnis)
+bool short_1 = short_1_aktiv and f_recent(f_flag(short_1_quelle), signal_gedaechtnis)
+bool short_2 = short_2_aktiv and f_recent(f_flag(short_2_quelle), signal_gedaechtnis)
+bool short_3 = short_3_aktiv and f_recent(f_flag(short_3_quelle), signal_gedaechtnis)
+bool short_4 = short_4_aktiv and f_recent(f_flag(short_4_quelle), signal_gedaechtnis)
+
+int long_alignment = (long_1 ? 1 : 0) + (long_2 ? 1 : 0) + (long_3 ? 1 : 0) + (long_4 ? 1 : 0)
+int short_alignment = (short_1 ? 1 : 0) + (short_2 ? 1 : 0) + (short_3 ? 1 : 0) + (short_4 ? 1 : 0)
+bool long_aligned = lux_quellen_verbunden and long_alignment >= long_mindest_alignment
+bool short_aligned = lux_quellen_verbunden and short_alignment >= short_mindest_alignment
+bool long_trigger = barstate.isconfirmed and f_alignment_event(long_aligned, ausloese_modus)
+bool short_trigger = barstate.isconfirmed and f_alignment_event(short_aligned, ausloese_modus)
+bool clean_long_entry = long_trigger and not short_trigger
+bool clean_short_entry = short_trigger and not long_trigger
+
+bool long_exit_1 = long_exit_1_aktiv and f_recent(f_flag(long_exit_1_quelle), signal_gedaechtnis)
+bool long_exit_2 = long_exit_2_aktiv and f_recent(f_flag(long_exit_2_quelle), signal_gedaechtnis)
+bool long_exit_3 = long_exit_3_aktiv and f_recent(f_flag(long_exit_3_quelle), signal_gedaechtnis)
+bool long_exit_4 = long_exit_4_aktiv and f_recent(f_flag(long_exit_4_quelle), signal_gedaechtnis)
+bool short_exit_1 = short_exit_1_aktiv and f_recent(f_flag(short_exit_1_quelle), signal_gedaechtnis)
+bool short_exit_2 = short_exit_2_aktiv and f_recent(f_flag(short_exit_2_quelle), signal_gedaechtnis)
+bool short_exit_3 = short_exit_3_aktiv and f_recent(f_flag(short_exit_3_quelle), signal_gedaechtnis)
+bool short_exit_4 = short_exit_4_aktiv and f_recent(f_flag(short_exit_4_quelle), signal_gedaechtnis)
+
+int long_exit_alignment = (long_exit_1 ? 1 : 0) + (long_exit_2 ? 1 : 0) + (long_exit_3 ? 1 : 0) + (long_exit_4 ? 1 : 0)
+int short_exit_alignment = (short_exit_1 ? 1 : 0) + (short_exit_2 ? 1 : 0) + (short_exit_3 ? 1 : 0) + (short_exit_4 ? 1 : 0)
+bool long_exit_aligned = lux_quellen_verbunden and bei_exit_signal_schliessen and long_exit_alignment >= long_exit_mindest_alignment
+bool short_exit_aligned = lux_quellen_verbunden and bei_exit_signal_schliessen and short_exit_alignment >= short_exit_mindest_alignment
+bool long_exit_trigger = barstate.isconfirmed and f_alignment_event(long_exit_aligned, ausloese_modus)
+bool short_exit_trigger = barstate.isconfirmed and f_alignment_event(short_exit_aligned, ausloese_modus)
+
+float manuell_kelly_prozent = f_kelly_prozent(manuell_kelly_trefferquote * 0.01, manuell_kelly_win_loss, kelly_anteil, kelly_min_prozent, kelly_max_prozent)
+float auto_kelly_prozent = f_auto_kelly_prozent(auto_kelly_lookback, kelly_anteil, kelly_min_prozent, kelly_max_prozent)
+float aktiver_kapital_prozent = groessen_modus == "Manuelles Kelly" ? manuell_kelly_prozent : groessen_modus == "Auto Kelly" ? auto_kelly_prozent : na
+float order_wert = groessen_modus == "Fester Einsatz" ? fester_einsatz_usdt : strategy.equity * aktiver_kapital_prozent * 0.01
+float order_menge_raw = close > 0 ? order_wert / close : 0.0
+float order_menge = f_round_qty(order_menge_raw, mengen_schritt)
+bool groesse_ok = order_menge >= mengen_schritt
+string payload_message = str.length(pionex_uuid) > 0 ? f_payload() : ""
+
+bool reverse_long_to_short = reversal_aktiv and clean_short_entry and strategy.position_size > 0
+bool reverse_short_to_long = reversal_aktiv and clean_long_entry and strategy.position_size < 0
+bool long_gegensignal_close = bei_gegensignal_schliessen and not reversal_aktiv and clean_short_entry
+bool short_gegensignal_close = bei_gegensignal_schliessen and not reversal_aktiv and clean_long_entry
+bool long_schliessen = strategy.position_size > 0 and (long_exit_trigger or long_gegensignal_close) and not reverse_long_to_short
+bool short_schliessen = strategy.position_size < 0 and (short_exit_trigger or short_gegensignal_close) and not reverse_short_to_long
+
+if long_schliessen
+    strategy.close("Long", comment="Lux Long Exit", alert_message=close_alerts_senden ? payload_message : "")
+
+if short_schliessen
+    strategy.close("Short", comment="Lux Short Exit", alert_message=close_alerts_senden ? payload_message : "")
+
+if clean_long_entry and groesse_ok and (strategy.position_size == 0 or reverse_short_to_long)
+    strategy.entry("Long", strategy.long, qty=order_menge, comment="Lux Long", alert_message=payload_message)
+
+if clean_short_entry and groesse_ok and (strategy.position_size == 0 or reverse_long_to_short)
+    strategy.entry("Short", strategy.short, qty=order_menge, comment="Lux Short", alert_message=payload_message)
+
+plotshape(clean_long_entry, title="Lux Long Entry", style=shape.triangleup, location=location.belowbar, color=color.lime, size=size.small, text="LE")
+plotshape(clean_short_entry, title="Lux Short Entry", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SE")
+plotshape(long_schliessen, title="Lux Long Exit", style=shape.xcross, location=location.abovebar, color=color.orange, size=size.tiny, text="LX")
+plotshape(short_schliessen, title="Lux Short Exit", style=shape.xcross, location=location.belowbar, color=color.orange, size=size.tiny, text="SX")
+bgcolor(not lux_quellen_verbunden ? color.new(color.orange, 90) : na)
+
+var table status = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 78), border_width=1)
+if status_anzeigen and barstate.islast
+    table.cell(status, 0, 0, "Lux Connector", text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(status, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, bgcolor=color.new(color.blue, 55))
+    table.cell(status, 0, 1, "Quellen", text_color=color.white)
+    table.cell(status, 1, 1, lux_quellen_verbunden ? "VERBUNDEN" : "FEHLT", text_color=lux_quellen_verbunden ? color.lime : color.orange)
+    table.cell(status, 0, 2, "Entry L/S", text_color=color.white)
+    table.cell(status, 1, 2, str.tostring(long_alignment) + "/" + str.tostring(long_mindest_alignment) + " | " + str.tostring(short_alignment) + "/" + str.tostring(short_mindest_alignment), text_color=long_alignment >= long_mindest_alignment ? color.lime : short_alignment >= short_mindest_alignment ? color.red : color.white)
+    table.cell(status, 0, 3, "Exit L/S", text_color=color.white)
+    table.cell(status, 1, 3, str.tostring(long_exit_alignment) + "/" + str.tostring(long_exit_mindest_alignment) + " | " + str.tostring(short_exit_alignment) + "/" + str.tostring(short_exit_mindest_alignment), text_color=color.white)
+    table.cell(status, 0, 4, "Trigger", text_color=color.white)
+    table.cell(status, 1, 4, clean_long_entry ? "LONG" : clean_short_entry ? "SHORT" : long_schliessen ? "LONG EXIT" : short_schliessen ? "SHORT EXIT" : "WARTEN", text_color=clean_long_entry ? color.lime : clean_short_entry ? color.red : long_schliessen or short_schliessen ? color.orange : color.gray)
+    table.cell(status, 0, 5, "Reversal", text_color=color.white)
+    table.cell(status, 1, 5, reversal_aktiv ? "AN" : "AUS", text_color=reversal_aktiv ? color.lime : color.white)
+    table.cell(status, 0, 6, "Groesse", text_color=color.white)
+    table.cell(status, 1, 6, groesse_ok ? str.tostring(order_menge, "#.######") : "KEINE", text_color=groesse_ok ? color.white : color.orange)
+    table.cell(status, 0, 7, "Sizing", text_color=color.white)
+    table.cell(status, 1, 7, groessen_modus, text_color=groessen_modus == "Fester Einsatz" ? color.white : color.lime)
+    table.cell(status, 0, 8, "Kapital %", text_color=color.white)
+    table.cell(status, 1, 8, groessen_modus == "Fester Einsatz" ? "-" : str.tostring(aktiver_kapital_prozent, "#.##"), text_color=color.white)
+    table.cell(status, 0, 9, "Position", text_color=color.white)
+    table.cell(status, 1, 9, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray)

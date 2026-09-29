@@ -1,0 +1,368 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Quant (LuxAlgo Specialist) — v2
+
+//@version=6
+strategy("Alpha Bot", overlay=true, pyramiding=3, default_qty_type=strategy.percent_of_equity, default_qty_value=10, max_labels_count=500, max_lines_count=500)
+
+// --- Constants & Colors ---
+COLOR_BULL = #00ffbb
+COLOR_BEAR = #ff0055
+COLOR_NEUT = #5b9cf6
+COLOR_TP   = #00ffbb
+COLOR_SL   = #ff0055
+
+// --- Inputs ---
+group_smc    = "Smart Money Concepts"
+msLen        = input.int(5, "Market Structure Length", minval = 1, tooltip = "Lookback for swing highs/lows to detect structure shifts.")
+showBlocks   = input.bool(true, "Show Breaker Blocks", tooltip = "Displays institutional breaker zones.")
+
+group_trade  = "Trade Management"
+rrRatio      = input.float(2.0, "Risk:Reward Ratio", minval = 0.5, step = 0.1)
+atrMult      = input.float(1.5, "ATR Multiplier for Stop Loss", minval = 0.5)
+mergeRatio   = input.float(50.0, "Cluster Merge Ratio (%)",  minval = 0, maxval = 100, step = 5, tooltip = "0% = keep original TP levels, 50% = median blend, 100% = adopt newest TP + trailing SL. Only affects TP (not SL) except at 100% where SL becomes trailing stop.")
+beDelay      = input.int(0, "Breakeven Delay (bars)", minval=0, maxval=50, step=1, group="Trade Management", tooltip="Bars to wait after the last cluster trade before SL moves to breakeven. 0 = disabled.")
+
+group_confidence = "Confidence Engine"
+useTrendFilter   = input.bool(true, "Trend Confirmation (EMA 200)")
+
+// Volume Filter
+useVolumeFilter  = input.bool(true, "Volume-TP Filter", group = "Volume Filter")
+minVolRatio      = input.float(0.6, "Min Volume Ratio for Signal", minval = 0.2, step = 0.1, group = "Volume Filter")
+maxTpAtrRatio    = input.float(3.0, "Max TP Distance (in ATR) per Volume Unit", minval = 1.0, step = 0.5, group = "Volume Filter")
+
+// --- Core Calculations ---
+atr      = ta.atr(14)
+ema200   = ta.ema(close, 200)
+rsi      = ta.rsi(close, 14)
+avgVol   = ta.sma(volume, 20)
+
+// Market Structure Detection
+ph = ta.pivothigh(high, msLen, msLen)
+pl = ta.pivotlow(low, msLen, msLen)
+
+var float lastPH = na
+var float lastPL = na
+var float prevPH = na
+var float prevPL = na
+
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+
+// Market Structure Shift (MSS)
+bullMSS = ta.crossover(close, lastPH)
+bearMSS = ta.crossunder(close, lastPL)
+
+// Breaker Block Logic (Simplified Institutional Zone)
+var float bullBreakerTop = na
+var float bullBreakerBtm = na
+var float bearBreakerTop = na
+var float bearBreakerBtm = na
+
+if bullMSS
+    bullBreakerTop := lastPH
+    bullBreakerBtm := math.min(low[msLen], low)
+if bearMSS
+    bearBreakerTop := math.max(high[msLen], high)
+    bearBreakerBtm := lastPL
+
+// Volume filter logic
+volRatio = math.min(volume / math.max(avgVol, 1e-10), 3.0)
+
+filterVol(isBull) =>
+    float risk = isBull ? close - (low - atr * (atrMult * math.max(0.5, math.min(2.5, avgVol / math.max(volume, 1))))) : (high + atr * (atrMult * math.max(0.5, math.min(2.5, avgVol / math.max(volume, 1))))) - close
+    float tpRaw = isBull ? close + (risk * rrRatio) : close - (risk * rrRatio)
+    float tpAtrDist = (isBull ? tpRaw - close : close - tpRaw) / math.max(atr, 1e-10)
+    float reqVol = tpAtrDist / math.max(maxTpAtrRatio, 0.1)
+    not useVolumeFilter or (volRatio >= reqVol and volRatio >= minVolRatio)
+
+// Signals
+isLong  = bullMSS and (not useTrendFilter or close > ema200) and filterVol(true)
+isShort = bearMSS and (not useTrendFilter or close < ema200) and filterVol(false)
+
+// --- Confidence Score ---
+get_confidence(isBullish) =>
+    float score = 30.0
+    if (isBullish and close > ema200) or (not isBullish and close < ema200)
+        score += 25.0
+    if volume > avgVol * 1.2
+        score += 20.0
+    if (isBullish and rsi < 55) or (not isBullish and rsi > 45)
+        score += 25.0
+    score
+
+// === LONG STATE TRACKING ===
+var int    longCount = 0
+var float  longEntry1 = na
+var float  longEntry2 = na
+var float  longEntry3 = na
+var float  longTP1 = na
+var float  longTP2 = na
+var float  longTP3 = na
+var float  longSL1 = na
+var float  longSL2 = na
+var float  longSL3 = na
+var int    longEntryBar1 = na
+var int    longEntryBar2 = na
+var int    longEntryBar3 = na
+var bool   longActive1 = false
+var bool   longActive2 = false
+var bool   longActive3 = false
+
+// === SHORT STATE TRACKING ===
+var int    shortCount = 0
+var float  shortEntry1 = na
+var float  shortEntry2 = na
+var float  shortEntry3 = na
+var float  shortTP1 = na
+var float  shortTP2 = na
+var float  shortTP3 = na
+var float  shortSL1 = na
+var float  shortSL2 = na
+var float  shortSL3 = na
+var int    shortEntryBar1 = na
+var int    shortEntryBar2 = na
+var int    shortEntryBar3 = na
+var bool   shortActive1 = false
+var bool   shortActive2 = false
+var bool   shortActive3 = false
+
+// === LONG TRADE ENTRY ===
+if isLong and longCount < 3 and strategy.position_size >= 0
+    longCount += 1
+    float sl = low - atr * atrMult
+    float riskDist = close - sl
+    float tp = close + riskDist * rrRatio
+
+    if longCount == 1
+        longEntry1 := close
+        longTP1 := tp
+        longSL1 := sl
+        longEntryBar1 := bar_index
+        longActive1 := true
+        strategy.entry("LCT1", strategy.long, qty=strategy.equity*0.01/(riskDist))
+    else
+        // Merge logic for 2nd and 3rd longs
+        newTP = tp
+        newSL = sl
+        newEntry = close
+
+        if longCount == 2
+            longEntry2 := newEntry
+            longEntryBar2 := bar_index
+            longActive2 := true
+            // Weighted TP blend using mergeRatio
+            float tpWeight = mergeRatio / 100.0
+            longTP1 := longTP1 + (newTP - longTP1) * tpWeight
+            longSL1 := math.max(longSL1, newSL)    // tightest SL always
+            longTP2 := newTP
+            longSL2 := newSL
+            strategy.entry("LCT2", strategy.long, qty=strategy.equity*0.01/(riskDist))
+
+        else if longCount == 3
+            longEntry3 := newEntry
+            longEntryBar3 := bar_index
+            longActive3 := true
+            // Weighted TP blend for all existing entries toward newest
+            float tpWeight = mergeRatio / 100.0
+            longTP1 := longTP1 + (newTP - longTP1) * tpWeight
+            longTP2 := longTP2 + (newTP - longTP2) * tpWeight
+            longSL1 := math.max(math.max(longSL1, longSL2), newSL)  // tightest SL always
+            longSL2 := math.max(longSL2, newSL)
+            longTP3 := newTP
+            longSL3 := newSL
+            strategy.entry("LCT3", strategy.long, qty=strategy.equity*0.01/(riskDist))
+
+// === SHORT TRADE ENTRY ===
+if isShort and shortCount < 3 and strategy.position_size <= 0
+    shortCount += 1
+    float risk = (high + atr * (atrMult)) - close
+    float tp = close - (close + risk - close) * rrRatio
+    float sl = high + atr * (atrMult)
+
+    if shortCount == 1
+        shortEntry1 := close
+        shortTP1 := tp
+        shortSL1 := sl
+        shortEntryBar1 := bar_index
+        shortActive1 := true
+        strategy.entry("SCT1", strategy.short, qty=strategy.equity*0.01/(risk))
+    else
+        newTP = tp
+        newSL = sl
+        newEntry = close
+
+        if shortCount == 2
+            shortEntry2 := newEntry
+            shortEntryBar2 := bar_index
+            shortActive2 := true
+            float tpWeight = mergeRatio / 100.0
+            shortTP1 := shortTP1 + (newTP - shortTP1) * tpWeight
+            shortSL1 := math.min(shortSL1, newSL)    // tightest SL always (lower = tighter for shorts)
+            shortTP2 := newTP
+            shortSL2 := newSL
+            strategy.entry("SCT2", strategy.short, qty=strategy.equity*0.01/(risk))
+
+        else if shortCount == 3
+            shortEntry3 := newEntry
+            shortEntryBar3 := bar_index
+            shortActive3 := true
+            float tpWeight = mergeRatio / 100.0
+            shortTP1 := shortTP1 + (newTP - shortTP1) * tpWeight
+            shortTP2 := shortTP2 + (newTP - shortTP2) * tpWeight
+            shortSL1 := math.min(math.min(shortSL1, shortSL2), newSL)  // tightest SL always
+            shortSL2 := math.min(shortSL2, newSL)
+            shortTP3 := newTP
+            shortSL3 := newSL
+            strategy.entry("SCT3", strategy.short, qty=strategy.equity*0.01/(risk))
+
+// === EXIT PLACEMENT (called every bar when position is open) ===
+
+// Helper: compute cluster breakeven for longs
+getLongBE(count) =>
+    float sum = 0.0
+    if count >= 1
+        sum += longEntry1
+    if count >= 2
+        sum += longEntry2
+    if count >= 3
+        sum += longEntry3
+    sum / count
+
+// Helper: compute cluster breakeven for shorts
+getShortBE(count) =>
+    float sum = 0.0
+    if count >= 1
+        sum += shortEntry1
+    if count >= 2
+        sum += shortEntry2
+    if count >= 3
+        sum += shortEntry3
+    sum / count
+
+// Breakeven check: if beDelay > 0 and enough bars have passed since last entry
+longBarsSinceLast = (longCount == 3 and longActive3) ? bar_index - longEntryBar3 : 
+                     (longCount == 2 and longActive2) ? bar_index - longEntryBar2 :
+                     (longCount == 1 and longActive1) ? bar_index - longEntryBar1 : 999
+longBE = getLongBE(longCount)
+
+shortBarsSinceLast = (shortCount == 3 and shortActive3) ? bar_index - shortEntryBar3 : 
+                      (shortCount == 2 and shortActive2) ? bar_index - shortEntryBar2 :
+                      (shortCount == 1 and shortActive1) ? bar_index - shortEntryBar1 : 999
+shortBE = getShortBE(shortCount)
+
+// --- Long exits ---
+if longCount >= 1 and longActive1
+    float lsl1 = longSL1
+    if beDelay > 0 and longBarsSinceLast >= beDelay and close > longBE
+        lsl1 := math.max(lsl1, longBE)  // SL to breakeven or tighter
+    if mergeRatio >= 100.0
+        strategy.exit(id="LCT1 Exit", from_entry="LCT1", trail_points=atr*0.15, trail_offset=atr*0.15, limit=longTP1)
+    else
+        strategy.exit(id="LCT1 Exit", from_entry="LCT1", stop=lsl1, limit=longTP1)
+
+if longCount >= 2 and longActive2
+    float lsl2 = longSL2
+    if beDelay > 0 and longBarsSinceLast >= beDelay and close > longBE
+        lsl2 := math.max(lsl2, longBE)
+    if mergeRatio >= 100.0
+        strategy.exit(id="LCT2 Exit", from_entry="LCT2", trail_points=atr*0.15, trail_offset=atr*0.15, limit=longTP2)
+    else
+        strategy.exit(id="LCT2 Exit", from_entry="LCT2", stop=lsl2, limit=longTP2)
+
+if longCount >= 3 and longActive3
+    float lsl3 = longSL3
+    if beDelay > 0 and longBarsSinceLast >= beDelay and close > longBE
+        lsl3 := math.max(lsl3, longBE)
+    if mergeRatio >= 100.0
+        strategy.exit(id="LCT3 Exit", from_entry="LCT3", trail_points=atr*0.15, trail_offset=atr*0.15, limit=longTP3)
+    else
+        strategy.exit(id="LCT3 Exit", from_entry="LCT3", stop=lsl3, limit=longTP3)
+
+// --- Short exits ---
+if shortCount >= 1 and shortActive1
+    float ssl1 = shortSL1
+    if beDelay > 0 and shortBarsSinceLast >= beDelay and close < shortBE
+        ssl1 := math.min(ssl1, shortBE)  // SL to breakeven or tighter (lower = tighter for shorts)
+    if mergeRatio >= 100.0
+        strategy.exit(id="SCT1 Exit", from_entry="SCT1", trail_points=atr*0.15, trail_offset=atr*0.15, limit=shortTP1)
+    else
+        strategy.exit(id="SCT1 Exit", from_entry="SCT1", stop=ssl1, limit=shortTP1)
+
+if shortCount >= 2 and shortActive2
+    float ssl2 = shortSL2
+    if beDelay > 0 and shortBarsSinceLast >= beDelay and close < shortBE
+        ssl2 := math.min(ssl2, shortBE)
+    if mergeRatio >= 100.0
+        strategy.exit(id="SCT2 Exit", from_entry="SCT2", trail_points=atr*0.15, trail_offset=atr*0.15, limit=shortTP2)
+    else
+        strategy.exit(id="SCT2 Exit", from_entry="SCT2", stop=ssl2, limit=shortTP2)
+
+if shortCount >= 3 and shortActive3
+    float ssl3 = shortSL3
+    if beDelay > 0 and shortBarsSinceLast >= beDelay and close < shortBE
+        ssl3 := math.min(ssl3, shortBE)
+    if mergeRatio >= 100.0
+        strategy.exit(id="SCT3 Exit", from_entry="SCT3", trail_points=atr*0.15, trail_offset=atr*0.15, limit=shortTP3)
+    else
+        strategy.exit(id="SCT3 Exit", from_entry="SCT3", stop=ssl3, limit=shortTP3)
+
+// === POSITION CLOSING — reset state on full close ===
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    longCount  := 0
+    longEntry1 := na
+    longEntry2 := na
+    longEntry3 := na
+    longTP1 := na
+    longTP2 := na
+    longTP3 := na
+    longSL1 := na
+    longSL2 := na
+    longSL3 := na
+    longEntryBar1 := na
+    longEntryBar2 := na
+    longEntryBar3 := na
+    longActive1 := false
+    longActive2 := false
+    longActive3 := false
+
+    shortCount  := 0
+    shortEntry1 := na
+    shortEntry2 := na
+    shortEntry3 := na
+    shortTP1 := na
+    shortTP2 := na
+    shortTP3 := na
+    shortSL1 := na
+    shortSL2 := na
+    shortSL3 := na
+    shortEntryBar1 := na
+    shortEntryBar2 := na
+    shortEntryBar3 := na
+    shortActive1 := false
+    shortActive2 := false
+    shortActive3 := false
+
+// === VISUALISATION — Breaker Blocks ===
+if showBlocks
+    // Bullish Breaker Block
+    if not na(bullBreakerTop)
+        box.new(bar_index[msLen*2], bullBreakerTop, bar_index, bullBreakerBtm,
+             bgcolor=color.new(COLOR_BULL, 90), border_color=COLOR_BULL, border_width=1,
+             xloc=xloc.bar_index, extend=extend.right)
+    // Bearish Breaker Block
+    if not na(bearBreakerTop)
+        box.new(bar_index[msLen*2], bearBreakerTop, bar_index, bearBreakerBtm,
+             bgcolor=color.new(COLOR_BEAR, 90), border_color=COLOR_BEAR, border_width=1,
+             xloc=xloc.bar_index, extend=extend.right)
+
+// Entry signals (labels)
+if isLong
+    label.new(bar_index, low, "L", style=label.style_label_up,
+         color=COLOR_BULL, textcolor=color.white, size=size.small, yloc=yloc.price)
+if isShort
+    label.new(bar_index, high, "S", style=label.style_label_down,
+         color=COLOR_BEAR, textcolor=color.white, size=size.small, yloc=yloc.price)

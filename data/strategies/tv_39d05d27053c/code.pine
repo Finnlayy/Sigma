@@ -1,0 +1,181 @@
+//@version=6
+strategy(
+     title = "Grid Trading Strategy v6",
+     overlay = true,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100.0,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.1,
+     pyramiding = 5,
+     initial_capital = 10000,
+     calc_on_every_tick = false,
+     calc_on_order_fills = false,
+     process_orders_on_close = true
+)
+
+// ─── INPUTS ──────────────────────────────────────────────────────────────────
+grpGrid  = "Grid Settings"
+grpEntry = "Entry Logic"
+grpRisk  = "Risk Management"
+grpExit  = "Exit Logic"
+grpVis   = "Visualization"
+
+num_grid_levels    = input.int(7, "Number of Grid Levels", minval=2, maxval=50, group=grpGrid)
+grid_static        = input.bool(false, "Static Grid", group=grpGrid)
+spacing_mode       = input.string("ATR", options=["Fixed %", "ATR"], group=grpGrid)
+fixed_spacing_pct  = input.float(1.0, "Fixed Spacing (%)", minval=0.01, maxval=10.0, step=0.1, group=grpGrid) / 100.0
+atr_length         = input.int(14, "ATR Length", minval=1, group=grpGrid)
+atr_multiplier     = input.float(1.5, "ATR Multiplier", minval=0.1, step=0.1, group=grpGrid)
+
+entry_mode    = input.string("Mean Reversion", options=["Mean Reversion", "Breakout"], group=grpEntry)
+allow_long    = input.bool(true, "Allow Long Entries", group=grpEntry)
+allow_short   = input.bool(true, "Allow Short Entries", group=grpEntry)
+scale_in      = input.bool(true, "Scale In Across Levels", group=grpEntry)
+
+max_concurrent_positions = input.int(5, "Max Concurrent Positions", minval=1, group=grpRisk)
+max_position_exposure    = input.float(25.0, "Max Equity Exposure per Trade (%)", minval=0.1, maxval=100.0, step=0.5, group=grpRisk) / 100.0
+use_trend_filter         = input.bool(true, "Use EMA Trend Filter", group=grpRisk)
+ema_length               = input.int(50, "Trend EMA Length", minval=10, group=grpRisk)
+use_volatility_filter    = input.bool(true, "Use Volatility Filter", group=grpRisk)
+vol_threshold_multiplier = input.float(3.0, "Volatility Threshold (x ATR)", minval=1.0, group=grpRisk)
+use_session_filter       = input.bool(false, "Limit to Session Hours", group=grpRisk)
+session_hours            = input.session("0930-1600", "Trading Session", group=grpRisk)
+min_dist_to_last_entry   = input.float(0.5, "Min Distance to Last Entry (%)", minval=0.1, group=grpRisk) / 100.0
+
+take_profit_mode        = input.string("Next Grid Level", options=["Next Grid Level", "Fixed %", "None"], group=grpExit)
+tp_fixed_pct            = input.float(1.5, "Take Profit (%)", minval=0.1, group=grpExit) / 100.0
+sl_percent              = input.float(2.0, "Stop Loss (%)", minval=0.1, group=grpExit) / 100.0
+use_atr_sl              = input.bool(true, "Use ATR-based Stop Loss", group=grpExit)
+atr_sl_mult             = input.float(2.0, "ATR SL Multiplier", minval=0.5, step=0.5, group=grpExit)
+exit_on_opposite_signal = input.bool(true, "Full Exit on Opposite Signal", group=grpExit)
+flatten_if_outside_grid = input.bool(true, "Flatten If Price Leaves Grid", group=grpExit)
+
+show_grid_lines = input.bool(true, "Show Grid Lines", group=grpVis)
+show_signals    = input.bool(true, "Show Entry/Exit Signals", group=grpVis)
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+in_trading_session() =>
+    not use_session_filter or not na(time(timeframe.period, session_hours))
+
+price_touches_level(price, level, tol) =>
+    not na(level) and math.abs(price - level) <= math.max(tol, level * 0.0001)
+
+get_order_id(dir, level_idx) =>
+    dir + "_" + str.tostring(level_idx)
+
+// ─── GRID CALCULATIONS ───────────────────────────────────────────────────────
+atr_val      = ta.atr(atr_length)
+float safe_atr = na(atr_val) ? (high - low) : atr_val
+grid_spacing = spacing_mode == "Fixed %" ? close * fixed_spacing_pct : safe_atr * atr_multiplier
+
+var float anchor_price = na
+if bar_index == 0
+    anchor_price := close
+else if not grid_static
+    float lowest  = ta.lowest(low, num_grid_levels * 2)
+    float highest = ta.highest(high, num_grid_levels * 2)
+    if not na(lowest) and not na(highest)
+        anchor_price := math.avg(lowest, highest)
+
+// Arrays start empty; we push into them so size always equals num_grid_levels
+var float[] grid_levels_long  = array.new_float(0)
+var float[] grid_levels_short = array.new_float(0)
+var bool    grid_built        = false
+
+bool need_rebuild = not grid_built or not grid_static
+if need_rebuild and not na(anchor_price) and not na(grid_spacing) and grid_spacing > 0.0
+    array.clear(grid_levels_long)
+    array.clear(grid_levels_short)
+    for i = 0 to num_grid_levels - 1
+        float offset = grid_spacing * (i + 1)
+        array.push(grid_levels_long, anchor_price - offset)
+        array.push(grid_levels_short, anchor_price + offset)
+    grid_built := true
+
+int grid_size = array.size(grid_levels_long)
+
+// ─── FILTERS ─────────────────────────────────────────────────────────────────
+ema_trend     = ta.ema(close, ema_length)
+trend_bullish = not use_trend_filter or (close > ema_trend)
+trend_bearish = not use_trend_filter or (close < ema_trend)
+
+excessive_vol = use_volatility_filter and (not na(atr_val)) and (atr_val > ta.atr(50) * vol_threshold_multiplier)
+can_trade_vol = not excessive_vol
+can_trade_time = in_trading_session()
+can_trade     = can_trade_vol and can_trade_time
+
+bool far_from_last_entry = true
+if strategy.position_size != 0.0 and not na(strategy.position_avg_price) and strategy.position_avg_price != 0.0
+    far_from_last_entry := math.abs(close - strategy.position_avg_price) / strategy.position_avg_price > min_dist_to_last_entry
+
+// ─── SIGNAL GENERATION ───────────────────────────────────────────────────────
+var bool[] triggered_long  = array.new_bool(50, false)
+var bool[] triggered_short = array.new_bool(50, false)
+
+if strategy.position_size == 0.0
+    array.fill(triggered_long, false)
+    array.fill(triggered_short, false)
+
+float tolerance = syminfo.mintick * 5.0
+
+bool should_enter_long  = false
+bool should_enter_short = false
+int  next_long_level_index  = -1
+int  next_short_level_index = -1
+
+if grid_size > 0
+    if entry_mode == "Mean Reversion"
+        // Long entries: nearest-to-anchor first (top of long array)
+        for i = grid_size - 1 to 0
+            float lvl = array.get(grid_levels_long, i)
+            bool already_hit = array.get(triggered_long, i)
+            if price_touches_level(low, lvl, tolerance) and not already_hit and allow_long and trend_bullish and can_trade and far_from_last_entry
+                should_enter_long := true
+                next_long_level_index := i
+                array.set(triggered_long, i, true)
+                break
+
+        // Short entries: nearest-to-anchor first (bottom of short array)
+        for i = 0 to grid_size - 1
+            float lvl = array.get(grid_levels_short, i)
+            bool already_hit = array.get(triggered_short, i)
+            if price_touches_level(high, lvl, tolerance) and not already_hit and allow_short and trend_bearish and can_trade and far_from_last_entry
+                should_enter_short := true
+                next_short_level_index := i
+                array.set(triggered_short, i, true)
+                break
+
+    else if entry_mode == "Breakout"
+        float upper_bound = array.get(grid_levels_short, grid_size - 1)
+        float lower_bound = array.get(grid_levels_long, 0)
+        if high >= upper_bound and allow_long and trend_bullish and can_trade
+            should_enter_long := true
+            next_long_level_index := grid_size - 1
+        if low <= lower_bound and allow_short and trend_bearish and can_trade
+            should_enter_short := true
+            next_short_level_index := 0
+
+bool within_position_limit = strategy.opentrades < max_concurrent_positions
+should_enter_long  := should_enter_long and within_position_limit
+should_enter_short := should_enter_short and within_position_limit
+
+// ─── TRADE EXECUTION ─────────────────────────────────────────────────────────
+float size_units = strategy.equity * max_position_exposure / close
+
+if should_enter_long
+    strategy.entry(get_order_id("LONG", next_long_level_index), strategy.long, qty=size_units)
+
+if should_enter_short
+    strategy.entry(get_order_id("SHORT", next_short_level_index), strategy.short, qty=size_units)
+
+// ─── EXITS AND PROTECTION ────────────────────────────────────────────────────
+float dynamic_sl = use_atr_sl ? (na(atr_val) ? close * sl_percent : atr_val * atr_sl_mult) : close * sl_percent
+float take_profit_price = na
+
+if take_profit_mode == "Next Grid Level" and strategy.position_size != 0.0 and grid_size > 0
+    take_profit_price := strategy.position_size > 0.0 ? strategy.position_avg_price + grid_spacing : strategy.position_avg_price - grid_spacing
+else if take_profit_mode == "Fixed %" and strategy.position_size != 0.0
+    take_profit_price := strategy.position_size > 0.0 ? strategy.position_avg_price * (1.0 + tp_fixed_pct) : strategy.position_avg_price * (1.0 - tp_fixed_pct)
+
+if strategy.position_size != 0.0 and not na(strategy.position_avg_price)
+    float stop_price = strategy.position_size > 0.0 ? strategy.position_avg_price - dynamic_sl 

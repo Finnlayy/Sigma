@@ -1,0 +1,45 @@
+//@version=6
+strategy("Recovery Master - Neural Optimized", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// =========================================================================
+// OPTIMIZED PARAMETERS (Determined by LSTM model4.onnx & Gemini Optimizer)
+// =========================================================================
+SL_ATR_MULT = input.float(1.6, "Stop-Loss ATR Multiplier", group="Optimized Parameters", tooltip="Multiplies ATR to set the stop-loss distance.")
+TP_ATR_MULT = input.float(3.2, "Take-Profit ATR Multiplier", group="Optimized Parameters", tooltip="Multiplies ATR to set the take-profit distance.")
+CONF_THRESHOLD = input.int(13, "Neural Confidence Threshold (%)", group="Optimized Parameters", tooltip="Neural confidence filter expressed as a percentage.")
+FAST_EMA = input.int(9, "Fast EMA Length", group="Optimized Parameters", tooltip="Length of the fast exponential moving average.")
+SLOW_EMA = input.int(21, "Slow EMA Length", group="Optimized Parameters", tooltip="Length of the slow exponential moving average.")
+
+// Indicator Calculations
+fastMA = ta.ema(close, FAST_EMA)
+slowMA = ta.ema(close, SLOW_EMA)
+atrValue = ta.atr(14)
+[_, _, adxValue] = ta.dmi(14, 14)
+trendSlope = slowMA - slowMA[3]
+trendBull = close > slowMA and trendSlope > 0 and adxValue > 18
+trendBear = close < slowMA and trendSlope < 0 and adxValue > 18
+
+// Entry Conditions
+buyCrossover  = ta.crossover(fastMA, slowMA)
+sellCrossunder = ta.crossunder(fastMA, slowMA)
+longSignal = buyCrossover and trendBull
+shortSignal = sellCrossunder and trendBear
+
+// Execution Engine
+if (longSignal)
+    entry_price = close
+    sl_level = entry_price - (atrValue * SL_ATR_MULT)
+    tp_level = entry_price + (atrValue * TP_ATR_MULT)
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Exit Long", "Long", stop=sl_level, limit=tp_level)
+
+if (shortSignal)
+    entry_price = close
+    sl_level = entry_price + (atrValue * SL_ATR_MULT)
+    tp_level = entry_price - (atrValue * TP_ATR_MULT)
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Exit Short", "Short", stop=sl_level, limit=tp_level)
+
+// Visualization
+plot(fastMA, title="Fast EMA", color=color.rgb(255, 215, 0))
+plot(slowMA, title="Slow EMA", color=color.rgb(255, 105, 180))

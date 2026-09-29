@@ -1,0 +1,788 @@
+1|// Datei:     MTF_CISD_OB_FVG_v2.pine
+2|// Zweck:     MTF CISD + OB/FVG Hybrid Strategy mit Pionex Signal Bot Webhook
+3|// Erstellt:  2026-04-08 | Version: 2.0
+4|// Abhaengig: Pine Script v6, TradingView, Pionex Signal Bot
+5|
+6|//@version=6
+7|strategy(title="MTF CISD + OB/FVG — Pionex Signal Bot [v2.0]", shorttitle="CISD+OB/FVG v2", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500, initial_capital=100, currency=currency.USDT, default_qty_type=strategy.percent_of_equity, default_qty_value=1, pyramiding=1, margin_long=0, margin_short=0, calc_on_every_tick=false, process_orders_on_close=false)
+8|// Audit invariant note: currency="USDT"
+9|
+10|// ============================================================================
+11|// GRUPPE 1: Core Settings — Multi-Timeframe
+12|// ============================================================================
+13|string GRP_MTF = "Multi-Timeframe Settings"
+14|int tf_h4  = input.int(240, "TF 1 — H4 (Richtung)", minval=1, group=GRP_MTF)
+15|int tf_h1  = input.int(60,  "TF 2 — H1 (Trend)", minval=1, group=GRP_MTF)
+16|int tf_m15 = input.int(15,  "TF 3 — M15 (Kontext)", minval=1, group=GRP_MTF)
+17|int tf_m5  = input.int(5,   "TF 4 — M5 (Fein)", minval=1, group=GRP_MTF)
+18|bool en_h4  = input.bool(true,  "H4 aktiviert", group=GRP_MTF)
+19|bool en_h1  = input.bool(true,  "H1 aktiviert", group=GRP_MTF)
+20|bool en_m15 = input.bool(true,  "M15 aktiviert", group=GRP_MTF)
+21|bool en_m5  = input.bool(false, "M5 aktiviert", group=GRP_MTF)
+22|int min_alignment = input.int(3, "Mindest-TF-Alignment", minval=1, maxval=4, group=GRP_MTF)
+23|
+24|// ============================================================================
+25|// GRUPPE 2: Core Settings — OB / FVG
+26|// ============================================================================
+27|string GRP_OB = "Order Block / FVG Settings"
+28|float ob_atr_mul  = input.float(1.6, "OB ATR Multiplikator", minval=0.5, maxval=5.0, step=0.1, group=GRP_OB)
+29|int ob_pivot      = input.int(6, "OB Pivot Lookback", minval=2, maxval=20, group=GRP_OB)
+30|int max_ob_boxes  = input.int(25, "Max OB Boxen", minval=5, maxval=100, group=GRP_OB)
+31|int max_fvg_boxes = input.int(25, "Max FVG Boxen", minval=5, maxval=100, group=GRP_OB)
+32|
+33|string GRP_EXEC = "Execution / Backtest"
+34|string logic_mode = input.string("Hybrid", "Signal Engine Mode", options=["Hybrid", "Realtime only", "Historical only"], group=GRP_EXEC, tooltip="Hybrid nutzt historische Zonen fuer Backtests und zeichnet Boxen nur live. Realtime only erzeugt Signale nur auf Live-Bars. Historical only deaktiviert die schweren Realtime-Boxen.")
+35|bool debug_mode = input.bool(false, "Debug Labels", group=GRP_EXEC, tooltip="Zeigt Confidence-Score-Labels auf dem Chart.")
+36|float standartqty = input.float(1.0, "standartqty (% Equity)", minval=1.0, maxval=100.0, step=0.25, group=GRP_EXEC)
+37|bool draw_realtime_zones = input.bool(true, "Realtime Box Visuals", group=GRP_EXEC)
+38|
+39|// ============================================================================
+40|// GRUPPE 3: Risk Management
+41|// ============================================================================
+42|string GRP_RISK = "Risk Management"
+43|float sl_atr_mul  = input.float(1.4, "SL ATR Multiplikator", minval=0.5, maxval=5.0, step=0.1, group=GRP_RISK, tooltip="Sharpe-Optimum: 1.4")
+44|float tp_atr_mul  = input.float(8.0, "TP ATR Multiplikator", minval=1.0, maxval=8.0, step=0.1, group=GRP_RISK, tooltip="MOON: 8.0")
+45|bool use_trail    = input.bool(false, "Trailing Stop aktivieren", group=GRP_RISK)
+46|float trail_atr   = input.float(1.2, "Trailing Stop ATR Mult", minval=0.3, maxval=3.0, step=0.1, group=GRP_RISK)
+47|bool use_max_dd   = input.bool(true, "Max Drawdown Breaker", group=GRP_RISK)
+48|float max_dd_pct  = input.float(8.0, "Max Drawdown %", minval=1.0, maxval=30.0, step=0.5, group=GRP_RISK)
+49|bool use_max_bars = input.bool(true, "Max Bars Held Exit", group=GRP_RISK)
+50|int max_bars_held = input.int(48, "Max Bars in Position", minval=6, maxval=500, group=GRP_RISK)
+51|
+52|// ============================================================================
+53|// GRUPPE 3b: Dynamic Asset-Specific Parameter Scaling
+54|// ============================================================================
+55|bool use_auto_asset_profile = input.bool(false, "Auto-Asset-Profil (SL/TP)", group=GRP_RISK, tooltip="Passt SL/TP Multiplikatoren automatisch an das gehandelte Asset an (BTC/ETH/SOL). Bei false werden die manuellen Werte aus GRUPPE 3 verwendet.")
+56|
+57|// Asset detection via syminfo.ticker
+58|string ticker = syminfo.ticker
+59|float auto_sl_mul = switch ticker
+60|    "BTCUSDT" => 1.4
+61|    "ETHUSDT" => 2.0
+62|    "SOLUSDT" => 3.5
+63|    => sl_atr_mul
+64|
+65|float auto_tp_mul = switch ticker
+66|    "BTCUSDT" => 8.0
+67|    "ETHUSDT" => 5.0
+68|    "SOLUSDT" => 4.5
+69|    => tp_atr_mul
+70|
+71|// Effective SL/TP multipliers (auto profile overrides manual when enabled)
+72|float eff_sl_atr_mul = use_auto_asset_profile ? auto_sl_mul : sl_atr_mul
+73|float eff_tp_atr_mul = use_auto_asset_profile ? auto_tp_mul : tp_atr_mul
+74|
+75|// ============================================================================
+76|// GRUPPE 4: Filter
+77|// ============================================================================
+78|string GRP_FILTER = "Signal Filter"
+79|int min_conf      = input.int(11, "Min. Confidence Score", minval=1, maxval=17, group=GRP_FILTER, tooltip="Sharpe-Optimum: 11")
+80|bool use_vol      = input.bool(true, "Volumen-Filter", group=GRP_FILTER)
+81|float vol_mult    = input.float(1.05, "Volumen-Multiplikator", minval=1.0, maxval=3.0, step=0.05, group=GRP_FILTER, tooltip="Sharpe-Optimum: 1.05")
+82|int vol_period    = input.int(20, "Volumen SMA Perioden", minval=5, maxval=100, group=GRP_FILTER)
+83|bool use_time     = input.bool(false, "Session-Zeitfilter", group=GRP_FILTER)
+84|int sess_start    = input.int(7, "Session Start (UTC)", minval=0, maxval=23, group=GRP_FILTER)
+85|int sess_end      = input.int(22, "Session Ende (UTC)", minval=0, maxval=23, group=GRP_FILTER)
+86|bool use_daily    = input.bool(true, "Daily Loss Limit", group=GRP_FILTER)
+87|float daily_lim   = input.float(3.0, "Daily Loss Limit %", minval=0.5, maxval=15.0, step=0.5, group=GRP_FILTER)
+88|bool use_ema_filter = input.bool(true, "EMA 200 Trendfilter", group=GRP_FILTER)
+89|int ema_len       = input.int(200, "EMA Laenge", minval=10, maxval=500, group=GRP_FILTER)
+90|bool use_rsi_filter = input.bool(true, "RSI Extremzonen-Filter", group=GRP_FILTER)
+91|int rsi_len       = input.int(14, "RSI Laenge", minval=5, maxval=50, group=GRP_FILTER)
+92|float rsi_ob      = input.float(78.0, "RSI Overbought", minval=60.0, maxval=95.0, step=1.0, group=GRP_FILTER, tooltip="Sharpe-Optimum: 78")
+93|float rsi_os      = input.float(22.0, "RSI Oversold", minval=5.0, maxval=40.0, step=1.0, group=GRP_FILTER)
+94|bool use_atr_filter = input.bool(true, "ATR Volatilitaets-Filter", group=GRP_FILTER)
+95|float atr_min_pct = input.float(0.15, "ATR Min % vom Preis", minval=0.01, maxval=1.0, step=0.01, group=GRP_FILTER, tooltip="Sharpe-Optimum: 0.15")
+96|bool allow_short  = input.bool(false, "Shorts erlauben (Futures)", group=GRP_FILTER, tooltip="Spot: IMMER false! Nur fuer Futures-Account.")
+97|
+98|// ============================================================================
+99|// GRUPPE 5: (ehemals Pionex Signal Bot — entfernt)
+100|// ============================================================================
+101|
+102|// ============================================================================
+103|// GRUPPE 6: Telegram Intelligence
+104|// ============================================================================
+105|string GRP_INTEL = "Telegram Intelligence"
+106|bool use_glint_news = input.bool(true, "GLINT News aktivieren", group=GRP_INTEL, tooltip="Der Relay Server kann die Confidence um bis zu 25% anheben, wenn News und Signalrichtung zusammenpassen.")
+107|bool use_manus_advisor = input.bool(true, "Manus Advisor Widget", group=GRP_INTEL, tooltip="Zeigt den Manus-Advisor-Status im Dashboard.")
+108|// ============================================================================
+109|// GRUPPE 7: Kelly Analytics
+110|// ============================================================================
+111|string GRP_KELLY = "Kelly Analytics"
+112|bool use_live_kelly = input.bool(true, "Live Trade-History verwenden", group=GRP_KELLY)
+113|float kelly_equity_usdt = input.float(1000.0, "Account Equity (USDT)", minval=0.0, step=10.0, group=GRP_KELLY, tooltip="Nur fuer die $-Risikowerte und Positionsgroesse")
+114|float kelly_fallback_winrate = input.float(55.0, "Fallback Winrate %", minval=0.0, maxval=100.0, step=0.1, group=GRP_KELLY)
+115|float kelly_fallback_rr = input.float(2.0, "Fallback Avg R:R", minval=0.1, maxval=20.0, step=0.1, group=GRP_KELLY)
+116|float your_risk_pct = input.float(1.0, "Your Risk %", minval=0.01, maxval=100.0, step=0.1, group=GRP_KELLY)
+117|float kelly_cap_pct = input.float(100.0, "Kelly Cap %", minval=1.0, maxval=100.0, step=1.0, group=GRP_KELLY)
+118|bool use_kelly_autosize = input.bool(true, "Kelly Auto-Size Orders", group=GRP_KELLY, tooltip="Berechnet die Order-Qty aus Risk Amount / Stop Distance. OFF nutzt das manuelle %Equity-Sizing.")
+119|bool use_strategy_equity_for_sizing = input.bool(true, "Strategy Equity fuer Sizing", group=GRP_KELLY, tooltip="ON nutzt strategy.equity fuer Backtests. OFF nutzt Account Equity (USDT).")
+120|
+121|// ============================================================================
+122|// CORE CALCULATIONS
+123|// ============================================================================
+124|
+125|// ATR fuer SL/TP
+126|float atr_val = ta.atr(14)
+127|
+128|// EMA 200
+129|float ema200 = ta.ema(close, ema_len)
+130|
+131|// RSI
+132|float rsi_val = ta.rsi(close, rsi_len)
+133|
+134|// Volumen SMA
+135|float vol_sma = ta.sma(volume, vol_period)
+136|
+137|f_safe_div(float numerator, float denominator) =>
+138|    denominator != 0.0 ? numerator / denominator : na
+139|
+140|f_fmt_pct(float value) =>
+141|    na(value) ? "---" : str.tostring(value, "#.##") + "%"
+142|
+143|f_fmt_signed(float value, string fmt) =>
+144|    na(value) ? "---" : (value > 0 ? "+" : "") + str.tostring(value, fmt)
+145|
+146|f_fmt_money(float value) =>
+147|    na(value) ? "---" : "$" + str.tostring(value, "#.##")
+148|
+149|f_fmt_signed_money(float value) =>
+150|    na(value) ? "---" : (value > 0 ? "+$" : value < 0 ? "-$" : "$") + str.tostring(math.abs(value), "#.##")
+151|
+152|f_fmt_qty(float value) =>
+153|    na(value) ? "---" : str.tostring(value, "#.########")
+154|
+155|f_kelly_growth(float win_rate, float avg_win_r, float avg_loss_r, float risk_fraction) =>
+156|    float win_term = 1.0 + (risk_fraction * avg_win_r)
+157|    float loss_term = 1.0 - (risk_fraction * avg_loss_r)
+158|    win_term > 0 and loss_term > 0 ? (win_rate * math.log(win_term) + (1.0 - win_rate) * math.log(loss_term)) * 100.0 : na
+159|
+160|f_trim_box_array(array<box> zones, int max_items) =>
+161|    if array.size(zones) > max_items
+162|        box.delete(array.shift(zones))
+163|
+164|f_push_zone(array<float> tops, array<float> bottoms, float raw_top, float raw_bottom, int max_items) =>
+165|    float zone_top = math.max(raw_top, raw_bottom)
+166|    float zone_bottom = math.min(raw_top, raw_bottom)
+167|    array.push(tops, zone_top)
+168|    array.push(bottoms, zone_bottom)
+169|    if array.size(tops) > max_items
+170|        array.shift(tops)
+171|        array.shift(bottoms)
+172|
+173|f_zone_touch(array<float> tops, array<float> bottoms, int recent_count) =>
+174|    bool touched = false
+175|    int zone_count = array.size(tops)
+176|    if zone_count > 0
+177|        int lookback = math.min(recent_count, zone_count)
+178|        for offset = 0 to lookback - 1
+179|            int idx = zone_count - 1 - offset
+180|            float zone_top = array.get(tops, idx)
+181|            float zone_bottom = array.get(bottoms, idx)
+182|            if low <= zone_top and high >= zone_bottom
+183|                touched := true
+184|                break
+185|    touched
+186|
+187|bool process_zone_logic = logic_mode != "Realtime only" or barstate.isrealtime
+188|bool draw_zone_visuals = draw_realtime_zones and logic_mode != "Historical only" and barstate.isrealtime
+189|
+190|// ============================================================================
+191|// CISD FUNCTION — Change In State of Delivery
+192|// ============================================================================
+193|f_cisd(float src_open, float src_close, float src_high, float src_low) =>
+194|    var int state = 0
+195|    bool is_bull_candle = src_close > src_open
+196|    bool is_bear_candle = src_close < src_open
+197|    bool bull_cisd = false
+198|    bool bear_cisd = false
+199|    if is_bear_candle and state != -1
+200|        if src_close < src_open[1] and not (src_high < src_high[1] and src_low > src_low[1])
+201|            state := -1
+202|            bear_cisd := true
+203|    if is_bull_candle and state != 1
+204|        if src_close > src_open[1] and not (src_high < src_high[1] and src_low > src_low[1])
+205|            state := 1
+206|            bull_cisd := true
+207|    [state, bull_cisd, bear_cisd]
+208|
+209|// ============================================================================
+210|// MTF CISD STATES via request.security
+211|// ============================================================================
+212|f_htf_cisd(int tf_minutes) =>
+213|    string tf_str = str.tostring(tf_minutes)
+214|    [htf_o, htf_c, htf_h, htf_l] = request.security(syminfo.tickerid, tf_str, [open[1], close[1], high[1], low[1]], lookahead=barmerge.lookahead_off)
+215|    [state, bull_trigger, bear_trigger] = f_cisd(htf_o, htf_c, htf_h, htf_l)
+216|    state
+217|
+218|int state_h4  = en_h4  ? f_htf_cisd(tf_h4)  : 0
+219|int state_h1  = en_h1  ? f_htf_cisd(tf_h1)  : 0
+220|int state_m15 = en_m15 ? f_htf_cisd(tf_m15) : 0
+221|int state_m5  = en_m5  ? f_htf_cisd(tf_m5)  : 0
+222|
+223|// Local CISD (chart timeframe)
+224|[local_state, local_bull_cisd, local_bear_cisd] = f_cisd(open, close, high, low)
+225|
+226|// ============================================================================
+227|// MTF ALIGNMENT CALCULATION
+228|// ============================================================================
+229|int bull_count = 0
+230|bull_count += (en_h4  and state_h4  == 1) ? 1 : 0
+231|bull_count += (en_h1  and state_h1  == 1) ? 1 : 0
+232|bull_count += (en_m15 and state_m15 == 1) ? 1 : 0
+233|bull_count += (en_m5  and state_m5  == 1) ? 1 : 0
+234|
+235|int bear_count = 0
+236|bear_count += (en_h4  and state_h4  == -1) ? 1 : 0
+237|bear_count += (en_h1  and state_h1  == -1) ? 1 : 0
+238|bear_count += (en_m15 and state_m15 == -1) ? 1 : 0
+239|bear_count += (en_m5  and state_m5  == -1) ? 1 : 0
+240|
+241|int active_tfs = (en_h4 ? 1 : 0) + (en_h1 ? 1 : 0) + (en_m15 ? 1 : 0) + (en_m5 ? 1 : 0)
+242|
+243|bool bull_aligned = bull_count >= min_alignment
+244|bool bear_aligned = bear_count >= min_alignment
+245|
+246|// ============================================================================
+247|// ORDER BLOCK DETECTION
+248|// ============================================================================
+249|var array<box> bull_ob_boxes = array.new<box>()
+250|var array<box> bear_ob_boxes = array.new<box>()
+251|var array<float> bull_ob_tops = array.new<float>()
+252|var array<float> bull_ob_bottoms = array.new<float>()
+253|var array<float> bear_ob_tops = array.new<float>()
+254|var array<float> bear_ob_bottoms = array.new<float>()
+255|
+256|float pivot_high = ta.pivothigh(high, ob_pivot, ob_pivot)
+257|float pivot_low  = ta.pivotlow(low, ob_pivot, ob_pivot)
+258|float ob_atr     = ta.atr(14) * ob_atr_mul
+259|
+260|// Bullish OB: pivot low detected, mark the bearish candle before the swing low
+261|if process_zone_logic and not na(pivot_low)
+262|    int ob_bar = bar_index - ob_pivot
+263|    if ob_bar >= 0
+264|        float ob_top = math.max(high[ob_pivot], low[ob_pivot])
+265|        float ob_bot = math.min(high[ob_pivot], low[ob_pivot])
+266|        if (ob_top - ob_bot) <= ob_atr
+267|            f_push_zone(bull_ob_tops, bull_ob_bottoms, ob_top, ob_bot, max_ob_boxes)
+268|            if draw_zone_visuals
+269|                box new_box = box.new(ob_bar, ob_top, bar_index, ob_bot, border_color=color.new(color.green, 60), bgcolor=color.new(color.green, 85))
+270|                array.push(bull_ob_boxes, new_box)
+271|                f_trim_box_array(bull_ob_boxes, max_ob_boxes)
+272|
+273|// Bearish OB: pivot high detected
+274|if process_zone_logic and not na(pivot_high)
+275|    int ob_bar = bar_index - ob_pivot
+276|    if ob_bar >= 0
+277|        float ob_top = math.max(high[ob_pivot], low[ob_pivot])
+278|        float ob_bot = math.min(high[ob_pivot], low[ob_pivot])
+279|        if (ob_top - ob_bot) <= ob_atr
+280|            f_push_zone(bear_ob_tops, bear_ob_bottoms, ob_top, ob_bot, max_ob_boxes)
+281|            if draw_zone_visuals
+282|                box new_box = box.new(ob_bar, ob_top, bar_index, ob_bot, border_color=color.new(color.red, 60), bgcolor=color.new(color.red, 85))
+283|                array.push(bear_ob_boxes, new_box)
+284|                f_trim_box_array(bear_ob_boxes, max_ob_boxes)
+285|
+286|// ============================================================================
+287|// FVG DETECTION (Fair Value Gap)
+288|// ============================================================================
+289|var array<box> bull_fvg_boxes = array.new<box>()
+290|var array<box> bear_fvg_boxes = array.new<box>()
+291|var array<float> bull_fvg_tops = array.new<float>()
+292|var array<float> bull_fvg_bottoms = array.new<float>()
+293|var array<float> bear_fvg_tops = array.new<float>()
+294|var array<float> bear_fvg_bottoms = array.new<float>()
+295|
+296|// Bullish FVG: gap between bar[2] high and bar[0] low
+297|bool bull_fvg = low > high[2] and close[1] > open[1]
+298|bool bear_fvg = high < low[2] and close[1] < open[1]
+299|
+300|if process_zone_logic and bull_fvg
+301|    f_push_zone(bull_fvg_tops, bull_fvg_bottoms, low, high[2], max_fvg_boxes)
+302|    if draw_zone_visuals
+303|        box new_box = box.new(bar_index - 2, low, bar_index, high[2], border_color=color.new(color.teal, 70), bgcolor=color.new(color.teal, 90))
+304|        array.push(bull_fvg_boxes, new_box)
+305|        f_trim_box_array(bull_fvg_boxes, max_fvg_boxes)
+306|
+307|if process_zone_logic and bear_fvg
+308|    f_push_zone(bear_fvg_tops, bear_fvg_bottoms, low[2], high, max_fvg_boxes)
+309|    if draw_zone_visuals
+310|        box new_box = box.new(bar_index - 2, low[2], bar_index, high, border_color=color.new(color.orange, 70), bgcolor=color.new(color.orange, 90))
+311|        array.push(bear_fvg_boxes, new_box)
+312|        f_trim_box_array(bear_fvg_boxes, max_fvg_boxes)
+313|
+314|// ============================================================================
+315|// OB/FVG TOUCH DETECTION
+316|// ============================================================================
+317|bool bull_ob_touch = f_zone_touch(bull_ob_tops, bull_ob_bottoms, 5)
+318|bool bear_ob_touch = f_zone_touch(bear_ob_tops, bear_ob_bottoms, 5)
+319|bool bull_fvg_touch = f_zone_touch(bull_fvg_tops, bull_fvg_bottoms, 5)
+320|bool bear_fvg_touch = f_zone_touch(bear_fvg_tops, bear_fvg_bottoms, 5)
+321|
+322|// ============================================================================
+323|// CONFIDENCE SCORING (0-17 Punkte)
+324|// ============================================================================
+325|int bull_conf = 0
+326|bull_conf += (bull_count == active_tfs and active_tfs >= 3) ? 4 : (bull_count >= min_alignment ? 2 : 0)
+327|bull_conf += local_bull_cisd ? 3 : 0
+328|bull_conf += bull_ob_touch ? 3 : 0
+329|bull_conf += bull_fvg_touch ? 3 : 0
+330|bull_conf += (use_vol and volume > vol_sma * vol_mult) ? 2 : (not use_vol ? 2 : 0)
+331|bull_conf += (close > open and (close - open) > atr_val * 0.5) ? 2 : 0
+332|
+333|int bear_conf = 0
+334|bear_conf += (bear_count == active_tfs and active_tfs >= 3) ? 4 : (bear_count >= min_alignment ? 2 : 0)
+335|bear_conf += local_bear_cisd ? 3 : 0
+336|bear_conf += bear_ob_touch ? 3 : 0
+337|bear_conf += bear_fvg_touch ? 3 : 0
+338|bear_conf += (use_vol and volume > vol_sma * vol_mult) ? 2 : (not use_vol ? 2 : 0)
+339|bear_conf += (open > close and (open - close) > atr_val * 0.5) ? 2 : 0
+340|
+341|// ============================================================================
+342|// FILTER CHECKS
+343|// ============================================================================
+344|
+345|// Session-Zeitfilter (UTC)
+346|int current_hour = hour(time, "UTC")
+347|bool time_ok = use_time ? (sess_start < sess_end ? (current_hour >= sess_start and current_hour < sess_end) : (current_hour >= sess_start or current_hour < sess_end)) : true
+348|
+349|// EMA 200 Trendfilter
+350|bool ema_long_ok  = use_ema_filter ? (close > ema200) : true
+351|bool ema_short_ok = use_ema_filter ? (close < ema200) : true
+352|
+353|// RSI Filter
+354|bool rsi_long_ok  = use_rsi_filter ? (rsi_val < rsi_ob) : true
+355|bool rsi_short_ok = use_rsi_filter ? (rsi_val > rsi_os) : true
+356|
+357|// ATR Volatilitaets-Filter
+358|float atr_pct = (atr_val / close) * 100
+359|bool atr_ok = use_atr_filter ? (atr_pct >= atr_min_pct) : true
+360|
+361|// Volumen-Filter (standalone check)
+362|bool vol_ok = use_vol ? (volume > vol_sma * vol_mult) : true
+363|
+364|// ============================================================================
+365|// DAILY LOSS LIMIT (approximiert fuer indicator)
+366|// ============================================================================
+367|var float daily_start_price = close
+368|var float daily_pnl_pct = 0.0
+369|var int daily_loss_count = 0
+370|
+371|bool is_new_day = ta.change(time("D")) != 0
+372|if is_new_day
+373|    daily_start_price := close
+374|    daily_pnl_pct := 0.0
+375|    daily_loss_count := 0
+376|
+377|daily_pnl_pct := ((close - daily_start_price) / daily_start_price) * 100
+378|bool daily_limit_ok = use_daily ? (daily_pnl_pct > -daily_lim) : true
+379|
+380|// ============================================================================
+381|// MAX DRAWDOWN CIRCUIT BREAKER
+382|// ============================================================================
+383|var float equity_peak = close
+384|var float current_dd_pct = 0.0
+385|
+386|equity_peak := math.max(equity_peak, close)
+387|current_dd_pct := ((equity_peak - close) / equity_peak) * 100
+388|bool dd_ok = use_max_dd ? (current_dd_pct < max_dd_pct) : true
+389|
+390|if is_new_day
+391|    equity_peak := close
+392|    current_dd_pct := 0.0
+393|
+394|// ============================================================================
+395|// POSITION TRACKING
+396|// ============================================================================
+397|var int position = 0       // 0=flat, 1=long, -1=short
+398|var int pending_entry_side = 0
+399|var float entry_price = na
+400|var float sl_price = na
+401|var float tp_price = na
+402|var float trail_price = na
+403|var float active_trade_risk = na
+404|var int bars_in_pos = 0
+405|var int active_conf_score = 0
+406|var string pending_exit_reason = ""
+407|var int kelly_closed_trades = 0
+408|var int kelly_win_trades = 0
+409|var int kelly_loss_trades = 0
+410|var float kelly_sum_win_r = 0.0
+411|var float kelly_sum_loss_r = 0.0
+412|
+413|float strategy_pos_size = strategy.position_size
+414|float strategy_prev_pos_size = nz(strategy.position_size[1], 0.0)
+415|int current_position = strategy_pos_size > 0 ? 1 : strategy_pos_size < 0 ? -1 : 0
+416|int previous_position = strategy_prev_pos_size > 0 ? 1 : strategy_prev_pos_size < 0 ? -1 : 0
+417|bool just_opened_long = current_position == 1 and previous_position != 1
+418|bool just_opened_short = current_position == -1 and previous_position != -1
+419|bool just_closed_trade = ta.change(strategy.closedtrades) > 0
+420|
+421|position := current_position
+422|if position != 0
+423|    entry_price := strategy.position_avg_price
+424|
+425|if just_opened_long
+426|    pending_entry_side := 0
+427|    active_trade_risk := not na(sl_price) ? math.max(entry_price - sl_price, syminfo.mintick) : na
+428|
+429|if just_opened_short
+430|    pending_entry_side := 0
+431|    active_trade_risk := not na(sl_price) ? math.max(sl_price - entry_price, syminfo.mintick) : na
+432|
+433|if position != 0
+434|    bars_in_pos := position != previous_position ? 0 : bars_in_pos + 1
+435|else if pending_entry_side == 0 and not just_closed_trade
+436|    bars_in_pos := 0
+437|
+438|// ============================================================================
+439|// SIGNAL GENERATION
+440|// ============================================================================
+441|bool all_filters_long = time_ok and ema_long_ok and rsi_long_ok and atr_ok and vol_ok and daily_limit_ok and dd_ok
+442|bool all_filters_short = time_ok and ema_short_ok and rsi_short_ok and atr_ok and vol_ok and daily_limit_ok and dd_ok
+443|
+444|bool signal_engine_ready = process_zone_logic
+445|bool long_setup = signal_engine_ready and bull_aligned and local_bull_cisd and bull_conf >= min_conf and all_filters_long
+446|bool short_setup = signal_engine_ready and allow_short and bear_aligned and local_bear_cisd and bear_conf >= min_conf and all_filters_short
+447|
+448|// Fire only on confirmed bars, no position overlap
+449|bool long_signal = long_setup and barstate.isconfirmed and position == 0 and pending_entry_side == 0
+450|bool short_signal = short_setup and barstate.isconfirmed and position == 0 and pending_entry_side == 0
+451|
+452|// ============================================================================
+453|// SL / TP CALCULATION
+454|// ============================================================================
+455|float long_sl = close - atr_val * eff_sl_atr_mul
+456|float long_tp = close + atr_val * eff_tp_atr_mul
+457|float short_sl = close + atr_val * eff_sl_atr_mul
+458|float short_tp = close - atr_val * eff_tp_atr_mul
+459|
+460|// ============================================================================
+461|// EXIT CONDITIONS
+462|// ============================================================================
+463|if use_trail and position == 1 and not na(trail_price)
+464|    float new_trail = high - atr_val * trail_atr
+465|    if new_trail > trail_price
+466|        trail_price := new_trail
+467|
+468|if use_trail and position == -1 and not na(trail_price)
+469|    float new_trail = low + atr_val * trail_atr
+470|    if new_trail < trail_price
+471|        trail_price := new_trail
+472|
+473|float active_long_stop = use_trail and not na(trail_price) ? math.max(sl_price, trail_price) : sl_price
+474|float active_short_stop = use_trail and not na(trail_price) ? math.min(sl_price, trail_price) : sl_price
+475|
+476|if (position == 1 or pending_entry_side == 1) and not na(active_long_stop) and not na(tp_price)
+477|    strategy.exit("Long TP/SL", from_entry="Long", stop=active_long_stop, limit=tp_price)
+478|
+479|if (position == -1 or pending_entry_side == -1) and not na(active_short_stop) and not na(tp_price)
+480|    strategy.exit("Short TP/SL", from_entry="Short", stop=active_short_stop, limit=tp_price)
+481|
+482|bool sl_hit_long  = position == 1 and not na(active_long_stop) and low <= active_long_stop
+483|bool tp_hit_long  = position == 1 and not na(tp_price) and high >= tp_price
+484|bool sl_hit_short = position == -1 and not na(active_short_stop) and high >= active_short_stop
+485|bool tp_hit_short = position == -1 and not na(tp_price) and low <= tp_price
+486|bool trail_hit_long  = use_trail and position == 1 and not na(trail_price) and low <= trail_price and active_long_stop > sl_price
+487|bool trail_hit_short = use_trail and position == -1 and not na(trail_price) and high >= trail_price and active_short_stop < sl_price
+488|
+489|// Max Bars Exit
+490|bool max_bars_exit = use_max_bars and bars_in_pos >= max_bars_held
+491|
+492|// Alignment Loss Exit
+493|bool alignment_loss_long  = position == 1 and not bull_aligned
+494|bool alignment_loss_short = position == -1 and not bear_aligned
+495|
+496|bool price_exit_long = (sl_hit_long or tp_hit_long or trail_hit_long) and barstate.isconfirmed
+497|bool price_exit_short = (sl_hit_short or tp_hit_short or trail_hit_short) and barstate.isconfirmed
+498|bool forced_exit_long = position == 1 and not price_exit_long and (max_bars_exit or alignment_loss_long) and barstate.isconfirmed
+499|bool forced_exit_short = position == -1 and not price_exit_short and (max_bars_exit or alignment_loss_short) and barstate.isconfirmed
+500|bool exit_long = price_exit_long or forced_exit_long
+501|bool exit_short = price_exit_short or forced_exit_short
+502|
+503|// Determine exit reason
+504|string exit_reason_long = sl_hit_long ? "stop_loss" : tp_hit_long ? "take_profit" : trail_hit_long ? "trailing_stop" : max_bars_exit ? "max_bars" : alignment_loss_long ? "alignment_loss" : "unknown"
+505|string exit_reason_short = sl_hit_short ? "stop_loss" : tp_hit_short ? "take_profit" : trail_hit_short ? "trailing_stop" : max_bars_exit ? "max_bars" : alignment_loss_short ? "alignment_loss" : "unknown"
+506|
+507|// Background color for alignment
+508|bgcolor(bull_aligned ? color.new(color.green, 92) : bear_aligned ? color.new(color.red, 92) : na)
+509|
+510|bool show_long_levels = position == 1 or pending_entry_side == 1
+511|bool show_short_levels = position == -1 or pending_entry_side == -1
+512|
+513|// Entry markers
+514|plotshape(long_signal, title="Long Entry", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.normal, text="LONG")
+515|plotshape(short_signal, title="Short Entry", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.normal, text="SHORT")
+516|
+517|// Exit markers
+518|plotshape(exit_long, title="Long Exit", style=shape.xcross, location=location.abovebar, color=color.orange, size=size.small, text="EXIT")
+519|plotshape(exit_short, title="Short Exit", style=shape.xcross, location=location.belowbar, color=color.orange, size=size.small, text="EXIT")
+520|
+521|// SL / TP lines
+522|plot(show_long_levels ? active_long_stop : na, title="Long SL", color=color.red, linewidth=1, style=plot.style_linebr)
+523|plot(show_long_levels ? tp_price : na, title="Long TP", color=color.green, linewidth=1, style=plot.style_linebr)
+524|plot(show_short_levels ? active_short_stop : na, title="Short SL", color=color.red, linewidth=1, style=plot.style_linebr)
+525|plot(show_short_levels ? tp_price : na, title="Short TP", color=color.green, linewidth=1, style=plot.style_linebr)
+526|
+527|// Trailing Stop line
+528|plot(use_trail and (show_long_levels or show_short_levels) ? trail_price : na, title="Trailing Stop", color=color.yellow, linewidth=1, style=plot.style_linebr)
+529|
+530|// EMA 200
+531|plot(use_ema_filter ? ema200 : na, title="EMA 200", color=color.new(color.blue, 50), linewidth=2)
+532|
+533|// ============================================================================
+534|// KELLY ANALYTICS
+535|// ============================================================================
+536|int kelly_strategy_win_trades = strategy.wintrades
+537|int kelly_strategy_loss_trades = strategy.losstrades
+538|int kelly_strategy_closed_trades = kelly_strategy_win_trades + kelly_strategy_loss_trades
+539|bool kelly_has_strategy_wl_stats = use_live_kelly and kelly_strategy_closed_trades > 0
+540|bool kelly_has_live_rr_stats = use_live_kelly and kelly_closed_trades > 0 and kelly_win_trades > 0 and kelly_loss_trades > 0
+541|
+542|float kelly_live_winrate = kelly_closed_trades > 0 ? f_safe_div(kelly_win_trades * 1.0, kelly_closed_trades * 1.0) : na
+543|float kelly_live_avg_win_r = kelly_win_trades > 0 ? f_safe_div(kelly_sum_win_r, kelly_win_trades * 1.0) : na
+544|float kelly_live_avg_loss_r = kelly_loss_trades > 0 ? f_safe_div(kelly_sum_loss_r, kelly_loss_trades * 1.0) : na
+545|float kelly_strategy_winrate = kelly_has_strategy_wl_stats ? f_safe_div(kelly_strategy_win_trades * 1.0, kelly_strategy_closed_trades * 1.0) : na
+546|
+547|float kelly_winrate = kelly_has_strategy_wl_stats ? kelly_strategy_winrate : kelly_has_live_rr_stats ? kelly_live_winrate : kelly_fallback_winrate / 100.0
+548|float kelly_avg_win_r = kelly_has_live_rr_stats ? kelly_live_avg_win_r : kelly_fallback_rr
+549|float kelly_avg_loss_r = kelly_has_live_rr_stats ? kelly_live_avg_loss_r : 1.0
+550|float kelly_avg_rr = not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) and kelly_avg_loss_r > 0 ? f_safe_div(kelly_avg_win_r, kelly_avg_loss_r) : na
+551|
+552|float kelly_be_winrate = not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) and (kelly_avg_win_r + kelly_avg_loss_r) > 0 ? kelly_avg_loss_r / (kelly_avg_win_r + kelly_avg_loss_r) : na
+553|float kelly_edge_per_r = not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) ? (kelly_winrate * kelly_avg_win_r - (1.0 - kelly_winrate) * kelly_avg_loss_r) : na
+554|float kelly_full_fraction_raw = not na(kelly_edge_per_r) and not na(kelly_avg_win_r) and not na(kelly_avg_loss_r) and kelly_avg_win_r > 0 and kelly_avg_loss_r > 0 ? kelly_edge_per_r / (kelly_avg_win_r * kelly_avg_loss_r) : na
+555|float kelly_full_pct = not na(kelly_full_fraction_raw) ? math.max(0.0, math.min(kelly_cap_pct, kelly_full_fraction_raw * 100.0)) : na
+556|float kelly_half_pct = not na(kelly_full_pct) ? kelly_full_pct * 0.5 : na
+557|float kelly_quarter_pct = not na(kelly_full_pct) ? kelly_full_pct * 0.25 : na
+558|float kelly_risk_fraction = not na(kelly_full_pct) ? kelly_full_pct / 100.0 : na
+559|float your_risk_fraction = your_risk_pct / 100.0
+560|
+561|float kelly_growth_at_full = not na(kelly_risk_fraction) ? f_kelly_growth(kelly_winrate, kelly_avg_win_r, kelly_avg_loss_r, kelly_risk_fraction) : na
+562|float kelly_growth_at_your = f_kelly_growth(kelly_winrate, kelly_avg_win_r, kelly_avg_loss_r, your_risk_fraction)
+563|
+564|float active_stop_pct = position == 1 and not na(entry_price) and not na(active_long_stop) ? math.abs(entry_price - active_long_stop) / entry_price : position == -1 and not na(entry_price) and not na(active_short_stop) ? math.abs(active_short_stop - entry_price) / entry_price : long_setup ? math.abs(close - long_sl) / close : short_setup ? math.abs(short_sl - close) / close : na
+565|float sizing_equity = use_strategy_equity_for_sizing ? strategy.equity : kelly_equity_usdt
+566|float kelly_risk_amt = not na(kelly_full_pct) ? sizing_equity * (kelly_full_pct / 100.0) : na
+567|float kelly_position_value = not na(kelly_risk_amt) and not na(active_stop_pct) and active_stop_pct > 0 ? kelly_risk_amt / active_stop_pct : na
+568|float manual_position_value = sizing_equity * (standartqty / 100.0)
+569|float manual_entry_qty = close > 0 ? manual_position_value / close : na
+570|float effective_kelly_risk_pct = not na(kelly_full_pct) and kelly_full_pct > 0 ? math.min(kelly_full_pct, your_risk_pct) : your_risk_pct
+571|float effective_sizing_risk_pct = use_kelly_autosize ? effective_kelly_risk_pct : na
+572|float effective_sizing_risk_amt = not na(effective_sizing_risk_pct) ? sizing_equity * (effective_sizing_risk_pct / 100.0) : na
+573|float long_stop_value_per_unit = math.max(math.abs(close - long_sl), syminfo.mintick) * syminfo.pointvalue
+574|float short_stop_value_per_unit = math.max(math.abs(short_sl - close), syminfo.mintick) * syminfo.pointvalue
+575|float long_kelly_entry_qty = not na(effective_sizing_risk_amt) and long_stop_value_per_unit > 0 ? effective_sizing_risk_amt / long_stop_value_per_unit : na
+576|float short_kelly_entry_qty = not na(effective_sizing_risk_amt) and short_stop_value_per_unit > 0 ? effective_sizing_risk_amt / short_stop_value_per_unit : na
+577|float long_entry_qty = use_kelly_autosize ? long_kelly_entry_qty : manual_entry_qty
+578|float short_entry_qty = use_kelly_autosize ? short_kelly_entry_qty : manual_entry_qty
+579|long_entry_qty := not na(long_entry_qty) and long_entry_qty > 0 ? long_entry_qty : na
+580|short_entry_qty := not na(short_entry_qty) and short_entry_qty > 0 ? short_entry_qty : na
+581|
+582|// ============================================================================
+583|// ENTRY EXECUTION
+584|// ============================================================================
+585|if long_signal and not na(long_entry_qty) and long_entry_qty > 0
+586|    sl_price := long_sl
+587|    tp_price := long_tp
+588|    strategy.entry("Long", strategy.long, qty=long_entry_qty)
+589|
+590|if short_signal and not na(short_entry_qty) and short_entry_qty > 0
+591|    sl_price := short_sl
+592|    tp_price := short_tp
+593|    strategy.entry("Short", strategy.short, qty=short_entry_qty)
+594|
+595|int kelly_display_trades = kelly_has_strategy_wl_stats ? kelly_strategy_closed_trades : kelly_closed_trades
+596|string kelly_trades_text = kelly_has_strategy_wl_stats ? str.tostring(kelly_display_trades) + " (" + str.tostring(kelly_strategy_win_trades) + "W/" + str.tostring(kelly_strategy_loss_trades) + "L)" : str.tostring(kelly_display_trades)
+597|float dashboard_entry_qty = math.abs(strategy.position_size) > 0 ? math.abs(strategy.position_size) : long_setup ? long_entry_qty : short_setup ? short_entry_qty : na
+598|string sizing_mode = use_kelly_autosize ? "Kelly Risk" : "% Equity"
+599|
+600|string kelly_status = na(kelly_full_pct) or kelly_full_pct <= 0.0 ? "No Edge" : your_risk_pct <= kelly_full_pct * 0.25 ? "Conservative" : your_risk_pct < kelly_full_pct ? "Near Kelly" : "Aggressive"
+601|color kelly_status_color = kelly_status == "Conservative" ? color.yellow : kelly_status == "Near Kelly" ? color.orange : kelly_status == "Aggressive" ? color.red : color.gray
+602|string kelly_source = kelly_has_strategy_wl_stats or kelly_has_live_rr_stats ? "LIVE" : "MANUAL"
+603|color kelly_source_color = kelly_has_strategy_wl_stats or kelly_has_live_rr_stats ? color.lime : color.orange
+604|
+605|// ============================================================================
+606|// DASHBOARD TABLE (oben rechts)
+607|// ============================================================================
+608|var table dash = table.new(position.top_right, 2, 41, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.new(color.gray, 60))
+609|
+610|if barstate.islast
+611|    // Row 0: Title
+612|    table.cell(dash, 0, 0, "MTF CISD + OB/FVG v2.0", text_color=color.white, text_size=size.small)
+613|    table.cell(dash, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small)
+614|
+615|    // Row 1: H4 State
+616|    table.cell(dash, 0, 1, "H4", text_color=color.white, text_size=size.tiny)
+617|    table.cell(dash, 1, 1, en_h4 ? (state_h4 == 1 ? "BULL" : state_h4 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_h4 ? (state_h4 == 1 ? color.green : state_h4 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+618|
+619|    // Row 2: H1 State
+620|    table.cell(dash, 0, 2, "H1", text_color=color.white, text_size=size.tiny)
+621|    table.cell(dash, 1, 2, en_h1 ? (state_h1 == 1 ? "BULL" : state_h1 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_h1 ? (state_h1 == 1 ? color.green : state_h1 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+622|
+623|    // Row 3: M15 State
+624|    table.cell(dash, 0, 3, "M15", text_color=color.white, text_size=size.tiny)
+625|    table.cell(dash, 1, 3, en_m15 ? (state_m15 == 1 ? "BULL" : state_m15 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_m15 ? (state_m15 == 1 ? color.green : state_m15 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+626|
+627|    // Row 4: M5 State
+628|    table.cell(dash, 0, 4, "M5", text_color=color.white, text_size=size.tiny)
+629|    table.cell(dash, 1, 4, en_m5 ? (state_m5 == 1 ? "BULL" : state_m5 == -1 ? "BEAR" : "FLAT") : "OFF", text_color=en_m5 ? (state_m5 == 1 ? color.green : state_m5 == -1 ? color.red : color.gray) : color.gray, text_size=size.tiny)
+630|
+631|    // Row 5: Local CISD
+632|    table.cell(dash, 0, 5, "Local CISD", text_color=color.white, text_size=size.tiny)
+633|    table.cell(dash, 1, 5, local_state == 1 ? "BULL" : local_state == -1 ? "BEAR" : "FLAT", text_color=local_state == 1 ? color.green : local_state == -1 ? color.red : color.gray, text_size=size.tiny)
+634|
+635|    // Row 6: Alignment
+636|    table.cell(dash, 0, 6, "Alignment", text_color=color.white, text_size=size.tiny)
+637|    table.cell(dash, 1, 6, str.tostring(math.max(bull_count, bear_count)) + "/" + str.tostring(active_tfs), text_color=bull_aligned or bear_aligned ? color.green : color.gray, text_size=size.tiny)
+638|
+639|    // Row 7: Confidence
+640|    table.cell(dash, 0, 7, "Confidence", text_color=color.white, text_size=size.tiny)
+641|    int display_conf = math.max(bull_conf, bear_conf)
+642|    table.cell(dash, 1, 7, str.tostring(display_conf) + "/17", text_color=display_conf >= min_conf ? color.green : color.orange, text_size=size.tiny)
+643|
+644|    // Row 8: Position
+645|    table.cell(dash, 0, 8, "Position", text_color=color.white, text_size=size.tiny)
+646|    table.cell(dash, 1, 8, position == 1 ? "LONG" : position == -1 ? "SHORT" : "FLAT", text_color=position == 1 ? color.green : position == -1 ? color.red : color.gray, text_size=size.tiny)
+647|
+648|    // Row 9: Entry Price
+649|    table.cell(dash, 0, 9, "Entry", text_color=color.white, text_size=size.tiny)
+650|    table.cell(dash, 1, 9, not na(entry_price) ? str.tostring(entry_price, format.mintick) : "---", text_color=color.white, text_size=size.tiny)
+651|
+652|    // Row 10: Stop Loss
+653|    table.cell(dash, 0, 10, "Stop Loss", text_color=color.white, text_size=size.tiny)
+654|    table.cell(dash, 1, 10, not na(sl_price) ? str.tostring(sl_price, format.mintick) : "---", text_color=color.red, text_size=size.tiny)
+655|
+656|    // Row 11: Take Profit
+657|    table.cell(dash, 0, 11, "Take Profit", text_color=color.white, text_size=size.tiny)
+658|    table.cell(dash, 1, 11, not na(tp_price) ? str.tostring(tp_price, format.mintick) : "---", text_color=color.green, text_size=size.tiny)
+659|
+660|    // Row 12: R:R Ratio
+661|    float rr_ratio = not na(entry_price) and not na(sl_price) and not na(tp_price) and position == 1 ? (tp_price - entry_price) / math.max(entry_price - sl_price, 0.01) : not na(entry_price) and not na(sl_price) and not na(tp_price) and position == -1 ? (entry_price - tp_price) / math.max(sl_price - entry_price, 0.01) : 0.0
+662|    table.cell(dash, 0, 12, "R:R", text_color=color.white, text_size=size.tiny)
+663|    table.cell(dash, 1, 12, rr_ratio > 0 ? "1:" + str.tostring(rr_ratio, "#.##") : "---", text_color=color.white, text_size=size.tiny)
+664|
+665|    // Row 13: Bars in Position
+666|    table.cell(dash, 0, 13, "Bars Held", text_color=color.white, text_size=size.tiny)
+667|    table.cell(dash, 1, 13, position != 0 ? str.tostring(bars_in_pos) : "---", text_color=color.white, text_size=size.tiny)
+668|
+669|    // Row 14: ATR
+670|    table.cell(dash, 0, 14, "ATR(14)", text_color=color.white, text_size=size.tiny)
+671|    table.cell(dash, 1, 14, str.tostring(atr_val, format.mintick), text_color=color.white, text_size=size.tiny)
+672|
+673|    // Row 15: RSI
+674|    table.cell(dash, 0, 15, "RSI(14)", text_color=color.white, text_size=size.tiny)
+675|    table.cell(dash, 1, 15, str.tostring(rsi_val, "#.#"), text_color=rsi_val > rsi_ob ? color.red : rsi_val < rsi_os ? color.green : color.white, text_size=size.tiny)
+676|
+677|    // Row 16: Daily PnL
+678|    table.cell(dash, 0, 16, "Daily PnL", text_color=color.white, text_size=size.tiny)
+679|    table.cell(dash, 1, 16, str.tostring(daily_pnl_pct, "#.##") + "%", text_color=daily_pnl_pct >= 0 ? color.green : color.red, text_size=size.tiny)
+680|
+681|    // Row 17: Session
+682|    table.cell(dash, 0, 17, "Session", text_color=color.white, text_size=size.tiny)
+683|    table.cell(dash, 1, 17, time_ok ? "ACTIVE" : "CLOSED", text_color=time_ok ? color.green : color.red, text_size=size.tiny)
+684|
+685|    // Row 18: DD Breaker
+686|    table.cell(dash, 0, 18, "Max DD", text_color=color.white, text_size=size.tiny)
+687|    table.cell(dash, 1, 18, str.tostring(current_dd_pct, "#.##") + "% / " + str.tostring(max_dd_pct, "#.#") + "%", text_color=dd_ok ? color.green : color.red, text_size=size.tiny)
+688|
+689|    // Row 19: Shorts
+690|    table.cell(dash, 0, 19, "Shorts", text_color=color.white, text_size=size.tiny)
+691|    table.cell(dash, 1, 19, allow_short ? "ON (Futures)" : "OFF (Spot)", text_color=allow_short ? color.yellow : color.gray, text_size=size.tiny)
+692|
+693|    // Row 20: Kelly Header
+694|    table.cell(dash, 0, 20, "KELLY", text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 0))
+695|    table.cell(dash, 1, 20, kelly_source, text_color=kelly_source_color, text_size=size.small, bgcolor=color.new(color.purple, 0))
+696|
+697|    // Row 21: Winrate
+698|    table.cell(dash, 0, 21, "Winrate", text_color=color.white, text_size=size.tiny)
+699|    table.cell(dash, 1, 21, f_fmt_pct(kelly_winrate * 100.0), text_color=color.white, text_size=size.tiny)
+700|
+701|    // Row 22: Avg R:R
+702|    table.cell(dash, 0, 22, "Avg R:R", text_color=color.white, text_size=size.tiny)
+703|    table.cell(dash, 1, 22, not na(kelly_avg_rr) ? "1 : " + str.tostring(kelly_avg_rr, "#.##") : "---", text_color=color.white, text_size=size.tiny)
+704|
+705|    // Row 23: Break-even Winrate
+706|    table.cell(dash, 0, 23, "BE Winrate", text_color=color.white, text_size=size.tiny)
+707|    table.cell(dash, 1, 23, f_fmt_pct(kelly_be_winrate * 100.0), text_color=color.white, text_size=size.tiny)
+708|
+709|    // Row 24: Edge per $1
+710|    table.cell(dash, 0, 24, "Edge / $1", text_color=color.white, text_size=size.tiny)
+711|    table.cell(dash, 1, 24, f_fmt_signed_money(kelly_edge_per_r), text_color=na(kelly_edge_per_r) ? color.gray : kelly_edge_per_r >= 0 ? color.lime : color.red, text_size=size.tiny)
+712|
+713|    // Row 25: Full Kelly
+714|    table.cell(dash, 0, 25, "Full Kelly", text_color=color.white, text_size=size.tiny)
+715|    table.cell(dash, 1, 25, f_fmt_pct(kelly_full_pct), text_color=na(kelly_full_pct) ? color.gray : color.lime, text_size=size.tiny)
+716|
+717|    // Row 26: Half Kelly
+718|    table.cell(dash, 0, 26, "Half Kelly", text_color=color.white, text_size=size.tiny)
+719|    table.cell(dash, 1, 26, f_fmt_pct(kelly_half_pct), text_color=na(kelly_half_pct) ? color.gray : color.lime, text_size=size.tiny)
+720|
+721|    // Row 27: Quarter Kelly
+722|    table.cell(dash, 0, 27, "Quarter Kelly", text_color=color.white, text_size=size.tiny)
+723|    table.cell(dash, 1, 27, f_fmt_pct(kelly_quarter_pct), text_color=na(kelly_quarter_pct) ? color.gray : color.lime, text_size=size.tiny)
+724|
+725|    // Row 28: Your Risk
+726|    table.cell(dash, 0, 28, "Your Risk", text_color=color.white, text_size=size.tiny)
+727|    table.cell(dash, 1, 28, f_fmt_pct(your_risk_pct), text_color=color.aqua, text_size=size.tiny)
+728|
+729|    // Row 29: Status
+730|    table.cell(dash, 0, 29, "Status", text_color=color.white, text_size=size.tiny)
+731|    table.cell(dash, 1, 29, kelly_status, text_color=kelly_status_color, text_size=size.tiny)
+732|
+733|    // Row 30: Risk Amount if Kelly
+734|    table.cell(dash, 0, 30, "Risk Amt", text_color=color.white, text_size=size.tiny)
+735|    table.cell(dash, 1, 30, f_fmt_money(kelly_risk_amt), text_color=na(kelly_risk_amt) ? color.gray : color.aqua, text_size=size.tiny)
+736|
+737|    // Row 31: Position Value if Kelly
+738|    table.cell(dash, 0, 31, "Position", text_color=color.white, text_size=size.tiny)
+739|    table.cell(dash, 1, 31, f_fmt_money(kelly_position_value), text_color=na(kelly_position_value) ? color.gray : color.aqua, text_size=size.tiny)
+740|
+741|    // Row 32: Growth Rate at Kelly
+742|    table.cell(dash, 0, 32, "Growth @ Kelly", text_color=color.white, text_size=size.tiny)
+743|    table.cell(dash, 1, 32, f_fmt_signed(kelly_growth_at_full, "#.##") + "% /trade", text_color=na(kelly_growth_at_full) ? color.gray : kelly_growth_at_full >= 0 ? color.lime : color.red, text_size=size.tiny)
+744|
+745|    // Row 33: Growth Rate at Your Risk
+746|    table.cell(dash, 0, 33, "Growth @ Your", text_color=color.white, text_size=size.tiny)
+747|    table.cell(dash, 1, 33, f_fmt_signed(kelly_growth_at_your, "#.##") + "% /trade", text_color=na(kelly_growth_at_your) ? color.gray : kelly_growth_at_your >= 0 ? color.lime : color.red, text_size=size.tiny)
+748|
+749|    // Row 34: Sample Size
+750|    table.cell(dash, 0, 34, "Trades", text_color=color.white, text_size=size.tiny)
+751|    table.cell(dash, 1, 34, kelly_trades_text, text_color=color.white, text_size=size.tiny)
+752|
+753|    // Row 35: Telegram Intelligence Header
+754|    table.cell(dash, 0, 35, "TELEGRAM", text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 0))
+755|    table.cell(dash, 1, 35, "INTEL", text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 0))
+756|
+757|    // Row 36: GLINT News
+758|    table.cell(dash, 0, 36, "GLINT News", text_color=color.white, text_size=size.tiny)
+759|    table.cell(dash, 1, 36, use_glint_news ? "ON" : "OFF", text_color=use_glint_news ? color.lime : color.gray, text_size=size.tiny)
+760|
+761|    // Row 37: Manus Advisor Widget
+762|    table.cell(dash, 0, 37, "Manus Advisor", text_color=color.white, text_size=size.tiny)
+763|    table.cell(dash, 1, 37, use_manus_advisor ? "ON" : "OFF", text_color=use_manus_advisor ? color.aqua : color.gray, text_size=size.tiny)
+764|
+765|    // Row 38: Boost Cap
+766|    table.cell(dash, 0, 38, "Boost Cap", text_color=color.white, text_size=size.tiny)
+767|    table.cell(dash, 1, 38, "25%", text_color=color.lime, text_size=size.tiny)
+768|
+769|    // Row 39: Execution Mode
+770|    table.cell(dash, 0, 39, "Mode", text_color=color.white, text_size=size.tiny)
+771|    table.cell(dash, 1, 39, logic_mode + " | " + sizing_mode, text_color=logic_mode == "Realtime only" ? color.orange : logic_mode == "Historical only" ? color.aqua : color.lime, text_size=size.tiny)
+772|
+773|    // Row 40: Entry Quantity
+774|    table.cell(dash, 0, 40, "Entry Qty", text_color=color.white, text_size=size.tiny)
+775|    table.cell(dash, 1, 40, f_fmt_qty(dashboard_entry_qty), text_color=na(dashboard_entry_qty) ? color.gray : color.aqua, text_size=size.tiny)
+776|
+777|// ============================================================================
+778|// DEBUG LABELS
+779|// ============================================================================
+780|if debug_mode and barstate.isconfirmed
+781|    int show_conf = math.max(bull_conf, bear_conf)
+782|    if show_conf >= min_conf - 2
+783|        label.new(bar_index, high + atr_val * 0.5, str.tostring(show_conf), style=label.style_label_down, color=show_conf >= min_conf ? color.green : color.orange, textcolor=color.white, size=size.tiny)
+784|
+785|// ============================================================================
+786|// END OF SCRIPT
+787|// ============================================================================
+788|

@@ -1,0 +1,211 @@
+//@version=6
+indicator("Universal_Adaptive_SniperEngine_v2", overlay=true, max_labels_count=500, max_boxes_count=100, max_bars_back=5000)
+
+// ==========================================
+// 1. INPUTS & CONFIGURATION
+// ==========================================
+group_regime  = "=== 1. Market Regime & Adaptivity ==="
+useRegime     = input.bool(true, "Enable Dynamic Regime Filtering", group=group_regime)
+chopLen       = input.int(14, "Choppiness Index Length", group=group_regime, minval=5)
+chopThreshold = input.float(61.8, "Choppiness Upper Threshold (Ranging > This)", group=group_regime, step=1.0)
+htfMultiplier = input.int(4, "HTF Multiplier (e.g., 4x Chart Period)", group=group_regime, minval=2, maxval=24)
+
+group_weights = "=== 2. Factor Weightings (%) ==="
+w_trend       = input.float(25.0, "Trend & EMA Ribbon Weight", group=group_weights)
+w_vwap        = input.float(20.0, "VWAP Alignment Weight", group=group_weights)
+w_htf         = input.float(25.0, "HTF Direction Weight", group=group_weights)
+w_momentum    = input.float(15.0, "RSI / MACD Momentum Weight", group=group_weights)
+w_memory      = input.float(15.0, "Quantum Memory Weight", group=group_weights)
+minScorePct   = input.float(65.0, "Minimum Total Confidence (%)", group=group_weights, minval=50.0, maxval=95.0)
+
+group_risk    = "=== 3. Risk & Active Trade Lifecycle ==="
+slAtrMult     = input.float(1.5, "Initial SL (ATR Mult)", group=group_risk, step=0.1)
+tp1AtrMult    = input.float(1.5, "TP1 (ATR Mult)", group=group_risk, step=0.1)
+useBreakEven  = input.bool(true, "Move SL to Break-Even after TP1", group=group_risk)
+useTrailStop  = input.bool(true, "Enable ATR Trailing Stop for Runners", group=group_risk)
+trailAtrMult  = input.float(2.0, "Trailing Stop ATR Distance", group=group_risk, step=0.1)
+maxTradeBars  = input.int(120, "Max Stagnation Bars before Time Exit", group=group_risk, minval=10)
+
+// ==========================================
+// 2. HELPER FUNCTIONS
+// ==========================================
+// Choppiness Index (100 = Ranging/Choppy, 0 = Pure Trend)
+f_choppiness(len) =>
+    100.0 * math.log10(math.sum(ta.atr(1), len) / (ta.highest(high, len) - ta.lowest(low, len))) / math.log10(len)
+
+// Dynamic HTF Resolution (Never lower than chart timeframe)
+f_getDynamicHTF(mult) =>
+    chartSec = timeframe.in_seconds(timeframe.period)
+    targetSec = na(chartSec) ? 300 : chartSec * mult
+    targetSec >= 86400 ? str.tostring(math.round(targetSec / 86400)) + "D" :
+     targetSec >= 3600  ? str.tostring(math.round(targetSec / 60)) :
+     str.tostring(math.round(targetSec / 60))
+
+// ==========================================
+// 3. CORE INDICATORS & REGIME ENGINE
+// ==========================================
+ema9    = ta.ema(close, 9)
+ema21   = ta.ema(close, 21)
+vwapVal = ta.vwap(hlc3)
+atrVal  = ta.atr(14)
+rsiVal  = ta.rsi(close, 14)
+[macdMain, macdSig, _] = ta.macd(close, 12, 26, 9)
+
+// Market Regime Classification
+chopVal       = f_choppiness(chopLen)
+isRanging     = useRegime and (chopVal >= chopThreshold)
+isTrending    = not isRanging
+regimeString  = isRanging ? "RANGING (CHOPPY)" : "TRENDING"
+regimeColor   = isRanging ? color.orange : color.green
+
+// Non-Repainting Adaptive HTF Request
+htfString     = f_getDynamicHTF(htfMultiplier)
+htfEmaBull    = request.security(syminfo.tickerid, htfString, close > ta.ema(close, 21), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+htfEmaBear    = request.security(syminfo.tickerid, htfString, close < ta.ema(close, 21), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// ==========================================
+// 4. DETERMINISTIC QUANTUM MEMORY (NO VARIP)
+// ==========================================
+// Using standard 'var' so updates occur once per confirmed bar (No real-time tick repainting!)
+var float qMemory = 0.0
+float trendDir = (close > ema21 and ema9 > ema21) ? 1.0 : (close < ema21 and ema9 < ema21) ? -1.0 : 0.0
+float memInput = trendDir * 0.25
+if barstate.isconfirmed
+    qMemory := math.max(-1.0, math.min(1.0, qMemory * 0.88 + memInput))
+
+// ==========================================
+// 5. WEIGHTED MULTI-FACTOR SCORING ENGINE
+// ==========================================
+float totalWeight = w_trend + w_vwap + w_htf + w_momentum + w_memory
+
+float bullScore = 0.0
+bullScore += (ema9 > ema21 and close > ema9) ? w_trend : 0.0
+bullScore += (close > vwapVal)               ? w_vwap  : 0.0
+bullScore += htfEmaBull                      ? w_htf   : 0.0
+bullScore += (rsiVal > 50 and macdMain > macdSig) ? w_momentum : 0.0
+bullScore += (qMemory > 0.05)                ? w_memory : 0.0
+float bullPct = (bullScore / totalWeight) * 100.0
+
+float bearScore = 0.0
+bearScore += (ema9 < ema21 and close < ema9) ? w_trend : 0.0
+bearScore += (close < vwapVal)               ? w_vwap  : 0.0
+bearScore += htfEmaBear                      ? w_htf   : 0.0
+bearScore += (rsiVal < 50 and macdMain < macdSig) ? w_momentum : 0.0
+bearScore += (qMemory < -0.05)               ? w_memory : 0.0
+float bearPct = (bearScore / totalWeight) * 100.0
+
+// Signal Generation (Suppressed in Choppy/Ranging Regime unless Mean-Reversion mode is active)
+bool rawBuy  = isTrending and ta.crossover(ema9, ema21) and (bullPct >= minScorePct)
+bool rawSell = isTrending and ta.crossunder(ema9, ema21) and (bearPct >= minScorePct)
+
+// ==========================================
+// 6. ACTIVE TRADE LIFECYCLE & RISK MACHINE
+// ==========================================
+var int   posDir      = 0      // 1 = Long, -1 = Short, 0 = Flat
+var float entryPrice  = na
+var float slPrice     = na
+var float tp1Price    = na
+var bool  tp1Hit      = false
+var int   entryBar    = na
+var float peakPrice   = na
+
+// Entry Processing
+if rawBuy and posDir == 0
+    posDir     := 1
+    entryPrice := close
+    slPrice    := close - (atrVal * slAtrMult)
+    tp1Price   := close + (atrVal * tp1AtrMult)
+    tp1Hit     := false
+    entryBar   := bar_index
+    peakPrice  := high
+
+if rawSell and posDir == 0
+    posDir     := -1
+    entryPrice := close
+    slPrice    := close + (atrVal * slAtrMult)
+    tp1Price   := close - (atrVal * tp1AtrMult)
+    tp1Hit     := false
+    entryBar   := bar_index
+    peakPrice  := low
+
+// Active Position Management (Break-Even, Trailing Stop & Time Stop)
+bool exitSignal = false
+string exitReason = ""
+
+if posDir == 1
+    peakPrice := math.max(peakPrice, high)
+    // Check TP1 Break-Even
+    if high >= tp1Price and not tp1Hit
+        tp1Hit := true
+        if useBreakEven
+            slPrice := math.max(slPrice, entryPrice)
+    // ATR Trailing Stop after TP1
+    if tp1Hit and useTrailStop
+        slPrice := math.max(slPrice, peakPrice - (atrVal * trailAtrMult))
+    // Check Exit Triggers
+    if low <= slPrice
+        exitSignal := true
+        exitReason := tp1Hit ? "TRAIL_SL_LONG" : "SL_LONG"
+    else if (bar_index - entryBar) >= maxTradeBars
+        exitSignal := true
+        exitReason := "TIME_STOP_LONG"
+
+else if posDir == -1
+    peakPrice := math.min(peakPrice, low)
+    // Check TP1 Break-Even
+    if low <= tp1Price and not tp1Hit
+        tp1Hit := true
+        if useBreakEven
+            slPrice := math.min(slPrice, entryPrice)
+    // ATR Trailing Stop after TP1
+    if tp1Hit and useTrailStop
+        slPrice := math.min(slPrice, peakPrice + (atrVal * trailAtrMult))
+    // Check Exit Triggers
+    if high >= slPrice
+        exitSignal := true
+        exitReason := tp1Hit ? "TRAIL_SL_SHORT" : "SL_SHORT"
+    else if (bar_index - entryBar) >= maxTradeBars
+        exitSignal := true
+        exitReason := "TIME_STOP_SHORT"
+
+// Reset State on Exit
+if exitSignal
+    posDir     := 0
+    entryPrice := na
+    slPrice    := na
+    tp1Price   := na
+    tp1Hit     := false
+
+// ==========================================
+// 7. VISUALS & UNIVERSAL WEBHOOK ALERTS
+// ==========================================
+plot(vwapVal, "VWAP", color=color.blue, linewidth=2)
+plot(posDir != 0 ? slPrice : na, "Active Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(posDir != 0 and not tp1Hit ? tp1Price : na, "Target TP1", color=color.green, style=plot.style_circles)
+
+plotshape(rawBuy and posDir[1] == 0, "BUY", shape.labelup, location.belowbar, color.green, 0, "BUY", color.white)
+plotshape(rawSell and posDir[1] == 0, "SELL", shape.labeldown, location.abovebar, color.red, 0, "SELL", color.white)
+plotshape(exitSignal, "EXIT", shape.xcross, location.abovebar, color.orange, 0, "EXIT")
+
+// Standardized JSON Webhook Builder
+f_makeJson(_action, _dir, _reason) =>
+    '{"action":"' + _action + '","symbol":"' + syminfo.ticker + '","dir":"' + _dir + '","price":' + str.tostring(close, format.mintick) + ',"reason":"' + _reason + '","regime":"' + regimeString + '"}'
+
+if rawBuy and posDir[1] == 0
+    alert(f_makeJson("ENTER", "LONG", "CONFIDENCE_ENTRY"), alert.freq_once_per_bar_close)
+if rawSell and posDir[1] == 0
+    alert(f_makeJson("ENTER", "SHORT", "CONFIDENCE_ENTRY"), alert.freq_once_per_bar_close)
+if exitSignal
+    alert(f_makeJson("EXIT", posDir[1] == 1 ? "LONG" : "SHORT", exitReason), alert.freq_once_per_bar_close)
+
+// Dashboard Overlay
+var table dash = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 20), border_width=1)
+if barstate.islast
+    table.cell(dash, 0, 0, "REGIME", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, regimeString, bgcolor=regimeColor, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 1, "BULL CONFIDENCE", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(bullPct, "#.#") + "%", bgcolor=color.green, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 2, "BEAR CONFIDENCE", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(bearPct, "#.#") + "%", bgcolor=color.red, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 3, "ACTIVE STATE", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, posDir == 1 ? "LONG" : posDir == -1 ? "SHORT" : "FLAT", bgcolor=posDir != 0 ? color.blue : color.gray, text_color=color.white, text_size=size.small)

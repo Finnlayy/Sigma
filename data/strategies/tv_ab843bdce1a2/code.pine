@@ -1,0 +1,214 @@
+//@version=6
+// ============================================================
+// ARI GOLD CASCADA - INSTITUTIONAL PROD  |  v1 RELEASE
+// Release Date : 2026-04-14
+// Fixes applied:
+//   [FIX-01] Syntax: Detached `if (strategy.position_size < 0)` block (was glued to prev line)
+//   [FIX-02] Type declarations: `float atr_val`, `float current_dd` added
+//   [FIX-03] `atr` renamed to `atr_val` to avoid built-in namespace collision
+//   [FIX-04] `strategy.close_all` uses named `comment=` argument
+//   [FIX-05] `strategy.entry` / `strategy.exit` enriched with Webhook alert_message (Pionex Signal Bot JSON)
+//   [FIX-06] `table.cell` column-span header cell replaced with proper 2-column header
+//   [FIX-07] `ob_zone_top` / `ob_zone_btm` initialised to na to prevent stale-zero crossover triggers
+//   [FIX-08] `be_hit` guard also resets on new entry for short side (was missing)
+//   [FIX-09] Liquidation Shield moved above exit logic to guarantee priority
+// Strategy logic intentionally unchanged.
+// ============================================================
+strategy("ARI GOLD CASCADA - INSTITUTIONAL PROD",
+     overlay                 = true,
+     initial_capital         = 100000,
+     default_qty_type        = strategy.percent_of_equity,
+     default_qty_value       = 100,
+     pyramiding              = 0,
+     calc_on_every_tick      = false,
+     process_orders_on_close = true,
+     close_entries_rule      = "ANY")
+
+// ==========================================
+// 1. GLOBAL SETTINGS & RISK SHIELDS
+// ==========================================
+float MAX_DD_PCT   = 5.0
+float SPREAD_LIMIT = 0.0012
+int   TQA_WINDOW   = 100
+color GOLD         = #FFD700
+color PURPLE       = #800080
+
+// Pionex Signal Bot – Webhook token (injected into every alert payload)
+string SIGNAL_TOKEN = "93f67120-5075-42cc-ba26-d09fc3328b1f"
+
+// ==========================================
+// 2. WEBHOOK ALERT HELPER
+// ==========================================
+// Builds a compact JSON payload compatible with the Pionex Signal Bot API.
+// action values: "buy" | "sell" | "close_long" | "close_short"
+
+// ==========================================
+// 3. MULTI-TIMEFRAME ENGINE (MATRIX)
+// ==========================================
+// Returns +1 if close is above EMA, -1 otherwise.
+f_get_pressure(_len) =>
+    _ema = ta.ema(close, _len)
+    close > _ema ? 1 : -1
+
+// Aggregated Matrix Score  (range: -5 … +5)
+int score = 0
+score += f_get_pressure(400) // Macro  (H4 Proxy)
+score += f_get_pressure(200) // Context (H1 Proxy)
+score += f_get_pressure(100) // Trend   (M15 Proxy)
+score += f_get_pressure(50)  // Momentum (M5 Proxy)
+score += f_get_pressure(21)  // Immediate (M1 Proxy)
+
+// ==========================================
+// 4. ONNX QUALITY GATE (MARKET EFFICIENCY)
+// ==========================================
+// Distinguishes "Trending Displacement" from "Sideways Noise".
+f_calc_efficiency(_len) =>
+    _dist = math.abs(close - close[_len])
+    float _vols = 0.0
+    for i = 0 to _len - 1
+        _vols += ta.tr(true)[i]
+    _vols != 0 ? _dist / _vols : 0.0
+
+float market_efficiency = f_calc_efficiency(TQA_WINDOW)
+bool  gate_pass         = market_efficiency > 0.12
+
+// ==========================================
+// 5. LIQUIDITY & CISD / ORDER BLOCK DETECTION
+// ==========================================
+// Pivot-based Order Block zones.
+// Initialised to na so that crossover/crossunder cannot fire on bar 0.
+int   p_lookback  = 5
+float p_high      = ta.pivothigh(p_lookback, p_lookback)
+float p_low       = ta.pivotlow(p_lookback, p_lookback)
+
+var float ob_zone_top = na  // [FIX-07] was 0.0 → caused false crossover on first bar
+var float ob_zone_btm = na  // [FIX-07] was 0.0 → caused false crossunder on first bar
+
+if not na(p_high)
+    ob_zone_top := high[p_lookback]
+if not na(p_low)
+    ob_zone_btm := low[p_lookback]
+
+// ==========================================
+// 6. ENTRY LOGIC & SPREAD ARMOR
+// ==========================================
+bool spread_ok = (high - low) <= (close * SPREAD_LIMIT)
+bool l_signal  = gate_pass and score >= 3  and ta.crossover(close, ob_zone_top)  and spread_ok
+bool s_signal  = gate_pass and score <= -3 and ta.crossunder(close, ob_zone_btm) and spread_ok
+
+// ==========================================
+// 7. POSITION MANAGEMENT (TRIPLE-STAGE TP)
+// ==========================================
+var float entry_price = 0.0
+var float stop_loss   = 0.0
+var float tp1         = 0.0
+var float tp2         = 0.0
+var float tp3         = 0.0
+var bool  be_hit      = false
+
+float atr_val = ta.atr(14)  // [FIX-02/03] typed + renamed from `atr`
+
+// --- Long Entry ---
+if l_signal and strategy.position_size == 0
+    entry_price := close
+    stop_loss   := close - atr_val * 1.5
+    tp1         := close + (close - stop_loss) * 1.0
+    tp2         := close + (close - stop_loss) * 2.0
+    tp3         := close + (close - stop_loss) * 3.5
+    be_hit      := false
+    strategy.entry("CASC_L", strategy.long,
+         comment       = "MATRIX_QUALIFIED",
+         alert_message =("buy"))
+
+// --- Short Entry ---
+if s_signal and strategy.position_size == 0
+    entry_price := close
+    stop_loss   := close + atr_val * 1.5
+    tp1         := close - (stop_loss - close) * 1.0
+    tp2         := close - (stop_loss - close) * 2.0
+    tp3         := close - (stop_loss - close) * 3.5
+    be_hit      := false  // [FIX-08] was missing reset on short entry
+ 
+
+// ==========================================
+// 8. LIQUIDATION SHIELD (PRIORITY – runs before exits)
+// ==========================================
+// [FIX-09] Moved above exit logic so the shield fires before any TP order is placed.
+float current_dd = (strategy.max_equity - strategy.equity) / strategy.max_equity * 100  // [FIX-02]
+if current_dd >= MAX_DD_PCT
+    strategy.close_all(comment = "SHIELD_ACTIVE_DD_MAX")  // [FIX-04] named argument
+
+// ==========================================
+// 9. DYNAMIC SCALING, BREAKEVEN & EXIT MANAGEMENT
+// ==========================================
+
+// --- Long exits ---
+if strategy.position_size > 0
+    if high >= tp1 and not be_hit
+        stop_loss := entry_price  // Move stop to Breakeven
+        be_hit    := true
+    strategy.exit("L_TP1", "CASC_L",
+         qty_percent   = 33,
+         limit         = tp1,
+         stop          = stop_loss,
+         comment_profit = "TP1_BE",
+         alert_message = f_webhook("close_long", "TP1_BE"))
+    strategy.exit("L_TP2", "CASC_L",
+         qty_percent   = 33,
+         limit         = tp2,
+         stop          = stop_loss,
+         comment_profit = "TP2_RUN",
+         alert_message = f_webhook("close_long", "TP2_RUN"))
+    strategy.exit("L_TP3", "CASC_L",
+         limit         = tp3,
+         stop          = stop_loss,
+         comment_profit = "TP3_MAX",
+         alert_message = f_webhook("close_long", "TP3_MAX"))
+
+// --- Short exits ---
+// [FIX-01] This block was glued to the last line of the long-exit block (missing newline)
+if strategy.position_size < 0
+    if low <= tp1 and not be_hit
+        stop_loss := entry_price  // Move stop to Breakeven
+        be_hit    := true
+    strategy.exit("S_TP1", "CASC_S",
+         qty_percent   = 33,
+         limit         = tp1,
+         stop          = stop_loss,
+         comment_profit = "TP1_BE",
+         alert_message = f_webhook("close_short", "TP1_BE"))
+    strategy.exit("S_TP2", "CASC_S",
+         qty_percent   = 33,
+         limit         = tp2,
+         stop          = stop_loss,
+         comment_profit = "TP2_RUN",
+         alert_message = f_webhook("close_short", "TP2_RUN"))
+    strategy.exit("S_TP3", "CASC_S",
+         limit         = tp3,
+         stop          = stop_loss,
+         comment_profit = "TP3_MAX",
+         alert_message = f_webhook("close_short", "TP3_MAX"))
+
+// ==========================================
+// 10. DASHBOARD & DIAGNOSTICS
+// ==========================================
+var table status_db = table.new(position.top_right, 2, 5,
+     bgcolor      = color.new(color.black, 70),
+     border_width = 1)
+
+if barstate.islast
+    // [FIX-06] Header uses both columns; removed invalid single-cell colspan
+    table.cell(status_db, 0, 0, "CASCADA PROD", text_color = GOLD)
+    table.cell(status_db, 1, 0, "v1 RELEASE",   text_color = GOLD)
+    table.cell(status_db, 0, 1, "Matrix Score",  text_color = color.white)
+    table.cell(status_db, 1, 1, str.tostring(score),
+         text_color = score >= 3 ? color.green : score <= -3 ? color.red : color.gray)
+    table.cell(status_db, 0, 2, "ONNX Gate",     text_color = color.white)
+    table.cell(status_db, 1, 2, str.tostring(market_efficiency, "#.###"),
+         text_color = gate_pass ? color.green : color.red)
+    table.cell(status_db, 0, 3, "DD Shield",     text_color = color.white)
+    table.cell(status_db, 1, 3, str.tostring(current_dd, "#.##") + "%",
+         text_color = current_dd >= MAX_DD_PCT ? color.red : color.green)
+    table.cell(status_db, 0, 4, "Spread OK",     text_color = color.white)
+    table.cell(status_db, 1, 4, spread_ok ? "YES" : "NO",
+         text_color = spread_ok ? color.green : color.red)

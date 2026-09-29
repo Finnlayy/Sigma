@@ -1,0 +1,310 @@
+//@version=6
+
+strategy("Fable 5 OS - Breaker Blocks & Sweeps", overlay=true, max_boxes_count=500, max_labels_count=500)
+
+// ==========================================
+
+// INPUTS
+
+// ==========================================
+
+var string G_STRICT = "Structure Settings"
+
+leftLen  = input.int(5, "Swing Left Bars", minval=1, group=G_STRICT, tooltip="Number of bars required to the left of a pivot")
+
+rightLen = input.int(5, "Swing Right Bars", minval=1, group=G_STRICT, tooltip="Number of bars required to the right of a pivot")
+
+var string G_COLOR = "Visual Configuration"
+
+colorBullSweep   = input.color(color.rgb(0, 230, 118), "Bullish Sweep Color", group=G_COLOR)
+
+colorBearSweep   = input.color(color.rgb(255, 23, 68), "Bearish Sweep Color", group=G_COLOR)
+
+colorBullBreaker = input.color(color.rgb(41, 121, 255), "Bullish Breaker Color", group=G_COLOR)
+
+colorBearBreaker = input.color(color.rgb(255, 109, 0), "Bearish Breaker Color", group=G_COLOR)
+
+showMitigated    = input.bool(true, "Show Mitigated Breaker Blocks", group=G_COLOR, tooltip="Keep historical mitigated breaker blocks on the chart")
+
+// ==========================================
+
+// CUSTOM TYPES (UDTs)
+
+// ==========================================
+
+type BreakerBlock
+
+    box   ext_box
+
+    float top
+
+    float bottom
+
+    bool  is_bullish
+
+    bool  mitigated
+
+// ==========================================
+
+// STATE VARIABLES
+
+// ==========================================
+
+var BreakerBlock[] active_breakers = array.new<BreakerBlock>()
+
+// Track historical confirmed swing highs/lows
+
+var float last_ph_val = na
+
+var float last_ph_high = na
+
+var float last_ph_low = na
+
+var int   last_ph_idx = na
+
+var float last_pl_val = na
+
+var float last_pl_high = na
+
+var float last_pl_low = na
+
+var int   last_pl_idx = na
+
+// Tracking states for Sweeps
+
+var bool low_swept = false
+
+var float low_sweep_level = na
+
+var float low_sweep_block_high = na
+
+var float low_sweep_block_low = na
+
+var int   low_sweep_block_idx = na
+
+var bool high_swept = false
+
+var float high_sweep_level = na
+
+var float high_sweep_block_high = na
+
+var float high_sweep_block_low = na
+
+var int   high_sweep_block_idx = na
+
+// ==========================================
+
+// SWING DETECTION
+
+// ==========================================
+
+ph = ta.pivothigh(high, leftLen, rightLen)
+
+pl = ta.pivotlow(low, leftLen, rightLen)
+
+if not na(ph)
+
+    last_ph_val  := ph
+
+    last_ph_high := high[rightLen]
+
+    last_ph_low  := low[rightLen]
+
+    last_ph_idx  := bar_index - rightLen
+
+if not na(pl)
+
+    last_pl_val  := pl
+
+    last_pl_high := high[rightLen]
+
+    last_pl_low  := low[rightLen]
+
+    last_pl_idx  := bar_index - rightLen
+
+// ==========================================
+
+// LIQUIDITY SWEEP DETECTION
+
+// ==========================================
+
+bool bullish_sweep = false
+
+bool bearish_sweep = false
+
+// Bullish Sweep: Price takes out last confirmed swing low, but closes above it
+
+if not na(last_pl_val) and low < last_pl_val and close > last_pl_val
+
+    bullish_sweep := true
+
+    low_swept := true
+
+    low_sweep_level := last_pl_val
+
+    // Store the Swing High block that preceded this sweep (the target breaker zone)
+
+    low_sweep_block_high := last_ph_high
+
+    low_sweep_block_low  := last_ph_low
+
+    low_sweep_block_idx  := last_ph_idx
+
+// Bearish Sweep: Price takes out last confirmed swing high, but closes below it
+
+if not na(last_ph_val) and high > last_ph_val and close < last_ph_val
+
+    bearish_sweep := true
+
+    high_swept := true
+
+    high_sweep_level := last_ph_val
+
+    // Store the Swing Low block that preceded this sweep (the target breaker zone)
+
+    high_sweep_block_high := last_pl_high
+
+    high_sweep_block_low  := last_pl_low
+
+    high_sweep_block_idx  := last_pl_idx
+
+// Plot Sweep Signals
+
+plotshape(bullish_sweep, title="Bullish Sweep", style=shape.triangleup, location=location.belowbar, color=colorBullSweep, size=size.small, text="Sweep", textcolor=colorBullSweep)
+
+plotshape(bearish_sweep, title="Bearish Sweep", style=shape.triangledown, location=location.abovebar, color=colorBearSweep, size=size.small, text="Sweep", textcolor=colorBearSweep)
+
+// ==========================================
+
+// BREAKER BLOCK ENGINE
+
+// ==========================================
+
+// 1. Bullish Breaker: Price closes above the Swing High block that led to the Low Sweep
+
+if low_swept and close > low_sweep_block_high
+
+    // Create new Bullish Breaker
+
+    box bb_box = box.new(         left=low_sweep_block_idx,         top=low_sweep_block_high,          right=bar_index,          bottom=low_sweep_block_low,         border_color=colorBullBreaker,         border_style=line.style_dashed,         bgcolor=color.new(colorBullBreaker, 90),text="Bullish Breaker",text_size=size.normal,text_color=colorBullBreaker,text_valign=text.align_center,         text_halign=text.align_right
+
+         )
+
+    
+
+    array.push(active_breakers, BreakerBlock.new(bb_box, low_sweep_block_high, low_sweep_block_low, true, false))
+
+    low_swept := false // Reset state
+
+// 2. Bearish Breaker: Price closes below the Swing Low block that led to the High Sweep
+
+if high_swept and close < high_sweep_block_low
+
+    
+
+    box bb_box = box.new(
+
+         left=high_sweep_block_idx, 
+
+         top=high_sweep_block_high, 
+
+         right=bar_index, 
+
+         bottom=high_sweep_block_low, 
+
+         border_color=colorBearBreaker, 
+
+         border_style=line.style_dashed,
+
+         bgcolor=color.new(colorBearBreaker, 90),
+
+         text="Bearish Breaker",
+
+         text_size=size.normal,
+
+         text_color=colorBearBreaker,
+
+         text_valign=text.align_center,
+
+         text_halign=text.align_right
+
+         )
+
+    
+
+    array.push(active_breakers, BreakerBlock.new(bb_box, high_sweep_block_high, high_sweep_block_low, false, false))
+
+    high_swept := false // Reset state
+
+// ==========================================
+
+// MITIGATION & LIFE-CYCLE MANAGEMENT
+
+// ==========================================
+
+if array.size(active_breakers) > 0
+
+    for i = array.size(active_breakers) - 1 to 0
+
+        BreakerBlock bb = array.get(active_breakers, i)
+
+        
+
+        if not bb.mitigated
+
+            // Update the box extension to current bar
+
+            box.set_right(bb.ext_box, bar_index)
+
+            
+
+            // Check for mitigation (Close beyond the opposite side of the Breaker Block)
+
+            if bb.is_bullish and close < bb.bottom
+
+                bb.mitigated := true
+
+                if not showMitigated
+
+                    box.delete(bb.ext_box)
+
+                else
+
+                    box.set_bgcolor(bb.ext_box, color.new(color.gray, 95))
+
+                    box.set_border_color(bb.ext_box, color.new(color.gray, 50))
+
+                    box.set_text_color(bb.ext_box, color.new(color.gray, 50))
+
+                    box.set_text(bb.ext_box, "Mitigated Bullish BB")
+
+            
+
+            else if not bb.is_bullish and close > bb.top
+
+                bb.mitigated := true
+
+                if not showMitigated
+
+                    box.delete(bb.ext_box)
+
+                else
+
+                    box.set_bgcolor(bb.ext_box, color.new(color.gray, 95))
+
+                    box.set_border_color(bb.ext_box, color.new(color.gray, 50))
+
+                    box.set_text_color(bb.ext_box, color.new(color.gray, 50))
+
+                    box.set_text(bb.ext_box, "Mitigated Bearish BB")
+
+// Limit memory footprint by cleaning old arrays
+
+if array.size(active_breakers) > 50
+
+    BreakerBlock discarded = array.shift(active_breakers)
+
+    if not discarded.mitigated
+
+        box.delete(discarded.ext_box)
+

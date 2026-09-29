@@ -1,0 +1,676 @@
+//@version=6
+// TradingLab PRO — MTF FIFO Zones (1m/2m/5m Execution / Auto-HTF Zonen)
+// Chart: 1m, 2m oder 5m. Zonen, SL und TP kommen aus bestätigten HTF-Kerzen.
+// MTF-Auto-Mapping:  Chart 1m  → Zonen 15m, Bias 60m
+//                    Chart 2m  → Zonen 15m, Bias 60m
+//                    Chart 5m  → Zonen 15m, Bias 60m
+// (alles manuell overridebar)
+// Optimierungen ggü. 5m-Version:
+//  - Zonen-Alter zeitbasiert (Minuten), nicht bar-basiert → TF-unabhängig
+//  - Chart-TF-Check akzeptiert 60–300s dynamisch
+//  - LTF-BOS-Länge als Input (auf 1m ggf. 4–5 Bars)
+//  - Optionaler zweiter HTF-Bias-Filter (EMA200) gegen 1m-Rauschen
+// FIFO: älteste Zone zuerst mergen/entfernen, erster Treffer im Pfad = Entry,
+//       erster Gegenzone im Pfad = TP1, zweite = TP2.
+// Edge: Premium/Discount + OTE + HTF Volumen-Impuls + LTF Volumenkerze + HVN.
+strategy("TradingLab PRO — MTF FIFO 1m/2m/5m",
+     shorttitle="TL MTF FIFO",
+     overlay=true,
+     initial_capital=10000,
+     currency=currency.USDT,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     pyramiding=0,
+     close_entries_rule="FIFO",
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     margin_long=0,
+     margin_short=0,
+     max_boxes_count=120,
+     max_lines_count=80,
+     max_labels_count=120)
+
+// ─── Pionex ──────────────────────────────────────────────────────────────────
+string GRP_PX = "00. Pionex Webhook"
+string uuid = input.string("8a17bcf9-0d9c-4a09-92ae-27adf755d95d", "Pionex Signal Bot UUID", group=GRP_PX)
+string pionex_payload = '{ "data": { "action": "{{strategy.order.action}}", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_param": "{}", "signal_type": "' + uuid + '", "symbol": "{{ticker}}", "time": "{{timenow}}" }'
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+string GRP_MTF = "01. MTF"
+string htf_sel  = input.string("Auto", "Zonen-Timeframe (HTF)", options=["Auto", "5", "15", "30", "60"], group=GRP_MTF, tooltip="Auto: Chart 1m/2m/5m → 15m Zonen. Manuell overridebar.")
+string bias_sel = input.string("Auto", "Bias-Timeframe (EMA200)", options=["Auto", "15", "30", "60", "120", "240"], group=GRP_MTF, tooltip="Auto: Chart 1m/2m/5m → 60m. Filtert Longs unter / Shorts über der EMA200 des Bias-TF.")
+bool   use_bias_filter = input.bool(true, "HTF Bias-Filter (EMA200) aktiv", group=GRP_MTF)
+bool   warn_chart_tf   = input.bool(true, "Warnung wenn Chart > 5m", group=GRP_MTF)
+
+int    tf_sec   = timeframe.in_seconds()
+string htf_tf   = htf_sel  == "Auto" ? (tf_sec <= 300 ? "15" : tf_sec <= 900 ? "60" : "240") : htf_sel
+string bias_tf  = bias_sel == "Auto" ? (tf_sec <= 300 ? "60" : tf_sec <= 900 ? "240" : "D") : bias_sel
+
+string GRP_STR = "02. HTF Struktur"
+int    htf_lookback = input.int(5, "HTF Structure Lookback", minval=2, maxval=20, group=GRP_STR)
+string bos_mode     = input.string("Close", "HTF BOS", options=["Close", "Wick"], group=GRP_STR)
+int    impulse_sma  = input.int(20, "HTF Impulse SMA", minval=5, maxval=50, group=GRP_STR)
+float  impulse_mult = input.float(1.7, "HTF Impulse Strength", minval=1.0, maxval=4.0, step=0.1, group=GRP_STR)
+int    opp_lookback = input.int(6, "HTF Gegenkerze Fenster", minval=1, maxval=16, group=GRP_STR)
+
+string GRP_ZON = "03. FIFO Zonen"
+int    max_zones       = input.int(8, "Max Zonen pro Seite", minval=2, maxval=16, group=GRP_ZON)
+int    zone_max_age_min = input.int(480, "Max Zonen-Alter (Minuten, TF-unabhängig)", minval=60, maxval=2880, group=GRP_ZON, tooltip="Zeitbasiert statt bar-basiert: 480 min = 8h, egal ob Chart 1m, 2m oder 5m.")
+float  merge_atr       = input.float(0.25, "Merge Abstand (HTF-ATR)", minval=0.05, maxval=1.5, step=0.05, group=GRP_ZON)
+bool   merge_overlap   = input.bool(true, "Überlappende Zonen mergen (FIFO behält die ältere)", group=GRP_ZON)
+bool   one_shot        = input.bool(true, "Eine Zone = ein Trade", group=GRP_ZON)
+
+string GRP_VOL = "04. Volumenkerzen"
+bool   use_htf_vol   = input.bool(true, "HTF Zone nur bei Volumen-Impuls", group=GRP_VOL)
+float  htf_rvol_min  = input.float(1.25, "HTF min Rel. Volumen", minval=0.8, maxval=4.0, step=0.05, group=GRP_VOL)
+bool   use_ltf_vol   = input.bool(true, "LTF Entry nur mit Volumenkerze", group=GRP_VOL)
+float  ltf_rvol_min  = input.float(1.15, "LTF min Rel. Volumen", minval=0.8, maxval=4.0, step=0.05, group=GRP_VOL)
+int    vol_sma_len   = input.int(20, "Volumen SMA", minval=5, maxval=50, group=GRP_VOL)
+bool   paint_vol     = input.bool(true, "Volumenkerzen einfärben", group=GRP_VOL)
+
+string GRP_EDGE = "05. Entry Detail (LTF)"
+bool   use_prem_disc = input.bool(true, "Premium/Discount Filter (Long nur Discount, Short nur Premium)", group=GRP_EDGE)
+bool   use_ote       = input.bool(true, "OTE-Tasche bevorzugen (0.62–0.79)", group=GRP_EDGE)
+bool   ote_strict    = input.bool(false, "OTE Pflicht (sonst nur Bonus)", group=GRP_EDGE)
+bool   use_hvn       = input.bool(true, "LTF High-Volume-Node als Entry-Magnet", group=GRP_EDGE)
+float  hvn_atr_prox  = input.float(0.35, "HVN Nähe (LTF-ATR)", minval=0.1, maxval=1.5, step=0.05, group=GRP_EDGE)
+string entry_mode    = input.string("High Detail", "LTF Entry-Trigger", options=["Touch", "Reaktion", "High Detail"], group=GRP_EDGE)
+int    ltf_bos_len   = input.int(3, "LTF BOS Länge (Bars)", minval=2, maxval=10, group=GRP_EDGE, tooltip="Auf 1m ggf. 4–5 Bars (≈ Minuten), auf 2m 3 Bars, auf 5m 2–3 Bars.")
+bool   allow_sweep   = input.bool(true, "Sweep unter/über Distal erlaubt", group=GRP_EDGE)
+
+string GRP_TRD = "06. FIFO Exits / Risk"
+bool   trade_longs   = input.bool(true, "Longs", group=GRP_TRD)
+bool   trade_shorts  = input.bool(true, "Shorts", group=GRP_TRD)
+float  min_rr        = input.float(1.3, "Min RRR bis TP1", minval=0.8, maxval=4.0, step=0.1, group=GRP_TRD)
+float  rr_fallback   = input.float(2.5, "RRR Fallback wenn keine Gegenzone", minval=1.0, maxval=6.0, step=0.1, group=GRP_TRD)
+bool   scale_out     = input.bool(true, "FIFO Scale-Out 50% TP1 / 50% TP2", group=GRP_TRD)
+float  sl_atr_pad    = input.float(0.12, "SL Puffer (LTF-ATR)", minval=0.0, maxval=0.8, step=0.02, group=GRP_TRD)
+float  min_sl_atr    = input.float(0.25, "Min SL (LTF-ATR)", minval=0.1, maxval=2.0, step=0.05, group=GRP_TRD)
+
+string GRP_VIS = "07. Visuals"
+bool   show_zones    = input.bool(true, "Zonen-Boxen", group=GRP_VIS)
+bool   show_pd       = input.bool(true, "Premium / Discount / EQ", group=GRP_VIS)
+bool   show_rrr      = input.bool(true, "SL/TP Linien", group=GRP_VIS)
+bool   show_dash     = input.bool(true, "Dashboard", group=GRP_VIS)
+color  col_demand    = input.color(color.new(#00bfa5, 78), "Demand", group=GRP_VIS)
+color  col_supply    = input.color(color.new(#c62828, 78), "Supply", group=GRP_VIS)
+
+// ─── Typen ───────────────────────────────────────────────────────────────────
+type HBar
+    float o
+    float h
+    float l
+    float c
+    float v
+    int   t
+
+type Zone
+    int   id
+    int   ztype
+    float top
+    float bot
+    float proximal
+    float distal
+    float hvn
+    float hvn_vol
+    int   born_bar
+    int   born_time
+    float rvol
+    int   touches
+    bool  mitigated
+    bool  consumed
+    box   bx
+    label lb
+
+// ─── HTF Daten (nur geschlossene HTF-Kerzen, kein Lookahead) ─────────────────
+[hO, hH, hL, hC, hV, hT, atrH] = request.security(
+     syminfo.tickerid, htf_tf,
+     [open[1], high[1], low[1], close[1], volume[1], time[1], ta.atr(14)[1]],
+     lookahead=barmerge.lookahead_off)
+
+// ─── Bias-TF (EMA200, nur geschlossene Kerzen) ───────────────────────────────
+[bias_c, bias_e] = request.security(
+     syminfo.tickerid, bias_tf,
+     [close[1], ta.ema(close, 200)[1]],
+     lookahead=barmerge.lookahead_off)
+
+bool bias_long_ok  = not use_bias_filter or na(bias_e) or na(bias_c) or bias_c > bias_e
+bool bias_short_ok = not use_bias_filter or na(bias_e) or na(bias_c) or bias_c < bias_e
+
+bool newHTF = not na(hT) and ta.change(hT) != 0
+
+float atrL   = ta.atr(14)
+float volSmaL = ta.sma(volume, vol_sma_len)
+float rvolL  = volSmaL > 0 ? volume / volSmaL : 0.0
+bool  vol_candle = rvolL >= ltf_rvol_min
+bool  vol_climax = rvolL >= ltf_rvol_min * 1.6
+
+var HBar[] hb = array.new<HBar>()
+var Zone[] q_dem = array.new<Zone>()
+var Zone[] q_sup = array.new<Zone>()
+var int next_id = 1
+
+var bool htf_up = false
+var bool htf_ready = false
+var float swing_hi = na
+var float swing_lo = na
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+f_fade(Zone z) =>
+    if not na(z.bx)
+        box.set_bgcolor(z.bx, color.new(color.gray, 90))
+        box.set_border_color(z.bx, color.new(color.gray, 55))
+        box.set_right(z.bx, bar_index)
+        box.set_extend(z.bx, extend.none)
+    if not na(z.lb)
+        label.delete(z.lb)
+        z.lb := na
+    z.mitigated := true
+    z
+
+f_overlap(float a_top, float a_bot, float b_top, float b_bot, float pad) =>
+    math.min(a_top, b_top) + pad >= math.max(a_bot, b_bot)
+
+f_draw_zone(int ztype, float top, float bot, string txt, color bg) =>
+    box bx = na
+    label lb = na
+    if show_zones
+        color bd = ztype == 1 ? color.new(#00bfa5, 15) : color.new(#c62828, 15)
+        bx := box.new(bar_index, top, bar_index + 6, bot, border_color=bd, bgcolor=bg, xloc=xloc.bar_index, extend=extend.none)
+        lb := label.new(bar_index, ztype == 1 ? top : bot, txt, style=ztype == 1 ? label.style_label_down : label.style_label_up, color=ztype == 1 ? color.new(#00695c, 0) : color.new(#b71c1c, 0), textcolor=color.white, size=size.tiny)
+    [bx, lb]
+
+// ─── HTF History + Struktur + neue FIFO-Zonen ────────────────────────────────
+if newHTF and not na(hC)
+    array.push(hb, HBar.new(hO, hH, hL, hC, hV, int(hT)))
+    if array.size(hb) > 80
+        array.shift(hb)
+
+    int n = array.size(hb)
+    if n >= htf_lookback + 2
+        HBar last = array.get(hb, n - 1)
+        float prior_h = na
+        float prior_l = na
+        int from = math.max(0, n - 1 - htf_lookback)
+        for j = from to n - 2
+            HBar b = array.get(hb, j)
+            prior_h := na(prior_h) ? b.h : math.max(prior_h, b.h)
+            prior_l := na(prior_l) ? b.l : math.min(prior_l, b.l)
+
+        bool bos_up = bos_mode == "Close" ? last.c > prior_h : last.h > prior_h
+        bool bos_dn = bos_mode == "Close" ? last.c < prior_l : last.l < prior_l
+
+        if bos_up and bos_dn
+            htf_up := last.c > last.o
+            htf_ready := true
+        else if bos_up
+            htf_up := true
+            htf_ready := true
+        else if bos_dn
+            htf_up := false
+            htf_ready := true
+
+        if bos_up
+            swing_hi := last.h
+            if na(swing_lo)
+                swing_lo := prior_l
+        if bos_dn
+            swing_lo := last.l
+            if na(swing_hi)
+                swing_hi := prior_h
+
+        float bsum = 0.0
+        float vsum = 0.0
+        int cnt = 0
+        int bfrom = math.max(0, n - 1 - impulse_sma)
+        for j = bfrom to n - 2
+            HBar b = array.get(hb, j)
+            bsum += math.abs(b.c - b.o)
+            vsum += b.v
+            cnt += 1
+        float avg_body = cnt > 0 ? bsum / cnt : na
+        float avg_vol  = cnt > 0 ? vsum / cnt : na
+        float last_body = math.abs(last.c - last.o)
+        float last_rvol = avg_vol > 0 ? last.v / avg_vol : 0.0
+        bool imp_up = last.c > last.o and not na(avg_body) and last_body > avg_body * impulse_mult
+        bool imp_dn = last.c < last.o and not na(avg_body) and last_body > avg_body * impulse_mult
+        bool vol_ok = not use_htf_vol or last_rvol >= htf_rvol_min
+
+        if htf_ready and htf_up and imp_up and vol_ok
+            float zt = last.h
+            float zb = last.l
+            float prox = math.max(last.o, last.c)
+            float dist = last.l
+            bool found = false
+            int o_from = math.max(0, n - 1 - opp_lookback)
+            for j = n - 2 to o_from
+                HBar b = array.get(hb, j)
+                if not found and b.c < b.o
+                    zt := b.h
+                    zb := b.l
+                    prox := math.max(b.o, b.c)
+                    dist := b.l
+                    found := true
+            if zt > zb and (zt - zb) >= atrH * 0.08
+                bool merged = false
+                if merge_overlap and array.size(q_dem) > 0
+                    for i = 0 to array.size(q_dem) - 1
+                        Zone z = array.get(q_dem, i)
+                        if not merged and not z.mitigated and f_overlap(z.top, z.bot, zt, zb, atrH * merge_atr)
+                            z.top := math.max(z.top, zt)
+                            z.bot := math.min(z.bot, zb)
+                            z.proximal := math.max(z.proximal, prox)
+                            z.distal := math.min(z.distal, dist)
+                            z.rvol := math.max(z.rvol, last_rvol)
+                            if not na(z.bx)
+                                box.set_top(z.bx, z.top)
+                                box.set_bottom(z.bx, z.bot)
+                            array.set(q_dem, i, z)
+                            merged := true
+                if not merged
+                    string txt = "D" + str.tostring(next_id) + " RVOL " + str.tostring(last_rvol, "#.00")
+                    [bx, lb] = f_draw_zone(1, zt, zb, txt, col_demand)
+                    array.push(q_dem, Zone.new(next_id, 1, zt, zb, prox, dist, na, 0.0, bar_index, time, last_rvol, 0, false, false, bx, lb))
+                    next_id += 1
+
+        if htf_ready and not htf_up and imp_dn and vol_ok
+            float zt = last.h
+            float zb = last.l
+            float prox = math.min(last.o, last.c)
+            float dist = last.h
+            bool found = false
+            int o_from = math.max(0, n - 1 - opp_lookback)
+            for j = n - 2 to o_from
+                HBar b = array.get(hb, j)
+                if not found and b.c > b.o
+                    zt := b.h
+                    zb := b.l
+                    prox := math.min(b.o, b.c)
+                    dist := b.h
+                    found := true
+            if zt > zb and (zt - zb) >= atrH * 0.08
+                bool merged = false
+                if merge_overlap and array.size(q_sup) > 0
+                    for i = 0 to array.size(q_sup) - 1
+                        Zone z = array.get(q_sup, i)
+                        if not merged and not z.mitigated and f_overlap(z.top, z.bot, zt, zb, atrH * merge_atr)
+                            z.top := math.max(z.top, zt)
+                            z.bot := math.min(z.bot, zb)
+                            z.proximal := math.min(z.proximal, prox)
+                            z.distal := math.max(z.distal, dist)
+                            z.rvol := math.max(z.rvol, last_rvol)
+                            if not na(z.bx)
+                                box.set_top(z.bx, z.top)
+                                box.set_bottom(z.bx, z.bot)
+                            array.set(q_sup, i, z)
+                            merged := true
+                if not merged
+                    string txt = "S" + str.tostring(next_id) + " RVOL " + str.tostring(last_rvol, "#.00")
+                    [bx, lb] = f_draw_zone(2, zt, zb, txt, col_supply)
+                    array.push(q_sup, Zone.new(next_id, 2, zt, zb, prox, dist, na, 0.0, bar_index, time, last_rvol, 0, false, false, bx, lb))
+                    next_id += 1
+
+// ─── FIFO Pflege: Alter (zeitbasiert!), Mitigierung, Cap, HVN ────────────────
+f_maintain(Zone[] q, int ztype) =>
+    if array.size(q) > 0
+        for i = array.size(q) - 1 to 0
+            Zone z = array.get(q, i)
+            bool aged = time - z.born_time > zone_max_age_min * 60000
+            bool broken = ztype == 1 ? close < z.distal : close > z.distal
+            if not z.mitigated and (aged or broken)
+                z := f_fade(z)
+            bool inside = high >= z.bot and low <= z.top
+            if not z.mitigated and inside
+                z.touches += 1
+                if volume > z.hvn_vol
+                    z.hvn := (high + low + close) / 3.0
+                    z.hvn_vol := volume
+            if not z.mitigated and not na(z.bx)
+                box.set_right(z.bx, bar_index + 2)
+                if not na(z.lb)
+                    label.set_x(z.lb, bar_index)
+                    label.set_y(z.lb, ztype == 1 ? z.top : z.bot)
+            array.set(q, i, z)
+            if z.mitigated and time - z.born_time > (zone_max_age_min + 45) * 60000
+                if not na(z.bx)
+                    box.delete(z.bx)
+                if not na(z.lb)
+                    label.delete(z.lb)
+                array.remove(q, i)
+        for i = 0 to 7
+            if array.size(q) > max_zones
+                Zone old = array.get(q, 0)
+                old := f_fade(old)
+                if not na(old.bx)
+                    box.delete(old.bx)
+                if not na(old.lb)
+                    label.delete(old.lb)
+                array.shift(q)
+
+f_maintain(q_dem, 1)
+f_maintain(q_sup, 2)
+
+// ─── Premium / Discount / OTE (HTF Dealing Range) ────────────────────────────
+float eq = not na(swing_hi) and not na(swing_lo) ? (swing_hi + swing_lo) / 2.0 : na
+float rng = not na(swing_hi) and not na(swing_lo) ? swing_hi - swing_lo : na
+float ote_lo = not na(rng) ? swing_hi - rng * 0.79 : na
+float ote_hi = not na(rng) ? swing_hi - rng * 0.62 : na
+float ote_lo_s = not na(rng) ? swing_lo + rng * 0.62 : na
+float ote_hi_s = not na(rng) ? swing_lo + rng * 0.79 : na
+
+bool in_discount = na(eq) ? true : close < eq
+bool in_premium  = na(eq) ? true : close > eq
+bool in_ote_long  = not na(ote_lo) and low <= ote_hi and close >= ote_lo
+bool in_ote_short = not na(ote_lo_s) and high >= ote_lo_s and close <= ote_hi_s
+bool pd_long_ok  = not use_prem_disc or in_discount
+bool pd_short_ok = not use_prem_disc or in_premium
+bool ote_long_ok  = not use_ote or not ote_strict or in_ote_long
+bool ote_short_ok = not use_ote or not ote_strict or in_ote_short
+
+// ─── FIFO: erste Zone im Pfad, die der LTF-Preis jetzt testet ────────────────
+f_path_demand() =>
+    int pick = -1
+    float nearest = na
+    int sz = array.size(q_dem)
+    if sz > 0
+        for i = 0 to sz - 1
+            Zone z = array.get(q_dem, i)
+            bool free = not z.mitigated and (not one_shot or not z.consumed) and bar_index > z.born_bar + 1
+            bool reached = low <= z.proximal and low <= z.top
+            bool held = allow_sweep ? close >= z.distal : low >= z.distal
+            if free and reached and held
+                float dist = math.abs(close - z.proximal)
+                if pick < 0 or dist < nearest
+                    nearest := dist
+                    pick := i
+    pick
+
+f_path_supply() =>
+    int pick = -1
+    float nearest = na
+    int sz = array.size(q_sup)
+    if sz > 0
+        for i = 0 to sz - 1
+            Zone z = array.get(q_sup, i)
+            bool free = not z.mitigated and (not one_shot or not z.consumed) and bar_index > z.born_bar + 1
+            bool reached = high >= z.proximal and high >= z.bot
+            bool held = allow_sweep ? close <= z.distal : high <= z.distal
+            if free and reached and held
+                float dist = math.abs(close - z.proximal)
+                if pick < 0 or dist < nearest
+                    nearest := dist
+                    pick := i
+    pick
+
+int idx_d = f_path_demand()
+int idx_s = f_path_supply()
+
+// ─── LTF High-Detail Trigger ─────────────────────────────────────────────────
+bool pin_long  = (close - low) >= 2.0 * math.max(math.abs(close - open), atrL * 0.05) and (close > open or close >= (high + low) / 2.0)
+bool pin_short = (high - close) >= 2.0 * math.max(math.abs(close - open), atrL * 0.05) and (close < open or close <= (high + low) / 2.0)
+bool eng_long  = close > open and close > high[1] and open <= close[1]
+bool eng_short = close < open and close < low[1] and open >= close[1]
+bool disp_long  = close > open and math.abs(close - open) > atrL * 0.55
+bool disp_short = close < open and math.abs(close - open) > atrL * 0.55
+bool ltf_bos_up = close > ta.highest(high[1], ltf_bos_len)
+bool ltf_bos_dn = close < ta.lowest(low[1], ltf_bos_len)
+
+f_hvn_ok(Zone z) =>
+    not use_hvn or na(z.hvn) or math.abs(close - z.hvn) <= atrL * hvn_atr_prox or (allow_sweep and low <= z.distal and close >= z.proximal)
+
+bool trig_long = switch entry_mode
+    "Touch"       => true
+    "Reaktion"    => close > open
+    "High Detail" => (pin_long or eng_long or disp_long or ltf_bos_up) and close > open
+    => close > open
+
+bool trig_short = switch entry_mode
+    "Touch"       => true
+    "Reaktion"    => close < open
+    "High Detail" => (pin_short or eng_short or disp_short or ltf_bos_dn) and close < open
+    => close < open
+
+bool vol_entry_ok = not use_ltf_vol or vol_candle
+
+// ─── Gegenzonen für FIFO-TP ──────────────────────────────────────────────────
+f_first_above(float px) =>
+    float best = na
+    int sz = array.size(q_sup)
+    if sz > 0
+        for i = 0 to sz - 1
+            Zone z = array.get(q_sup, i)
+            if not z.mitigated and z.bot > px
+                best := na(best) ? z.bot : math.min(best, z.bot)
+    best
+
+f_second_above(float px, float first) =>
+    float best = na
+    int sz = array.size(q_sup)
+    if sz > 0
+        for i = 0 to sz - 1
+            Zone z = array.get(q_sup, i)
+            if not z.mitigated and z.bot > px and not na(first) and z.bot > first + atrL * 0.05
+                best := na(best) ? z.bot : math.min(best, z.bot)
+    best
+
+f_first_below(float px) =>
+    float best = na
+    int sz = array.size(q_dem)
+    if sz > 0
+        for i = 0 to sz - 1
+            Zone z = array.get(q_dem, i)
+            if not z.mitigated and z.top < px
+                best := na(best) ? z.top : math.max(best, z.top)
+    best
+
+f_second_below(float px, float first) =>
+    float best = na
+    int sz = array.size(q_dem)
+    if sz > 0
+        for i = 0 to sz - 1
+            Zone z = array.get(q_dem, i)
+            if not z.mitigated and z.top < px and not na(first) and z.top < first - atrL * 0.05
+                best := na(best) ? z.top : math.max(best, z.top)
+    best
+
+// ─── Trade State ─────────────────────────────────────────────────────────────
+var float t_sl  = na
+var float t_tp1 = na
+var float t_tp2 = na
+var int   t_dir = 0
+var int   t_zid = na
+var line  ln_e = na
+var line  ln_s = na
+var line  ln_t1 = na
+var line  ln_t2 = na
+
+f_lines(float e, float s, float t1, float t2) =>
+    if show_rrr
+        if not na(ln_e)
+            line.delete(ln_e)
+        if not na(ln_s)
+            line.delete(ln_s)
+        if not na(ln_t1)
+            line.delete(ln_t1)
+        if not na(ln_t2)
+            line.delete(ln_t2)
+        line lne = line.new(bar_index, e,  bar_index + 16, e,  color=color.new(color.aqua, 0), width=2)
+        line lns = line.new(bar_index, s,  bar_index + 16, s,  color=color.new(color.red, 0), width=2)
+        line lnt1 = line.new(bar_index, t1, bar_index + 16, t1, color=color.new(color.lime, 0), width=2)
+        line lnt2 = na
+        if not na(t2) and t2 != t1
+            lnt2 := line.new(bar_index, t2, bar_index + 16, t2, color=color.new(color.olive, 0), width=2)
+        [lne, lns, lnt1, lnt2]
+    else
+        [na, na, na, na]
+
+bool flat = strategy.position_size == 0
+bool chart_ok = not warn_chart_tf or tf_sec <= 300
+
+// ─── LONG: LTF Detail in HTF Demand, SL/TP aus HTF FIFO ──────────────────────
+if trade_longs and flat and chart_ok and htf_ready and htf_up and bias_long_ok and idx_d >= 0 and pd_long_ok and ote_long_ok and trig_long and vol_entry_ok
+    Zone z = array.get(q_dem, idx_d)
+    if f_hvn_ok(z)
+        float sl = math.min(z.distal, low) - atrL * sl_atr_pad
+        sl := math.min(sl, close - atrL * min_sl_atr)
+        float risk = close - sl
+        float tp_zone1 = f_first_above(close)
+        float tp_zone2 = f_second_above(close, tp_zone1)
+        float tp_rr = close + risk * rr_fallback
+        float tp1 = na
+        if not na(tp_zone1) and (tp_zone1 - close) / risk >= min_rr
+            tp1 := tp_zone1
+        else
+            tp1 := tp_rr
+        float tp2 = na
+        if scale_out and not na(tp_zone2) and tp_zone2 > tp1
+            tp2 := tp_zone2
+        else if scale_out
+            tp2 := close + risk * math.max(rr_fallback, min_rr + 0.8)
+        else
+            tp2 := tp1
+        if risk > 0 and sl < close and tp1 > close
+            strategy.entry("Long", strategy.long, comment="L D" + str.tostring(z.id), alert_message=pionex_payload)
+            t_sl := sl
+            t_tp1 := tp1
+            t_tp2 := tp2
+            t_dir := 1
+            t_zid := z.id
+            z.consumed := true
+            z.touches += 1
+            array.set(q_dem, idx_d, z)
+            [ln_e_new, ln_s_new, ln_t1_new, ln_t2_new] = f_lines(close, sl, tp1, tp2)
+            ln_e := ln_e_new
+            ln_s := ln_s_new
+            ln_t1 := ln_t1_new
+            ln_t2 := ln_t2_new
+            alert("FIFO Long | HTF Demand #" + str.tostring(z.id) + " | RVOL " + str.tostring(z.rvol, "#.00"), alert.freq_once_per_bar_close)
+
+// ─── SHORT ───────────────────────────────────────────────────────────────────
+if trade_shorts and flat and chart_ok and htf_ready and not htf_up and bias_short_ok and idx_s >= 0 and pd_short_ok and ote_short_ok and trig_short and vol_entry_ok
+    Zone z = array.get(q_sup, idx_s)
+    if f_hvn_ok(z)
+        float sl = math.max(z.distal, high) + atrL * sl_atr_pad
+        sl := math.max(sl, close + atrL * min_sl_atr)
+        float risk = sl - close
+        float tp_zone1 = f_first_below(close)
+        float tp_zone2 = f_second_below(close, tp_zone1)
+        float tp_rr = close - risk * rr_fallback
+        float tp1 = na
+        if not na(tp_zone1) and (close - tp_zone1) / risk >= min_rr
+            tp1 := tp_zone1
+        else
+            tp1 := tp_rr
+        float tp2 = na
+        if scale_out and not na(tp_zone2) and tp_zone2 < tp1
+            tp2 := tp_zone2
+        else if scale_out
+            tp2 := close - risk * math.max(rr_fallback, min_rr + 0.8)
+        else
+            tp2 := tp1
+        if risk > 0 and sl > close and tp1 < close
+            strategy.entry("Short", strategy.short, comment="S S" + str.tostring(z.id), alert_message=pionex_payload)
+            t_sl := sl
+            t_tp1 := tp1
+            t_tp2 := tp2
+            t_dir := -1
+            t_zid := z.id
+            z.consumed := true
+            z.touches += 1
+            array.set(q_sup, idx_s, z)
+            [ln_e_new, ln_s_new, ln_t1_new, ln_t2_new] = f_lines(close, sl, tp1, tp2)
+            ln_e := ln_e_new
+            ln_s := ln_s_new
+            ln_t1 := ln_t1_new
+            ln_t2 := ln_t2_new
+            alert("FIFO Short | HTF Supply #" + str.tostring(z.id) + " | RVOL " + str.tostring(z.rvol, "#.00"), alert.freq_once_per_bar_close)
+
+// ─── FIFO Exits aktiv halten ─────────────────────────────────────────────────
+if strategy.position_size > 0 and not na(t_sl) and not na(t_tp1)
+    if scale_out and not na(t_tp2) and t_tp2 > t_tp1
+        strategy.exit("L_TP1", "Long", qty_percent=50, stop=t_sl, limit=t_tp1, comment_loss="SL", comment_profit="TP1", alert_message=pionex_payload)
+        strategy.exit("L_TP2", "Long", stop=t_sl, limit=t_tp2, comment_loss="SL", comment_profit="TP2", alert_message=pionex_payload)
+    else
+        strategy.exit("L_X", "Long", stop=t_sl, limit=t_tp1, comment_loss="SL", comment_profit="TP", alert_message=pionex_payload)
+
+if strategy.position_size < 0 and not na(t_sl) and not na(t_tp1)
+    if scale_out and not na(t_tp2) and t_tp2 < t_tp1
+        strategy.exit("S_TP1", "Short", qty_percent=50, stop=t_sl, limit=t_tp1, comment_loss="SL", comment_profit="TP1", alert_message=pionex_payload)
+        strategy.exit("S_TP2", "Short", stop=t_sl, limit=t_tp2, comment_loss="SL", comment_profit="TP2", alert_message=pionex_payload)
+    else
+        strategy.exit("S_X", "Short", stop=t_sl, limit=t_tp1, comment_loss="SL", comment_profit="TP", alert_message=pionex_payload)
+
+if flat and t_dir != 0
+    t_dir := 0
+    t_zid := na
+
+// ─── Visuals ─────────────────────────────────────────────────────────────────
+plot(show_pd ? swing_hi : na, "HTF Swing High", color=color.new(#c62828, 40), style=plot.style_linebr)
+plot(show_pd ? eq : na,       "HTF Equilibrium", color=color.new(#ffd54f, 0), style=plot.style_linebr, linewidth=2)
+plot(show_pd ? swing_lo : na, "HTF Swing Low",  color=color.new(#00bfa5, 40), style=plot.style_linebr)
+plot(show_pd and use_ote ? ote_lo : na, "OTE Long Lo", color=color.new(#80cbc4, 60), style=plot.style_linebr)
+plot(show_pd and use_ote ? ote_hi : na, "OTE Long Hi", color=color.new(#80cbc4, 60), style=plot.style_linebr)
+
+fill(plot(show_pd ? swing_hi : na, display=display.none), plot(show_pd ? eq : na, display=display.none), color=color.new(#c62828, 94), title="Premium")
+fill(plot(show_pd ? eq : na, display=display.none), plot(show_pd ? swing_lo : na, display=display.none), color=color.new(#00bfa5, 94), title="Discount")
+
+bgcolor(not htf_ready ? color.new(color.gray, 94) : htf_up ? color.new(#004d40, 94) : color.new(#4a148c, 94))
+
+barcolor(paint_vol ? (vol_climax ? (close > open ? color.new(#00e676, 0) : color.new(#ff1744, 0)) : vol_candle ? (close > open ? color.new(#00bfa5, 30) : color.new(#e53935, 30)) : color.new(#78909c, 55)) : na)
+
+bool hvn_mark = false
+if use_hvn and idx_d >= 0
+    hvn_mark := not na(array.get(q_dem, idx_d).hvn)
+plotshape(hvn_mark, title="HVN Demand", style=shape.diamond, location=location.belowbar, size=size.tiny, color=color.new(#00e5ff, 0))
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 11, bgcolor=color.new(#0d0d0d, 8), border_width=1, border_color=color.new(color.gray, 55))
+
+f_cell(int c, int r, string txt, color bg, color fg) =>
+    table.cell(dash, c, r, txt, text_color=fg, bgcolor=bg, text_halign=text.align_left, text_size=size.small)
+
+if show_dash and barstate.islast
+    int live_d = 0
+    int live_s = 0
+    if array.size(q_dem) > 0
+        for i = 0 to array.size(q_dem) - 1
+            if not array.get(q_dem, i).mitigated
+                live_d += 1
+    if array.size(q_sup) > 0
+        for i = 0 to array.size(q_sup) - 1
+            if not array.get(q_sup, i).mitigated
+                live_s += 1
+
+    string why = not chart_ok ? "Chart auf 1m/2m/5m stellen" : not htf_ready ? "Warte auf HTF BOS" : not htf_up ? "HTF Downtrend — keine Longs" : not bias_long_ok ? "Bias-TF unter EMA200 (kein Long)" : not pd_long_ok ? "Preis im Premium (kein Long)" : not ote_long_ok ? "Außerhalb OTE" : idx_d < 0 ? "Keine HTF Demand im Pfad" : not vol_entry_ok ? "Keine LTF Volumenkerze" : not trig_long ? "Kein LTF High-Detail Trigger" : not flat ? "In Position" : "FIFO Long bereit"
+
+    string pd = na(eq) ? "—" : in_discount ? (in_ote_long ? "DISCOUNT + OTE" : "DISCOUNT") : (in_ote_short ? "PREMIUM + OTE" : "PREMIUM")
+    string tf_txt = timeframe.period + " exec / " + htf_tf + " zones / " + bias_tf + " bias"
+    if tf_sec > 300
+        tf_txt := tf_txt + "  (Chart > 5m!)"
+    string bias_txt = not use_bias_filter ? "aus" : na(bias_e) or na(bias_c) ? "lädt…" : bias_c > bias_e ? bias_tf + " über EMA200 → long" : bias_tf + " unter EMA200 → short"
+
+    f_cell(0, 0, "Setup", color.new(#111111, 0), color.gray)
+    f_cell(1, 0, tf_txt, color.new(#111111, 0), tf_sec <= 300 ? color.white : color.orange)
+    f_cell(0, 1, "HTF Bias", color.new(#111111, 0), color.gray)
+    f_cell(1, 1, not htf_ready ? "NEUTRAL" : htf_up ? "UPTREND" : "DOWNTREND", color.new(#111111, 0), htf_up ? color.teal : not htf_ready ? color.gray : color.red)
+    f_cell(0, 2, "Bias TF", color.new(#111111, 0), color.gray)
+    f_cell(1, 2, bias_txt, color.new(#111111, 0), not use_bias_filter ? color.gray : na(bias_e) ? color.gray : bias_c > bias_e ? color.teal : color.red)
+    f_cell(0, 3, "PD / OTE", color.new(#111111, 0), color.gray)
+    f_cell(1, 3, pd, color.new(#111111, 0), in_discount ? color.teal : color.orange)
+    f_cell(0, 4, "FIFO Q", color.new(#111111, 0), color.gray)
+    f_cell(1, 4, "D " + str.tostring(live_d) + "  |  S " + str.tostring(live_s), color.new(#111111, 0), color.white)
+    f_cell(0, 5, "LTF RVOL", color.new(#111111, 0), color.gray)
+    f_cell(1, 5, str.tostring(rvolL, "#.00") + (vol_climax ? "  CLIMAX" : vol_candle ? "  VOL" : ""), color.new(#111111, 0), vol_candle ? color.lime : color.gray)
+    f_cell(0, 6, "Pfad-Zone", color.new(#111111, 0), color.gray)
+    f_cell(1, 6, idx_d >= 0 ? "D#" + str.tostring(array.get(q_dem, idx_d).id) : idx_s >= 0 ? "S#" + str.tostring(array.get(q_sup, idx_s).id) : "—", color.new(#111111, 0), color.white)
+    f_cell(0, 7, "Long", color.new(#111111, 0), color.gray)
+    f_cell(1, 7, why, why == "FIFO Long bereit" ? color.new(#00bfa5, 65) : color.new(#222222, 0), color.white)
+    f_cell(0, 8, "Pos", color.new(#111111, 0), color.gray)
+    f_cell(1, 8, strategy.position_size > 0 ? "LONG #" + str.tostring(t_zid) : strategy.position_size < 0 ? "SHORT #" + str.tostring(t_zid) : "FLAT", color.new(#111111, 0), color.white)
+    f_cell(0, 9, "SL / TP", color.new(#111111, 0), color.gray)
+    f_cell(1, 9, not na(t_sl) and strategy.position_size != 0 ? str.tostring(t_sl, format.mintick) + " → " + str.tostring(t_tp1, format.mintick) : "—", color.new(#111111, 0), color.white)
+    f_cell(0, 10, "Edge", color.new(#111111, 0), color.gray)
+    f_cell(1, 10, "HTF Zone + LTF Vol/HVN + PD + Bias", color.new(#111111, 0), color.silver)

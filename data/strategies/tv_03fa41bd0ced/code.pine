@@ -1,0 +1,283 @@
+// Datei:     MTF_CISD_OB_FVG_v3_GA_Final.pine
+// Zweck:     Walk-Forward GA Optimization Engine fuer Prop Firms
+// Erstellt:  2026-04-08 | Version: 3.0
+// Abhaengig: Pine Script v6, TradingView
+
+//@version=6
+strategy(title="Quant-God GA Engine [v3.0]", shorttitle="GA Engine v3", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ============================================================================
+// GRUPPE 1: Prop Fund Settings (User Settings)
+// ============================================================================
+string GRP_PROP = "Prop Fund Settings"
+float prop_daily_dd = input.float(5.0, "Max Daily Drawdown (%)", minval=1.0, maxval=20.0, step=0.5, group=GRP_PROP)
+float prop_max_dd   = input.float(10.0, "Max Total Drawdown (%)", minval=2.0, maxval=50.0, step=1.0, group=GRP_PROP)
+float prop_target   = input.float(8.0, "Profit Target Phase 1 (%)", minval=1.0, maxval=100.0, step=1.0, group=GRP_PROP)
+
+// ============================================================================
+// GRUPPE 2: GA Settings
+// ============================================================================
+string GRP_GA = "Genetic Algorithm Settings"
+int pop_size    = input.int(30, "Population Size", minval=10, maxval=100, group=GRP_GA)
+int eval_period = input.int(200, "Walk-Forward Eval Period (Bars)", minval=50, maxval=1000, group=GRP_GA)
+float mut_rate  = input.float(0.15, "Mutation Rate", minval=0.01, maxval=1.0, step=0.01, group=GRP_GA)
+
+// ============================================================================
+// GRUPPE 3: Base Strategy Limits
+// ============================================================================
+string GRP_BASE = "Base Limits (MACD + RSI)"
+int rsi_len = input.int(14, "RSI Length", minval=5, maxval=30, group=GRP_BASE)
+int macd_fast = input.int(12, "MACD Fast", minval=5, maxval=30, group=GRP_BASE)
+int macd_slow = input.int(26, "MACD Slow", minval=15, maxval=50, group=GRP_BASE)
+int macd_sig = input.int(9, "MACD Signal", minval=5, maxval=20, group=GRP_BASE)
+
+// ============================================================================
+// TYPES & ARRAYS
+// ============================================================================
+type Individual
+    // Genes (Parameters to optimize)
+    float sl_atr_mul
+    float tp_atr_mul
+    int rsi_threshold
+    // State
+    int pos_state      // 0=flat, 1=long, -1=short
+    float entry_price
+    float peak_price
+    float valley_price
+    float daily_start_equity
+    float current_equity
+    float max_equity
+    // Stats
+    float net_profit
+    float max_dd
+    float daily_dd
+    int win_trades
+    int total_trades
+    float weight
+
+var array<Individual> population = array.new<Individual>()
+var int bars_since_eval = 0
+
+// ============================================================================
+// CORE INDICATORS
+// ============================================================================
+float atr_val = ta.atr(14)
+float rsi_val = ta.rsi(close, rsi_len)
+[macdLine, signalLine, _] = ta.macd(close, macd_fast, macd_slow, macd_sig)
+
+bool long_cond = ta.crossover(macdLine, signalLine)
+bool short_cond = ta.crossunder(macdLine, signalLine)
+
+bool is_new_day = ta.change(time("D")) != 0
+
+// ============================================================================
+// GA FUNCTIONS
+// ============================================================================
+
+f_init_pop() =>
+    for i = 0 to pop_size - 1
+        Individual ind = Individual.new(
+             sl_atr_mul = math.random(0.5, 3.0),
+             tp_atr_mul = math.random(1.0, 5.0),
+             rsi_threshold = math.round(math.random(30, 70)),
+             pos_state = 0, entry_price = 0.0, peak_price = 0.0, valley_price = 0.0,
+             daily_start_equity = 10000.0, current_equity = 10000.0, max_equity = 10000.0,
+             net_profit = 0.0, max_dd = 0.0, daily_dd = 0.0, win_trades = 0, total_trades = 0, weight = 0.0
+             )
+        array.push(population, ind)
+
+if barstate.isfirst
+    f_init_pop()
+
+// Evaluate current bar for all individuals
+if barstate.isconfirmed
+    for i = 0 to array.size(population) - 1
+        Individual ind = array.get(population, i)
+        
+        // Daily reset
+        if is_new_day
+            ind.daily_start_equity := ind.current_equity
+            ind.daily_dd := 0.0
+            
+        // Manage open positions
+        if ind.pos_state == 1
+            ind.peak_price := math.max(ind.peak_price, high)
+            float sl_price = ind.entry_price - (atr_val * ind.sl_atr_mul)
+            float tp_price = ind.entry_price + (atr_val * ind.tp_atr_mul)
+            
+            if low <= sl_price or high >= tp_price
+                float exit_price = low <= sl_price ? sl_price : tp_price
+                float pnl = (exit_price - ind.entry_price) / ind.entry_price * ind.current_equity
+                ind.current_equity += pnl
+                ind.net_profit += pnl
+                ind.total_trades += 1
+                if pnl > 0
+                    ind.win_trades += 1
+                ind.pos_state := 0
+                
+        else if ind.pos_state == -1
+            ind.valley_price := math.min(ind.valley_price, low)
+            float sl_price = ind.entry_price + (atr_val * ind.sl_atr_mul)
+            float tp_price = ind.entry_price - (atr_val * ind.tp_atr_mul)
+            
+            if high >= sl_price or low <= tp_price
+                float exit_price = high >= sl_price ? sl_price : tp_price
+                float pnl = (ind.entry_price - exit_price) / ind.entry_price * ind.current_equity
+                ind.current_equity += pnl
+                ind.net_profit += pnl
+                ind.total_trades += 1
+                if pnl > 0
+                    ind.win_trades += 1
+                ind.pos_state := 0
+                
+        // Calculate DD
+        ind.max_equity := math.max(ind.max_equity, ind.current_equity)
+        float dd_pct = ((ind.max_equity - ind.current_equity) / ind.max_equity) * 100.0
+        ind.max_dd := math.max(ind.max_dd, dd_pct)
+        
+        float d_dd_pct = ((ind.daily_start_equity - ind.current_equity) / ind.daily_start_equity) * 100.0
+        ind.daily_dd := math.max(ind.daily_dd, d_dd_pct)
+        
+        // Enter new positions
+        if ind.pos_state == 0
+            if long_cond and rsi_val < ind.rsi_threshold
+                ind.pos_state := 1
+                ind.entry_price := close
+                ind.peak_price := close
+            else if short_cond and rsi_val > (100 - ind.rsi_threshold)
+                ind.pos_state := -1
+                ind.entry_price := close
+                ind.valley_price := close
+                
+    bars_since_eval += 1
+
+// Walk-Forward Evolution
+if barstate.isconfirmed and bars_since_eval >= eval_period
+    bars_since_eval := 0
+    
+    // Calculate Fitness
+    for i = 0 to array.size(population) - 1
+        Individual ind = array.get(population, i)
+        float penalty = 0.0
+        if ind.max_dd > prop_max_dd
+            penalty += 10000.0
+        if ind.daily_dd > prop_daily_dd
+            penalty += 10000.0
+            
+        ind.weight := math.max(0.0, ind.net_profit - penalty)
+        
+    // Sort (Bubble Sort)
+    int n = array.size(population)
+    for i = 0 to n - 2
+        for j = 0 to n - i - 2
+            Individual ind1 = array.get(population, j)
+            Individual ind2 = array.get(population, j + 1)
+            if ind1.weight < ind2.weight
+                array.set(population, j, ind2)
+                array.set(population, j + 1, ind1)
+                
+    array<Individual> new_pop = array.new<Individual>()
+    
+    // Elitism
+    if n > 0
+        array.push(new_pop, array.get(population, 0))
+    if n > 1
+        array.push(new_pop, array.get(population, 1))
+        
+    // Crossover & Mutation
+    while array.size(new_pop) < pop_size
+        int idx1 = math.round(math.random(0, n/3)) // bias towards better half
+        int idx2 = math.round(math.random(0, n/3))
+        Individual p1 = array.get(population, idx1)
+        Individual p2 = array.get(population, idx2)
+        
+        Individual child = Individual.new(
+             sl_atr_mul = math.random() > 0.5 ? p1.sl_atr_mul : p2.sl_atr_mul,
+             tp_atr_mul = math.random() > 0.5 ? p1.tp_atr_mul : p2.tp_atr_mul,
+             rsi_threshold = math.random() > 0.5 ? p1.rsi_threshold : p2.rsi_threshold,
+             pos_state = 0, entry_price = 0.0, peak_price = 0.0, valley_price = 0.0,
+             daily_start_equity = 10000.0, current_equity = 10000.0, max_equity = 10000.0,
+             net_profit = 0.0, max_dd = 0.0, daily_dd = 0.0, win_trades = 0, total_trades = 0, weight = 0.0
+        )
+        
+        if math.random() < mut_rate
+            child.sl_atr_mul := math.random(0.5, 3.0)
+        if math.random() < mut_rate
+            child.tp_atr_mul := math.random(1.0, 5.0)
+        if math.random() < mut_rate
+            child.rsi_threshold := math.round(math.random(30, 70))
+            
+        array.push(new_pop, child)
+        
+    population := new_pop
+
+// ============================================================================
+// DASHBOARD
+// ============================================================================
+if barstate.islast
+    Individual best_high_risk = na
+    Individual best_moderate = na
+    Individual best_prop = na
+    
+    float max_profit = -999999.0
+    float max_romad = -999999.0
+    float max_prop_profit = -999999.0
+    
+    for i = 0 to array.size(population) - 1
+        Individual ind = array.get(population, i)
+        if ind.total_trades > 5 // Minimum sample size
+            
+            // High Risk
+            if ind.net_profit > max_profit
+                max_profit := ind.net_profit
+                best_high_risk := ind
+                
+            // Moderate
+            float romad = ind.max_dd > 0 ? ind.net_profit / ind.max_dd : ind.net_profit
+            if romad > max_romad
+                max_romad := romad
+                best_moderate := ind
+                
+            // Prop Fund
+            float wr = ind.total_trades > 0 ? ind.win_trades / ind.total_trades : 0.0
+            if ind.max_dd <= prop_max_dd and ind.daily_dd <= prop_daily_dd and wr > 0.5
+                if ind.net_profit > max_prop_profit
+                    max_prop_profit := ind.net_profit
+                    best_prop := ind
+
+    var table dash = table.new(position.top_right, 4, 7, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.new(color.gray, 60))
+    
+    table.cell(dash, 0, 0, "Profile", text_color=color.white, bgcolor=color.new(color.blue, 50))
+    table.cell(dash, 1, 0, "High Risk", text_color=color.white, bgcolor=color.new(color.red, 50))
+    table.cell(dash, 2, 0, "Moderate", text_color=color.white, bgcolor=color.new(color.orange, 50))
+    table.cell(dash, 3, 0, "Prop Fund", text_color=color.white, bgcolor=color.new(color.green, 50))
+    
+    table.cell(dash, 0, 1, "SL ATR", text_color=color.white)
+    table.cell(dash, 1, 1, not na(best_high_risk) ? str.tostring(best_high_risk.sl_atr_mul, "#.##") : "---", text_color=color.white)
+    table.cell(dash, 2, 1, not na(best_moderate) ? str.tostring(best_moderate.sl_atr_mul, "#.##") : "---", text_color=color.white)
+    table.cell(dash, 3, 1, not na(best_prop) ? str.tostring(best_prop.sl_atr_mul, "#.##") : "---", text_color=color.white)
+    
+    table.cell(dash, 0, 2, "TP ATR", text_color=color.white)
+    table.cell(dash, 1, 2, not na(best_high_risk) ? str.tostring(best_high_risk.tp_atr_mul, "#.##") : "---", text_color=color.white)
+    table.cell(dash, 2, 2, not na(best_moderate) ? str.tostring(best_moderate.tp_atr_mul, "#.##") : "---", text_color=color.white)
+    table.cell(dash, 3, 2, not na(best_prop) ? str.tostring(best_prop.tp_atr_mul, "#.##") : "---", text_color=color.white)
+    
+    table.cell(dash, 0, 3, "RSI Thresh", text_color=color.white)
+    table.cell(dash, 1, 3, not na(best_high_risk) ? str.tostring(best_high_risk.rsi_threshold) : "---", text_color=color.white)
+    table.cell(dash, 2, 3, not na(best_moderate) ? str.tostring(best_moderate.rsi_threshold) : "---", text_color=color.white)
+    table.cell(dash, 3, 3, not na(best_prop) ? str.tostring(best_prop.rsi_threshold) : "---", text_color=color.white)
+    
+    table.cell(dash, 0, 4, "Net Profit", text_color=color.white)
+    table.cell(dash, 1, 4, not na(best_high_risk) ? "$" + str.tostring(best_high_risk.net_profit, "#.##") : "---", text_color=color.white)
+    table.cell(dash, 2, 4, not na(best_moderate) ? "$" + str.tostring(best_moderate.net_profit, "#.##") : "---", text_color=color.white)
+    table.cell(dash, 3, 4, not na(best_prop) ? "$" + str.tostring(best_prop.net_profit, "#.##") : "---", text_color=color.white)
+    
+    table.cell(dash, 0, 5, "Max DD", text_color=color.white)
+    table.cell(dash, 1, 5, not na(best_high_risk) ? str.tostring(best_high_risk.max_dd, "#.##") + "%" : "---", text_color=color.white)
+    table.cell(dash, 2, 5, not na(best_moderate) ? str.tostring(best_moderate.max_dd, "#.##") + "%" : "---", text_color=color.white)
+    table.cell(dash, 3, 5, not na(best_prop) ? str.tostring(best_prop.max_dd, "#.##") + "%" : "---", text_color=color.white)
+    
+    table.cell(dash, 0, 6, "Winrate", text_color=color.white)
+    table.cell(dash, 1, 6, not na(best_high_risk) and best_high_risk.total_trades > 0 ? str.tostring((best_high_risk.win_trades / best_high_risk.total_trades) * 100, "#.##") + "%" : "---", text_color=color.white)
+    table.cell(dash, 2, 6, not na(best_moderate) and best_moderate.total_trades > 0 ? str.tostring((best_moderate.win_trades / best_moderate.total_trades) * 100, "#.##") + "%" : "---", text_color=color.white)
+    table.cell(dash, 3, 6, not na(best_prop) and best_prop.total_trades > 0 ? str.tostring((best_prop.win_trades / best_prop.total_trades) * 100, "#.##") + "%" : "---", text_color=color.white)

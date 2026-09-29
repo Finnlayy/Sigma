@@ -1,0 +1,429 @@
+//@version=6
+
+strategy("MOS - Muhamad Official Strategy (SNRZ Multi-Timeframe) Ultimate v2.5", overlay=true, max_boxes_count=100, max_labels_count=100,           initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, margin_long=20, margin_short=20)
+
+// ╔══════════════════════════════════════════════════════════════════════╗
+
+// ║ DATEI:     MOS_Ultimate_Strategy.pine                                ║
+
+// ║ ZWECK:     Optimierte SNRZ MTF Strategie mit Hurst, DER & Kelly      ║
+
+// ║ VERSION:   2.5 (Echtzeit-Label-Korrektur & Visualisierung)           ║
+
+// ╚══════════════════════════════════════════════════════════════════════╝
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// STRATEGY INPUTS & OPTIMIZATION PARAMETERS
+
+//---------------------------------------------------------------------------------------------------------------------
+
+group_strat     = "Base Strategy Settings"
+
+SL_PARAM        = input.float(1.14, "SL Parameter (ATR Multiplier)", group=group_strat, tooltip="ATR-Multiplikator für den Stop-Loss")
+
+TP_PARAM        = input.float(9.55, "TP Parameter (ATR Multiplier)", group=group_strat, tooltip="ATR-Multiplikator für den Take-Profit")
+
+ATR_LEN         = input.int(14, "ATR Length", group=group_strat)
+
+USE_TRAILING    = input.bool(false, "Use Trailing Stop Loss", group=group_strat)
+
+LEFT_LEN        = input.int(10, "Left Swing Lookback", group=group_strat)
+
+RIGHT_LEN       = input.int(5, "Right Swing Lookback", group=group_strat)
+
+USE_AUTO        = input.bool(true, "Use Auto Left/Right Lengths", group=group_strat)
+
+MAX_ZONES       = input.int(15, "Max Active Zones", group=group_strat)
+
+REVERSE_ON_OPP  = input.bool(true, "Reverse on Opposite Signal", group=group_strat, tooltip="Wenn DEAKTIVIERT (false), werden Gegensignale ignoriert, bis das SL oder TP des aktuellen Trades getroffen wird.")
+
+group_visual    = "Visualization Settings"
+
+SHOW_SBR        = input.bool(true, "Show SBR/RBS Zones & Signals", group=group_visual)
+
+SHOW_INVERSION  = input.bool(true, "Show IVS/IVR Inversion Zones", group=group_visual)
+
+SHOW_PO2        = input.bool(true, "Show PO2 Signals", group=group_visual)
+
+SHOW_SWEEP      = input.bool(true, "Show Liquidity Sweep Signals", group=group_visual)
+
+SHOW_DASHBOARD  = input.bool(true, "Show Performance Dashboard", group=group_visual)
+
+OFFSET_LABELS   = input.bool(false, "Offset S/R Labels in Past", group=group_visual, tooltip="Wenn AKTIVIERT, werden VR/VS Labels in die Vergangenheit gezeichnet. Wenn DEAKTIVIERT, siehst du das Echtzeit-Signal dort, wo es tatsächlich erkannt wurde.")
+
+group_regime    = "Regime & Energy Filters (Optional)"
+
+USE_REGIME_FLT  = input.bool(false, "Use Hurst Regime Filter", group=group_regime, tooltip="Trendfolge-Trades nur im Trendmarkt (H > 0.52). Reversals im Seitwärtsmarkt.")
+
+USE_DER_FILTER  = input.bool(false, "Use DER Trend Energy Filter", group=group_regime, tooltip="Filtert Trades basierend auf der Richtungs-Volumen-Energie.")
+
+DER_LOOKBACK    = input.int(20, "DER Lookback Period", group=group_regime)
+
+DER_SMOOTH      = input.int(5, "DER Smoothing Period", group=group_regime)
+
+group_risk      = "Position Sizing & Risk Management"
+
+SIZING_MODE     = input.string("Leverage", "Position Sizing Mode", options=["Leverage", "Kelly Risk Parity", "Fixed Percent"], group=group_risk, tooltip="'Leverage' nutzt die Original-Einstellung von 500% (5x Hebel).")
+
+LEVERAGE_VAL    = input.float(500.0, "Leverage Value (% of Equity)", group=group_risk, tooltip="Hebeleinstellung. 500% = 5x Hebel.")
+
+USE_KELLY       = input.bool(true, "Use Dynamic Kelly (only for Kelly Mode)", group=group_risk)
+
+KELLY_MULT      = input.float(0.5, "Kelly Multiplier (Half-Kelly)", minval=0.1, maxval=1.0, step=0.1, group=group_risk)
+
+DEFAULT_RISK    = input.float(1.5, "Fixed Risk % (or Fallback Risk)", minval=0.1, maxval=10.0, step=0.1, group=group_risk)
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// STRUCTURAL & HISTORICAL METRICS (Dynamic Kelly / Position Sizing)
+
+//---------------------------------------------------------------------------------------------------------------------
+
+var float total_trades   = 0.0
+
+var float winning_trades = 0.0
+
+var float total_win_amt  = 0.0
+
+var float total_loss_amt = 0.0
+
+if strategy.closedtrades > 0 and ta.change(strategy.closedtrades)
+
+    total_trades := total_trades + 1
+
+    pnl = strategy.closedtrades.profit(strategy.closedtrades - 1)
+
+    if pnl > 0
+
+        winning_trades := winning_trades + 1
+
+        total_win_amt := total_win_amt + pnl
+
+    else
+
+        total_loss_amt := total_loss_amt + math.abs(pnl)
+
+win_rate = total_trades > 0 ? winning_trades / total_trades : 0.5
+
+avg_win  = winning_trades > 0 ? total_win_amt / winning_trades : 1.0
+
+avg_loss = (total_trades - winning_trades) > 0 ? total_loss_amt / (total_trades - winning_trades) : 1.0
+
+rr_ratio = avg_loss > 0 ? avg_win / avg_loss : 1.0
+
+// Dynamic Kelly Formula: K% = W - [(1 - W) / R]
+
+kelly_calc = rr_ratio > 0 ? win_rate - ((1.0 - win_rate) / rr_ratio) : 0.0
+
+dynamic_kelly = math.max(0.01, math.min(kelly_calc * KELLY_MULT, 0.15)) // Cap Kelly risk at safe 15% for paper-trading stability
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// SYSTEM ENGINE: HURST & DER FILTERS
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// Hurst Exponent Estimator
+
+calc_hurst(len) =>
+
+    hh = ta.highest(high, len)
+
+    ll = ta.lowest(low, len)
+
+    sd = ta.stdev(close, len)
+
+    sd > 0 ? (math.log(hh - ll) / math.log(len)) : 0.5
+
+hurst_val = calc_hurst(50)
+
+is_trending = hurst_val > 0.52
+
+// Directional Energy Ratio (DER)
+
+calc_der(lookback, smooth) =>
+
+    price_diff = close - close[1]
+
+    vol_energy = price_diff * volume
+
+    smoothed_energy = ta.wma(vol_energy, lookback)
+
+    energy_volatility = ta.atr(lookback) * ta.wma(volume, lookback)
+
+    energy_volatility > 0 ? ta.wma(smoothed_energy / energy_volatility, smooth) : 0.0
+
+der_val = calc_der(DER_LOOKBACK, DER_SMOOTH)
+
+der_bullish = der_val > 0.1
+
+der_bearish = der_val < -0.1
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// STRUCTURAL ZONES (SBR / RBS & INVERSIONS)
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// Auto swing lengths
+
+atr_val       = ta.atr(ATR_LEN)
+
+left_len_dyn  = USE_AUTO ? math.max(5, math.round(ta.ema(atr_val / syminfo.mintick, 20) % 15)) : LEFT_LEN
+
+right_len_dyn = USE_AUTO ? math.max(3, math.round(left_len_dyn / 2)) : RIGHT_LEN
+
+ph = ta.pivothigh(high, left_len_dyn, right_len_dyn)
+
+pl = ta.pivotlow(low, left_len_dyn, right_len_dyn)
+
+// Use v6 Objects for structural zones tracking
+
+type Zone
+
+    box   b_obj
+
+    float top
+
+    float bottom
+
+    bool  is_support
+
+    bool  active
+
+var Zone[] active_zones = array.new<Zone>()
+
+// Clean up old elements to stay within system limits
+
+clean_old_elements() =>
+
+    if array.size(active_zones) > MAX_ZONES
+
+        for i = 0 to array.size(active_zones) - MAX_ZONES - 1
+
+            Zone dead_z = array.shift(active_zones)
+
+            box.delete(dead_z.b_obj)
+
+if not na(ph) and SHOW_SBR
+
+    box_top    = ph
+
+    box_bottom = ph - (atr_val * 0.5)
+
+    b = box.new(left=bar_index - right_len_dyn, top=box_top, right=bar_index, bottom=box_bottom, 
+
+                 bgcolor=color.new(color.red, 90), border_color=color.new(color.red, 60))
+
+    array.push(active_zones, Zone.new(b, box_top, box_bottom, false, true))
+
+    clean_old_elements()
+
+if not na(pl) and SHOW_SBR
+
+    box_top    = pl + (atr_val * 0.5)
+
+    box_bottom = pl
+
+    b = box.new(left=bar_index - right_len_dyn, top=box_top, right=bar_index, bottom=box_bottom, 
+
+                 bgcolor=color.new(color.green, 90), border_color=color.new(color.green, 60))
+
+    array.push(active_zones, Zone.new(b, box_top, box_bottom, true, true))
+
+    clean_old_elements()
+
+// Update active zones and find breakout triggers
+
+bool rbs_broken = false
+
+bool sbr_broken = false
+
+if array.size(active_zones) > 0
+
+    for i = array.size(active_zones) - 1 to 0
+
+        Zone z = array.get(active_zones, i)
+
+        if z.active
+
+            box.set_right(z.b_obj, bar_index)
+
+            if z.is_support and close < z.bottom // Support broken down -> SBR
+
+                z.active := false
+
+                rbs_broken := true
+
+                box.set_bgcolor(z.b_obj, color.new(color.red, 80))
+
+                box.set_border_color(z.b_obj, color.red)
+
+                if SHOW_INVERSION
+
+                    label.new(bar_index, high, "IVS (Inversion Support)", color=color.red, textcolor=color.white, style=label.style_label_down)
+
+            else if not z.is_support and close > z.top // Resistance broken up -> RBS
+
+                z.active := false
+
+                sbr_broken := true
+
+                box.set_bgcolor(z.b_obj, color.new(color.green, 80))
+
+                box.set_border_color(z.b_obj, color.green)
+
+                if SHOW_INVERSION
+
+                    label.new(bar_index, low, "IVR (Inversion Resistance)", color=color.green, textcolor=color.white, style=label.style_label_up)
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// LIQUIDITY SWEEPS & PO2 ENGINE
+
+//---------------------------------------------------------------------------------------------------------------------
+
+recent_high = ta.highest(high, 10)[1]
+
+recent_low  = ta.lowest(low, 10)[1]
+
+bullish_sweep = SHOW_SWEEP and (low < recent_low and close > recent_low and close > open)
+
+bearish_sweep = SHOW_SWEEP and (high > recent_high and close < recent_high and close < open)
+
+// Power of 3 (PO2) AMD Setup: Accumulation near Open, Sweep, Expansion Close
+
+daily_open = request.security(syminfo.tickerid, "D", open[0], barmerge.gaps_off, barmerge.lookahead_off)
+
+po2_bullish = SHOW_PO2 and (close > daily_open and low < daily_open and close > open)
+
+po2_bearish = SHOW_PO2 and (close < daily_open and high > daily_open and close < open)
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// TRADE EXECUTION ENGINE (Paper-Trading Protected Sizing)
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// Stop Loss & Take Profit calculations
+
+sl_distance = atr_val * SL_PARAM
+
+tp_distance = atr_val * TP_PARAM
+
+// Define dynamic paper-trading safe sizing metrics
+
+float risk_percentage = DEFAULT_RISK
+
+if SIZING_MODE == "Kelly Risk Parity"
+
+    risk_percentage := dynamic_kelly * 100
+
+else if SIZING_MODE == "Fixed Percent"
+
+    risk_percentage := DEFAULT_RISK
+
+float final_position_size = na
+
+if SIZING_MODE == "Leverage"
+
+    // Safe-capped leverage limits to prevent artificial broker margin rejections
+
+    leverage_cap = math.min(LEVERAGE_VAL, 500.0) 
+
+    final_position_size := (strategy.equity * (leverage_cap / 100)) / close
+
+else
+
+    // Risk-Parity calculation based on dynamic Stop Loss distance
+
+    risk_value = strategy.equity * (risk_percentage / 100.0)
+
+    final_position_size := sl_distance > 0 ? (risk_value / sl_distance) : (strategy.equity * 0.1 / close)
+
+// Final structural safeguard: ensure strategy never tries to buy more than equity * margin allows
+
+max_leverage_limit = (strategy.equity * 4.8) / close
+
+final_position_size := math.min(final_position_size, max_leverage_limit)
+
+// Filter Conditions
+
+long_filter  = (not USE_REGIME_FLT or is_trending) and (not USE_DER_FILTER or der_bullish)
+
+short_filter = (not USE_REGIME_FLT or is_trending) and (not USE_DER_FILTER or der_bearish)
+
+// Trade Signal Aggregations
+
+long_signal  = sbr_broken or bullish_sweep or po2_bullish
+
+short_signal = rbs_broken or bearish_sweep or po2_bearish
+
+// Trade Operations Execution
+
+if long_signal and long_filter
+
+    if REVERSE_ON_OPP
+
+        strategy.close("Short")
+
+    if strategy.position_size == 0
+
+        strategy.entry("Long", strategy.long, qty=final_position_size)
+
+        sl_price = close - sl_distance
+
+        tp_price = close + tp_distance
+
+        strategy.exit("Exit Long", "Long", stop=sl_price, limit=tp_price, trail_points = USE_TRAILING ? sl_distance / syminfo.mintick : na)
+
+if short_signal and short_filter
+
+    if REVERSE_ON_OPP
+
+        strategy.close("Long")
+
+    if strategy.position_size == 0
+
+        strategy.entry("Short", strategy.short, qty=final_position_size)
+
+        sl_price = close + sl_distance
+
+        tp_price = close - tp_distance
+
+        strategy.exit("Exit Short", "Short", stop=sl_price, limit=tp_price, trail_points = USE_TRAILING ? sl_distance / syminfo.mintick : na)
+
+//---------------------------------------------------------------------------------------------------------------------
+
+// PERFORMANCE METRICS DASHBOARD
+
+//---------------------------------------------------------------------------------------------------------------------
+
+var table ui = table.new(position.top_right, 4, 3, bgcolor=color.new(color.black, 30), border_width=1, border_color=color.gray)
+
+if SHOW_DASHBOARD and barstate.islast
+
+    table.cell(ui, 0, 0, "Metric", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 1, 0, "Current Value", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 2, 0, "Metric 2", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 3, 0, "Current Value 2", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 0, 1, "Hurst Exponent", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 1, 1, str.tostring(hurst_val, "#.##"), bgcolor=is_trending ? color.new(color.green, 50) : color.new(color.orange, 50), text_size=size.small)
+
+    table.cell(ui, 2, 1, "Win Rate", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 3, 1, str.tostring(win_rate * 100, "#.#") + "%", text_size=size.small)
+
+    table.cell(ui, 0, 2, "DER Energy Ratio", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 1, 2, str.tostring(der_val, "#.##"), bgcolor=der_bullish ? color.new(color.green, 50) : der_bearish ? color.new(color.red, 50) : color.new(color.gray, 50), text_size=size.small)
+
+    table.cell(ui, 2, 2, "Dynamic Kelly Risk", text_color=color.white, text_size=size.small)
+
+    table.cell(ui, 3, 2, str.tostring(dynamic_kelly * 100, "#.#") + "%", text_size=size.small)

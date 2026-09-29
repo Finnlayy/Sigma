@@ -1,0 +1,198 @@
+//@version=6
+// =============================================================================
+// ZECUSDT.P 15m Multi-Filter Voting Strategy (EMA 99 Base)
+// =============================================================================
+strategy("ZECUSDT.P 15m Voting Engine",
+     overlay=true,
+     initial_capital=10000.0,
+     default_qty_type=strategy.cash,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.04,
+     slippage=1,
+     pyramiding=0,
+     calc_on_every_tick=false, // Repainting-Schutz
+     process_orders_on_close=true)
+
+// =============================================================================
+// === INPUTS ===
+// =============================================================================
+dfQty       = input.float(100.0,  "Default Order Size (USDT)", group="Settings")
+emaLen      = input.int(99, "Trend Baseline EMA", group="Trend") 
+
+// Filter Toggles & Weights
+mcEn = input.bool(true, "MACD Enabled", group="MACD", inline="m1")
+mcW  = input.float(1.0, "Weight", step=0.1, group="MACD", inline="m1")
+
+rEn  = input.bool(true, "RSI Enabled", group="RSI", inline="r1")
+rW   = input.float(1.0, "Weight", step=0.1, group="RSI", inline="r1")
+
+bbEn = input.bool(true, "BB Enabled", group="BB", inline="b1")
+bbW  = input.float(1.0, "Weight", step=0.1, group="BB", inline="b1")
+
+stEn = input.bool(true, "Stoch Enabled", group="Stoch", inline="s1")
+stW  = input.float(1.0, "Weight", step=0.1, group="Stoch", inline="s1")
+
+adxEn = input.bool(true, "ADX Enabled", group="ADX", inline="a1")
+adxW  = input.float(1.0, "Weight", step=0.1, group="ADX", inline="a1")
+
+scrThresh = input.float(2.0, "Score Threshold", step=0.1, group="Scoring")
+cooldown  = input.int(3, "Cooldown Bars", group="Scoring")
+
+// Exits & Sizing
+trlAct   = input.float(1.0, "Trail Act Profit %", step=0.1, group="Exits")
+trlPct   = input.float(0.5, "Trail Offset %", step=0.1, group="Exits")
+enSL     = input.bool(true, "Use SL", group="Exits")
+slP      = input.float(2.0, "SL %", step=0.1, group="Exits")
+enBE     = input.bool(true, "Use Break-Even", group="Exits")
+beTr     = input.float(1.0, "BE Trigger %", step=0.1, group="Exits")
+
+enKelly  = input.bool(false, "Use Kelly Sizing (Aggressive)", group="Kelly")
+kFrac    = input.float(0.5,  "Kelly Fraction", step=0.1, group="Kelly")
+
+// =============================================================================
+// === INDICATORS ===
+// =============================================================================
+baseline = ta.ema(close, emaLen)
+
+[macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
+rsiVal   = ta.rsi(close, 14)
+
+bbBasis = ta.sma(close, 20)
+bbDev   = 2.0 * ta.stdev(close, 20)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+stochKVal = ta.sma(ta.stoch(high, low, close, 14), 3)
+stochDVal = ta.sma(stochKVal, 3)
+
+// ADX - V6 Konform
+up = ta.change(high)
+down = -ta.change(low)
+plusDM  = na(up) == false and up > down and up > 0 ? up : 0.0
+minusDM = na(down) == false and down > up and down > 0 ? down : 0.0
+tr_rma  = ta.rma(ta.tr(true), 14)
+plusDI  = 100 * ta.rma(plusDM, 14) / (tr_rma == 0 ? 1 : tr_rma)
+minusDI = 100 * ta.rma(minusDM, 14) / (tr_rma == 0 ? 1 : tr_rma)
+adxVal  = 100 * ta.rma(math.abs(plusDI - minusDI) / (plusDI + minusDI == 0 ? 1 : plusDI + minusDI), 14)
+
+// =============================================================================
+// === SCORING ENGINE (The Core Logic) ===
+// =============================================================================
+float longScore  = 0.0
+float shortScore = 0.0
+
+if mcEn
+    if na(macdLine) == false and na(signalLine) == false
+        if macdLine > signalLine
+            longScore += mcW
+        else if macdLine < signalLine
+            shortScore += mcW
+
+if rEn
+    if na(rsiVal) == false
+        if rsiVal > 50.0 // Neutral Midline für 15m
+            longScore += rW
+        else if rsiVal < 50.0
+            shortScore += rW
+
+if bbEn
+    if na(bbBasis) == false
+        if close > bbBasis
+            longScore += bbW
+        else if close < bbBasis
+            shortScore += bbW
+
+if stEn
+    if na(stochKVal) == false and na(stochDVal) == false
+        if stochKVal > stochDVal and stochKVal < 80.0
+            longScore += stW
+        else if stochKVal < stochDVal and stochKVal > 20.0
+            shortScore += stW
+
+if adxEn
+    if na(adxVal) == false and adxVal > 20.0
+        longScore += adxW
+        shortScore += adxW
+
+// =============================================================================
+// === ENTRY LOGIC ===
+// =============================================================================
+var int lastEntryBar = na
+bool cdOK = na(lastEntryBar) or (bar_index - lastEntryBar) > cooldown
+
+// Baseline filter übernimmt das Gating, das Scoring feuert den Trigger
+bool bullBias = close > baseline
+bool bearBias = close < baseline
+
+bool longCond  = bullBias and longScore >= scrThresh and barstate.isconfirmed and cdOK
+bool shortCond = bearBias and shortScore >= scrThresh and barstate.isconfirmed and cdOK
+
+// =============================================================================
+// === SIZING (Float-Safe for Crypto) ===
+// =============================================================================
+float posSz = dfQty / close // Float, nicht int()!
+
+if enKelly and strategy.closedtrades >= 10
+    float wr = strategy.wintrades / strategy.closedtrades
+    float avgWin = strategy.grossprofit / strategy.wintrades
+    float avgLoss = math.abs(strategy.grossloss / strategy.losstrades)
+    
+    if avgLoss > 0.0 and avgWin > 0.0
+        float R = avgWin / avgLoss
+        float kRaw = (wr * R - (1.0 - wr)) / R
+        float kellyF = math.max(0.0, kRaw) * kFrac
+        // Maximal 50% des Kapitals per Trade erlauben (Konservativer Schutz)
+        float maxCap = strategy.equity * 0.5
+        posSz := math.min((strategy.equity * kellyF) / close, maxCap / close)
+
+// =============================================================================
+// === EXECUTION & EXITS ===
+// =============================================================================
+if longCond and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=posSz)
+    lastEntryBar := bar_index
+
+if shortCond and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=posSz)
+    lastEntryBar := bar_index
+
+// Exit Management
+var float entryPrice = na
+var bool  beTriggered = false
+
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    entryPrice  := strategy.position_avg_price
+    beTriggered := false
+else if strategy.position_size == 0
+    entryPrice  := na
+    beTriggered := false
+
+float unrlPct = 0.0
+if strategy.position_size > 0 and na(entryPrice) == false
+    unrlPct := (close - entryPrice) / entryPrice * 100.0
+else if strategy.position_size < 0 and na(entryPrice) == false
+    unrlPct := (entryPrice - close) / entryPrice * 100.0
+
+if enBE and beTriggered == false and strategy.position_size != 0 and unrlPct >= beTr
+    beTriggered := true
+
+float safeMT = syminfo.mintick != 0.0 ? syminfo.mintick : 0.01
+int   slTix  = enSL and na(entryPrice) == false ? int((entryPrice * (slP / 100.0)) / safeMT) : na
+int   actTrl = unrlPct >= trlAct ? int((close * (trlPct / 100.0)) / safeMT) : na
+
+if strategy.position_size > 0
+    strategy.exit("XL", "Long", loss=slTix, trail_offset=actTrl)
+    if enBE and beTriggered and close <= entryPrice
+        strategy.close("Long", comment="BE")
+
+if strategy.position_size < 0
+    strategy.exit("XS", "Short", loss=slTix, trail_offset=actTrl)
+    if enBE and beTriggered and close >= entryPrice
+        strategy.close("Short", comment="BE")
+
+// =============================================================================
+// === PLOTS ===
+// =============================================================================
+plot(baseline, "EMA 99", color=color.blue, linewidth=2)
+bgcolor(bullBias ? color.new(color.green, 95) : bearBias ? color.new(color.red, 95) : na)

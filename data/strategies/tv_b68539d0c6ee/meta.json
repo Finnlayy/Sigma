@@ -1,0 +1,9 @@
+{
+  "bytes": 11921,
+  "name": "ZECUSDT.P Step 1 - 15m OB Premium Discount",
+  "persisted_at": "2026-09-08T00:06:30Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "tv_b68539d0c6ee",
+  "tv_script_id": "USER;39e9056eb6e543389976a83a6ffee89f"
+}

@@ -1,0 +1,203 @@
+//@version=6
+strategy(
+     "Fib Golden Pocket Sniper v1.1 - Directional Fix & Chandelier",
+     overlay = true,
+     max_lines_count = 50,
+     max_labels_count = 50,
+     max_boxes_count = 10,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.05,
+     pyramiding = 0,
+     process_orders_on_close = false,
+     calc_on_every_tick = false
+)
+
+// ══════════════════════════════════════════════
+//  INPUTS
+// ══════════════════════════════════════════════
+bool  show_fibs       = input.bool(true,  "Show Fibonacci Levels", group="UI")
+bool  show_gp         = input.bool(true,  "Show Golden Pocket Zones", group="UI")
+bool  show_dashboard  = input.bool(true,  "Show Dashboard", group="UI")
+
+int   fib_lookback    = input.int(50,     "Swing Lookback", minval = 10, maxval = 200, group="Core Logic")
+int   rsi_len         = input.int(14,     "RSI Length", minval = 1, group="Core Logic")
+float rsi_ob          = input.float(65.0, "RSI Overbought", group="Core Logic")
+float rsi_os          = input.float(35.0, "RSI Oversold", group="Core Logic")
+float atr_mult        = input.float(1.5,  "Initial ATR SL Multiplier", minval = 0.1, step = 0.1, group="Core Logic")
+float rr_ratio        = input.float(2.0,  "Risk:Reward Ratio", minval = 0.1, step = 0.1, group="Core Logic")
+int   trend_ema_len   = input.int(50,     "Trend EMA Length", minval = 1, group="Core Logic")
+int   trend_slope_len = input.int(3,      "Trend Slope Bars", minval = 1, maxval = 50, group="Core Logic")
+
+bool  use_chandelier  = input.bool(true,  "Use Chandelier Trailing Exit", group="Trailing Logic")
+int   ch_len          = input.int(22,     "Chandelier ATR Length", minval = 1, group="Trailing Logic")
+float ch_mult         = input.float(3.0,  "Chandelier ATR Multiplier", minval = 0.1, step = 0.1, group="Trailing Logic")
+
+// ══════════════════════════════════════════════
+//  CORE CALCULATIONS
+// ══════════════════════════════════════════════
+float swing_high = ta.highest(high, fib_lookback)
+float swing_low  = ta.lowest(low, fib_lookback)
+float swing_rng  = swing_high - swing_low
+
+float fib_0   = swing_high
+float fib_236 = swing_high - swing_rng * 0.236
+float fib_382 = swing_high - swing_rng * 0.382
+float fib_500 = swing_high - swing_rng * 0.500
+float fib_618 = swing_high - swing_rng * 0.618
+float fib_65  = swing_high - swing_rng * 0.650
+float fib_786 = swing_high - swing_rng * 0.786
+float fib_1   = swing_low
+
+float long_gp_top = fib_618
+float long_gp_bot = fib_65
+
+float short_gp_top = swing_low + swing_rng * 0.650
+float short_gp_bot = swing_low + swing_rng * 0.618
+
+float rsi_val = ta.rsi(close, rsi_len)
+float atr_val = ta.atr(14)
+float ema_trend = ta.ema(close, trend_ema_len)
+
+// Chandelier Calculations
+float ch_atr = ta.atr(ch_len)
+float ch_long_calc  = ta.highest(high, ch_len) - (ch_atr * ch_mult)
+float ch_short_calc = ta.lowest(low, ch_len) + (ch_atr * ch_mult)
+
+bool valid_range = not na(swing_rng) and swing_rng > 0
+bool long_in_gp  = valid_range and close <= long_gp_top and close >= long_gp_bot
+bool short_in_gp = valid_range and close <= short_gp_top and close >= short_gp_bot
+bool price_in_gp_flag = long_in_gp or short_in_gp
+
+bool ema_rising  = not na(ema_trend[trend_slope_len]) and ema_trend > ema_trend[trend_slope_len]
+bool ema_falling = not na(ema_trend[trend_slope_len]) and ema_trend < ema_trend[trend_slope_len]
+
+bool uptrend   = close > ema_trend or ema_rising
+bool downtrend = close < ema_trend or ema_falling
+
+// ══════════════════════════════════════════════
+//  SIGNAL LOGIC
+// ══════════════════════════════════════════════
+bool rsi_ok_long  = not na(rsi_val) and rsi_val < rsi_ob
+bool rsi_ok_short = not na(rsi_val) and rsi_val > rsi_os
+
+bool long_signal  = long_in_gp and rsi_ok_long and uptrend
+bool short_signal = short_in_gp and rsi_ok_short and downtrend
+
+bool can_enter_long  = strategy.position_size <= 0
+bool can_enter_short = strategy.position_size >= 0
+
+bool long_entry_signal  = long_signal and can_enter_long
+bool short_entry_signal = short_signal and can_enter_short
+
+float long_sl_initial  = close - atr_val * atr_mult
+float long_tp          = close + atr_val * atr_mult * rr_ratio
+float short_sl_initial = close + atr_val * atr_mult
+float short_tp         = close - atr_val * atr_mult * rr_ratio
+
+var float active_long_sl = na
+var float active_long_tp = na
+var float active_short_sl = na
+var float active_short_tp = na
+
+// ══════════════════════════════════════════════
+//  PLOTS
+// ══════════════════════════════════════════════
+plot(show_fibs ? fib_0   : na, "Fib 0",     color = color.new(color.white,  20), linewidth = 1)
+plot(show_fibs ? fib_236 : na, "Fib 0.236", color = color.new(color.blue,   20), linewidth = 1)
+plot(show_fibs ? fib_382 : na, "Fib 0.382", color = color.new(color.yellow, 20), linewidth = 1)
+plot(show_fibs ? fib_500 : na, "Fib 0.5",   color = color.new(color.orange, 20), linewidth = 1)
+plot(show_fibs ? fib_618 : na, "Fib 0.618", color = color.new(color.green,  20), linewidth = 2)
+plot(show_fibs ? fib_65  : na, "Fib 0.65",  color = color.new(color.green,  40), linewidth = 1)
+plot(show_fibs ? fib_786 : na, "Fib 0.786", color = color.new(color.red,    20), linewidth = 1)
+plot(show_fibs ? fib_1   : na, "Fib 1",     color = color.new(color.white,  20), linewidth = 1)
+plot(ema_trend, "Trend EMA", color = color.new(color.aqua, 20), linewidth = 1)
+
+// Chandelier Trailing Plots (sichtbar wenn aktiv und Position offen)
+plot(use_chandelier and strategy.position_size > 0 ? active_long_sl : na, "Chandelier Long SL", color=color.new(color.fuchsia, 0), style=plot.style_stepline, linewidth=2)
+plot(use_chandelier and strategy.position_size < 0 ? active_short_sl : na, "Chandelier Short SL", color=color.new(color.fuchsia, 0), style=plot.style_stepline, linewidth=2)
+
+gp_long_upper  = plot(show_gp ? long_gp_top  : na, "Long GP Top", color = na)
+gp_long_lower  = plot(show_gp ? long_gp_bot  : na, "Long GP Bot", color = na)
+gp_short_upper = plot(show_gp ? short_gp_top : na, "Short GP Top", color = na)
+gp_short_lower = plot(show_gp ? short_gp_bot : na, "Short GP Bot", color = na)
+fill(gp_long_upper, gp_long_lower, color = color.new(color.green, 84), title = "Long Golden Pocket Fill")
+fill(gp_short_upper, gp_short_lower, color = color.new(color.red, 84), title = "Short Golden Pocket Fill")
+
+plotshape(long_signal,  title = "Long Signal",  style = shape.triangleup,   location = location.belowbar, color = color.green, size = size.small)
+plotshape(short_signal, title = "Short Signal", style = shape.triangledown, location = location.abovebar, color = color.red,   size = size.small)
+
+// ══════════════════════════════════════════════
+//  GOLDEN POCKET LINEFILLS
+// ══════════════════════════════════════════════
+var line long_gp_line_top = na
+var line long_gp_line_bot = na
+var linefill long_gp_fill = na
+var line short_gp_line_top = na
+var line short_gp_line_bot = na
+var linefill short_gp_fill = na
+
+if barstate.islast
+    if not na(long_gp_fill)
+        linefill.delete(long_gp_fill)
+        long_gp_fill := na
+    if not na(long_gp_line_top)
+        line.delete(long_gp_line_top)
+        long_gp_line_top := na
+    if not na(long_gp_line_bot)
+        line.delete(long_gp_line_bot)
+        long_gp_line_bot := na
+    if not na(short_gp_fill)
+        linefill.delete(short_gp_fill)
+        short_gp_fill := na
+    if not na(short_gp_line_top)
+        line.delete(short_gp_line_top)
+        short_gp_line_top := na
+    if not na(short_gp_line_bot)
+        line.delete(short_gp_line_bot)
+        short_gp_line_bot := na
+
+    long_gp_line_top := line.new(bar_index - fib_lookback, long_gp_top, bar_index, long_gp_top, color = color.new(color.green, 60))
+    long_gp_line_bot := line.new(bar_index - fib_lookback, long_gp_bot, bar_index, long_gp_bot, color = color.new(color.green, 60))
+    long_gp_fill := linefill.new(long_gp_line_top, long_gp_line_bot, color = color.new(color.green, 88))
+    short_gp_line_top := line.new(bar_index - fib_lookback, short_gp_top, bar_index, short_gp_top, color = color.new(color.red, 60))
+    short_gp_line_bot := line.new(bar_index - fib_lookback, short_gp_bot, bar_index, short_gp_bot, color = color.new(color.red, 60))
+    short_gp_fill := linefill.new(short_gp_line_top, short_gp_line_bot, color = color.new(color.red, 88))
+
+// ══════════════════════════════════════════════
+//  STRATEGY ORDERS & TRAILING LOGIC
+// ══════════════════════════════════════════════
+if long_entry_signal
+    active_long_sl := long_sl_initial
+    active_long_tp := long_tp
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop = active_long_sl, limit = active_long_tp)
+
+if short_entry_signal
+    active_short_sl := short_sl_initial
+    active_short_tp := short_tp
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop = active_short_sl, limit = active_short_tp)
+
+// Statemachine für asymmetrisches Trailing (nach Entry-Phase)
+if strategy.position_size > 0 and not na(active_long_sl) and not na(active_long_tp)
+    if use_chandelier
+        // Ratchet-Logik: Stop darf sich nur nach oben bewegen
+        active_long_sl := math.max(active_long_sl, ch_long_calc)
+    strategy.exit("Long Exit", "Long", stop = active_long_sl, limit = active_long_tp)
+
+else if strategy.position_size < 0 and not na(active_short_sl) and not na(active_short_tp)
+    if use_chandelier
+        // Ratchet-Logik: Stop darf sich nur nach unten bewegen
+        active_short_sl := math.min(active_short_sl, ch_short_calc)
+    strategy.exit("Short Exit", "Short", stop = active_short_sl, limit = active_short_tp)
+
+else if strategy.position_size == 0 and not long_entry_signal and not short_entry_signal
+    strategy.cancel("Long Exit")
+    strategy.cancel("Short Exit")
+    active_long_sl := na
+    active_long_tp := na
+    active_short_sl := na
+    active_short_tp := na

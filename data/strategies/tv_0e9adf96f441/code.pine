@@ -1,0 +1,68 @@
+//@version=5
+strategy("Liquidity Sweep Strategy",
+     overlay=true,
+     initial_capital=1000,
+     currency=currency.EUR,
+     default_qty_type=strategy.cash,
+     default_qty_value=50)
+
+// ===== SETTINGS =====
+leverage = input.int(10, "Leverage")
+rsiLength = input.int(14)
+stopLossPerc = input.float(1.5)
+takeProfitPerc = input.float(3.0)
+maxDrawdown = input.float(10)
+
+// ===== INDICATORS =====
+ema200 = ta.ema(close, 200)
+rsi = ta.rsi(close, rsiLength)
+
+plot(ema200, color=color.blue)
+
+// ===== LIQUIDITY LEVELS =====
+swingHigh = ta.highest(high, 20)
+swingLow = ta.lowest(low, 20)
+
+// ===== SWEEP CONDITIONS =====
+sweepHigh = high > swingHigh[1] and close < swingHigh[1]
+sweepLow = low < swingLow[1] and close > swingLow[1]
+
+// ===== TREND =====
+bullTrend = close > ema200
+bearTrend = close < ema200
+
+// ===== ENTRY =====
+longCondition = sweepLow and bullTrend and rsi < 40
+shortCondition = sweepHigh and bearTrend and rsi > 60
+
+// ===== EQUITY PROTECTION =====
+var float peakEquity = strategy.equity
+peakEquity := math.max(peakEquity, strategy.equity)
+
+drawdown = (peakEquity - strategy.equity) / peakEquity * 100
+canTrade = drawdown < maxDrawdown
+
+// ===== POSITION SIZE =====
+positionSize = 50 * leverage / close
+
+// ===== TRADES =====
+if longCondition and canTrade
+    strategy.entry("Long", strategy.long, qty=positionSize)
+
+if shortCondition and canTrade
+    strategy.entry("Short", strategy.short, qty=positionSize)
+
+// ===== EXIT =====
+strategy.exit("Exit Long",
+     from_entry="Long",
+     profit=takeProfitPerc,
+     loss=stopLossPerc)
+
+strategy.exit("Exit Short",
+     from_entry="Short",
+     profit=takeProfitPerc,
+     loss=stopLossPerc)
+
+// ===== VISUALS =====
+plotshape(longCondition, location=location.belowbar, color=color.green, style=shape.triangleup)
+plotshape(shortCondition, location=location.abovebar, color=color.red, style=shape.triangledown)

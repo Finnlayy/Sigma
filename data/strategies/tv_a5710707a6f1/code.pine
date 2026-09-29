@@ -1,0 +1,156 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Quant (LuxAlgo Specialist) — v3.1 — Compilation Fix
+
+//@version=6
+strategy("Neo-Quantum SMC [Cluster Optimized]", overlay=true, pyramiding=3, default_qty_type=strategy.percent_of_equity, default_qty_value=10, max_labels_count=500, max_lines_count=500)
+
+// --- Constants & Colors ---
+COLOR_BULL = #00ffbb
+COLOR_BEAR = #ff0055
+COLOR_TEXT = color.white
+COLOR_BG   = color.new(color.black, 80)
+
+// --- Inputs ---
+group_smc    = "Smart Money Concepts"
+msLen        = input.int(5, "Market Structure Length", minval = 1)
+showBlocks   = input.bool(true, "Show Breaker Blocks")
+
+group_cluster = "Cluster Optimization"
+atrSpacing   = input.float(1.0, "Min. ATR Spacing between Trades", minval=0.5, step=0.1)
+useVolWeight = input.bool(true, "Volume-Weighted TP Merging")
+timeDecay    = input.bool(true, "Enable Time-Decay Exit", group=group_cluster)
+decayBars    = input.int(30, "Max. Cluster Duration (Bars)", minval=5, group=group_cluster)
+
+group_trade  = "Trade Management"
+rrRatio      = input.float(2.0, "Risk:Reward Ratio", minval = 0.5, step = 0.1)
+atrMult      = input.float(1.5, "ATR Multiplier for Stop Loss", minval = 0.5)
+
+group_kelly  = "Position Sizing (Kelly)"
+useKelly     = input.bool(true, "Use Full Kelly Sizing")
+maxRiskCap   = input.float(5.0, "Max Risk Cap (%)", minval=0.5, maxval=20.0) / 100.0
+baseRisk     = input.float(1.0, "Base Risk (%)", minval=0.1) / 100.0
+
+// --- Core Calculations ---
+atr      = ta.atr(14)
+ema200   = ta.ema(close, 200)
+avgVol   = ta.sma(volume, 20)
+
+// Market Structure
+ph = ta.pivothigh(high, msLen, msLen)
+pl = ta.pivotlow(low, msLen, msLen)
+var float lastPH = na
+var float lastPL = na
+
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+bullMSS = ta.crossover(close, lastPH)
+bearMSS = ta.crossunder(close, lastPL)
+
+// Confirmed Bar Check (Quant Rule)
+validBar = barstate.isconfirmed or barstate.ishistory
+
+// Signals
+isLong  = bullMSS and close > ema200 and validBar
+isShort = bearMSS and close < ema200 and validBar
+
+// === DYNAMIC KELLY CALCULATION ===
+var float totalWinP = 0.0
+var float totalLossP = 0.0
+var int wCount = 0
+var int lCount = 0
+
+if strategy.closedtrades > nz(strategy.closedtrades[1])
+    float trProfit = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    if trProfit > 0
+        wCount += 1
+        totalWinP += trProfit
+    else
+        lCount += 1
+        totalLossP += math.abs(trProfit)
+
+// Safe Math (Float Casts)
+float wRate = strategy.closedtrades > 0 ? ((wCount * 1.0) / strategy.closedtrades) : 0.0
+float aWin  = wCount > 0 ? (totalWinP / wCount) : 0.0
+float aLoss = lCount > 0 ? (totalLossP / lCount) : 0.0
+float realRR = aLoss > 0 ? (aWin / aLoss) : rrRatio
+float kellyFraction = (wRate > 0 and realRR > 0) ? (wRate - ((1.0 - wRate) / realRR)) : 0.0
+float currentRisk = useKelly ? (kellyFraction > 0 ? math.min(kellyFraction, maxRiskCap) : baseRisk) : baseRisk
+
+// === CLUSTER STATE TRACKING ===
+var int   cCount = 0
+var float cTP = na
+var float cSL = na
+var float lastEntryP = na
+var float totalVol = 0.0
+var float volWeightedSum = 0.0
+var int   firstEntryBar = 0
+
+// Reset on Position Clear
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    cCount := 0
+    cTP := na
+    cSL := na
+    lastEntryP := na
+    totalVol := 0.0
+    volWeightedSum := 0.0
+    firstEntryBar := 0
+
+// === ENTRY LOGIC WITH SPACING & WEIGHTING ===
+// nz() schützt vor na-Fehlern beim Start des Arrays
+canEnterLong  = isLong  and cCount < 3 and (cCount == 0 or close < (nz(lastEntryP) - atr * atrSpacing))
+canEnterShort = isShort and cCount < 3 and (cCount == 0 or close > (nz(lastEntryP) + atr * atrSpacing))
+
+if (canEnterLong or canEnterShort)
+    cCount += 1
+    float risk = math.abs(close - (canEnterLong ? low - atr * atrMult : high + atr * atrMult))
+    float individualTP = canEnterLong ? close + risk * rrRatio : close - risk * rrRatio
+    float qty = (strategy.equity * currentRisk) / risk
+    
+    // Weighted TP Logic (Safe Division)
+    totalVol += volume
+    volWeightedSum += (individualTP * volume)
+    cTP := useVolWeight ? (volWeightedSum / math.max(totalVol, 1e-10)) : individualTP
+    
+    // SL Logic: Strictest level wins
+    if canEnterLong
+        cSL := na(cSL) ? low - atr * atrMult : math.max(cSL, low - atr * atrMult)
+    else
+        cSL := na(cSL) ? high + atr * atrMult : math.min(cSL, high + atr * atrMult)
+    
+    lastEntryP := close
+    if cCount == 1
+        firstEntryBar := bar_index
+
+    strategy.entry(canEnterLong ? "L" + str.tostring(cCount) : "S" + str.tostring(cCount), canEnterLong ? strategy.long : strategy.short, qty=qty)
+
+// === EXIT MANAGEMENT ===
+// Time-Decay Exit
+if timeDecay and strategy.position_size != 0 and (bar_index - firstEntryBar >= decayBars)
+    strategy.close_all(comment="Time-Decay Exit")
+
+// Cluster TP/SL Exits
+if strategy.position_size != 0
+    strategy.exit("Cluster Exit", stop=cSL, limit=cTP, comment_loss="SL", comment_profit="TP")
+
+// === UI & DASHBOARD ===
+var table dash = table.new(position.top_right, 2, 6, bgcolor=COLOR_BG, border_width=1, border_color=color.gray)
+if barstate.islast
+    table.cell(dash, 0, 0, "NEO-QUANTUM SMC v3", text_color=COLOR_TEXT, bgcolor=color.new(color.gray, 50))
+    table.cell(dash, 1, 0, "", bgcolor=color.new(color.gray, 50))
+    table.cell(dash, 0, 1, "Cluster Active:", text_color=COLOR_TEXT, text_halign=text.align_left)
+    table.cell(dash, 1, 1, str.tostring(cCount) + "/3", text_color=COLOR_TEXT)
+    table.cell(dash, 0, 2, "Win Rate:", text_color=COLOR_TEXT, text_halign=text.align_left)
+    table.cell(dash, 1, 2, str.tostring(wRate * 100, "#.#") + "%", text_color=(wRate > 0.4 ? COLOR_BULL : COLOR_BEAR))
+    table.cell(dash, 0, 3, "Kelly Risk:", text_color=COLOR_TEXT, text_halign=text.align_left)
+    table.cell(dash, 1, 3, str.tostring(currentRisk * 100, "#.##") + "%", text_color=COLOR_BULL)
+    table.cell(dash, 0, 4, "Time in Trade:", text_color=COLOR_TEXT, text_halign=text.align_left)
+    table.cell(dash, 1, 4, str.tostring(strategy.position_size != 0 ? bar_index - firstEntryBar : 0) + "/" + str.tostring(decayBars), text_color=COLOR_TEXT)
+    table.cell(dash, 0, 5, "Net Profit:", text_color=COLOR_TEXT, text_halign=text.align_left)
+    table.cell(dash, 1, 5, str.tostring(strategy.netprofit, "#.##"), text_color=(strategy.netprofit > 0 ? COLOR_BULL : COLOR_BEAR))
+
+// Visuals (Safe plotting)
+plot(strategy.position_size != 0 ? cTP : na, "Cluster TP", color=color.new(COLOR_BULL, 40), style=plot.style_linebr)
+plot(strategy.position_size != 0 ? cSL : na, "Cluster SL", color=color.new(COLOR_BEAR, 40), style=plot.style_linebr) 

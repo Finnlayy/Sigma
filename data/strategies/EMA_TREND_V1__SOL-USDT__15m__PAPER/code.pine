@@ -1,0 +1,2 @@
+// ema trend archetype (seed)
+function onCandle(ctx){ const f=ctx.ema(12), s=ctx.ema(60); if(f.prev<=s.prev && f>s) return ctx.long('trend'); return ctx.hold(); }

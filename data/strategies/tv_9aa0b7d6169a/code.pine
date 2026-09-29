@@ -1,0 +1,398 @@
+//@version=6
+strategy(
+     title="RIVER 15m Balanced - Pionex Compile Safe",
+     shorttitle="RIVER15 Bal Safe",
+     overlay=true,
+     initial_capital=100,
+     currency=currency.USD,
+     default_qty_type=strategy.cash,
+     default_qty_value=50,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     margin_long=0,
+     margin_short=0,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     max_labels_count=50,
+     max_lines_count=50
+)
+
+// Pionex alert:
+// Condition: this strategy
+// Trigger: Order fills only
+// Webhook URL: your Pionex Signal Bot webhook
+// Message: {{strategy.order.alert_message}}
+
+//==================================================================================================
+// Inputs
+//==================================================================================================
+string group_signal = "1. RIVER 15m Balanced Signal"
+string tf1 = input.timeframe("60", "MTF 1", group=group_signal)
+string tf2 = input.timeframe("240", "MTF 2", group=group_signal)
+string tf3 = input.timeframe("D", "MTF 3", group=group_signal)
+int required_alignment = input.int(67, "Required MTF Alignment %", minval=34, maxval=100, group=group_signal)
+int min_score = input.int(4, "Minimum Signal Score", minval=1, maxval=8, group=group_signal)
+bool use_fvg = input.bool(true, "Use FVG Retest", group=group_signal)
+bool use_sweeps = input.bool(true, "Use Liquidity Sweeps", group=group_signal)
+int sweep_lookback = input.int(12, "Sweep Lookback Bars", minval=3, maxval=100, group=group_signal)
+
+string group_filters = "2. Filters"
+bool use_ema_filter = input.bool(true, "Use EMA Trend Filter", group=group_filters)
+int ema_fast_len = input.int(50, "Fast EMA", minval=2, maxval=500, group=group_filters)
+int ema_slow_len = input.int(200, "Slow EMA", minval=5, maxval=800, group=group_filters)
+float low_vol_atr_pct = input.float(0.03, "Low Volatility ATR %", minval=0.00, maxval=5.00, step=0.01, group=group_filters)
+float high_vol_atr_pct = input.float(0.70, "High Volatility ATR %", minval=0.05, maxval=20.00, step=0.05, group=group_filters)
+float trend_atr_threshold = input.float(1.20, "Trend Strength ATR Threshold", minval=0.10, maxval=10.00, step=0.10, group=group_filters)
+bool block_low_vol = input.bool(true, "Block Low Volatility", group=group_filters)
+
+string group_bprc = "3. BPRC Reload"
+int channel_len = input.int(24, "Channel EMA Length", minval=5, maxval=300, group=group_bprc)
+float breakout_atr_mult = input.float(1.20, "Breakout ATR Multiplier", minval=0.20, maxval=6.00, step=0.05, group=group_bprc)
+float reload_atr_mult = input.float(0.75, "Reload ATR Multiplier", minval=0.05, maxval=3.00, step=0.05, group=group_bprc)
+int bprc_ttl = input.int(18, "BPRC Setup Expiry Bars", minval=1, maxval=100, group=group_bprc)
+
+string group_risk = "4. Trade Management"
+float sl_atr_mult = input.float(1.25, "Initial Stop ATR Multiplier", minval=0.20, maxval=10.00, step=0.05, group=group_risk)
+float tp1_rr = input.float(0.85, "TP1 R Multiple", minval=0.10, maxval=10.00, step=0.05, group=group_risk)
+float tp1_pct = input.float(35.00, "TP1 Exit %", minval=0.00, maxval=100.00, step=1.00, group=group_risk)
+float tp2_rr = input.float(1.80, "TP2 R Multiple", minval=0.20, maxval=15.00, step=0.10, group=group_risk)
+float tp2_pct = input.float(35.00, "TP2 Exit %", minval=0.00, maxval=100.00, step=1.00, group=group_risk)
+bool use_break_even = input.bool(true, "Use Break-Even", group=group_risk)
+float be_trigger_rr = input.float(0.90, "Break-Even Trigger R", minval=0.10, maxval=10.00, step=0.05, group=group_risk)
+float be_offset_atr = input.float(0.02, "Break-Even Offset ATR", minval=0.00, maxval=1.00, step=0.01, group=group_risk)
+bool use_fading_trail = input.bool(true, "Use Fading Trail", group=group_risk)
+float trail_activation_r = input.float(0.30, "Trail Activation R", minval=0.05, maxval=5.00, step=0.05, group=group_risk)
+float trail_dist_1 = input.float(0.28, "Trail Distance Below 1R", minval=0.02, maxval=5.00, step=0.02, group=group_risk)
+float trail_dist_2 = input.float(0.18, "Trail Distance From 1R", minval=0.02, maxval=5.00, step=0.02, group=group_risk)
+float trail_dist_3 = input.float(0.10, "Trail Distance From 1.5R", minval=0.02, maxval=5.00, step=0.02, group=group_risk)
+bool exit_on_alignment_loss = input.bool(true, "Close When MTF Alignment Is Lost", group=group_risk)
+
+string group_guard = "5. Account Guardrails"
+float max_account_loss = input.float(100.00, "Max Account Drawdown USDT", minval=1.00, maxval=1000.00, step=1.00, group=group_guard)
+int cooldown_bars = input.int(3, "Cooldown Bars After Exit", minval=0, maxval=100, group=group_guard)
+
+string group_pionex = "6. Pionex"
+string pionex_uuid = input.string("", "Pionex Signal Bot UUID", group=group_pionex)
+bool require_uuid_for_orders = input.bool(false, "Require UUID Before Trading", group=group_pionex)
+bool send_close_alerts = input.bool(true, "Send Close Alerts", group=group_pionex)
+
+string group_ui = "7. Visuals"
+bool show_dashboard = input.bool(true, "Show Dashboard", group=group_ui)
+bool show_plots = input.bool(true, "Show Plots", group=group_ui)
+
+//==================================================================================================
+// Helpers
+//==================================================================================================
+f_clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
+
+f_pionex_payload() =>
+    "{\"data\":{\"action\":\"{{strategy.order.action}}\",\"contracts\":\"{{strategy.order.contracts}}\",\"position_size\":\"{{strategy.position_size}}\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"signal_type\":\"" + pionex_uuid + "\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+
+f_trail_dist(float profit_r) =>
+    profit_r >= 1.50 ? trail_dist_3 : profit_r >= 1.00 ? trail_dist_2 : trail_dist_1
+
+f_cisd() =>
+    var float bull_target = na
+    var float bear_target = na
+    var int state = 0
+    bool is_inside = high < high[1] and low > low[1]
+    bool bull_cisd = not na(bull_target) and close > bull_target and close[1] <= bull_target
+    bool bear_cisd = not na(bear_target) and close < bear_target and close[1] >= bear_target
+
+    if barstate.isconfirmed
+        if bull_cisd
+            state := 1
+        if bear_cisd
+            state := -1
+        if close < open and not is_inside
+            bull_target := open
+        if close > open and not is_inside
+            bear_target := open
+
+    [state, bull_cisd, bear_cisd]
+
+//==================================================================================================
+// Market Snapshot
+//==================================================================================================
+bool confirmed = barstate.isconfirmed
+float atr = math.max(ta.atr(14), syminfo.mintick)
+float atr_pct = close > 0.0 ? atr / close * 100.0 : 0.0
+float ema_fast = ta.ema(close, ema_fast_len)
+float ema_slow = ta.ema(close, ema_slow_len)
+float rsi = ta.rsi(close, 14)
+float trend_strength = atr > 0.0 ? math.abs(ema_fast - ema_slow) / atr : 0.0
+int regime = atr_pct <= low_vol_atr_pct ? 4 : atr_pct >= high_vol_atr_pct ? 3 : trend_strength >= trend_atr_threshold ? 1 : 2
+string regime_text = regime == 1 ? "Trend" : regime == 2 ? "Range" : regime == 3 ? "HighVol" : "LowVol"
+bool regime_ok = not (block_low_vol and regime == 4)
+bool ema_long_ok = not use_ema_filter or ema_fast > ema_slow
+bool ema_short_ok = not use_ema_filter or ema_fast < ema_slow
+
+// Explicit visible output so TradingView always recognizes this as a visual strategy.
+plot(close, title="Compile Anchor Close", color=color.new(color.gray, 0))
+
+//==================================================================================================
+// CISD + MTF
+//==================================================================================================
+[local_state, local_bull_cisd, local_bear_cisd] = f_cisd()
+[tf1_state_raw, _, _] = request.security(syminfo.tickerid, tf1, f_cisd(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[tf2_state_raw, _, _] = request.security(syminfo.tickerid, tf2, f_cisd(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[tf3_state_raw, _, _] = request.security(syminfo.tickerid, tf3, f_cisd(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+int tf1_state = nz(tf1_state_raw[1], 0)
+int tf2_state = nz(tf2_state_raw[1], 0)
+int tf3_state = nz(tf3_state_raw[1], 0)
+int bull_tfs = (tf1_state == 1 ? 1 : 0) + (tf2_state == 1 ? 1 : 0) + (tf3_state == 1 ? 1 : 0)
+int bear_tfs = (tf1_state == -1 ? 1 : 0) + (tf2_state == -1 ? 1 : 0) + (tf3_state == -1 ? 1 : 0)
+int bull_align_pct = int(math.round(bull_tfs / 3.0 * 100.0))
+int bear_align_pct = int(math.round(bear_tfs / 3.0 * 100.0))
+bool mtf_long_ok = bull_align_pct >= required_alignment
+bool mtf_short_ok = bear_align_pct >= required_alignment
+
+//==================================================================================================
+// BPRC Reload
+//==================================================================================================
+float basis = ta.ema(close, channel_len)
+float bp_upper = basis + atr * breakout_atr_mult
+float bp_lower = basis - atr * breakout_atr_mult
+float r_upper = basis + atr * reload_atr_mult
+float r_lower = basis - atr * reload_atr_mult
+var int bprc_state = 0
+var int bprc_bar = na
+bool bprc_long_trigger = false
+bool bprc_short_trigger = false
+
+if confirmed
+    bprc_long_trigger := false
+    bprc_short_trigger := false
+
+    if bprc_state != 0 and not na(bprc_bar) and bar_index - bprc_bar > bprc_ttl
+        bprc_state := 0
+        bprc_bar := na
+    if bprc_state > 0 and close < bp_lower
+        bprc_state := 0
+        bprc_bar := na
+    if bprc_state < 0 and close > bp_upper
+        bprc_state := 0
+        bprc_bar := na
+
+    bool long_impulse = close > bp_upper and close > open and ema_long_ok
+    bool short_impulse = close < bp_lower and close < open and ema_short_ok
+    bool long_reload = bprc_state == 1 and low <= r_upper and close >= basis
+    bool short_reload = bprc_state == -1 and high >= r_lower and close <= basis
+
+    if bprc_state == 0
+        if long_impulse and not short_impulse
+            bprc_state := 1
+            bprc_bar := bar_index
+        else if short_impulse and not long_impulse
+            bprc_state := -1
+            bprc_bar := bar_index
+    else if long_reload
+        bprc_long_trigger := true
+        bprc_state := 0
+        bprc_bar := na
+    else if short_reload
+        bprc_short_trigger := true
+        bprc_state := 0
+        bprc_bar := na
+
+//==================================================================================================
+// Liquidity / FVG
+//==================================================================================================
+var float bull_fvg_low = na
+var float bull_fvg_high = na
+var float bear_fvg_low = na
+var float bear_fvg_high = na
+bool new_bull_fvg = use_fvg and not na(high[2]) and low > high[2]
+bool new_bear_fvg = use_fvg and not na(low[2]) and high < low[2]
+
+if confirmed
+    if new_bull_fvg
+        bull_fvg_low := high[2]
+        bull_fvg_high := low
+    if new_bear_fvg
+        bear_fvg_low := high
+        bear_fvg_high := low[2]
+
+bool bull_fvg_retest = use_fvg and not new_bull_fvg and not na(bull_fvg_low) and low <= bull_fvg_high and close >= bull_fvg_low and close > open
+bool bear_fvg_retest = use_fvg and not new_bear_fvg and not na(bear_fvg_high) and high >= bear_fvg_low and close <= bear_fvg_high and close < open
+float prev_lowest = ta.lowest(low[1], sweep_lookback)
+float prev_highest = ta.highest(high[1], sweep_lookback)
+bool bull_sweep = use_sweeps and low < prev_lowest and close > prev_lowest and close > open
+bool bear_sweep = use_sweeps and high > prev_highest and close < prev_highest and close < open
+
+//==================================================================================================
+// Guardrails
+//==================================================================================================
+var float start_equity = na
+var int last_flat_bar = na
+float prev_pos = nz(strategy.position_size[1], 0.0)
+bool flat = strategy.position_size == 0.0
+bool new_long_pos = strategy.position_size > 0.0 and prev_pos <= 0.0
+bool new_short_pos = strategy.position_size < 0.0 and prev_pos >= 0.0
+bool just_flat = strategy.position_size == 0.0 and prev_pos != 0.0
+
+if na(start_equity)
+    start_equity := strategy.equity
+if confirmed and just_flat
+    last_flat_bar := bar_index
+
+float account_pnl = strategy.equity - start_equity
+bool risk_locked = account_pnl <= -max_account_loss
+int bars_since_flat = na(last_flat_bar) ? 100000 : bar_index - last_flat_bar
+bool cooldown_ok = bars_since_flat >= cooldown_bars
+bool route_ok = not require_uuid_for_orders or str.length(pionex_uuid) > 0
+bool trade_gate_ok = route_ok and not risk_locked and cooldown_ok and regime_ok
+string payload = f_pionex_payload()
+
+if confirmed and risk_locked
+    strategy.cancel("Long")
+    strategy.cancel("Short")
+    if strategy.position_size != 0.0
+        strategy.close_all(comment="Risk Lock", alert_message=send_close_alerts ? payload : "")
+
+//==================================================================================================
+// Signal Fusion
+//==================================================================================================
+bool cisd_long = local_bull_cisd and mtf_long_ok
+bool cisd_short = local_bear_cisd and mtf_short_ok
+bool bprc_long = bprc_long_trigger and mtf_long_ok
+bool bprc_short = bprc_short_trigger and mtf_short_ok
+bool liquidity_long = (bull_fvg_retest or bull_sweep) and mtf_long_ok
+bool liquidity_short = (bear_fvg_retest or bear_sweep) and mtf_short_ok
+
+int long_score = 0
+long_score += cisd_long ? 2 : 0
+long_score += bprc_long ? 2 : 0
+long_score += bull_fvg_retest ? 1 : 0
+long_score += bull_sweep ? 1 : 0
+long_score += ema_long_ok ? 1 : 0
+long_score += rsi >= 54 and rsi <= 78 ? 1 : 0
+long_score += regime == 1 or regime == 3 ? 1 : 0
+
+int short_score = 0
+short_score += cisd_short ? 2 : 0
+short_score += bprc_short ? 2 : 0
+short_score += bear_fvg_retest ? 1 : 0
+short_score += bear_sweep ? 1 : 0
+short_score += ema_short_ok ? 1 : 0
+short_score += rsi <= 46 and rsi >= 22 ? 1 : 0
+short_score += regime == 1 or regime == 3 ? 1 : 0
+
+bool long_signal = confirmed and flat and trade_gate_ok and ema_long_ok and long_score >= min_score and long_score > short_score and (cisd_long or bprc_long or liquidity_long)
+bool short_signal = confirmed and flat and trade_gate_ok and ema_short_ok and short_score >= min_score and short_score > long_score and (cisd_short or bprc_short or liquidity_short)
+
+if long_signal
+    strategy.cancel("Short")
+    strategy.entry("Long", strategy.long, alert_message=payload)
+
+if short_signal
+    strategy.cancel("Long")
+    strategy.entry("Short", strategy.short, alert_message=payload)
+
+//==================================================================================================
+// Trade Management
+//==================================================================================================
+var float entry_atr = na
+var float live_stop = na
+var float high_since_entry = na
+var float low_since_entry = na
+
+if confirmed and new_long_pos
+    entry_atr := atr
+    live_stop := strategy.position_avg_price - entry_atr * sl_atr_mult
+    high_since_entry := high
+    low_since_entry := na
+
+if confirmed and new_short_pos
+    entry_atr := atr
+    live_stop := strategy.position_avg_price + entry_atr * sl_atr_mult
+    low_since_entry := low
+    high_since_entry := na
+
+if confirmed and just_flat
+    entry_atr := na
+    live_stop := na
+    high_since_entry := na
+    low_since_entry := na
+
+float tp1_qty = f_clamp(tp1_pct, 0.0, 100.0)
+float tp2_qty = f_clamp(tp2_pct, 0.0, 100.0 - tp1_qty)
+float runner_qty = math.max(0.0, 100.0 - tp1_qty - tp2_qty)
+
+if not risk_locked and strategy.position_size > 0.0
+    entry_atr := na(entry_atr) ? atr : entry_atr
+    float avg = strategy.position_avg_price
+    float initial_stop = avg - entry_atr * sl_atr_mult
+    float risk = math.max(avg - initial_stop, syminfo.mintick)
+    high_since_entry := na(high_since_entry) ? high : math.max(high_since_entry, high)
+    float profit_r = (high_since_entry - avg) / risk
+    float trail_candidate = high_since_entry - risk * f_trail_dist(profit_r)
+    float trail_stop = use_fading_trail and profit_r >= trail_activation_r ? math.max(initial_stop, trail_candidate) : initial_stop
+    float be_stop = use_break_even and high_since_entry >= avg + risk * be_trigger_rr ? avg + entry_atr * be_offset_atr : initial_stop
+    live_stop := na(live_stop) ? math.max(initial_stop, trail_stop, be_stop) : math.max(live_stop, initial_stop, trail_stop, be_stop)
+    float tp1 = avg + risk * tp1_rr
+    float tp2 = avg + risk * tp2_rr
+    if tp1_qty > 0.0
+        strategy.exit("Long TP1", from_entry="Long", qty_percent=tp1_qty, limit=tp1, stop=live_stop, alert_message=send_close_alerts ? payload : "")
+    if tp2_qty > 0.0
+        strategy.exit("Long TP2", from_entry="Long", qty_percent=tp2_qty, limit=tp2, stop=live_stop, alert_message=send_close_alerts ? payload : "")
+    if runner_qty > 0.0
+        strategy.exit("Long Runner", from_entry="Long", qty_percent=runner_qty, stop=live_stop, alert_message=send_close_alerts ? payload : "")
+    if exit_on_alignment_loss and not mtf_long_ok
+        strategy.close("Long", comment="MTF Lost", alert_message=send_close_alerts ? payload : "")
+
+if not risk_locked and strategy.position_size < 0.0
+    entry_atr := na(entry_atr) ? atr : entry_atr
+    float avg = strategy.position_avg_price
+    float initial_stop = avg + entry_atr * sl_atr_mult
+    float risk = math.max(initial_stop - avg, syminfo.mintick)
+    low_since_entry := na(low_since_entry) ? low : math.min(low_since_entry, low)
+    float profit_r = (avg - low_since_entry) / risk
+    float trail_candidate = low_since_entry + risk * f_trail_dist(profit_r)
+    float trail_stop = use_fading_trail and profit_r >= trail_activation_r ? math.min(initial_stop, trail_candidate) : initial_stop
+    float be_stop = use_break_even and low_since_entry <= avg - risk * be_trigger_rr ? avg - entry_atr * be_offset_atr : initial_stop
+    live_stop := na(live_stop) ? math.min(initial_stop, trail_stop, be_stop) : math.min(live_stop, initial_stop, trail_stop, be_stop)
+    float tp1 = avg - risk * tp1_rr
+    float tp2 = avg - risk * tp2_rr
+    if tp1_qty > 0.0
+        strategy.exit("Short TP1", from_entry="Short", qty_percent=tp1_qty, limit=tp1, stop=live_stop, alert_message=send_close_alerts ? payload : "")
+    if tp2_qty > 0.0
+        strategy.exit("Short TP2", from_entry="Short", qty_percent=tp2_qty, limit=tp2, stop=live_stop, alert_message=send_close_alerts ? payload : "")
+    if runner_qty > 0.0
+        strategy.exit("Short Runner", from_entry="Short", qty_percent=runner_qty, stop=live_stop, alert_message=send_close_alerts ? payload : "")
+    if exit_on_alignment_loss and not mtf_short_ok
+        strategy.close("Short", comment="MTF Lost", alert_message=send_close_alerts ? payload : "")
+
+//==================================================================================================
+// Visuals
+//==================================================================================================
+plot(show_plots ? basis : na, title="Basis", color=color.new(color.gray, 35))
+plot(show_plots ? bp_upper : na, title="BP Upper", color=color.new(color.teal, 75))
+plot(show_plots ? bp_lower : na, title="BP Lower", color=color.new(color.red, 75))
+plot(show_plots ? live_stop : na, title="Live Stop", color=color.new(color.red, 0), style=plot.style_linebr)
+plotshape(series=long_signal, title="Long Signal", style=shape.triangleup, location=location.belowbar, color=color.new(color.green, 0), size=size.small)
+plotshape(series=short_signal, title="Short Signal", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.small)
+
+var table dash = table.new(position.top_right, 4, 5, bgcolor=color.new(color.black, 82), border_width=1, border_color=color.new(color.gray, 45))
+
+if show_dashboard and barstate.islast
+    string pos_txt = strategy.position_size > 0.0 ? "LONG" : strategy.position_size < 0.0 ? "SHORT" : "FLAT"
+    color pos_col = strategy.position_size > 0.0 ? color.lime : strategy.position_size < 0.0 ? color.red : color.gray
+    string route_txt = risk_locked ? "LOCKED" : not route_ok ? "NO UUID" : cooldown_ok ? "READY" : "COOLDOWN"
+    color route_col = risk_locked or not route_ok ? color.red : cooldown_ok ? color.lime : color.orange
+    table.cell(dash, 0, 0, "RIVER15", text_color=color.white, bgcolor=color.new(color.blue, 35), text_halign=text.align_center)
+    table.cell(dash, 1, 0, "Regime", text_color=color.white, bgcolor=color.new(color.blue, 35), text_halign=text.align_center)
+    table.cell(dash, 2, 0, "MTF", text_color=color.white, bgcolor=color.new(color.blue, 35), text_halign=text.align_center)
+    table.cell(dash, 3, 0, "Route", text_color=color.white, bgcolor=color.new(color.blue, 35), text_halign=text.align_center)
+    table.cell(dash, 0, 1, pos_txt, text_color=pos_col, text_halign=text.align_center)
+    table.cell(dash, 1, 1, regime_text, text_color=regime == 4 ? color.orange : color.white, text_halign=text.align_center)
+    table.cell(dash, 2, 1, str.tostring(bull_align_pct) + "% / " + str.tostring(bear_align_pct) + "%", text_color=color.white, text_halign=text.align_center)
+    table.cell(dash, 3, 1, route_txt, text_color=route_col, text_halign=text.align_center)
+    table.cell(dash, 0, 2, "L/S " + str.tostring(long_score) + "/" + str.tostring(short_score), text_color=color.white)
+    table.cell(dash, 1, 2, "Need " + str.tostring(min_score), text_color=color.white)
+    table.cell(dash, 2, 2, "ATR% " + str.tostring(atr_pct, "#.###"), text_color=color.white)
+    table.cell(dash, 3, 2, "PnL " + str.tostring(account_pnl, "#.##"), text_color=risk_locked ? color.red : color.white)

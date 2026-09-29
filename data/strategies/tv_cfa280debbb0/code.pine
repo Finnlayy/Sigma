@@ -1,0 +1,153 @@
+//@version=6
+strategy("BPRC PRO x ", shorttitle="HF CVD Quant", overlay=true, calc_on_every_tick=false, process_orders_on_close=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=500, margin_long=20, margin_short=20, pyramiding=0)
+
+// === RISK MANAGEMENT & LEVERAGE ===
+// 5x Leverage is achieved via margin_long=20, margin_short=20 and default_qty_value=500.
+// Max Drawdown 15%
+strategy.risk.max_drawdown(15, strategy.percent_of_equity)
+
+// === USER SETTINGS ===
+in_channel_len  = input.int(20, "BPRC Channel Length", group="Base Strategy")
+cvd_length      = input.int(14, title="CVD Voting Window (EMA Length)", minval=1, group="Sentiment")
+use_short       = input.bool(true, title="Allow Elimination (Shorts)?", group="Sentiment")
+
+// === RISK / TP SETTINGS ===
+sl_pct          = input.float(1.0, title="Stop Loss %", minval=0.1, step=0.1, group="Risk / Take Profit")
+use_trailing_sl = input.bool(true, title="Use Trailing Stop Loss?", group="Risk / Take Profit")
+
+tp1_pct         = input.float(1.0, title="TP1 Profit Target %", minval=0.1, step=0.1, group="Risk / Take Profit")
+tp2_pct         = input.float(2.0, title="TP2 Profit Target %", minval=0.1, step=0.1, group="Risk / Take Profit")
+
+tp1_qty_pct     = input.float(20.0, title="TP1 Close Position %", minval=1.0, maxval=100.0, step=1.0, group="Risk / Take Profit")
+tp2_qty_pct     = input.float(80.0, title="TP2 Close Position %", minval=1.0, maxval=100.0, step=1.0, group="Risk / Take Profit")
+
+vol_spike_mult  = input.float(3.0, title="Volume Spike Exit Multiplier", step=0.5, group="High-Frequency Risk")
+
+// === JSON ALERT PAYLOAD BUILDER ===
+// Following Pionex Signal Bot format strictly.
+// Note: strategy.order.* placeholders parse perfectly when sent via strategy entry/exit alert_message parameter.
+f_alert_json(action_str) =>
+    '{"data": { "action": "' + action_str + '", "contracts": "{{strategy.order.contracts}}", "position_size": "{{strategy.position_size}}" }, "price": "{{close}}", "signal_type": "93f67120-5075-42cc-ba26-d09fc3328b1f", "symbol": "BTCUSDT", "time": "{{timenow}}"}'
+
+// === EINSTELLUNGEN: BERECHNUNG DER VOTES (Orderflow Proxy) ===
+range_tot = math.max(high - low, syminfo.mintick)
+buy_votes = volume * ((close - low) / range_tot)
+sell_votes = volume * ((high - close) / range_tot)
+vote_delta = buy_votes - sell_votes
+
+cvd = ta.cum(vote_delta)
+cvd_ma = ta.ema(cvd, cvd_length)
+
+// CVD Signals / Pfeile
+immunity = ta.crossover(cvd, cvd_ma)
+elimination = ta.crossunder(cvd, cvd_ma)
+
+// === BPRC PRO BASE CALCULATION ===
+hh = ta.highest(high, in_channel_len)
+ll = ta.lowest(low, in_channel_len)
+
+bp_break_long = ta.crossover(close, hh[1])
+bp_break_short = ta.crossunder(close, ll[1])
+
+// === HIGH-FREQUENCY CONFLUENCE LOGIC ===
+long_signal = (immunity or bp_break_long) and cvd > cvd_ma
+short_signal = (elimination or bp_break_short) and cvd < cvd_ma
+
+// Rapid Exit based on Volume Spikes
+vol_ma = ta.sma(volume, 20)
+vol_spike = volume > vol_ma * vol_spike_mult
+
+// === TRAILING STOP VARIABLEN ===
+var float long_stop = na
+var float short_stop = na
+
+// === TRADING LOGIK MIT REVERSAL ===
+
+// Grüner Pfeil / Long-Signal:
+// Flat       -> BUY
+// Short offen -> Short to Long
+if long_signal
+    if strategy.position_size == 0
+        strategy.entry("Long", strategy.long, alert_message=f_alert_json("BUY"))
+        alert(f_alert_json("BUY"), alert.freq_once_per_bar_close)
+
+    if strategy.position_size < 0
+        strategy.entry("Long", strategy.long, alert_message=f_alert_json("Short to Long"))
+        alert(f_alert_json("Short to Long"), alert.freq_once_per_bar_close)
+
+// Roter Pfeil / Short-Signal:
+// Flat      -> SELL
+// Long offen -> Long to Short
+if short_signal and use_short
+    if strategy.position_size == 0
+        strategy.entry("Short", strategy.short, alert_message=f_alert_json("SELL"))
+        alert(f_alert_json("SELL"), alert.freq_once_per_bar_close)
+
+    if strategy.position_size > 0
+        strategy.entry("Short", strategy.short, alert_message=f_alert_json("Long to Short"))
+        alert(f_alert_json("Long to Short"), alert.freq_once_per_bar_close)
+
+// === LONG RISK MANAGEMENT: TP1 / TP2 / STOP LOSS ===
+if strategy.position_size > 0
+    long_avg = strategy.position_avg_price
+
+    long_tp1 = long_avg * (1 + tp1_pct / 100)
+    long_tp2 = long_avg * (1 + tp2_pct / 100)
+
+    long_initial_sl = long_avg * (1 - sl_pct / 100)
+    long_trailing_sl = close * (1 - sl_pct / 100)
+
+    if use_trailing_sl
+        long_stop := na(long_stop) ? long_initial_sl : math.max(math.max(long_stop, long_trailing_sl), long_initial_sl)
+    else
+        long_stop := long_initial_sl
+
+    // TP1 schließt 20%, Stop-Loss bleibt aktiv
+    strategy.exit("TP1 Long / SL", from_entry="Long", qty_percent=tp1_qty_pct, limit=long_tp1, stop=long_stop, alert_message=f_alert_json("SELL"))
+
+    // TP2 schließt 80%, Stop-Loss bleibt aktiv
+    strategy.exit("TP2 Long / SL", from_entry="Long", qty_percent=tp2_qty_pct, limit=long_tp2, stop=long_stop, alert_message=f_alert_json("SELL"))
+
+    if vol_spike
+        strategy.close("Long", comment="Vol Spike Exit Long", alert_message=f_alert_json("SELL"))
+        alert(f_alert_json("SELL"), alert.freq_once_per_bar_close)
+else
+    long_stop := na
+
+// === SHORT RISK MANAGEMENT: TP1 / TP2 / STOP LOSS ===
+if strategy.position_size < 0
+    short_avg = strategy.position_avg_price
+
+    short_tp1 = short_avg * (1 - tp1_pct / 100)
+    short_tp2 = short_avg * (1 - tp2_pct / 100)
+
+    short_initial_sl = short_avg * (1 + sl_pct / 100)
+    short_trailing_sl = close * (1 + sl_pct / 100)
+
+    if use_trailing_sl
+        short_stop := na(short_stop) ? short_initial_sl : math.min(math.min(short_stop, short_trailing_sl), short_initial_sl)
+    else
+        short_stop := short_initial_sl
+
+    // TP1 schließt 20%, Stop-Loss bleibt aktiv
+    strategy.exit("TP1 Short / SL", from_entry="Short", qty_percent=tp1_qty_pct, limit=short_tp1, stop=short_stop, alert_message=f_alert_json("BUY"))
+
+    // TP2 schließt 80%, Stop-Loss bleibt aktiv
+    strategy.exit("TP2 Short / SL", from_entry="Short", qty_percent=tp2_qty_pct, limit=short_tp2, stop=short_stop, alert_message=f_alert_json("BUY"))
+
+    if vol_spike
+        strategy.close("Short", comment="Vol Spike Exit Short", alert_message=f_alert_json("BUY"))
+        alert(f_alert_json("BUY"), alert.freq_once_per_bar_close)
+else
+    short_stop := na
+
+// === VISUALISIERUNG ===
+bgcolor(immunity ? color.new(color.green, 90) : na, title="Immunity Zone")
+bgcolor(elimination ? color.new(color.red, 90) : na, title="Elimination Zone")
+
+plotshape(series=immunity, title="Safe!", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)
+plotshape(series=elimination, title="Eliminated!", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+// Optional: Stop-Loss Linien anzeigen
+plot(strategy.position_size > 0 ? long_stop : na, title="Long Stop Loss", color=color.red, linewidth=2)
+plot(strategy.position_size < 0 ? short_stop : na, title="Short Stop Loss", color=color.red, linewidth=2)

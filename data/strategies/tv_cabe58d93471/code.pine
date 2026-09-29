@@ -1,0 +1,225 @@
+//@version=5
+strategy("MOS - Muhamad Official Strategy (SNRZ Multi-Timeframe)", overlay=true, max_boxes_count=100, max_labels_count=100, 
+         initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=500, margin_long=20, margin_short=20)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// HARDCODED OPTIMIZED PARAMETERS
+//---------------------------------------------------------------------------------------------------------------------{
+const float SL_PARAM     = 1.14
+const float TP_PARAM     = 9.55
+const int ATR_LEN        = 14
+const bool USE_TRAILING  = false
+const int LEFT_LEN       = 10
+const int RIGHT_LEN      = 5
+const bool USE_AUTO      = true
+const int MAX_ZONES      = 15
+const bool SHOW_SBR      = true
+const bool SHOW_INVERSION = true
+const bool SHOW_PO2      = true
+const bool SHOW_SWEEP    = true
+
+// Enforce Max Drawdown 15%
+strategy.risk.max_drawdown(15, strategy.percent_of_equity)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Constants & Variables
+//---------------------------------------------------------------------------------------------------------------------{
+COLOR_GREEN = #089981
+COLOR_RED   = #f23645
+COLOR_BLUE  = #5b9cf6
+
+var color vrColor  = color.new(COLOR_RED, 90) 
+var color vsColor  = color.new(COLOR_GREEN, 90) 
+var color sbrColor = color.new(COLOR_RED, 85) 
+var color rbsColor = color.new(COLOR_GREEN, 85) 
+var color ivsColor = color.new(COLOR_BLUE, 85) 
+var color ivrColor = color.new(COLOR_BLUE, 85) 
+
+isHighTf = timeframe.isdaily or timeframe.isweekly or timeframe.ismonthly or (timeframe.isminutes and timeframe.multiplier >= 240)
+
+defaultLeft  = isHighTf ? 4 : 10
+defaultRight = isHighTf ? 2 : 5
+
+autoLeft  = USE_AUTO ? defaultLeft  : LEFT_LEN
+autoRight = USE_AUTO ? defaultRight : RIGHT_LEN
+
+ph = ta.pivothigh(high, autoLeft, autoRight)
+pl = ta.pivotlow(low, autoLeft, autoRight)
+
+var box[] liveVr = array.new_box()
+var box[] liveVs = array.new_box()
+var box[] liveIvr = array.new_box()
+var box[] liveIvs = array.new_box()
+
+var int supportBreakCount = 0
+var int resistanceBreakCount = 0
+
+isNewDay = ta.change(time("D")) != 0
+
+atrValue = ta.atr(ATR_LEN)
+var float slPrice = na
+var float tpPrice = na
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Drawing Base Zones (VS / VR)
+//---------------------------------------------------------------------------------------------------------------------{
+if not na(ph)
+    topVal = high[autoRight]
+    botVal = math.max(open[autoRight], close[autoRight])
+    bx = box.new(left=bar_index - autoRight, top=topVal, right=bar_index, bottom=botVal, 
+                 bgcolor=vrColor, border_color=COLOR_RED, border_style=line.style_solid)
+    array.push(liveVr, bx)
+    label.new(bar_index - autoRight, topVal, "VR", color=COLOR_RED, textcolor=chart.fg_color, style=label.style_label_down, size=size.small)
+    if array.size(liveVr) > MAX_ZONES
+        box.delete(array.shift(liveVr))
+
+if not na(pl)
+    topVal = math.min(open[autoRight], close[autoRight])
+    botVal = low[autoRight]
+    bx = box.new(left=bar_index - autoRight, top=topVal, right=bar_index, bottom=botVal, 
+                 bgcolor=vsColor, border_color=COLOR_GREEN, border_style=line.style_solid)
+    array.push(liveVs, bx)
+    label.new(bar_index - autoRight, botVal, "VS", color=COLOR_GREEN, textcolor=chart.fg_color, style=label.style_label_up, size=size.small)
+    if array.size(liveVs) > MAX_ZONES
+        box.delete(array.shift(liveVs))
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Advanced Checking Logic & Signal Generation
+//---------------------------------------------------------------------------------------------------------------------{
+bool buySignal = false
+bool sellSignal = false
+
+if barstate.isconfirmed
+    if isNewDay
+        supportBreakCount := 0
+        resistanceBreakCount := 0
+
+    // Check VR Zones (Resistance)
+    if array.size(liveVr) > 0
+        for i = array.size(liveVr) - 1 to 0 by 1
+            b   = array.get(liveVr, i)
+            top = box.get_top(b)
+            bot = box.get_bottom(b)
+            box.set_right(b, bar_index)
+            
+            if close > top and close[1] <= top
+                resistanceBreakCount += 1
+                
+                if resistanceBreakCount >= 2
+                    label.new(bar_index, high, "RSS (Double Break BUY)", color=COLOR_GREEN, textcolor=chart.fg_color, size=size.small)
+                    buySignal := true
+                    resistanceBreakCount := 0
+                else if SHOW_SBR
+                    box.set_bgcolor(b, rbsColor)
+                    box.set_border_color(b, COLOR_GREEN)
+                    label.new(bar_index, high, "RBS (BUY)", color=COLOR_GREEN, textcolor=chart.fg_color, size=size.small)
+                    buySignal := true
+                
+                if SHOW_INVERSION
+                    box.set_bgcolor(b, ivrColor)
+                    box.set_border_color(b, COLOR_BLUE)
+                    label.new(bar_index, bot, "IVR", color=COLOR_BLUE, textcolor=chart.fg_color, style=label.style_label_up, size=size.small)
+                    array.push(liveIvr, b)
+                
+                array.remove(liveVr, i)
+                
+            else if high > top and close < top and SHOW_SWEEP and high[1] <= top
+                label.new(bar_index, high, "Liq Sweep ✗ (SELL)", color=COLOR_RED, textcolor=chart.fg_color, size=size.small)
+                sellSignal := true
+
+    // Check VS Zones (Support)
+    if array.size(liveVs) > 0
+        for i = array.size(liveVs) - 1 to 0 by 1
+            b   = array.get(liveVs, i)
+            bot = box.get_bottom(b)
+            top = box.get_top(b)
+            box.set_right(b, bar_index)
+            
+            if close < bot and close[1] >= bot
+                supportBreakCount += 1
+                
+                if supportBreakCount >= 2
+                    label.new(bar_index, low, "SRR (Double Break SELL)", color=COLOR_RED, textcolor=chart.fg_color, size=size.small)
+                    sellSignal := true
+                    supportBreakCount := 0
+                else if SHOW_SBR
+                    box.set_bgcolor(b, sbrColor)
+                    box.set_border_color(b, COLOR_RED)
+                    label.new(bar_index, low, "SBR (SELL)", color=COLOR_RED, textcolor=chart.fg_color, size=size.small)
+                    sellSignal := true
+                
+                if SHOW_INVERSION
+                    box.set_bgcolor(b, ivsColor)
+                    box.set_border_color(b, COLOR_BLUE)
+                    label.new(bar_index, top, "IVS", color=COLOR_BLUE, textcolor=chart.fg_color, style=label.style_label_down, size=size.small)
+                    array.push(liveIvs, b)
+                
+                array.remove(liveVs, i)
+                
+            else if low < bot and close > bot and SHOW_SWEEP and low[1] >= bot
+                label.new(bar_index, low, "Liq Sweep ✓ (BUY)", color=COLOR_GREEN, textcolor=chart.fg_color, size=size.small)
+                buySignal := true
+
+    // PO2 Logic (Power of Second Touch)
+    if SHOW_PO2
+        if array.size(liveIvr) > 0
+            for i = array.size(liveIvr) - 1 to 0 by 1
+                b = array.get(liveIvr, i)
+                top = box.get_top(b)
+                bot = box.get_bottom(b)
+                box.set_right(b, bar_index)
+                
+                if low <= top and high >= bot and close > bot and close[1] > top
+                    label.new(bar_index, low, "PO2 (BUY Call) ⚡", color=COLOR_GREEN, textcolor=chart.fg_color, size=size.normal)
+                    buySignal := true
+                    array.remove(liveIvr, i)
+                    
+        if array.size(liveIvs) > 0
+            for i = array.size(liveIvs) - 1 to 0 by 1
+                b = array.get(liveIvs, i)
+                bot = box.get_bottom(b)
+                top = box.get_top(b)
+                box.set_right(b, bar_index)
+                
+                if high >= bot and low <= top and close < top and close[1] < bot
+                    label.new(bar_index, high, "PO2 (SELL Call) ⚡", color=COLOR_RED, textcolor=chart.fg_color, size=size.normal)
+                    sellSignal := true
+                    array.remove(liveIvs, i)
+else
+    // Update live boxes on non-confirmed bars
+    if array.size(liveVr) > 0
+        for i = 0 to array.size(liveVr) - 1 by 1
+            box.set_right(array.get(liveVr, i), bar_index)
+    if array.size(liveVs) > 0
+        for i = 0 to array.size(liveVs) - 1 by 1
+            box.set_right(array.get(liveVs, i), bar_index)
+    if array.size(liveIvr) > 0
+        for i = 0 to array.size(liveIvr) - 1 by 1
+            box.set_right(array.get(liveIvr, i), bar_index)
+    if array.size(liveIvs) > 0
+        for i = 0 to array.size(liveIvs) - 1 by 1
+            box.set_right(array.get(liveIvs, i), bar_index)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Strategy Execution & Risk Management
+//---------------------------------------------------------------------------------------------------------------------{
+if buySignal and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long)
+    slPrice := close - (atrValue * SL_PARAM)
+    tpPrice := close + (atrValue * TP_PARAM)
+
+if sellSignal and strategy.position_size >= 0
+    strategy.entry("Short", strategy.short)
+    slPrice := close + (atrValue * SL_PARAM)
+    tpPrice := close - (atrValue * TP_PARAM)
+
+// Stop Loss & Take Profit Update
+if strategy.position_size > 0
+    if USE_TRAILING
+        slPrice := math.max(slPrice, close - (atrValue * SL_PARAM))
+    strategy.exit("Exit Long", "Long", stop=slPrice, limit=tpPrice)
+
+if strategy.position_size < 0
+    if USE_TRAILING
+        slPrice := math.min(slPrice, close + (atrValue * SL_PARAM))
+    strategy.exit("Exit Short", "Short", stop=slPrice, limit=tpPrice)

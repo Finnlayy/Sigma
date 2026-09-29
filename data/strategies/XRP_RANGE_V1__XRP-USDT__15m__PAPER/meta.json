@@ -1,0 +1,9 @@
+{
+  "bytes": 24,
+  "name": "XRP Range Fader (Archiv)",
+  "persisted_at": "2026-09-08T00:22:35Z",
+  "placeholder": false,
+  "source_file": "code.pine",
+  "strategy_id": "XRP_RANGE_V1__XRP-USDT__15m__PAPER",
+  "tv_script_id": ""
+}

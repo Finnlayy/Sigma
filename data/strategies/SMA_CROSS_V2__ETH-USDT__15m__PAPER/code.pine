@@ -1,0 +1,2 @@
+// sma cross archetype (seed)
+function onCandle(ctx){ const f=ctx.sma(12), s=ctx.sma(48); if(f.prev<=s.prev && f>s) return ctx.long('cross'); return ctx.hold(); }

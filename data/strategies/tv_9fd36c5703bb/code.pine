@@ -1,0 +1,636 @@
+//@version=6
+strategy("ZECUSDT.P Pro MTF 1H OB FVG + 5m LSOB Trail", overlay=true, pyramiding=1, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.06, slippage=2, calc_on_order_fills=true, calc_on_every_tick=false, process_orders_on_close=true, default_qty_type=strategy.fixed, default_qty_value=1)
+
+// ---------- Helpers ----------
+f_fmt(v) =>
+    string s = "n/a"
+    if not na(v)
+        s := str.tostring(v, "#.##")
+    s
+
+// ---------- Core Inputs ----------
+groupCore = "Core"
+htfTf = input.timeframe("60", "HTF Structure Timeframe", group=groupCore)
+enableLong = input.bool(true, "Enable Long", group=groupCore)
+enableShort = input.bool(true, "Enable Short", group=groupCore)
+maxOpenTrades = input.int(2, "Max Open Entries", minval=1, maxval=2, group=groupCore)
+cooldownBars = input.int(8, "5m Cooldown Bars", minval=0, group=groupCore)
+minQty = input.float(0.001, "Minimum Quantity", minval=0.0, step=0.001, group=groupCore)
+
+// ---------- 1H Range / Premium Discount ----------
+groupRange = "1H Range / Premium Discount"
+rangeLen = input.int(36, "1H Range Lookback", minval=5, group=groupRange)
+discountMaxFib = input.float(0.50, "Long Max Fib Discount", minval=0.0, maxval=1.0, step=0.01, group=groupRange)
+premiumMinFib = input.float(0.50, "Short Min Fib Premium", minval=0.0, maxval=1.0, step=0.01, group=groupRange)
+deepDiscountMaxFib = input.float(0.382, "Deep Discount Max Fib", minval=0.0, maxval=1.0, step=0.01, group=groupRange)
+deepPremiumMinFib = input.float(0.618, "Deep Premium Min Fib", minval=0.0, maxval=1.0, step=0.01, group=groupRange)
+requireDeepZone = input.bool(false, "Require Deep Premium / Discount", group=groupRange)
+
+// ---------- 1H OB ----------
+groupOB = "1H Order Block"
+bosLen = input.int(8, "1H BOS Lookback", minval=3, group=groupOB)
+obSearchBars = input.int(6, "1H OB Search Bars", minval=1, maxval=20, group=groupOB)
+obMaxAgeHtfBars = input.int(36, "1H OB Max Age", minval=1, group=groupOB)
+obUseWicks = input.bool(true, "Use Full OB Wick Zone", group=groupOB)
+obTouchBufferAtr = input.float(0.08, "OB Touch Buffer ATR", minval=0.0, step=0.01, group=groupOB)
+
+// ---------- 1H FVG TP ----------
+groupFVG = "1H FVG Targets"
+fvgMaxAgeHtfBars = input.int(72, "1H FVG Max Age", minval=1, group=groupFVG)
+tp1Fib = input.float(0.618, "TP1 FVG Fib", minval=0.0, maxval=1.0, step=0.001, group=groupFVG)
+tp2Fib = input.float(0.818, "TP2 FVG Fib", minval=0.0, maxval=1.0, step=0.001, group=groupFVG)
+fallbackTpR1 = input.float(1.50, "Fallback TP1 R", minval=0.1, step=0.1, group=groupFVG)
+fallbackTpR2 = input.float(2.50, "Fallback TP2 R", minval=0.1, step=0.1, group=groupFVG)
+
+// ---------- 5m Entry ----------
+groupEntry = "5m Entry"
+requireRejectionWick = input.bool(true, "Require Rejection Wick", group=groupEntry)
+minWickBodyRatio = input.float(0.50, "Min Wick / Body Ratio", minval=0.0, step=0.1, group=groupEntry)
+requireCloseBeyondOb = input.bool(false, "Require Close Beyond OB Edge", group=groupEntry)
+useRsiFilter = input.bool(false, "Use RSI Filter", group=groupEntry)
+rsiLen = input.int(14, "RSI Length", minval=1, group=groupEntry)
+rsiLongMax = input.float(68.0, "Long RSI Max", minval=0.0, maxval=100.0, step=0.5, group=groupEntry)
+rsiShortMin = input.float(32.0, "Short RSI Min", minval=0.0, maxval=100.0, step=0.5, group=groupEntry)
+allowAddOnlyBeforeTp1 = input.bool(true, "Allow Add Only Before TP1", group=groupEntry)
+
+// ---------- 5m LSOB Trail ----------
+groupLsob = "5m LSOB Trailing"
+useLsobTrail = input.bool(true, "Use 5m LSOB Trail", group=groupLsob)
+lsobSwingLen = input.int(10, "5m LSOB BOS Lookback", minval=3, group=groupLsob)
+lsobSearchBars = input.int(6, "5m LSOB Search Bars", minval=1, maxval=20, group=groupLsob)
+lsobUseWicks = input.bool(true, "Use Full LSOB Wick Zone", group=groupLsob)
+lsobAtrBuffer = input.float(0.05, "LSOB Trail ATR Buffer", minval=0.0, step=0.01, group=groupLsob)
+lsobOnlyAfterTp1 = input.bool(true, "Activate LSOB Trail Only After TP1", group=groupLsob)
+lsobMinImproveAtr = input.float(0.25, "Min LSOB Stop Improvement ATR", minval=0.0, step=0.05, group=groupLsob)
+
+// ---------- Risk ----------
+groupRisk = "Risk / Exit"
+atrLen = input.int(14, "ATR Length", minval=1, group=groupRisk)
+slAtrBuffer = input.float(0.25, "SL ATR Buffer Beyond 1H OB", minval=0.0, step=0.05, group=groupRisk)
+tp1QtyPct = input.float(50.0, "TP1 Qty %", minval=1.0, maxval=99.0, step=1.0, group=groupRisk)
+moveBeAfterTp1 = input.bool(true, "Move Stop To BE After TP1", group=groupRisk)
+beOffsetAtr = input.float(0.02, "BE Offset ATR", minval=0.0, step=0.01, group=groupRisk)
+useAtrTrailAfterTp1 = input.bool(true, "ATR Trail After TP1", group=groupRisk)
+atrTrailMult = input.float(1.40, "ATR Trail Mult", minval=0.1, step=0.1, group=groupRisk)
+
+// ---------- Sizing ----------
+groupSizing = "Sizing"
+riskPct = input.float(1.00, "Equity % Per Entry", minval=0.1, maxval=100.0, step=0.1, group=groupSizing)
+
+// ---------- Dashboard ----------
+groupDash = "Dashboard"
+showDashboard = input.bool(true, "Show Dashboard", group=groupDash)
+
+// ---------- HTF Functions ----------
+f_htfBullObHigh(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    bool bos = close > ta.highest(high, _bosLen)[1]
+    if bos
+        for i = 1 to _searchBars
+            if close[i] < open[i] and na(out)
+                if _useWicks
+                    out := high[i]
+                else
+                    out := open[i]
+    out
+
+f_htfBullObLow(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    bool bos = close > ta.highest(high, _bosLen)[1]
+    if bos
+        for i = 1 to _searchBars
+            if close[i] < open[i] and na(out)
+                if _useWicks
+                    out := low[i]
+                else
+                    out := close[i]
+    out
+
+f_htfBearObHigh(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    bool bos = close < ta.lowest(low, _bosLen)[1]
+    if bos
+        for i = 1 to _searchBars
+            if close[i] > open[i] and na(out)
+                if _useWicks
+                    out := high[i]
+                else
+                    out := close[i]
+    out
+
+f_htfBearObLow(_bosLen, _searchBars, _useWicks) =>
+    float out = na
+    bool bos = close < ta.lowest(low, _bosLen)[1]
+    if bos
+        for i = 1 to _searchBars
+            if close[i] > open[i] and na(out)
+                if _useWicks
+                    out := low[i]
+                else
+                    out := open[i]
+    out
+
+f_htfBullFvgLow() =>
+    float out = na
+    if low > high[2]
+        out := high[2]
+    out
+
+f_htfBullFvgHigh() =>
+    float out = na
+    if low > high[2]
+        out := low
+    out
+
+f_htfBearFvgLow() =>
+    float out = na
+    if high < low[2]
+        out := high
+    out
+
+f_htfBearFvgHigh() =>
+    float out = na
+    if high < low[2]
+        out := low[2]
+    out
+
+// ---------- Confirmed HTF Data ----------
+htfRangeHigh = request.security(syminfo.tickerid, htfTf, ta.highest(high, rangeLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfRangeLow = request.security(syminfo.tickerid, htfTf, ta.lowest(low, rangeLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfAtr = request.security(syminfo.tickerid, htfTf, ta.atr(atrLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+newBullObHigh = request.security(syminfo.tickerid, htfTf, f_htfBullObHigh(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBullObLow = request.security(syminfo.tickerid, htfTf, f_htfBullObLow(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBearObHigh = request.security(syminfo.tickerid, htfTf, f_htfBearObHigh(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBearObLow = request.security(syminfo.tickerid, htfTf, f_htfBearObLow(bosLen, obSearchBars, obUseWicks)[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+newBullFvgLow = request.security(syminfo.tickerid, htfTf, f_htfBullFvgLow()[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBullFvgHigh = request.security(syminfo.tickerid, htfTf, f_htfBullFvgHigh()[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBearFvgLow = request.security(syminfo.tickerid, htfTf, f_htfBearFvgLow()[1], barmerge.gaps_off, barmerge.lookahead_off)
+newBearFvgHigh = request.security(syminfo.tickerid, htfTf, f_htfBearFvgHigh()[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+htfTime = request.security(syminfo.tickerid, htfTf, time, barmerge.gaps_off, barmerge.lookahead_off)
+htfTimeDelta = ta.change(htfTime)
+newHtfBar = not na(htfTimeDelta) and htfTimeDelta != 0
+
+// ---------- Persist HTF Zones ----------
+var float bullObHigh = na
+var float bullObLow = na
+var int bullObAge = 100000
+
+var float bearObHigh = na
+var float bearObLow = na
+var int bearObAge = 100000
+
+var float bullFvgLow = na
+var float bullFvgHigh = na
+var int bullFvgAge = 100000
+
+var float bearFvgLow = na
+var float bearFvgHigh = na
+var int bearFvgAge = 100000
+
+if newHtfBar
+    bullObAge := bullObAge + 1
+    bearObAge := bearObAge + 1
+    bullFvgAge := bullFvgAge + 1
+    bearFvgAge := bearFvgAge + 1
+
+    if not na(newBullObHigh) and not na(newBullObLow)
+        bullObHigh := math.max(newBullObHigh, newBullObLow)
+        bullObLow := math.min(newBullObHigh, newBullObLow)
+        bullObAge := 0
+
+    if not na(newBearObHigh) and not na(newBearObLow)
+        bearObHigh := math.max(newBearObHigh, newBearObLow)
+        bearObLow := math.min(newBearObHigh, newBearObLow)
+        bearObAge := 0
+
+    if not na(newBullFvgLow) and not na(newBullFvgHigh)
+        bullFvgHigh := math.max(newBullFvgHigh, newBullFvgLow)
+        bullFvgLow := math.min(newBullFvgHigh, newBullFvgLow)
+        bullFvgAge := 0
+
+    if not na(newBearFvgLow) and not na(newBearFvgHigh)
+        bearFvgHigh := math.max(newBearFvgHigh, newBearFvgLow)
+        bearFvgLow := math.min(newBearFvgHigh, newBearFvgLow)
+        bearFvgAge := 0
+
+if bullObAge > obMaxAgeHtfBars
+    bullObHigh := na
+    bullObLow := na
+
+if bearObAge > obMaxAgeHtfBars
+    bearObHigh := na
+    bearObLow := na
+
+if bullFvgAge > fvgMaxAgeHtfBars
+    bullFvgHigh := na
+    bullFvgLow := na
+
+if bearFvgAge > fvgMaxAgeHtfBars
+    bearFvgHigh := na
+    bearFvgLow := na
+
+// ---------- Premium / Discount ----------
+htfRange = htfRangeHigh - htfRangeLow
+equilibrium = htfRangeLow + htfRange * 0.50
+deepDiscountLine = htfRangeLow + htfRange * deepDiscountMaxFib
+deepPremiumLine = htfRangeLow + htfRange * deepPremiumMinFib
+
+float priceFib = 0.50
+if htfRange > 0.0
+    priceFib := (close - htfRangeLow) / htfRange
+
+longZoneOk = priceFib <= discountMaxFib
+shortZoneOk = priceFib >= premiumMinFib
+
+if requireDeepZone
+    longZoneOk := priceFib <= deepDiscountMaxFib
+    shortZoneOk := priceFib >= deepPremiumMinFib
+
+bullObValid = not na(bullObHigh) and not na(bullObLow) and bullObAge <= obMaxAgeHtfBars
+bearObValid = not na(bearObHigh) and not na(bearObLow) and bearObAge <= obMaxAgeHtfBars
+
+float bullObMid = na
+float bearObMid = na
+
+if bullObValid
+    bullObMid := (bullObHigh + bullObLow) * 0.5
+
+if bearObValid
+    bearObMid := (bearObHigh + bearObLow) * 0.5
+
+bullObInDiscount = bullObValid and htfRange > 0.0 and bullObMid <= equilibrium
+bearObInPremium = bearObValid and htfRange > 0.0 and bearObMid >= equilibrium
+
+// ---------- FVG Targets ----------
+bearFvgValidForLong = not na(bearFvgHigh) and not na(bearFvgLow) and bearFvgAge <= fvgMaxAgeHtfBars and bearFvgLow > close
+bullFvgValidForShort = not na(bullFvgHigh) and not na(bullFvgLow) and bullFvgAge <= fvgMaxAgeHtfBars and bullFvgHigh < close
+
+float longTp1Fvg = na
+float longTp2Fvg = na
+float shortTp1Fvg = na
+float shortTp2Fvg = na
+
+if bearFvgValidForLong
+    bearFvgSize = bearFvgHigh - bearFvgLow
+    longTp1Fvg := bearFvgLow + bearFvgSize * tp1Fib
+    longTp2Fvg := bearFvgLow + bearFvgSize * tp2Fib
+
+if bullFvgValidForShort
+    bullFvgSize = bullFvgHigh - bullFvgLow
+    shortTp1Fvg := bullFvgHigh - bullFvgSize * tp1Fib
+    shortTp2Fvg := bullFvgHigh - bullFvgSize * tp2Fib
+
+// ---------- 5m Execution ----------
+atr = ta.atr(atrLen)
+rsi = ta.rsi(close, rsiLen)
+
+body = math.max(math.abs(close - open), syminfo.mintick)
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+
+longWickOk = true
+shortWickOk = true
+
+if requireRejectionWick
+    longWickOk := lowerWick >= body * minWickBodyRatio
+    shortWickOk := upperWick >= body * minWickBodyRatio
+
+longRsiOk = true
+shortRsiOk = true
+
+if useRsiFilter
+    longRsiOk := rsi <= rsiLongMax
+    shortRsiOk := rsi >= rsiShortMin
+
+obTouchBuffer = atr * obTouchBufferAtr
+
+longRetest = bullObValid and low <= bullObHigh + obTouchBuffer and high >= bullObLow - obTouchBuffer
+shortRetest = bearObValid and high >= bearObLow - obTouchBuffer and low <= bearObHigh + obTouchBuffer
+
+longRejection = close > open and close > bullObLow
+shortRejection = close < open and close < bearObHigh
+
+if requireCloseBeyondOb
+    longRejection := close > open and close > bullObHigh
+    shortRejection := close < open and close < bearObLow
+
+// ---------- 5m LSOB Detection ----------
+lsobBullBos = close > ta.highest(high, lsobSwingLen)[1]
+lsobBearBos = close < ta.lowest(low, lsobSwingLen)[1]
+
+float newLsobBullHigh = na
+float newLsobBullLow = na
+float newLsobBearHigh = na
+float newLsobBearLow = na
+
+if lsobBullBos
+    for i = 1 to lsobSearchBars
+        if close[i] < open[i] and na(newLsobBullLow)
+            if lsobUseWicks
+                newLsobBullHigh := high[i]
+                newLsobBullLow := low[i]
+            else
+                newLsobBullHigh := open[i]
+                newLsobBullLow := close[i]
+
+if lsobBearBos
+    for i = 1 to lsobSearchBars
+        if close[i] > open[i] and na(newLsobBearHigh)
+            if lsobUseWicks
+                newLsobBearHigh := high[i]
+                newLsobBearLow := low[i]
+            else
+                newLsobBearHigh := close[i]
+                newLsobBearLow := open[i]
+
+// ---------- Entry Control ----------
+var int lastEntryBar = na
+
+int barsSinceEntry = 100000
+if not na(lastEntryBar)
+    barsSinceEntry := bar_index - lastEntryBar
+
+cooldownOk = barsSinceEntry >= cooldownBars
+confirmedBar = barstate.isconfirmed
+openTradeCapacityOk = strategy.opentrades < maxOpenTrades
+
+// Active trade state variables declared before setup filters using TP1 state.
+var float activeLongSlBase = na
+var float activeShortSlBase = na
+var float activeLongTp1 = na
+var float activeLongTp2 = na
+var float activeShortTp1 = na
+var float activeShortTp2 = na
+var bool longTp1Touched = false
+var bool shortTp1Touched = false
+var float highSinceEntry = na
+var float lowSinceEntry = na
+var float activeLongLsobStop = na
+var float activeShortLsobStop = na
+
+longAddOk = true
+shortAddOk = true
+
+if allowAddOnlyBeforeTp1
+    longAddOk := not longTp1Touched
+    shortAddOk := not shortTp1Touched
+
+canLongDirection = strategy.position_size >= 0
+canShortDirection = strategy.position_size <= 0
+
+longSetup = enableLong and confirmedBar and cooldownOk and openTradeCapacityOk and canLongDirection and longAddOk and longZoneOk and bullObInDiscount and longRetest and longRejection and longWickOk and longRsiOk
+shortSetup = enableShort and confirmedBar and cooldownOk and openTradeCapacityOk and canShortDirection and shortAddOk and shortZoneOk and bearObInPremium and shortRetest and shortRejection and shortWickOk and shortRsiOk
+
+// ---------- Position Sizing ----------
+float rawQty = 0.0
+if close > 0.0
+    rawQty := strategy.equity * (riskPct / 100.0) / close
+
+entryQty = math.max(rawQty, minQty)
+
+// ---------- Entries ----------
+if longSetup
+    baseStopLong = bullObLow - atr * slAtrBuffer
+    longRisk = close - baseStopLong
+    float plannedLongTp1 = longTp1Fvg
+    float plannedLongTp2 = longTp2Fvg
+
+    if na(plannedLongTp1) or plannedLongTp1 <= close
+        plannedLongTp1 := close + longRisk * fallbackTpR1
+
+    if na(plannedLongTp2) or plannedLongTp2 <= plannedLongTp1
+        plannedLongTp2 := close + longRisk * fallbackTpR2
+
+    activeLongSlBase := baseStopLong
+    activeLongTp1 := plannedLongTp1
+    activeLongTp2 := plannedLongTp2
+    activeShortSlBase := na
+    activeShortTp1 := na
+    activeShortTp2 := na
+    activeShortLsobStop := na
+    activeLongLsobStop := na
+    shortTp1Touched := false
+    if strategy.position_size == 0
+        longTp1Touched := false
+
+    strategy.entry("Long", strategy.long, qty=entryQty)
+    lastEntryBar := bar_index
+
+if shortSetup
+    baseStopShort = bearObHigh + atr * slAtrBuffer
+    shortRisk = baseStopShort - close
+    float plannedShortTp1 = shortTp1Fvg
+    float plannedShortTp2 = shortTp2Fvg
+
+    if na(plannedShortTp1) or plannedShortTp1 >= close
+        plannedShortTp1 := close - shortRisk * fallbackTpR1
+
+    if na(plannedShortTp2) or plannedShortTp2 >= plannedShortTp1
+        plannedShortTp2 := close - shortRisk * fallbackTpR2
+
+    activeShortSlBase := baseStopShort
+    activeShortTp1 := plannedShortTp1
+    activeShortTp2 := plannedShortTp2
+    activeLongSlBase := na
+    activeLongTp1 := na
+    activeLongTp2 := na
+    activeLongLsobStop := na
+    activeShortLsobStop := na
+    longTp1Touched := false
+    if strategy.position_size == 0
+        shortTp1Touched := false
+
+    strategy.entry("Short", strategy.short, qty=entryQty)
+    lastEntryBar := bar_index
+
+// ---------- Trade Management ----------
+if strategy.position_size > 0
+    if strategy.position_size[1] <= 0
+        highSinceEntry := high
+    else
+        highSinceEntry := math.max(nz(highSinceEntry, high), high)
+else
+    highSinceEntry := na
+
+if strategy.position_size < 0
+    if strategy.position_size[1] >= 0
+        lowSinceEntry := low
+    else
+        lowSinceEntry := math.min(nz(lowSinceEntry, low), low)
+else
+    lowSinceEntry := na
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeLongSlBase := na
+    activeShortSlBase := na
+    activeLongTp1 := na
+    activeLongTp2 := na
+    activeShortTp1 := na
+    activeShortTp2 := na
+    activeLongLsobStop := na
+    activeShortLsobStop := na
+    longTp1Touched := false
+    shortTp1Touched := false
+
+if strategy.position_size > 0 and not na(activeLongTp1)
+    if high >= activeLongTp1
+        longTp1Touched := true
+
+if strategy.position_size < 0 and not na(activeShortTp1)
+    if low <= activeShortTp1
+        shortTp1Touched := true
+
+// ---------- LSOB Trail Update ----------
+lsobLongAllowed = useLsobTrail and strategy.position_size > 0
+lsobShortAllowed = useLsobTrail and strategy.position_size < 0
+
+if lsobOnlyAfterTp1
+    lsobLongAllowed := lsobLongAllowed and longTp1Touched
+    lsobShortAllowed := lsobShortAllowed and shortTp1Touched
+
+if lsobLongAllowed and not na(newLsobBullLow)
+    proposedLongLsobStop = newLsobBullLow - atr * lsobAtrBuffer
+    longImproveOk = na(activeLongLsobStop) or proposedLongLsobStop > activeLongLsobStop + atr * lsobMinImproveAtr
+    longStopBelowPrice = proposedLongLsobStop < close
+    if longImproveOk and longStopBelowPrice
+        activeLongLsobStop := proposedLongLsobStop
+
+if lsobShortAllowed and not na(newLsobBearHigh)
+    proposedShortLsobStop = newLsobBearHigh + atr * lsobAtrBuffer
+    shortImproveOk = na(activeShortLsobStop) or proposedShortLsobStop < activeShortLsobStop - atr * lsobMinImproveAtr
+    shortStopAbovePrice = proposedShortLsobStop > close
+    if shortImproveOk and shortStopAbovePrice
+        activeShortLsobStop := proposedShortLsobStop
+
+// ---------- strategy.exit ----------
+float longStop = activeLongSlBase
+float shortStop = activeShortSlBase
+
+if strategy.position_size > 0 and not na(longStop) and not na(activeLongTp1) and not na(activeLongTp2)
+    if moveBeAfterTp1 and longTp1Touched
+        beStopLong = strategy.position_avg_price + atr * beOffsetAtr
+        longStop := math.max(longStop, beStopLong)
+
+    if useAtrTrailAfterTp1 and longTp1Touched and not na(highSinceEntry)
+        atrTrailLong = highSinceEntry - atr * atrTrailMult
+        longStop := math.max(longStop, atrTrailLong)
+
+    if useLsobTrail and not na(activeLongLsobStop)
+        longStop := math.max(longStop, activeLongLsobStop)
+
+    strategy.exit("L-TP1", from_entry="Long", qty_percent=tp1QtyPct, stop=longStop, limit=activeLongTp1)
+    strategy.exit("L-TP2", from_entry="Long", qty_percent=100.0 - tp1QtyPct, stop=longStop, limit=activeLongTp2)
+
+if strategy.position_size < 0 and not na(shortStop) and not na(activeShortTp1) and not na(activeShortTp2)
+    if moveBeAfterTp1 and shortTp1Touched
+        beStopShort = strategy.position_avg_price - atr * beOffsetAtr
+        shortStop := math.min(shortStop, beStopShort)
+
+    if useAtrTrailAfterTp1 and shortTp1Touched and not na(lowSinceEntry)
+        atrTrailShort = lowSinceEntry + atr * atrTrailMult
+        shortStop := math.min(shortStop, atrTrailShort)
+
+    if useLsobTrail and not na(activeShortLsobStop)
+        shortStop := math.min(shortStop, activeShortLsobStop)
+
+    strategy.exit("S-TP1", from_entry="Short", qty_percent=tp1QtyPct, stop=shortStop, limit=activeShortTp1)
+    strategy.exit("S-TP2", from_entry="Short", qty_percent=100.0 - tp1QtyPct, stop=shortStop, limit=activeShortTp2)
+
+// ---------- Visuals ----------
+plot(htfRangeHigh, "1H Range High", color=color.new(color.gray, 40), linewidth=1)
+plot(htfRangeLow, "1H Range Low", color=color.new(color.gray, 40), linewidth=1)
+plot(equilibrium, "1H Equilibrium", color=color.new(color.yellow, 0), linewidth=1)
+plot(deepDiscountLine, "1H Deep Discount", color=color.new(color.green, 70), linewidth=1)
+plot(deepPremiumLine, "1H Deep Premium", color=color.new(color.red, 70), linewidth=1)
+
+plot(bullObHigh, "1H Bull OB High", color=color.new(color.lime, 0), linewidth=2)
+plot(bullObLow, "1H Bull OB Low", color=color.new(color.lime, 0), linewidth=2)
+plot(bearObHigh, "1H Bear OB High", color=color.new(color.red, 0), linewidth=2)
+plot(bearObLow, "1H Bear OB Low", color=color.new(color.red, 0), linewidth=2)
+
+plot(bearFvgLow, "1H Bear FVG Low", color=color.new(color.orange, 35), linewidth=1)
+plot(bearFvgHigh, "1H Bear FVG High", color=color.new(color.orange, 35), linewidth=1)
+plot(bullFvgLow, "1H Bull FVG Low", color=color.new(color.aqua, 35), linewidth=1)
+plot(bullFvgHigh, "1H Bull FVG High", color=color.new(color.aqua, 35), linewidth=1)
+
+plot(activeLongTp1, "Active Long TP1", color=color.new(color.green, 0), linewidth=1)
+plot(activeLongTp2, "Active Long TP2", color=color.new(color.green, 0), linewidth=2)
+plot(activeShortTp1, "Active Short TP1", color=color.new(color.red, 0), linewidth=1)
+plot(activeShortTp2, "Active Short TP2", color=color.new(color.red, 0), linewidth=2)
+
+plot(activeLongLsobStop, "5m Long LSOB Stop", color=color.new(color.lime, 0), linewidth=2)
+plot(activeShortLsobStop, "5m Short LSOB Stop", color=color.new(color.red, 0), linewidth=2)
+
+plotshape(longSetup, title="Long OB Entry", style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.lime, text="L")
+plotshape(shortSetup, title="Short OB Entry", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.red, text="S")
+plotshape(not na(newLsobBullLow), title="Bull LSOB", style=shape.circle, location=location.belowbar, size=size.tiny, color=color.new(color.lime, 20), text="LS")
+plotshape(not na(newLsobBearHigh), title="Bear LSOB", style=shape.circle, location=location.abovebar, size=size.tiny, color=color.new(color.red, 20), text="LS")
+
+// ---------- Dashboard ----------
+var table dash = table.new(position.top_right, 2, 13, bgcolor=color.new(color.black, 10), border_width=1)
+
+if showDashboard and barstate.islast
+    float pf = na
+    grossLossAbsDash = math.abs(strategy.grossloss)
+    if grossLossAbsDash > 0.0
+        pf := strategy.grossprofit / grossLossAbsDash
+
+    float winRatePct = na
+    if strategy.closedtrades > 0
+        winRatePct := strategy.wintrades / strategy.closedtrades * 100.0
+
+    zoneText = "EQ"
+    if longZoneOk
+        zoneText := "Discount"
+    if shortZoneOk
+        zoneText := "Premium"
+
+    lsobText = "Off"
+    if useLsobTrail
+        lsobText := "On"
+    if strategy.position_size > 0 and not na(activeLongLsobStop)
+        lsobText := "Long " + f_fmt(activeLongLsobStop)
+    if strategy.position_size < 0 and not na(activeShortLsobStop)
+        lsobText := "Short " + f_fmt(activeShortLsobStop)
+
+    table.cell(dash, 0, 0, "Metric", text_color=color.white, bgcolor=color.new(color.gray, 70))
+    table.cell(dash, 1, 0, "Value", text_color=color.white, bgcolor=color.new(color.gray, 70))
+
+    table.cell(dash, 0, 1, "HTF", text_color=color.white)
+    table.cell(dash, 1, 1, htfTf, text_color=color.white)
+
+    table.cell(dash, 0, 2, "Zone", text_color=color.white)
+    table.cell(dash, 1, 2, zoneText + " " + f_fmt(priceFib), text_color=color.white)
+
+    table.cell(dash, 0, 3, "Open Trades", text_color=color.white)
+    table.cell(dash, 1, 3, str.tostring(strategy.opentrades), text_color=strategy.opentrades < maxOpenTrades ? color.lime : color.orange)
+
+    table.cell(dash, 0, 4, "Net Profit", text_color=color.white)
+    table.cell(dash, 1, 4, f_fmt(strategy.netprofit), text_color=strategy.netprofit >= 0.0 ? color.lime : color.red)
+
+    table.cell(dash, 0, 5, "Profit Factor", text_color=color.white)
+    table.cell(dash, 1, 5, f_fmt(pf), text_color=not na(pf) and pf >= 1.5 ? color.lime : color.orange)
+
+    table.cell(dash, 0, 6, "Win Rate", text_color=color.white)
+    table.cell(dash, 1, 6, f_fmt(winRatePct), text_color=color.white)
+
+    table.cell(dash, 0, 7, "Closed Trades", text_color=color.white)
+    table.cell(dash, 1, 7, str.tostring(strategy.closedtrades), text_color=color.white)
+
+    table.cell(dash, 0, 8, "Bull OB Age", text_color=color.white)
+    table.cell(dash, 1, 8, str.tostring(bullObAge), text_color=bullObValid ? color.lime : color.red)
+
+    table.cell(dash, 0, 9, "Bear OB Age", text_color=color.white)
+    table.cell(dash, 1, 9, str.tostring(bearObAge), text_color=bearObValid ? color.lime : color.red)
+
+    table.cell(dash, 0, 10, "Bear FVG Age", text_color=color.white)
+    table.cell(dash, 1, 10, str.tostring(bearFvgAge), text_color=bearFvgValidForLong ? color.orange : color.gray)
+
+    table.cell(dash, 0, 11, "Bull FVG Age", text_color=color.white)
+    table.cell(dash, 1, 11, str.tostring(bullFvgAge), text_color=bullFvgValidForShort ? color.aqua : color.gray)
+
+    table.cell(dash, 0, 12, "LSOB Trail", text_color=color.white)
+    table.cell(dash, 1, 12, lsobText, text_color=useLsobTrail ? color.aqua : color.gray)

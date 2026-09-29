@@ -1,0 +1,244 @@
+//@version=6
+strategy(
+    title = "WTI/USDT PERP Glint News Pionex Bot GA #1",
+    shorttitle = "WTI",
+    overlay = true,
+    initial_capital = 100,
+    currency = "USDT",
+    default_qty_type = strategy.percent_of_equity,
+    default_qty_value = 100.0,
+    commission_type = strategy.commission.percent,
+    commission_value = 0.1,
+    pyramiding = 1,
+    margin_long = 0,
+    margin_short = 0,
+    calc_on_every_tick = false,
+    calc_on_order_fills = false,
+    process_orders_on_close = false,
+    max_lines_count = 200,
+    max_labels_count = 200,
+    max_boxes_count = 200
+)
+grp_main = "Bot Einstellungen"
+contracts = input.string("0.01", "Contracts", group=grp_main)
+min_conf = input.int(28, "Min. Confidence Score", minval=0, maxval=100, group=grp_main)
+use_shorts = input.bool(true, "Short Signale aktivieren", group=grp_main)
+send_close = input.bool(true, "Close Signale senden", group=grp_main)
+grp_risk = "Risiko und Filter"
+risk_pct = input.float(0.002, "Positionsgroesse (Equity-Fraktion)", minval=0.0001, maxval=1.0, step=0.0001, group=grp_risk)
+sl_atr_mul = input.float(0.7, "SL ATR Multiplikator", minval=0.1, step=0.1, group=grp_risk)
+tp_atr_mul = input.float(1.3, "TP ATR Multiplikator", minval=0.1, step=0.1, group=grp_risk)
+vol_mult = input.float(0.7, "Volumen Multiplikator", minval=0.5, step=0.1, group=grp_risk)
+max_daily_move_pct = input.float(15.702, "Max Tagesbewegung Prozent", minval=0.5, step=0.5, group=grp_risk)
+pivot_len = input.int(3, "CISD Pivot Laenge", minval=1, maxval=20, group=grp_risk)
+body_floor_mult = input.float(0.1, "OB Body Floor (ATR Faktor)", minval=0.01, step=0.01, group=grp_risk)
+ob_body_mult = input.float(1.1, "OB Body Multiplikator", minval=0.5, step=0.1, group=grp_risk)
+w_trend = input.int(9, "Gewicht Trend", minval=0, maxval=100, group=grp_risk)
+w_cisd = input.int(35, "Gewicht CISD", minval=0, maxval=100, group=grp_risk)
+w_ob = input.int(22, "Gewicht Order Block", minval=0, maxval=100, group=grp_risk)
+w_fvg = input.int(23, "Gewicht FVG", minval=0, maxval=100, group=grp_risk)
+w_news = input.int(20, "Gewicht News", minval=0, maxval=100, group=grp_risk)
+w_vol = input.int(16, "Gewicht Volumen", minval=0, maxval=100, group=grp_risk)
+grp_tf = "Zeitfenster (3m Setup)"
+tf_trend_high = input.timeframe("48", "Trend TF High", group=grp_tf)
+tf_trend_mid = input.timeframe("12", "Trend TF Mid", group=grp_tf)
+tf_trend_low = input.timeframe("3", "Trend TF Low", group=grp_tf)
+grp_session = "Session"
+use_session = input.bool(true, "Session Filter aktivieren", group=grp_session)
+session_time = input.session("0800-2200", "Trading Session (UTC)", group=grp_session)
+grp_news = "Glint News"
+news_bull = input.bool(false, "News Bullish", group=grp_news)
+news_bear = input.bool(false, "News Bearish", group=grp_news)
+grp_vis = "Visualisierung"
+show_ob = input.bool(true, "Order Blocks anzeigen", group=grp_vis)
+show_fvg = input.bool(true, "FVGs anzeigen", group=grp_vis)
+show_cisd = input.bool(true, "CISD Linien anzeigen", group=grp_vis)
+show_table = input.bool(true, "Status Tabelle anzeigen", group=grp_vis)
+f_payload(string tv_action, string tv_contracts, string pos_size) =>
+    "{\"data\":{\"action\":\"" + tv_action + "\",\"contracts\":\"" + tv_contracts + "\",\"position_size\":\"" + pos_size + "\"},\"price\":\"{{close}}\",\"signal_param\":\"{}\",\"symbol\":\"{{ticker}}\",\"time\":\"{{timenow}}\"}"
+f_trend_bull() =>
+    ema50 = ta.ema(close, 50)
+    ema200 = ta.ema(close, 200)
+    ema50 > ema200 and close > ema50
+f_trend_bear() =>
+    ema50 = ta.ema(close, 50)
+    ema200 = ta.ema(close, 200)
+    ema50 < ema200 and close < ema50
+bool in_session = not use_session or not na(time(timeframe.period, session_time))
+float day_open = request.security(syminfo.tickerid, "D", open[1], lookahead=barmerge.lookahead_off)
+float daily_move_pct = day_open > 0 ? math.abs(close - day_open) / day_open * 100.0 : 0.0
+bool daily_guard_active = daily_move_pct >= max_daily_move_pct
+bool h4_bull = request.security(syminfo.tickerid, tf_trend_high, f_trend_bull()[1], lookahead=barmerge.lookahead_off)
+bool h4_bear = request.security(syminfo.tickerid, tf_trend_high, f_trend_bear()[1], lookahead=barmerge.lookahead_off)
+bool h1_bull = request.security(syminfo.tickerid, tf_trend_mid, f_trend_bull()[1], lookahead=barmerge.lookahead_off)
+bool h1_bear = request.security(syminfo.tickerid, tf_trend_mid, f_trend_bear()[1], lookahead=barmerge.lookahead_off)
+bool m15_bull = request.security(syminfo.tickerid, tf_trend_low, f_trend_bull()[1], lookahead=barmerge.lookahead_off)
+bool m15_bear = request.security(syminfo.tickerid, tf_trend_low, f_trend_bear()[1], lookahead=barmerge.lookahead_off)
+atr = ta.atr(14)
+atr_safe = math.max(atr, close * 0.0001)
+
+// === CISD Pivot Detection ===
+float ph = pivot_len > 0 ? ta.pivothigh(high, pivot_len, pivot_len) : na
+float pl = pivot_len > 0 ? ta.pivotlow(low, pivot_len, pivot_len) : na
+
+var float swing_high = na
+var float swing_low = na
+var int cisd_trend = 0
+bool cisd_bull = false
+bool cisd_bear = false
+
+if not na(ph)
+    if cisd_trend == -1 and not na(swing_high) and ph > swing_high
+        cisd_bull := true
+    swing_high := ph
+    cisd_trend := 1
+
+if not na(pl)
+    if cisd_trend == 1 and not na(swing_low) and pl < swing_low
+        cisd_bear := true
+    swing_low := pl
+    cisd_trend := -1
+
+// === CISD Break (price-action break of swing level) for OB Detection ===
+bool cisd_bull_break = not na(swing_high) and close > swing_high and close[1] <= swing_high
+bool cisd_bear_break = not na(swing_low) and close < swing_low and close[1] >= swing_low
+float floor = body_floor_mult * atr_safe
+
+// === Order Block Detection ===
+var float ob_top = na
+var float ob_bot = na
+var int ob_bar = na
+var bool ob_active = false
+var bool ob_bullish = false
+var bool ob_bearish = false
+
+if cisd_bull_break and close[1] < open[1] and math.abs(close[1] - open[1]) > floor
+    ob_bar := bar_index - 1
+    ob_top := high[1]
+    ob_bot := low[1]
+    ob_active := true
+    ob_bullish := true
+    ob_bearish := false
+
+if cisd_bear_break and close[1] > open[1] and math.abs(close[1] - open[1]) > floor
+    ob_bar := bar_index - 1
+    ob_top := high[1]
+    ob_bot := low[1]
+    ob_active := true
+    ob_bullish := false
+    ob_bearish := true
+
+// === OB Staleness Check ===
+if ob_active and not na(ob_bar) and bar_index - ob_bar > 50
+    ob_active := false
+
+// === FVG Detection ===
+bool fvg_bull = low > high[2]
+bool fvg_bear = high < low[2]
+
+// === Trend Score (multi-TF agreement) ===
+float trend_score = 0
+if h4_bull and h1_bull and m15_bull
+    trend_score := 100
+else if h4_bull and h1_bull
+    trend_score := 75
+else if h4_bull
+    trend_score := 50
+else if h4_bear and h1_bear and m15_bear
+    trend_score := -100
+else if h4_bear and h1_bear
+    trend_score := -75
+else if h4_bear
+    trend_score := -50
+
+// === Component Scores ===
+float cisd_score = cisd_trend == 1 ? 100 : cisd_trend == -1 ? -100 : 0
+float ob_score = ob_active and ob_bullish ? 100 : ob_active and ob_bearish ? -100 : 0
+float fvg_score = fvg_bull ? 100 : fvg_bear ? -100 : 0
+float news_score = (news_bull ? 50 : 0) - (news_bear ? 50 : 0)
+float avg_vol = ta.sma(volume, 20)
+float vol_score = volume > avg_vol * vol_mult ? 50 : volume > avg_vol * 0.5 ? 25 : 0
+
+// === Confidence Score ===
+float total_weight = w_trend + w_cisd + w_ob + w_fvg + w_news + w_vol
+float conf_score = (trend_score * w_trend + cisd_score * w_cisd + ob_score * w_ob + fvg_score * w_fvg + news_score * w_news + vol_score * w_vol) / total_weight
+
+// === Entry Conditions ===
+bool long_conf = conf_score >= min_conf
+bool short_conf = conf_score <= -min_conf
+
+bool long_condition = h4_bull and cisd_trend == 1 and long_conf and in_session and not daily_guard_active and vol_score > 0 and not news_bear and strategy.position_size == 0
+bool short_condition = h4_bear and cisd_trend == -1 and short_conf and in_session and not daily_guard_active and vol_score > 0 and not news_bull and use_shorts and strategy.position_size == 0
+
+// === Position Sizing ===
+float pos_qty = math.max(1, math.floor(strategy.equity * risk_pct / atr_safe))
+
+// === Entry Logic ===
+if long_condition
+    strategy.entry("Long", strategy.long, qty=pos_qty)
+    alert(f_payload("buy", contracts, str.tostring(pos_qty)), alert.freq_once_per_bar)
+
+if short_condition
+    strategy.entry("Short", strategy.short, qty=pos_qty)
+    alert(f_payload("sell", contracts, str.tostring(pos_qty)), alert.freq_once_per_bar)
+
+// === Exit Logic ===
+// Exit on opposite CISD signal
+if cisd_bear and strategy.position_size > 0
+    strategy.close("Long", comment="CISD Bear Exit")
+    if send_close
+        alert(f_payload("close", contracts, "0"), alert.freq_once_per_bar)
+
+if cisd_bull and strategy.position_size < 0
+    strategy.close("Short", comment="CISD Bull Exit")
+    if send_close
+        alert(f_payload("close", contracts, "0"), alert.freq_once_per_bar)
+
+// SL/TP via ATR
+if strategy.position_size > 0
+    float sl_long = strategy.position_avg_price - atr_safe * sl_atr_mul
+    float tp_long = strategy.position_avg_price + atr_safe * tp_atr_mul
+    strategy.exit("Long SL/TP", "Long", stop=sl_long, limit=tp_long)
+
+if strategy.position_size < 0
+    float sl_short = strategy.position_avg_price + atr_safe * sl_atr_mul
+    float tp_short = strategy.position_avg_price - atr_safe * tp_atr_mul
+    strategy.exit("Short SL/TP", "Short", stop=sl_short, limit=tp_short)
+
+// === Visualization ===
+// CISD markers
+plotshape(cisd_bull and show_cisd, "CISD Bull", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(cisd_bear and show_cisd, "CISD Bear", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// OB zones
+if ob_active and show_ob and not na(ob_top)
+    box.new(ob_bar, ob_top, bar_index, ob_bot, xloc=xloc.bar_index, border_color=color.new(color.blue, 70), bgcolor=color.new(color.blue, 85))
+
+// FVG zones
+if fvg_bull and show_fvg
+    box.new(bar_index[2], low, bar_index, high[2], xloc=xloc.bar_index, border_color=color.new(color.green, 70), bgcolor=color.new(color.green, 85))
+
+if fvg_bear and show_fvg
+    box.new(bar_index[2], low[2], bar_index, high, xloc=xloc.bar_index, border_color=color.new(color.red, 70), bgcolor=color.new(color.red, 85))
+
+// Position background tint
+bgcolor(strategy.position_size > 0 ? color.new(color.green, 85) : strategy.position_size < 0 ? color.new(color.red, 85) : na)
+
+// Confidence gauge plot
+plot(conf_score, "Confidence", conf_score >= 0 ? color.lime : color.red, 2, plot.style_line)
+
+// Entry/exit markers
+plotshape(long_condition, "Long Entry", shape.labelup, location.belowbar, color.lime, size=size.tiny, text="L")
+plotshape(short_condition, "Short Entry", shape.labeldown, location.abovebar, color.red, size=size.tiny, text="S")
+
+// === Status Table ===
+if show_table and barstate.islast
+    tbl = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 70), border_color=color.gray, border_width=1)
+    table.cell(tbl, 0, 0, "WTI Bot", text_color=color.white, text_size=size.small, bgcolor=color.new(color.blue, 60))
+    table.cell(tbl, 0, 1, "Trend: " + (trend_score > 20 ? "Bull" : trend_score < -20 ? "Bear" : "Mix"), text_color=trend_score > 20 ? color.lime : trend_score < -20 ? color.red : color.orange, text_size=size.small)
+    table.cell(tbl, 0, 2, "CISD: " + (cisd_trend == 1 ? "Bull" : cisd_trend == -1 ? "Bear" : "-"), text_color=cisd_trend == 1 ? color.lime : cisd_trend == -1 ? color.red : color.gray, text_size=size.small)
+    table.cell(tbl, 0, 3, "Conf: " + str.tostring(math.round(conf_score)), text_color=conf_score >= min_conf ? color.lime : color.orange, text_size=size.small)
+    table.cell(tbl, 0, 4, "OB: " + (ob_active ? "Yes" : "No"), text_color=ob_active ? color.aqua : color.gray, text_size=size.small)
+    table.cell(tbl, 0, 5, "FVG: " + (fvg_bull ? "Bull" : fvg_bear ? "Bear" : "-"), text_color=fvg_bull ? color.lime : fvg_bear ? color.red : color.gray, text_size=size.small)
+    table.cell(tbl, 0, 6, "Vol: " + str.tostring(math.round(vol_score)), text_color=vol_score > 0 ? color.yellow : color.gray, text_size=size.small)
+    table.cell(tbl, 0, 7, "Pos: " + str.tostring(strategy.position_size), text_color=strategy.position_size > 0 ? color.lime : strategy.position_size < 0 ? color.red : color.gray, text_size=size.small)
