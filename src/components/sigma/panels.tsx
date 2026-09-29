@@ -468,11 +468,10 @@ export function MarketChart() {
     let raf = 0;
     let pending: Candle | null = null;
     let closed = false;
-    let retryCount = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-    const MAX_WS_RETRIES = 5;
-    const WS_BACKOFF_MAX_MS = 30_000;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const MAX_BACKOFF_MS = 30000;
 
     const flush = () => {
       raf = 0;
@@ -492,21 +491,6 @@ export function MarketChart() {
       });
     };
 
-    const startPolling = () => {
-      if (pollInterval) return;
-      void load();
-      pollInterval = setInterval(() => {
-        void load();
-      }, 5000);
-    };
-
-    const stopPolling = () => {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
-    };
-
     const connect = () => {
       if (closed) return;
       try {
@@ -514,26 +498,25 @@ export function MarketChart() {
         ws.onopen = () => {
           setStreamStatus('live');
           retryCount = 0;
-          stopPolling();
         };
-        ws.onerror = () => {
+        ws.onerror = (err) => {
+          console.error('[MarketChart] WS-Fehler:', err);
           if (!closed) setStreamStatus('err');
         };
         ws.onclose = () => {
           if (!closed) setStreamStatus('off');
           if (closed || reconnectTimer) return;
-
-          if (retryCount < MAX_WS_RETRIES) {
-            const delay = Math.min(1000 * 2 ** retryCount, WS_BACKOFF_MAX_MS);
+          if (retryCount < MAX_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCount, MAX_BACKOFF_MS);
             retryCount++;
-            console.warn(`[MarketChart] WS disconnected — Reconnect in ${delay}ms (${retryCount}/${MAX_WS_RETRIES})`);
+            console.warn(`[MarketChart] WS getrennt — Reconnect in ${delay}ms (${retryCount}/${MAX_RETRIES})`);
             reconnectTimer = setTimeout(() => {
               reconnectTimer = null;
               connect();
             }, delay);
           } else {
-            console.error('[MarketChart] WS retries exhausted — falling back to HTTP polling');
-            startPolling();
+            console.error('[MarketChart] WS-Retries erschöpft — HTTP-Poll-Fallback aktiv (load)');
+            void load();
           }
         };
         ws.onmessage = (ev) => {
@@ -551,14 +534,14 @@ export function MarketChart() {
             if (!c || typeof c.ts !== 'number') return;
             pending = c;
             if (!raf) raf = requestAnimationFrame(flush);
-          } catch (err) {
-            console.error('[MarketChart] Failed to parse WS message:', err, ev.data);
+          } catch (e) {
+            console.error('[MarketChart] WS-Frame invalid:', e, ev.data);
           }
         };
-      } catch (err) {
+      } catch (e) {
+        console.error('[MarketChart] WS connect fehlgeschlagen:', e);
         setStreamStatus('err');
-        console.error('[MarketChart] WS connection failed:', err);
-        startPolling();
+        void load();
       }
     };
 
@@ -571,11 +554,11 @@ export function MarketChart() {
         reconnectTimer = null;
       }
       if (raf) cancelAnimationFrame(raf);
-      stopPolling();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }
     };
-  }, [symbol, interval, MarketFeedSchema]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, interval]);
 
   const toggle = (key: keyof OverlayFlags) => {
     setOverlays((prev) => ({ ...prev, [key]: !prev[key] }));
