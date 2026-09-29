@@ -13,3 +13,7 @@
 ## 2023-10-27 - [Graphics / Rendering Insight]
 **Learning:** Animating the `width` CSS property on progress bars causes heavy CPU layout reflows (layout thrashing) leading to frame drops during frequent updates.
 **Action:** Replaced `width` animations with hardware-accelerated `transform: scaleX(...)` and `transform-origin: left`, maintaining 120 FPS by utilizing the GPU composite layer.
+
+## 2026-09-28 - [Graphics / Rendering Insight]
+**Learning:** Found that using `transition-all` on interactive elements like buttons and list items in `MarketPanel.tsx` triggers layout-thrashing by forcing the CPU to recalculate layout properties (like width/height bounds) rather than just composite properties.
+**Action:** Replaced `transition-all` with `transition-colors` on all MarketPanel interactive elements (buttons, list entries) to restrict transitions strictly to composite/paint properties, preventing layout recalculation and preserving high framerates.
