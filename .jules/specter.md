@@ -1,3 +1,3 @@
-## 2024-05-15 - [UI Aesthetic Insight]
-**Learning:** Netron Inspector panel uses a mismatched generic dark background (`#0e1117`) and lacks the explicit `FeedBadge` component for empty/offline states, violating the MP-17 standard.
-**Action:** Replace `#0e1117` with `bg-[#0a0a0c]/80 backdrop-blur-md`, introduce a `FeedBadge` component to explicitly reflect the `data?.running` state, and ensure tabular numbers for size metrics.
+## 2025-02-27 - [UI Aesthetic Insight]
+**Learning:** Found StrategyCard component using non-standard slate backgrounds (`bg-slate-950/60`, `border-slate-800`) and missing `tabular-nums` on dynamic numerical elements causing sub-pixel layout jitter during real-time state updates.
+**Action:** Replaced container styling with the MP-17 standard `bg-[#0a0a0c]/80 backdrop-blur-md border border-white/10 shadow-2xl` and added `tabular-nums` to numerical fields to eliminate sub-pixel jitter.
