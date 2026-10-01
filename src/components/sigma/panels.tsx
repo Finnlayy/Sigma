@@ -22,7 +22,6 @@ import {
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
-import { z } from 'zod';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -48,7 +47,6 @@ import {
 } from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl, { MAX_WS_RETRIES, WS_BACKOFF_MAX_MS } from '../../pages/ProcessLogView';   // §37
-import { z } from 'zod';
 
 /* ------------------------------------------------------------------ shared */
 
@@ -126,23 +124,28 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 );
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
-export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
-  if (!feed) return (
+export function FeedBadge({ feed, status, labelOverride }: { feed?: FeedMeta | SigmaFeedMeta | null, status?: 'CONNECTED' | 'DISCONNECTED', labelOverride?: string }) {
+  if (!feed && !status) return (
     <span className="rounded border border-red-500/40 bg-red-500/10 px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums text-red-400">
       DISCONNECTED
     </span>
   );
-  const tone = feed.source === 'tv_scraper'
-    ? 'border-emerald-500/40 text-emerald-400'
-    : feed.source === 'cache_stale'
-      ? 'border-amber-500/40 text-amber-400'
-      : 'border-zinc-600/40 text-zinc-400';
-  const label = feed.source === 'tv_scraper' ? 'LIVE :8001'
-    : feed.source === 'cache_stale' ? 'STALE CACHE' : 'SYNTHETIC';
+
+  // SigmaFeedMeta / FeedMeta have 'running' if it's an operator feed, but maybe not on the base interface
+  const isRunningFalse = feed && 'running' in feed ? feed.running === false : false;
+  const bg = isRunningFalse || status === 'DISCONNECTED' ? 'bg-red-500/10 border-red-500/40 text-red-400'
+    : feed?.source === 'tv_scraper' || status === 'CONNECTED' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+      : feed?.source === 'cache_stale' ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
+        : 'bg-zinc-500/10 border-zinc-600/40 text-zinc-400';
+
+  const tone = feed?.upstream_error ? 'bg-red-500/10 border-red-500/40 text-red-400' : bg;
+  const label = feed?.source === 'tv_scraper' ? 'LIVE :8001'
+    : feed?.source === 'cache_stale' ? 'STALE CACHE' : 'SYNTHETIC';
+
   return (
     <span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums ${tone}`}
-      title={feed.upstream_error || `source=${feed.source}`}>
-      {labelOverride || label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
+      title={feed?.upstream_error || (feed?.source ? `source=${feed.source}` : '')}>
+      {labelOverride || label}{feed?.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
     </span>
   );
 }
@@ -497,7 +500,6 @@ export function MarketChart() {
         };
         ws.onerror = (err) => {
           console.error('[MarketChart] WS Error:', err);
-          if (!closed) setStreamStatus('err');
         };
         ws.onclose = () => {
           setStreamStatus('err');
@@ -518,8 +520,13 @@ export function MarketChart() {
         ws.onmessage = (ev) => {
           try {
             if (typeof ev.data !== 'string') throw new Error('Expected string payload');
-            const msg = JSON.parse(ev.data);
-            if (!msg || typeof msg !== 'object') throw new Error('Invalid payload structure');
+            const rawData = JSON.parse(ev.data);
+            const parsed = MarketFeedSchema.safeParse(rawData);
+            if (!parsed.success) {
+              console.error('[MarketChart] WS-Frame parse error:', (parsed as any).error, ev.data);
+              return;
+            }
+            const msg = parsed.data;
 
             if (msg.channel === 'alpha:executions:live' && msg.data) {
               if (Array.isArray(msg.data.markers)) setMarkers(msg.data.markers);
@@ -528,7 +535,7 @@ export function MarketChart() {
             }
             const c = msg.data?.candle;
             if (!c || typeof c.ts !== 'number') return;
-            pending = c;
+            pending = c as Candle;
             if (!raf) raf = requestAnimationFrame(flush);
           } catch (err) {
             console.error('[MarketChart] WS-Frame parse error:', err, ev.data);
@@ -667,6 +674,7 @@ export function LLMConsole() {
         };
         ws.onmessage = (ev) => {
           try {
+            if (typeof ev.data !== 'string') throw new Error('Expected string payload');
             const msg = JSON.parse(ev.data);
             if (msg.content_chunk) append(String(msg.content_chunk).trimEnd());
             if (msg.tool_result) append(JSON.stringify(msg.tool_result).slice(0, 800));

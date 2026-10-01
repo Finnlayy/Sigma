@@ -23,3 +23,6 @@
 ## 2026-09-29 - [IPC/API Integration Insight]
 **Learning:** Raw MarketChart WebSocket listener lacked exponential backoff and silently masked corrupted payloads, risking silent stream deaths on network blips.
 **Action:** Wrapped MarketChart websocket in a robust reconnect loop with exponential backoff and strict JSON schema validation, logging errors explicitly.
+## 2026-10-01 - [IPC/API Integration Insight]
+**Learning:** Missing strict string-validation checks and `ws.onerror` state pollution caused silent payload parsing failures and double-retries in the UI.
+**Action:** Enforce strict `typeof ev.data === 'string'` in `ws.onmessage`, remove state logic from `ws.onerror` to centralize retries in `onclose`, and utilize `MarketFeedSchema` parsing to gracefully drop malformed frames.
