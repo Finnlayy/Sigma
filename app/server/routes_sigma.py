@@ -1096,8 +1096,10 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
                             data = data.decode()
                         try:
                             payload = _json.loads(data) if isinstance(data, str) else data
-                        except Exception:
-                            payload = {"raw": str(data)}
+                        except Exception as exc:
+                            import logging
+                            logging.error(f"Failed to parse pubsub payload: {exc} data={data}")
+                            continue
                         await websocket.send_text(_json.dumps({
                             "type": "update",
                             "channel": ch,
