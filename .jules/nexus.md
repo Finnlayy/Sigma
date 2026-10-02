@@ -23,3 +23,6 @@
 ## 2026-09-29 - [IPC/API Integration Insight]
 **Learning:** Raw MarketChart WebSocket listener lacked exponential backoff and silently masked corrupted payloads, risking silent stream deaths on network blips.
 **Action:** Wrapped MarketChart websocket in a robust reconnect loop with exponential backoff and strict JSON schema validation, logging errors explicitly.
+## 2026-10-02 - [IPC/API Integration Insight]
+**Learning:** Python backend IPC/pubsub handlers (e.g., Redis subscriptions in `routes_sigma.py`) were swallowing JSON parsing errors and propagating a 'raw' string fallback, violating fail-closed principles.
+**Action:** Always explicitly log parsing exceptions (using `logging.error`) and drop invalid payloads (via `continue` in loops) to enforce fail-closed boundaries and prevent propagating corrupt data.
