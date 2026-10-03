@@ -80,3 +80,6 @@
 ## 2026-09-26 - [Avoid inline array filters for length metrics inside useMemo]
 **Learning:** Found `.filter(s => s.status === 'active').length` inside a `useMemo` block in `StrategyEditor.tsx`. Even though it was memoized and prevented calculating on every render, `.filter().length` still performs an O(N) traversal which allocates an unnecessary intermediate array just to calculate the length, creating an O(N) memory allocation penalty on every recalculation.
 **Action:** When calculating subgroup counts or simple metrics from an array, calculate the counts in a single O(N) iterative loop wrapped in a `useMemo` block, instead of computing them using inline `.filter().length`, to prevent unnecessary intermediate array allocations.
+## 2024-05-24 - [Optimize String Search in Array Filters]
+**Learning:** Chained `.toLowerCase().includes()` inside `.filter()` on large arrays causes redundant string allocations on every iteration, severely degrading performance.
+**Action:** Replace chained string methods with a pre-compiled case-insensitive `RegExp`. Always safely escape user input before passing it to `RegExp`.

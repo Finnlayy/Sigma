@@ -96,14 +96,16 @@ export default function QueueMatrixPanel({
     const isPaper = queueType === 'paper';
 
     // Filter all time trades
-    // Bolt Optimization: Added useMemo and extracted search string manipulation to prevent O(N) array filtering and string recalculations on every React re-render, especially for fast inputs
+    // Bolt Optimization: Use case-insensitive RegExp test to prevent O(N) redundant .toLowerCase() and .includes() string allocations on every property inside the filter loop.
+    // Also, escape regex characters from user input to prevent SyntaxError on special characters.
     const filteredTrades = useMemo(() => {
-      const searchLower = tradeSearch.toLowerCase();
+      const escapedQuery = tradeSearch.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escapedQuery, 'i');
       return matrix.allTimeTrades.filter(t => {
         const matchesSearch = tradeSearch === "" ||
-          t.pair.toLowerCase().includes(searchLower) ||
-          t.strategyName.toLowerCase().includes(searchLower) ||
-          t.id.toLowerCase().includes(searchLower);
+          searchRegex.test(t.pair) ||
+          searchRegex.test(t.strategyName) ||
+          searchRegex.test(t.id);
 
         if (!matchesSearch) return false;
 
