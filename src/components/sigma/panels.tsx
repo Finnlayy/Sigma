@@ -22,7 +22,6 @@ import {
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
-import { z } from 'zod';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -48,7 +47,6 @@ import {
 } from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl, { MAX_WS_RETRIES, WS_BACKOFF_MAX_MS } from '../../pages/ProcessLogView';   // §37
-import { z } from 'zod';
 
 /* ------------------------------------------------------------------ shared */
 
