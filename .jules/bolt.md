@@ -83,3 +83,6 @@
 ## 2024-05-24 - [Optimize String Search in Array Filters]
 **Learning:** Chained `.toLowerCase().includes()` inside `.filter()` on large arrays causes redundant string allocations on every iteration, severely degrading performance.
 **Action:** Replace chained string methods with a pre-compiled case-insensitive `RegExp`. Always safely escape user input before passing it to `RegExp`.
+## 2024-02-15 - [Redundant Reduce Elimination]
+**Learning:** Performing identical `array.reduce()` calculations multiple times for state updates causes unnecessary O(N) penalties, particularly in real-time syncing `useEffect` blocks.
+**Action:** Pre-compute the value in a variable and assign it to multiple object properties to eliminate redundant array iterations.
