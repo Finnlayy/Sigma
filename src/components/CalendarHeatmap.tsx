@@ -355,11 +355,14 @@ export default function CalendarHeatmap({
           volumeUSD: aggregateActivePnL.volumeUSD > 0 ? aggregateActivePnL.volumeUSD : today.volumeUSD
         };
 
+        // Bolt Optimization: Calculate total PnL once instead of doing two identical O(N) array traversals
+        const totalPnL = Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0)?.toFixed(2));
+
         return {
           ...prev,
           days: updatedDays,
-          total30DPnL: Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0)?.toFixed(2)),
-          totalMonthPnL: Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0)?.toFixed(2))
+          total30DPnL: totalPnL,
+          totalMonthPnL: totalPnL
         };
       });
     }
