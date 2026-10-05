@@ -76,26 +76,27 @@ export default function KrakenLedgersPanel({
     }
   };
 
-  // Bolt Optimization: Memoize and hoist toLowerCase to prevent O(N) recalculations on render
+  // Bolt Optimization: Pre-compile case-insensitive RegExp to prevent O(N) redundant .toLowerCase() and .includes() string allocations on every render loop.
   const filteredSpotAssets = useMemo(() => {
     if (!ledgers?.spot.assets) return [];
     if (!searchQuery) return ledgers.spot.assets;
-    const searchLower = searchQuery.toLowerCase();
-    return ledgers.spot.assets.filter(a =>
-      a.asset.toLowerCase().includes(searchLower) ||
-      a.name.toLowerCase().includes(searchLower)
-    );
+    // Escape regex-reserved characters in user query to prevent crashes
+    const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedQuery, 'i');
+    return ledgers.spot.assets.filter(a => regex.test(a.asset) || regex.test(a.name));
   }, [ledgers?.spot.assets, searchQuery]);
 
-  // Bolt Optimization: Memoize and hoist toLowerCase to prevent O(N) recalculations on render
+  // Bolt Optimization: Pre-compile case-insensitive RegExp to prevent O(N) redundant .toLowerCase() and .includes() string allocations on every render loop.
   const filteredProPositions = useMemo(() => {
     if (!ledgers?.pro.positions) return [];
     if (!searchQuery) return ledgers.pro.positions;
-    const searchLower = searchQuery.toLowerCase();
+    // Escape regex-reserved characters in user query to prevent crashes
+    const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedQuery, 'i');
     return ledgers.pro.positions.filter(p =>
-      p.pair.toLowerCase().includes(searchLower) ||
-      p.type.toLowerCase().includes(searchLower) ||
-      p.contractType.toLowerCase().includes(searchLower)
+      regex.test(p.pair) ||
+      regex.test(p.type) ||
+      regex.test(p.contractType)
     );
   }, [ledgers?.pro.positions, searchQuery]);
 
