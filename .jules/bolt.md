@@ -86,3 +86,6 @@
 ## 2024-02-15 - [Redundant Reduce Elimination]
 **Learning:** Performing identical `array.reduce()` calculations multiple times for state updates causes unnecessary O(N) penalties, particularly in real-time syncing `useEffect` blocks.
 **Action:** Pre-compute the value in a variable and assign it to multiple object properties to eliminate redundant array iterations.
+## 2026-10-04 - [Optimize string array filters with pre-compiled RegExp]
+**Learning:** Using chained `.toLowerCase().includes()` inside large `.filter()` loops causes unnecessary O(N) string allocations during every iteration, which negatively impacts rendering performance in tight React render loops like in `KrakenLedgersPanel`.
+**Action:** Replace chained `.toLowerCase().includes()` with a pre-compiled, case-insensitive `RegExp`. Ensure the user input string is properly escaped (`replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`) before passing it to the `RegExp` constructor to avoid crashes from regex reserved characters.
