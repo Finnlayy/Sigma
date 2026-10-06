@@ -354,6 +354,19 @@ def install_canonical_tasks(
             cadence_s=float(bp.SCOUT_INCUBATOR_CYCLE_MINUTES) * 60.0,
             start_immediately=False,
         )
+    if sched.get("paper_validation_rotate") is None:
+        def _paper_validation_rotate() -> None:
+            from sigma.orchestration.paper_validation_rotator import get_paper_validation_rotator
+
+            get_paper_validation_rotator().tick()
+
+        sched.register(
+            "paper_validation_rotate",
+            bp.SchedulerTier.T2_MID,
+            _paper_validation_rotate,
+            cadence_s=300.0,
+            start_immediately=False,
+        )
     if flywheel is not None and sched.get("flywheel_sweep") is None:
         sched.register(
             "flywheel_sweep",

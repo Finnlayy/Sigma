@@ -39,6 +39,29 @@ def persist_academy_snapshot(
     return {"registry": str(registry_path), "training": str(training_path)}
 
 
+def persist_paper_validation_runs(
+    runs: Optional[List[Dict[str, Any]]] = None,
+    *,
+    data_dir: Optional[str] = None,
+) -> str:
+    """Append closed cohort run summaries to the versioned academy JSON trail."""
+    dest = academy_dir(data_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    path = dest / Path(bp.PATH_ACADEMY_PAPER_RUNS).name
+    existing: List[Dict[str, Any]] = []
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                existing = loaded
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("paper_validation_runs.json unreadable: %s", exc)
+    if runs:
+        existing.extend(list(runs))
+    _atomic_json(path, existing)
+    return str(path)
+
+
 def _atomic_json(path: Path, payload: Any) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(

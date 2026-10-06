@@ -11,7 +11,7 @@ Drei Provider mit unterschiedlicher Physik:
   Auslastung werden Hintergrund-Polls pausiert; 3.0 Tokens bleiben als
   Notfallreserve fuer Kill-Switch/Cancel-All frei.
 * **tradingview_subscription** — kein Ratelimit, sondern ein Alert-Slot-
-  Kontingent je Tier (essential = 5) inkl. Rotations-Queue.
+  Kontingent je Tier (essential = 20) inkl. Rotations-Queue.
 * **telegram_bot** — 1 Nachricht/s.
 
 HTTP 429 fuehrt zu exponentiellem Backoff 10s -> 30s -> 60s.

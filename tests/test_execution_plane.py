@@ -133,6 +133,7 @@ def test_install_canonical_tasks_registers_loop_graph():
         "deadman_heartbeat",
         "memory_watchdog",
         "scorecard_stage1_idle",
+        "paper_validation_rotate",
         "loop_c_feed_poll",
         "scout_incubator_cycle",
         "master_orchestrator_tick",
@@ -518,11 +519,11 @@ def test_429_backoff_ladder():
 
 def test_alert_slot_rotation_replaces_weakest():
     slots = AlertSlotRegistry(tier="essential")
-    assert slots.max_slots == 5
-    for idx in range(5):
+    assert slots.max_slots == 20
+    for idx in range(20):
         slots.request_slot(f"s{idx}", score=float(idx))
     assert slots.free_slots == 0
-    outcome = slots.request_slot("winner", score=9.0)
+    outcome = slots.request_slot("winner", score=99.0)
     assert outcome["granted"] is True and outcome["rotated_out"] == "s0"
     assert "s0" in slots.queue
     weak = slots.request_slot("loser", score=0.1)
@@ -530,7 +531,8 @@ def test_alert_slot_rotation_replaces_weakest():
 
 
 def test_alert_slot_release_promotes_from_queue():
-    slots = AlertSlotRegistry(tier="free")
+    slots = AlertSlotRegistry(tier="essential")
+    slots.max_slots = 1
     slots.request_slot("a", score=1.0)
     slots.request_slot("b", score=0.5)   # kein Slot -> Queue
     promoted = slots.release_slot("a")
@@ -540,7 +542,7 @@ def test_alert_slot_release_promotes_from_queue():
 def test_rate_limiter_status_shape():
     status = ProviderRateLimiter().status()
     assert status["kraken_api"]["max_counter"] == bp.KRAKEN_MAX_CALL_COUNTER
-    assert status["tradingview_subscription"]["max_active_alerts"] == 5
+    assert status["tradingview_subscription"]["max_active_alerts"] == bp.TV_SUBSCRIPTION_TIERS[bp.TV_SUBSCRIPTION_TIER_DEFAULT]
     assert status["backoff_ladder_s"] == [10.0, 30.0, 60.0]
 
 
