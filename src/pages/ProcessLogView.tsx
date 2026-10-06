@@ -52,7 +52,7 @@ export function matches(line: LogLine, selectedSet: Set<string>, search: string,
   if (selectedSet.size > 0 && !selectedSet.has(line.subsystem)) return false;
   if (!search) return true;
   if (searchRegex) return searchRegex.test(line.raw_line);
-  return line.raw_line.toLowerCase().includes(search.toLowerCase());
+  return false;
 }
 
 export default function ProcessLogView() {
@@ -171,7 +171,8 @@ export default function ProcessLogView() {
     try {
       return new RegExp(search, 'i');
     } catch {
-      return null;
+      const escapedQuery = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(escapedQuery, 'i');
     }
   }, [search]);
 

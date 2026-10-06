@@ -89,3 +89,6 @@
 ## 2026-10-04 - [Optimize string array filters with pre-compiled RegExp]
 **Learning:** Using chained `.toLowerCase().includes()` inside large `.filter()` loops causes unnecessary O(N) string allocations during every iteration, which negatively impacts rendering performance in tight React render loops like in `KrakenLedgersPanel`.
 **Action:** Replace chained `.toLowerCase().includes()` with a pre-compiled, case-insensitive `RegExp`. Ensure the user input string is properly escaped (`replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`) before passing it to the `RegExp` constructor to avoid crashes from regex reserved characters.
+## 2026-10-06 - [Optimize inline string filtering with pre-compiled RegExp]
+**Learning:** Using chained `.toLowerCase().includes()` inside loops (e.g. `.filter()`, `.map()`, or event loops) creates unnecessary O(N) string allocations during every iteration. This degrades rendering performance when looping through trades or logs in panels like StrategyLibraryPanel, BacktestingPanel, or ProcessLogView.
+**Action:** Replace chained `.toLowerCase().includes()` with a pre-compiled, case-insensitive `RegExp` created outside the loop. When using dynamic user inputs, always escape them via `.replace(/[.*+?^${}()|[\]\\]/g, '\\$&\')` before passing to `RegExp`.

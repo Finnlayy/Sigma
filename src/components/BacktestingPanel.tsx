@@ -235,10 +235,12 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
   // Filter Trades (Only count trades as wins/losses if closed)
   // Bolt Optimization: Added useMemo to prevent O(N) array filtering recalculation on every React re-render
   const filteredTrades = useMemo(() => {
+    // Bolt Optimization: Pre-compile RegExp outside the filter loop
+    const stopRegex = /stop/i;
     return backtestResult?.trades.filter(t => {
       if (tradeFilter === 'wins') return t.status === 'closed' && t.pnl > 0;
       if (tradeFilter === 'losses') return t.status === 'closed' && t.pnl < 0;
-      if (tradeFilter === 'stops') return t.status === 'closed' && t.reason.toLowerCase().includes('stop');
+      if (tradeFilter === 'stops') return t.status === 'closed' && stopRegex.test(t.reason);
       return true;
     }) || [];
   }, [backtestResult?.trades, tradeFilter]);
@@ -1018,11 +1020,13 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                       </td>
                     </tr>
                   ) : (
-                    filteredTrades.map((t, idx) => {
-                      const isProfit = t.pnl >= 0;
-                      const isStopLoss = t.reason.toLowerCase().includes('stop');
-                      return (
-                        <tr key={`${t.id || 'trade'}-${idx}`} className="hover:bg-zinc-950/60 transition-colors">
+                    (() => {
+                      const stopRegex = /stop/i;
+                      return filteredTrades.map((t, idx) => {
+                        const isProfit = t.pnl >= 0;
+                        const isStopLoss = stopRegex.test(t.reason);
+                        return (
+                          <tr key={`${t.id || 'trade'}-${idx}`} className="hover:bg-zinc-950/60 transition-colors">
                           <td className="py-2.5 px-3 text-zinc-400">#{idx + 1}</td>
                           <td className="py-2.5 px-3">
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-200">
@@ -1057,8 +1061,9 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                             </span>
                           </td>
                         </tr>
-                      );
-                    })
+                        );
+                      });
+                    })()
                   )}
                 </tbody>
               </table>
