@@ -39,9 +39,12 @@ export function StrategyLibraryPanel() {
 
   const selected = ws.selected;
   const visible = useMemo(() => {
-    const q = filter.toLowerCase();
+    // Bolt Optimization: Pre-compile case-insensitive RegExp to prevent O(N) redundant string allocations in loop
+    const escapedQuery = filter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const searchRegex = escapedQuery ? new RegExp(escapedQuery, 'i') : null;
+
     return ws.strategies.filter((s) => {
-      if (q && !`${s.name} ${s.assetPair} ${s.id} ${s.tv_script_id || ''}`.toLowerCase().includes(q)) return false;
+      if (searchRegex && !searchRegex.test(`${s.name} ${s.assetPair} ${s.id} ${s.tv_script_id || ''}`)) return false;
       return true;
     });
   }, [ws.strategies, filter]);

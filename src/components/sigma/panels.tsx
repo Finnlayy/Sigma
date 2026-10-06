@@ -423,12 +423,13 @@ export function MarketChart() {
           }
         }
         if (overlays.thrust) {
+          const outsideRegex = /outside/i;
           for (const ev of zones.events ?? []) {
             const ts = Number(ev.time ?? ev.ts ?? 0);
             if (!ts) continue;
             marks.push({
               time: ts,
-              position: String(ev.kind ?? '').toLowerCase().includes('outside') ? 'aboveBar' : 'belowBar',
+              position: outsideRegex.test(String(ev.kind ?? '')) ? 'aboveBar' : 'belowBar',
               color: '#f59e0b',
               shape: 'circle',
               text: String(ev.kind ?? 'thrust'),
