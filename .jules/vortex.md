@@ -17,3 +17,7 @@
 ## 2026-09-28 - [Graphics / Rendering Insight]
 **Learning:** Found that using `transition-all` on interactive elements like buttons and list items in `MarketPanel.tsx` triggers layout-thrashing by forcing the CPU to recalculate layout properties (like width/height bounds) rather than just composite properties.
 **Action:** Replaced `transition-all` with `transition-colors` on all MarketPanel interactive elements (buttons, list entries) to restrict transitions strictly to composite/paint properties, preventing layout recalculation and preserving high framerates.
+
+## 2024-05-28 - [Graphics / Rendering Insight]
+**Learning:** Found that using `transition-all` on interactive elements like buttons and list items across various components triggers layout-thrashing by forcing the CPU to recalculate layout properties (like width/height bounds) rather than just composite properties.
+**Action:** Replaced `transition-all` with `transition-colors` on interactive elements to restrict transitions strictly to composite/paint properties, preventing layout recalculation and preserving high framerates. Also added `contain: layout paint` to `StrategyCard` components.

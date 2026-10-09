@@ -181,7 +181,7 @@ export function QuantitativeRegimePanel() {
             <button
               key={pair}
               onClick={() => setSelectedAsset(pair)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors ${
                 selectedAsset === pair
                   ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-bold"
                   : "bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700"
