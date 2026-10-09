@@ -412,7 +412,7 @@ export default function MetricsPanel({
           <div className="flex items-center space-x-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-[10px]">
             <button
               onClick={() => setSelectedQueueTab('paper')}
-              className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 ${
                 selectedQueueTab === 'paper'
                   ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -423,7 +423,7 @@ export default function MetricsPanel({
             </button>
             <button
               onClick={() => setSelectedQueueTab('live')}
-              className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 ${
                 selectedQueueTab === 'live'
                   ? 'bg-rose-950 text-rose-300 border border-rose-800/60'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -498,7 +498,7 @@ export default function MetricsPanel({
                     <button
                       key={strat.strategyId}
                       onClick={() => setSelectedModalStrategy({ strategy: strat, queue: selectedQueueTab })}
-                      className="text-left bg-zinc-950/80 hover:bg-zinc-950 border border-zinc-800 hover:border-emerald-500/70 p-2.5 rounded-lg transition-all flex items-center justify-between group shadow-sm"
+                      className="text-left bg-zinc-950/80 hover:bg-zinc-950 border border-zinc-800 hover:border-emerald-500/70 p-2.5 rounded-lg transition-colors flex items-center justify-between group shadow-sm"
                     >
                       <div className="flex items-center space-x-2 min-w-0">
                         <div className={`w-7 h-7 rounded flex items-center justify-center font-bold text-[10px] border shrink-0 ${

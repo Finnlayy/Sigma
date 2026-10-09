@@ -322,7 +322,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
       <div className="flex border-b border-zinc-800 space-x-2">
         <button
           onClick={() => setActiveTab("overview")}
-          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-all ${
+          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-colors ${
             activeTab === "overview"
               ? "border-emerald-500 text-emerald-400 bg-emerald-950/20"
               : "border-transparent text-zinc-400 hover:text-zinc-200"
@@ -336,7 +336,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
             setActiveTab("query");
             if (!queryResult) handleRunQuery();
           }}
-          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-all ${
+          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-colors ${
             activeTab === "query"
               ? "border-emerald-500 text-emerald-400 bg-emerald-950/20"
               : "border-transparent text-zinc-400 hover:text-zinc-200"
@@ -350,7 +350,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
             setActiveTab("resample");
             if (!resampleResult) handleRunResample();
           }}
-          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-all ${
+          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-colors ${
             activeTab === "resample"
               ? "border-emerald-500 text-emerald-400 bg-emerald-950/20"
               : "border-transparent text-zinc-400 hover:text-zinc-200"
@@ -361,7 +361,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
 
         <button
           onClick={() => setActiveTab("compaction")}
-          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-all ${
+          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-colors ${
             activeTab === "compaction"
               ? "border-emerald-500 text-emerald-400 bg-emerald-950/20"
               : "border-transparent text-zinc-400 hover:text-zinc-200"
@@ -372,7 +372,7 @@ export const DataLakePanel: React.FC<DataLakePanelProps> = ({
 
         <button
           onClick={() => setActiveTab("gdrive")}
-          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-all ${
+          className={`px-3 py-2 text-xs font-mono font-medium border-b-2 transition-colors ${
             activeTab === "gdrive"
               ? "border-emerald-500 text-emerald-400 bg-emerald-950/20"
               : "border-transparent text-zinc-400 hover:text-zinc-200"

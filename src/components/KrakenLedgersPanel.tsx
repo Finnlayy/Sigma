@@ -132,7 +132,7 @@ export default function KrakenLedgersPanel({
           <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-xs">
             <button
               onClick={() => setActiveLedgerTab('spot')}
-              className={`px-3 py-1.5 rounded transition-all font-semibold flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 rounded transition-colors font-semibold flex items-center space-x-1.5 ${
                 activeLedgerTab === 'spot'
                   ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60 shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -143,7 +143,7 @@ export default function KrakenLedgersPanel({
             </button>
             <button
               onClick={() => setActiveLedgerTab('pro')}
-              className={`px-3 py-1.5 rounded transition-all font-semibold flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 rounded transition-colors font-semibold flex items-center space-x-1.5 ${
                 activeLedgerTab === 'pro'
                   ? 'bg-purple-950 text-purple-300 border border-purple-800/60 shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -157,7 +157,7 @@ export default function KrakenLedgersPanel({
           <button
             onClick={handleManualSync}
             disabled={isSyncing}
-            className="px-3 py-1.5 rounded bg-zinc-800/90 hover:bg-zinc-750 border border-zinc-700 text-xs text-zinc-200 hover:text-white transition-all flex items-center space-x-1.5 disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-zinc-800/90 hover:bg-zinc-750 border border-zinc-700 text-xs text-zinc-200 hover:text-white transition-colors flex items-center space-x-1.5 disabled:opacity-50"
             title="Force refresh balances & positions directly from Kraken" aria-label="Force refresh balances & positions directly from Kraken"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
