@@ -154,6 +154,8 @@ function DockTabset({
                 {PANEL_TITLES[p] ?? p}
                 <span
                   role="button"
+                  aria-label={`Close ${PANEL_TITLES[p] ?? p}`}
+                  title={`Close ${PANEL_TITLES[p] ?? p}`}
                   className="ml-1 rounded p-0.5 hover:bg-destructive/20 hover:text-destructive"
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(node.id, p); }}
                   onPointerDown={(e) => e.stopPropagation()}
