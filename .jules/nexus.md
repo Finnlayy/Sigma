@@ -26,3 +26,6 @@
 ## 2026-10-02 - [IPC/API Integration Insight]
 **Learning:** Python backend IPC/pubsub handlers (e.g., Redis subscriptions in `routes_sigma.py`) were swallowing JSON parsing errors and propagating a 'raw' string fallback, violating fail-closed principles.
 **Action:** Always explicitly log parsing exceptions (using `logging.error`) and drop invalid payloads (via `continue` in loops) to enforce fail-closed boundaries and prevent propagating corrupt data.
+## 2026-10-02 - [IPC/API Integration Insight]
+**Learning:** The LLM stream WebSocket in `LLMConsole` incorrectly propagated malformed JSON payloads to the UI by appending them to the chat stream when `JSON.parse()` failed, violating the fail-closed boundary principle.
+**Action:** Always ensure that `ws.onmessage` handlers fail-closed. Explicitly log parsing errors (e.g., using `console.error`) and drop the payload entirely instead of surfacing corrupted data or error strings directly into the UI state.
