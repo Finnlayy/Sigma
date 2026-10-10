@@ -92,3 +92,7 @@
 ## 2026-10-06 - [Optimize inline string filtering with pre-compiled RegExp]
 **Learning:** Using chained `.toLowerCase().includes()` inside loops (e.g. `.filter()`, `.map()`, or event loops) creates unnecessary O(N) string allocations during every iteration. This degrades rendering performance when looping through trades or logs in panels like StrategyLibraryPanel, BacktestingPanel, or ProcessLogView.
 **Action:** Replace chained `.toLowerCase().includes()` with a pre-compiled, case-insensitive `RegExp` created outside the loop. When using dynamic user inputs, always escape them via `.replace(/[.*+?^${}()|[\]\\]/g, '\\$&\')` before passing to `RegExp`.
+
+## 2025-03-08 - [React Render Loop O(N) Condensation]
+**Learning:** Found multiple array iterations (`.reduce()`, `.filter()`, `.map()`) traversing the exact same `Object.keys()` output in a hot React render path (`MetricsPanel.tsx` -> `displayBalances`). This causes redundant O(N) array allocations and intermediate garbage collection overhead.
+**Action:** Always condense sequential array transformations (`.reduce().filter().map()`) into a single O(N) iterative pass when executing within frequent component render cycles to prevent GC thrashing and intermediate allocations.
