@@ -310,7 +310,10 @@ def test_virtual_bot_and_deadman_rules():
 
 # ------------------------------------------------------------------ config ---
 
-def test_sigma_config_defaults_come_from_blueprint():
+def test_sigma_config_defaults_come_from_blueprint(monkeypatch):
+    # Defaults must be asserted against an env without live-trading opt-in:
+    # the operator's .env sets SIGMA_LIVE_TRADING=1 for paper mode.
+    monkeypatch.delenv("SIGMA_LIVE_TRADING", raising=False)
     cfg = load_config()
     assert cfg.api_port == bp.PORT_CORE
     assert cfg.kelly_fraction == bp.KELLY_FRACTION

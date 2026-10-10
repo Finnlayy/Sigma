@@ -218,6 +218,10 @@ def test_daily_notional_cap_in_loop_a():
 
     cfg = load_config()
     cfg.webhook_secret = ""
+    # Paper mode: an empty secret is only accepted when live trading is off
+    # (SafetyGuard rejects live+no-secret as UNAUTHORIZED). Pin it explicitly
+    # so the test is independent of the operator's SIGMA_LIVE_TRADING.
+    cfg.live_trading = False
     pipe.safety = SafetyGuard(cfg)
     pipe.config = cfg
     out = pipe.handle_signal(sig, provided_secret="", execution_market="futures")

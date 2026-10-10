@@ -22,7 +22,6 @@ import {
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
-import { z } from 'zod';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -48,7 +47,6 @@ import {
 } from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl, { MAX_WS_RETRIES, WS_BACKOFF_MAX_MS } from '../../pages/ProcessLogView';   // §37
-import { z } from 'zod';
 
 /* ------------------------------------------------------------------ shared */
 
@@ -142,7 +140,7 @@ export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) 
   return (
     <span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums ${tone}`}
       title={feed.upstream_error || `source=${feed.source}`}>
-      {labelOverride || label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
+      {label}{feed.age_s ? ` ${Math.round(feed.age_s)}s` : ''}
     </span>
   );
 }
@@ -1462,7 +1460,9 @@ export function NetronVisualizerPanel() {
           className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><ExternalLink size={12} /></a>
       </>}>
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">
-        <FeedBadge status={data?.running ? 'CONNECTED' : 'DISCONNECTED'} labelOverride={data?.running ? `LIVE :${data?.port}` : 'OFFLINE'} />
+        <span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums ${data?.running ? 'border-emerald-500/40 text-emerald-400' : 'border-red-500/40 text-red-400'}`}>
+          {data?.running ? `LIVE :${data?.port}` : 'OFFLINE'}
+        </span>
         <span className="font-mono text-zinc-400">{data?.version_tag || 'kein Modell'}</span>
         {!data?.available && <span className="text-amber-400">pip install netron</span>}
         {!data?.running && (
