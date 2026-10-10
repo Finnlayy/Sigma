@@ -59,7 +59,8 @@
 ---
 
 ## 3. Caveats
-
+916 passed, 1 skipped in ~128s (exit code 0)`.
+3. Invalidation condition: Any test failure or unha
 - `test_live_smoke_ui_matches_kraken_paper_status` is skipped as designed in automated CI environments because it requires an interactive terminal runner.
 - The DuckDB database file `data/sigma.duckdb` is locked when any long-running server instance is active due to standard single-process DuckDB file lock semantics. Isolated test execution using temporary directories (`SIGMA_DATA_DIR`) functions seamlessly.
 
@@ -86,3 +87,9 @@ To independently reproduce and verify this assessment:
    ```
    Expected: `916 passed, 1 skipped in ~128s (exit code 0)`.
 3. Invalidation condition: Any test failure or unhandled exception in DuckDB, FastAPI shutdown, or Loop A execution.
+instance_id] = StrategyState(strategy_id=instance_id, status="ACTIVE", base_budget_usd=50.0, current_budget_usd=40.0)
+        position = {"instance_id": instance_id, "direction": "LONG", "entry_price": 3000.0, "estimated_liquidation_price": 2700.0}
+        is_liquidated = await process_paper_tick(state_engine=engine, current_tick_price=2690.0, position=position)
+        assert is_liquidated is True
+        assert engine.states[instance_id].current_budget_usd == 0.0
+        assert engine.s
