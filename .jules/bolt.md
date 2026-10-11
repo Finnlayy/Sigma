@@ -96,3 +96,6 @@
 ## 2025-03-08 - [React Render Loop O(N) Condensation]
 **Learning:** Found multiple array iterations (`.reduce()`, `.filter()`, `.map()`) traversing the exact same `Object.keys()` output in a hot React render path (`MetricsPanel.tsx` -> `displayBalances`). This causes redundant O(N) array allocations and intermediate garbage collection overhead.
 **Action:** Always condense sequential array transformations (`.reduce().filter().map()`) into a single O(N) iterative pass when executing within frequent component render cycles to prevent GC thrashing and intermediate allocations.
+## 2026-10-10 - [Optimize chained array map and filter calls]
+**Learning:** Found sequential array iterations (like `events.map().filter()` or a loop executing `.filter().map()`) inside `MfeMaeScatter.tsx` that unnecessarily traversed the array multiple times, causing O(N*M) allocations and computations.
+**Action:** Always condense multiple chained `.map()` or `.filter()` calls into a single O(N) iterative `for` loop, especially inside React render paths, and wrap it in a `useMemo` block to eliminate intermediate array garbage collection overhead and redundant work.
