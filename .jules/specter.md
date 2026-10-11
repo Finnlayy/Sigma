@@ -1,4 +1,3 @@
-
-## 2024-05-24 - [UI Aesthetic Insight]
-**Learning:** Layout jitter caused by missing `tabular-nums` in `font-mono` text and the need for unified `FeedBadge` states in dark-glassmorphism panels.
-**Action:** Always include `tabular-nums` alongside `font-mono` for dynamic numerical data like prices and percentage changes, and consistently use the `FeedBadge` for connection states in dark-glassmorphism components.
+## 2023-10-01 - [UI Aesthetic Insight]
+**Learning:** Hardcoded `bg-zinc-900 border border-zinc-800` backgrounds violate the MP-17 Dark-Glassmorphism baseline (`bg-[#0a0a0c]/80 backdrop-blur-md border-white/10`).
+**Action:** Replace all `bg-zinc-900 border border-zinc-800` panel container backgrounds with the standard MP-17 class `rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl` for layout cohesion.

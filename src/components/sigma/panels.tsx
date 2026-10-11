@@ -22,7 +22,6 @@ import {
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
-import { z } from 'zod';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -48,7 +47,6 @@ import {
 } from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl, { MAX_WS_RETRIES, WS_BACKOFF_MAX_MS } from '../../pages/ProcessLogView';   // §37
-import { z } from 'zod';
 
 /* ------------------------------------------------------------------ shared */
 
@@ -126,7 +124,17 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 );
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
-export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
+export function FeedBadge({ feed, status, labelOverride }: { feed?: FeedMeta | SigmaFeedMeta | null, status?: string, labelOverride?: string }) {
+  if (status) {
+    const isConn = status === 'CONNECTED';
+    const tone = isConn ? 'border-emerald-500/40 text-emerald-400' : 'border-red-500/40 bg-red-500/10 text-red-400';
+    return (
+      <span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums ${tone}`}>
+        {labelOverride || status}
+      </span>
+    );
+  }
+
   if (!feed) return (
     <span className="rounded border border-red-500/40 bg-red-500/10 px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums text-red-400">
       DISCONNECTED

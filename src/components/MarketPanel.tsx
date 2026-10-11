@@ -446,7 +446,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 2. Interactive Charts Section with Visual Buy/Sell Execution Overlays */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl">
         {/* Header with Mode Switcher & Asset Selector */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3.5 pb-3 border-b border-zinc-800/80">
           <div className="flex items-center space-x-2">
@@ -639,7 +639,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                       const matchingMarkers = markersByTime.get(String(label)) || [];
 
                       return (
-                        <div className="bg-zinc-900 border border-zinc-700/80 rounded p-2.5 text-xs font-mono shadow-xl space-y-1.5 min-w-44">
+                        <div className="rounded border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-2.5 text-xs font-mono shadow-2xl space-y-1.5 min-w-44">
                           <div className="flex justify-between items-center text-zinc-400 text-[10px] border-b border-zinc-800 pb-1">
                             <span>{label}</span>
                             <span className="text-zinc-500 font-bold">{selectedPair}</span>
@@ -873,7 +873,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   <XAxis dataKey="time" stroke="#52525b" fontSize={9} tickLine={false} />
                   <YAxis stroke="#52525b" fontSize={9} tickLine={false} domain={['auto', 'auto']} />
                   <Tooltip 
-                    contentStyle={{ backgroundColor: "#18181b", borderColor: "#27272a", borderRadius: "6px" }}
+                    contentStyle={{ backgroundColor: "#0a0a0c", borderColor: "rgba(255,255,255,0.1)", borderRadius: "6px" }}
                     labelStyle={{ color: "#a1a1aa", fontFamily: "monospace" }}
                     itemStyle={{ color: "#10b981", fontFamily: "monospace" }}
                     formatter={(value: any) => [`$${Number(value)?.toLocaleString()}`, "Equity Balance"]}
@@ -894,7 +894,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 3. Filled Trades History Log with Interactive Overlay Locator */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-2">
             <h4 className="text-xs font-mono font-semibold text-zinc-400 tracking-wider uppercase">
