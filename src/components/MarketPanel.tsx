@@ -835,15 +835,15 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Execution Price</span>
-                    <span className="font-bold text-white">${activeSelectedOrder.price?.toLocaleString()}</span>
+                    <span className="font-bold text-white font-mono tabular-nums">${activeSelectedOrder.price?.toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Order Amount</span>
-                    <span className="font-bold text-zinc-200">{activeSelectedOrder.amount} {activeSelectedOrder.pair.split('/')[0]}</span>
+                    <span className="font-bold text-zinc-200 font-mono tabular-nums">{activeSelectedOrder.amount} {activeSelectedOrder.pair.split('/')[0]}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">USD Volume</span>
-                    <span className="font-bold text-emerald-400">${activeSelectedOrder.total?.toLocaleString()}</span>
+                    <span className="font-bold text-emerald-400 font-mono tabular-nums">${activeSelectedOrder.total?.toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Strategy</span>
@@ -851,7 +851,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   </div>
                 </div>
                 <div className="mt-2 pt-1 text-[9px] text-zinc-500 flex justify-between">
-                  <span>Timestamp: {new Date(activeSelectedOrder.timestamp)?.toLocaleString()}</span>
+                  <span className="font-mono tabular-nums">Timestamp: {new Date(activeSelectedOrder.timestamp)?.toLocaleString()}</span>
                   <span className="text-zinc-400">ID: {activeSelectedOrder.id}</span>
                 </div>
               </div>
@@ -971,13 +971,13 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   </div>
 
                   <div className="flex justify-between items-baseline">
-                    <span className="text-zinc-300 font-semibold">{order.amount} {order.pair.split('/')[0]}</span>
-                    <span className="text-zinc-400">@ ${order.price?.toLocaleString()}</span>
+                    <span className="text-zinc-300 font-semibold font-mono tabular-nums">{order.amount} {order.pair.split('/')[0]}</span>
+                    <span className="text-zinc-400 font-mono tabular-nums">@ ${order.price?.toLocaleString()}</span>
                   </div>
 
                   <div className="flex justify-between items-center text-[10px] text-zinc-500 mt-1 border-t border-zinc-900/90 pt-1">
                     <span className="truncate max-w-[180px]">{order.strategyName}</span>
-                    <span className="text-zinc-400 font-medium">${order.total?.toLocaleString()} USD</span>
+                    <span className="text-zinc-400 font-medium font-mono tabular-nums">${order.total?.toLocaleString()} USD</span>
                   </div>
                 </div>
               );
