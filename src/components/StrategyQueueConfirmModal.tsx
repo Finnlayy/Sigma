@@ -67,7 +67,7 @@ export const StrategyQueueConfirmModal: React.FC<StrategyQueueConfirmModalProps>
           </div>
           <button
             type="button"
-            aria-label="Close modal"
+
             disabled={isLoading}
             onClick={onCancel}
             className="p-1 rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
@@ -166,7 +166,7 @@ export const StrategyQueueConfirmModal: React.FC<StrategyQueueConfirmModalProps>
             type="button"
             disabled={isLoading}
             onClick={onConfirm}
-            className={`px-4 py-2 rounded-lg text-xs font-bold text-white transition-all flex items-center space-x-1.5 shadow-md ${
+            className={`px-4 py-2 rounded-lg text-xs font-bold text-white transition-colors flex items-center space-x-1.5 shadow-md ${
               isMovingToLive
                 ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-900/50'
                 : 'bg-amber-600 hover:bg-amber-500 text-zinc-950 font-extrabold shadow-amber-900/50'
