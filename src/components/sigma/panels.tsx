@@ -519,8 +519,7 @@ export function MarketChart() {
         ws.onmessage = (ev) => {
           try {
             if (typeof ev.data !== 'string') throw new Error('Expected string payload');
-            const msg = JSON.parse(ev.data);
-            if (!msg || typeof msg !== 'object') throw new Error('Invalid payload structure');
+            const msg = MarketFeedSchema.parse(JSON.parse(ev.data));
 
             if (msg.channel === 'alpha:executions:live' && msg.data) {
               if (Array.isArray(msg.data.markers)) setMarkers(msg.data.markers);
