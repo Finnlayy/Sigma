@@ -1,3 +1,4 @@
+import { z } from 'zod';
 /**
  * =========================================================
  * Datei:      src/components/sigma/panels.tsx
@@ -7,7 +8,6 @@
  * =========================================================
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { z } from 'zod';
 import {
   Activity, AlertTriangle, Beaker, Bot, Brain, Code2, Cpu, Gauge, HeartPulse, Radar,
   Download, ExternalLink, MemoryStick, MessageSquare, Pause, Play, RefreshCw, Send, ShieldAlert,
@@ -22,7 +22,6 @@ import {
   type TelegramSnapshot, type TvJob, type SigmaFeedMeta,
 } from '../../lib/sigmaApi';
 import TvLightweightChart, { type ChartMarker, type ChartPriceLine } from '../TvLightweightChart';
-import { z } from 'zod';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { sanitizeUrl } from '../../lib/security';
@@ -48,7 +47,6 @@ import {
 } from './mp17Panels';
 import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
 import ProcessLogViewImpl, { MAX_WS_RETRIES, WS_BACKOFF_MAX_MS } from '../../pages/ProcessLogView';   // §37
-import { z } from 'zod';
 
 /* ------------------------------------------------------------------ shared */
 
@@ -57,11 +55,11 @@ export const MarketFeedMsgSchema = z.object({
   data: z.object({
     candle: z.object({
       ts: z.number(),
-      open: z.number(),
-      high: z.number(),
-      low: z.number(),
-      close: z.number(),
-      volume: z.number().optional(),
+      o: z.number(),
+      h: z.number(),
+      l: z.number(),
+      c: z.number(),
+      v: z.number().optional(),
     }).optional(),
     markers: z.array(z.any()).optional(),
     price_lines: z.array(z.any()).optional(),
@@ -126,7 +124,16 @@ const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: str
 );
 
 /** Loop-C-Herkunftsbadge: macht sichtbar, ob Daten echt vom Sidecar kommen. */
-export function FeedBadge({ feed }: { feed?: FeedMeta | SigmaFeedMeta | null }) {
+export function FeedBadge({ feed, status, labelOverride }: { feed?: FeedMeta | SigmaFeedMeta | null, status?: string, labelOverride?: string }) {
+  if (status) {
+    const isConnected = status === 'CONNECTED';
+    return (
+      <span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums ${isConnected ? 'border-emerald-500/40 text-emerald-400' : 'border-red-500/40 bg-red-500/10 text-red-400'}`}>
+        {labelOverride || status}
+      </span>
+    );
+  }
+
   if (!feed) return (
     <span className="rounded border border-red-500/40 bg-red-500/10 px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums text-red-400">
       DISCONNECTED
@@ -450,15 +457,6 @@ export function MarketChart() {
     return () => { cancelled = true; clearInterval(id); };
   }, [overlays]);
 
-  const MarketFeedSchema = useMemo(() => z.object({
-    channel: z.string().optional(),
-    data: z.object({
-      candle: z.any().optional(),
-      markers: z.any().optional(),
-      price_lines: z.any().optional()
-    }).optional()
-  }), []);
-
   // Guide §6 — visualization-plane WS; rAF-batched last-bar updates
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -519,7 +517,7 @@ export function MarketChart() {
         ws.onmessage = (ev) => {
           try {
             if (typeof ev.data !== 'string') throw new Error('Expected string payload');
-            const msg = JSON.parse(ev.data);
+            const msg = MarketFeedMsgSchema.parse(JSON.parse(ev.data));
             if (!msg || typeof msg !== 'object') throw new Error('Invalid payload structure');
 
             if (msg.channel === 'alpha:executions:live' && msg.data) {
@@ -528,8 +526,10 @@ export function MarketChart() {
               return;
             }
             const c = msg.data?.candle;
-            if (!c || typeof c.ts !== 'number') return;
-            pending = c;
+            if (!c || typeof c.ts !== 'number' || typeof c.o !== 'number' || typeof c.h !== 'number' || typeof c.l !== 'number' || typeof c.c !== 'number') return;
+
+            // Default volume to 0 if missing since it's optional in the schema but required by the Candle interface
+            pending = { ...c, v: typeof c.v === 'number' ? c.v : 0 } as Candle;
             if (!raf) raf = requestAnimationFrame(flush);
           } catch (err) {
             console.error('[MarketChart] WS-Frame parse error:', err, ev.data);
@@ -660,6 +660,12 @@ export function LLMConsole() {
         return;
       }
 
+      const LlmMsgSchema = z.object({
+        content_chunk: z.string().optional(),
+        tool_result: z.any().optional(),
+        is_complete: z.boolean().optional()
+      }).catchall(z.any());
+
       const ws = new WebSocket(sigmaApi.llmStreamUrl());
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('LLM stream timeout')), 20000);
@@ -668,7 +674,7 @@ export function LLMConsole() {
         };
         ws.onmessage = (ev) => {
           try {
-            const msg = JSON.parse(ev.data);
+            const msg = LlmMsgSchema.parse(JSON.parse(ev.data));
             if (msg.content_chunk) append(String(msg.content_chunk).trimEnd());
             if (msg.tool_result) append(JSON.stringify(msg.tool_result).slice(0, 800));
             if (msg.is_complete) {
