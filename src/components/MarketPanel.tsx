@@ -446,7 +446,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 2. Interactive Charts Section with Visual Buy/Sell Execution Overlays */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl">
         {/* Header with Mode Switcher & Asset Selector */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3.5 pb-3 border-b border-zinc-800/80">
           <div className="flex items-center space-x-2">
@@ -835,15 +835,15 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Execution Price</span>
-                    <span className="font-bold text-white">${activeSelectedOrder.price?.toLocaleString()}</span>
+                    <span className="font-mono tabular-nums font-bold text-white">${activeSelectedOrder.price?.toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Order Amount</span>
-                    <span className="font-bold text-zinc-200">{activeSelectedOrder.amount} {activeSelectedOrder.pair.split('/')[0]}</span>
+                    <span className="font-mono tabular-nums font-bold text-zinc-200">{activeSelectedOrder.amount} {activeSelectedOrder.pair.split('/')[0]}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">USD Volume</span>
-                    <span className="font-bold text-emerald-400">${activeSelectedOrder.total?.toLocaleString()}</span>
+                    <span className="font-mono tabular-nums font-bold text-emerald-400">${activeSelectedOrder.total?.toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Strategy</span>
@@ -894,7 +894,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 3. Filled Trades History Log with Interactive Overlay Locator */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-2">
             <h4 className="text-xs font-mono font-semibold text-zinc-400 tracking-wider uppercase">
@@ -936,7 +936,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                     setSelectedOrderId(order.id === selectedOrderId ? null : order.id);
                     setChartViewMode('price-executions');
                   }}
-                  className={`border rounded p-2.5 text-xs font-mono transition-colors cursor-pointer ${
+                  className={`border rounded p-2.5 text-xs font-mono tabular-nums transition-colors cursor-pointer ${
                     isHighlighted
                       ? 'bg-zinc-800/90 border-emerald-500/90 shadow-md ring-1 ring-emerald-500/30'
                       : 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-900/80 hover:border-zinc-700'
