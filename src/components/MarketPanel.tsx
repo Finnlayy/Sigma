@@ -38,9 +38,9 @@ import { safeFetchJson } from "../lib/api";
 export function FeedBadge({ status }: { status: 'CONNECTED' | 'DISCONNECTED' }) {
   const tone = status === 'CONNECTED'
     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-    : 'border-zinc-600/40 bg-zinc-700/20 text-zinc-400';
+    : 'border-red-500/40 bg-red-500/10 text-red-400';
   return (
-    <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}>
+    <span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold tracking-wide tabular-nums ${tone}`}>
       {status}
     </span>
   );
@@ -432,7 +432,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                       maximumFractionDigits: ticker.pair.includes('XRP') ? 4 : 2
                     })}
                   </span>
-                  <div className="flex justify-between items-center text-[8px] font-mono text-zinc-500 mt-0.5">
+                  <div className="flex justify-between items-center text-[8px] font-mono text-zinc-500 mt-0.5 tabular-nums">
                     <span>Vol: {ticker.volume > 1000 ? `${(ticker.volume / 1000)?.toFixed(1)}k` : ticker.volume}</span>
                     {isSelected && (
                       <span className="text-emerald-400/90 font-semibold uppercase">ACTIVE</span>
@@ -832,7 +832,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] tabular-nums">
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Execution Price</span>
                     <span className="font-bold text-white">${activeSelectedOrder.price?.toLocaleString()}</span>
@@ -850,7 +850,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                     <span className="font-medium text-zinc-300 truncate block">{activeSelectedOrder.strategyName}</span>
                   </div>
                 </div>
-                <div className="mt-2 pt-1 text-[9px] text-zinc-500 flex justify-between">
+                <div className="mt-2 pt-1 text-[9px] text-zinc-500 flex justify-between tabular-nums">
                   <span>Timestamp: {new Date(activeSelectedOrder.timestamp)?.toLocaleString()}</span>
                   <span className="text-zinc-400">ID: {activeSelectedOrder.id}</span>
                 </div>
@@ -961,7 +961,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 tabular-nums">
                       <span className="text-[10px] text-zinc-500">{orderTime}</span>
                       <span className="text-[9px] text-sky-400/80 hover:text-sky-300 flex items-center">
                         <Tag className="w-2.5 h-2.5 mr-0.5" />
@@ -970,12 +970,12 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-baseline">
+                  <div className="flex justify-between items-baseline tabular-nums">
                     <span className="text-zinc-300 font-semibold">{order.amount} {order.pair.split('/')[0]}</span>
                     <span className="text-zinc-400">@ ${order.price?.toLocaleString()}</span>
                   </div>
 
-                  <div className="flex justify-between items-center text-[10px] text-zinc-500 mt-1 border-t border-zinc-900/90 pt-1">
+                  <div className="flex justify-between items-center text-[10px] text-zinc-500 mt-1 border-t border-zinc-900/90 pt-1 tabular-nums">
                     <span className="truncate max-w-[180px]">{order.strategyName}</span>
                     <span className="text-zinc-400 font-medium">${order.total?.toLocaleString()} USD</span>
                   </div>
