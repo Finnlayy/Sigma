@@ -446,7 +446,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 2. Interactive Charts Section with Visual Buy/Sell Execution Overlays */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl">
         {/* Header with Mode Switcher & Asset Selector */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3.5 pb-3 border-b border-zinc-800/80">
           <div className="flex items-center space-x-2">
@@ -894,15 +894,16 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 3. Filled Trades History Log with Interactive Overlay Locator */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="rounded-xl border border-white/10 bg-[#0a0a0c]/80 backdrop-blur-md p-4 shadow-2xl">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-2">
             <h4 className="text-xs font-mono font-semibold text-zinc-400 tracking-wider uppercase">
               Trade Filled Logs
             </h4>
-            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400">
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 tabular-nums">
               {orders.length} total
             </span>
+            <FeedBadge status={orders.length > 0 ? 'CONNECTED' : 'DISCONNECTED'} />
           </div>
           <button
             id="btn-reset-trade-history"
@@ -962,7 +963,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
-                      <span className="text-[10px] text-zinc-500">{orderTime}</span>
+                      <span className="text-[10px] text-zinc-500 font-mono tabular-nums">{orderTime}</span>
                       <span className="text-[9px] text-sky-400/80 hover:text-sky-300 flex items-center">
                         <Tag className="w-2.5 h-2.5 mr-0.5" />
                         <span>Chart</span>
@@ -971,13 +972,13 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   </div>
 
                   <div className="flex justify-between items-baseline">
-                    <span className="text-zinc-300 font-semibold">{order.amount} {order.pair.split('/')[0]}</span>
-                    <span className="text-zinc-400">@ ${order.price?.toLocaleString()}</span>
+                    <span className="text-zinc-300 font-semibold font-mono tabular-nums">{order.amount} {order.pair.split('/')[0]}</span>
+                    <span className="text-zinc-400 font-mono tabular-nums">@ ${order.price?.toLocaleString()}</span>
                   </div>
 
                   <div className="flex justify-between items-center text-[10px] text-zinc-500 mt-1 border-t border-zinc-900/90 pt-1">
                     <span className="truncate max-w-[180px]">{order.strategyName}</span>
-                    <span className="text-zinc-400 font-medium">${order.total?.toLocaleString()} USD</span>
+                    <span className="text-zinc-400 font-medium font-mono tabular-nums">${order.total?.toLocaleString()} USD</span>
                   </div>
                 </div>
               );
