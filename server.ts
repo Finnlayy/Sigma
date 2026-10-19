@@ -12,6 +12,13 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader('X-Frame-Options', 'DENY');
+    next();
+  });
+
   // K-1 — Kraken-Layer (public data only, paper only, fail-closed).
   // Muss VOR dem Mock-Catch-all gemountet werden.
   app.use('/api/kraken', krakenRouter());
