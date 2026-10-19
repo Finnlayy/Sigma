@@ -446,7 +446,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 2. Interactive Charts Section with Visual Buy/Sell Execution Overlays */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="bg-[#0a0a0c]/80 border border-white/10 backdrop-blur-md rounded-lg p-4 shadow-sm">
         {/* Header with Mode Switcher & Asset Selector */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3.5 pb-3 border-b border-zinc-800/80">
           <div className="flex items-center space-x-2">
@@ -625,10 +625,11 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   
                   <Tooltip 
                     contentStyle={{ 
-                      backgroundColor: "#18181b", 
-                      borderColor: "#27272a", 
-                      borderRadius: "6px",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.5)"
+                      backgroundColor: "rgba(10, 10, 12, 0.8)",
+                      borderColor: "rgba(255, 255, 255, 0.1)",
+                      backdropFilter: "blur(12px)",
+                      borderRadius: "12px",
+                      boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)"
                     }}
                     labelStyle={{ color: "#a1a1aa", fontFamily: "monospace", fontSize: "11px", fontWeight: "bold" }}
                     content={({ active, payload, label }) => {
@@ -647,13 +648,13 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
 
                           <div className="flex justify-between items-center text-zinc-200">
                             <span className="text-zinc-400">Price:</span>
-                            <span className="font-bold text-sky-400">${point.price?.toLocaleString()}</span>
+                            <span className="font-bold font-mono tabular-nums text-sky-400">${point.price?.toLocaleString()}</span>
                           </div>
 
                           {point.high !== undefined && (
                             <div className="grid grid-cols-2 gap-x-2 text-[10px] text-zinc-400 pt-0.5">
-                              <div>High: <span className="text-zinc-300">${point.high?.toLocaleString()}</span></div>
-                              <div>Low: <span className="text-zinc-300">${point.low?.toLocaleString()}</span></div>
+                              <div>High: <span className="text-zinc-300 font-mono tabular-nums">${point.high?.toLocaleString()}</span></div>
+                              <div>Low: <span className="text-zinc-300 font-mono tabular-nums">${point.low?.toLocaleString()}</span></div>
                             </div>
                           )}
 
@@ -674,11 +675,11 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                                 >
                                   <div className="flex justify-between items-center font-bold">
                                     <span>{m.order.type === 'buy' ? '▲ BUY' : '▼ SELL'}</span>
-                                    <span>${m.order.price?.toLocaleString()}</span>
+                                    <span className="font-mono tabular-nums">${m.order.price?.toLocaleString()}</span>
                                   </div>
                                   <div className="flex justify-between text-[9px] opacity-80 mt-0.5">
-                                    <span>{m.order.amount} {selectedPair.split('/')[0]}</span>
-                                    <span>${m.order.total?.toLocaleString()} USD</span>
+                                    <span className="font-mono tabular-nums">{m.order.amount} {selectedPair.split('/')[0]}</span>
+                                    <span className="font-mono tabular-nums">${m.order.total?.toLocaleString()} USD</span>
                                   </div>
                                   <div className="flex justify-between items-center text-[8px] opacity-70 mt-0.5">
                                     <span>{m.order.strategyName}</span>
@@ -835,15 +836,15 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Execution Price</span>
-                    <span className="font-bold text-white">${activeSelectedOrder.price?.toLocaleString()}</span>
+                    <span className="font-bold text-white font-mono tabular-nums">${activeSelectedOrder.price?.toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Order Amount</span>
-                    <span className="font-bold text-zinc-200">{activeSelectedOrder.amount} {activeSelectedOrder.pair.split('/')[0]}</span>
+                    <span className="font-bold text-zinc-200 font-mono tabular-nums">{activeSelectedOrder.amount} {activeSelectedOrder.pair.split('/')[0]}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">USD Volume</span>
-                    <span className="font-bold text-emerald-400">${activeSelectedOrder.total?.toLocaleString()}</span>
+                    <span className="font-bold text-emerald-400 font-mono tabular-nums">${activeSelectedOrder.total?.toLocaleString()}</span>
                   </div>
                   <div>
                     <span className="text-zinc-500 block text-[9px] uppercase">Strategy</span>
@@ -851,8 +852,8 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   </div>
                 </div>
                 <div className="mt-2 pt-1 text-[9px] text-zinc-500 flex justify-between">
-                  <span>Timestamp: {new Date(activeSelectedOrder.timestamp)?.toLocaleString()}</span>
-                  <span className="text-zinc-400">ID: {activeSelectedOrder.id}</span>
+                  <span className="font-mono tabular-nums">Timestamp: {new Date(activeSelectedOrder.timestamp)?.toLocaleString()}</span>
+                  <span className="text-zinc-400 font-mono tabular-nums">ID: {activeSelectedOrder.id}</span>
                 </div>
               </div>
             )}
@@ -873,7 +874,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   <XAxis dataKey="time" stroke="#52525b" fontSize={9} tickLine={false} />
                   <YAxis stroke="#52525b" fontSize={9} tickLine={false} domain={['auto', 'auto']} />
                   <Tooltip 
-                    contentStyle={{ backgroundColor: "#18181b", borderColor: "#27272a", borderRadius: "6px" }}
+                    contentStyle={{ backgroundColor: "rgba(10, 10, 12, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)", backdropFilter: "blur(12px)", borderRadius: "12px" }}
                     labelStyle={{ color: "#a1a1aa", fontFamily: "monospace" }}
                     itemStyle={{ color: "#10b981", fontFamily: "monospace" }}
                     formatter={(value: any) => [`$${Number(value)?.toLocaleString()}`, "Equity Balance"]}
@@ -894,7 +895,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       </div>
 
       {/* 3. Filled Trades History Log with Interactive Overlay Locator */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 shadow-sm">
+      <div className="bg-[#0a0a0c]/80 border border-white/10 backdrop-blur-md rounded-lg p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-2">
             <h4 className="text-xs font-mono font-semibold text-zinc-400 tracking-wider uppercase">
@@ -971,13 +972,13 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   </div>
 
                   <div className="flex justify-between items-baseline">
-                    <span className="text-zinc-300 font-semibold">{order.amount} {order.pair.split('/')[0]}</span>
-                    <span className="text-zinc-400">@ ${order.price?.toLocaleString()}</span>
+                    <span className="text-zinc-300 font-semibold font-mono tabular-nums">{order.amount} {order.pair.split('/')[0]}</span>
+                    <span className="text-zinc-400 font-mono tabular-nums">@ ${order.price?.toLocaleString()}</span>
                   </div>
 
                   <div className="flex justify-between items-center text-[10px] text-zinc-500 mt-1 border-t border-zinc-900/90 pt-1">
                     <span className="truncate max-w-[180px]">{order.strategyName}</span>
-                    <span className="text-zinc-400 font-medium">${order.total?.toLocaleString()} USD</span>
+                    <span className="text-zinc-400 font-medium font-mono tabular-nums">${order.total?.toLocaleString()} USD</span>
                   </div>
                 </div>
               );
