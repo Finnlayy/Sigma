@@ -827,6 +827,8 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                     type="button"
                     onClick={() => setSelectedOrderId(null)}
                     className="text-zinc-500 hover:text-zinc-300 text-xs px-1"
+                    aria-label="Close execution details"
+                    title="Close execution details"
                   >
                     ✕ Close
                   </button>
