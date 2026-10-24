@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { 
@@ -9,6 +10,11 @@ interface SystemHealthPanelProps {
   onRefresh?: () => void;
 }
 
+
+export const TelemetryMsgSchema = z.object({
+  telemetry: z.any().optional(),
+}).catchall(z.any());
+
 export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const [telemetry, setTelemetry] = useState<any>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -17,29 +23,63 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const [emergencyReason, setEmergencyReason] = useState<string>("");
 
   useEffect(() => {
-    // Connect to Server-Sent Events (SSE) stream
-    const eventSource = new EventSource("/api/quant/telemetry/stream");
+    let eventSource: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+    let retryCount = 0;
+    const MAX_SSE_RETRIES = 5;
+    const SSE_BACKOFF_MAX_MS = 30_000;
 
-    eventSource.onopen = () => {
-      setIsConnected(true);
-    };
-
-    eventSource.addEventListener("telemetry", (event: any) => {
+    const connect = () => {
+      if (closed) return;
       try {
-        const data = JSON.parse(event.data);
-        setTelemetry(data);
-        setLastPing(Date.now());
-      } catch (err) {
-        console.error("Failed to parse SSE telemetry:", err);
-      }
-    });
+        eventSource = new EventSource("/api/quant/telemetry/stream");
 
-    eventSource.onerror = () => {
-      setIsConnected(false);
+        eventSource.onopen = () => {
+          setIsConnected(true);
+          retryCount = 0;
+        };
+
+        eventSource.addEventListener("telemetry", (event: any) => {
+          try {
+            if (typeof event.data !== 'string') throw new Error('Expected string payload');
+            const data = TelemetryMsgSchema.parse(JSON.parse(event.data));
+            setTelemetry(data);
+            setLastPing(Date.now());
+          } catch (err) {
+            console.error("Failed to parse SSE telemetry:", err, event.data);
+          }
+        });
+
+        eventSource.onerror = (err) => {
+          setIsConnected(false);
+          eventSource?.close(); // Ensure connection is closed before reconnecting
+
+          if (closed || reconnectTimer) return;
+          if (retryCount < MAX_SSE_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCount, SSE_BACKOFF_MAX_MS);
+            retryCount++;
+            console.warn(`[SystemHealthPanel] SSE disconnected — Reconnect in ${delay}ms (${retryCount}/${MAX_SSE_RETRIES})`);
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, delay);
+          } else {
+            console.error('[SystemHealthPanel] SSE retries exhausted');
+          }
+        };
+      } catch (err) {
+        console.error('[SystemHealthPanel] SSE connection failed:', err);
+        setIsConnected(false);
+      }
     };
+
+    connect();
 
     return () => {
-      eventSource.close();
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      eventSource?.close();
     };
   }, []);
 
