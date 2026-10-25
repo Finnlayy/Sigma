@@ -32,9 +32,10 @@ type FlexChild = { type: string; weight?: number; children?: FlexChild[]; compon
 
 let _seq = 0;
 const uid = (p = 'n') => {
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+  const cryptoObj = (typeof window !== 'undefined' && window.crypto) || (typeof globalThis !== 'undefined' && globalThis.crypto);
+  if (cryptoObj && cryptoObj.getRandomValues) {
     const randomBytes = new Uint8Array(2);
-    window.crypto.getRandomValues(randomBytes);
+    cryptoObj.getRandomValues(randomBytes);
     const randomStr = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
     return `${p}-${++_seq}-${randomStr}`;
   }
