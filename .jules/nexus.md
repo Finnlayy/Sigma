@@ -29,3 +29,6 @@
 ## 2026-10-25 - [IPC/API Integration Insight]
 **Learning:** Raw WebSocket message handlers inside `MarketChart` and `LLMConsole` were exposed to corrupted payloads and inconsistent validation, failing silently or returning incomplete components due to schema/interface mismatch.
 **Action:** Enforced fail-closed constraints by wrapping all WebSocket `.onmessage` handlers in `MarketFeedMsgSchema` and `LlmMsgSchema` using strictly aligned Zod validation (`.parse()`), ensuring robust parsing failures are caught and explicitly logged via `console.error`.
+## 2026-10-31 - [IPC/API Integration Insight]
+**Learning:** Raw SSE (EventSource) listener in SystemHealthPanel lacked an exponential backoff reconnect loop and robust payload validation, causing silent stream deaths on network instability.
+**Action:** Wrapped EventSource connection in a robust reconnect loop with exponential backoff.

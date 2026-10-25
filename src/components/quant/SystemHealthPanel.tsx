@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 import { motion } from "motion/react";
 import { 
   Activity, ShieldAlert, Cpu, HardDrive, Zap, Radio, RefreshCw, 
@@ -9,6 +10,13 @@ interface SystemHealthPanelProps {
   onRefresh?: () => void;
 }
 
+
+const TelemetrySchema = z.object({
+  recent_logs: z.array(z.any()).optional(),
+  cpu_percent: z.number().optional(),
+  memory_percent: z.number().optional(),
+}).catchall(z.any());
+
 export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const [telemetry, setTelemetry] = useState<any>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -17,29 +25,50 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const [emergencyReason, setEmergencyReason] = useState<string>("");
 
   useEffect(() => {
-    // Connect to Server-Sent Events (SSE) stream
-    const eventSource = new EventSource("/api/quant/telemetry/stream");
+    let eventSource: EventSource | null = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const BASE_RETRY_MS = 1000;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+    let closed = false;
 
-    eventSource.onopen = () => {
-      setIsConnected(true);
+    const connect = () => {
+      if (closed) return;
+      eventSource = new EventSource("/api/quant/telemetry/stream");
+
+      eventSource.onopen = () => {
+        setIsConnected(true);
+        retryCount = 0;
+      };
+
+      eventSource.addEventListener("telemetry", (event: any) => {
+        try {
+          const rawData = JSON.parse(event.data);
+          const data = TelemetrySchema.parse(rawData);
+          setTelemetry(data);
+          setLastPing(Date.now());
+        } catch (err) {
+          console.error("Failed to parse SSE telemetry:", err, event.data);
+        }
+      });
+
+      eventSource.onerror = () => {
+        setIsConnected(false);
+        eventSource?.close();
+        if (!closed && retryCount < MAX_RETRIES) {
+          const delay = Math.min(BASE_RETRY_MS * 2 ** retryCount, 30000);
+          retryCount++;
+          reconnectTimer = setTimeout(connect, delay);
+        }
+      };
     };
 
-    eventSource.addEventListener("telemetry", (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        setTelemetry(data);
-        setLastPing(Date.now());
-      } catch (err) {
-        console.error("Failed to parse SSE telemetry:", err);
-      }
-    });
-
-    eventSource.onerror = () => {
-      setIsConnected(false);
-    };
+    connect();
 
     return () => {
-      eventSource.close();
+      closed = true;
+      clearTimeout(reconnectTimer);
+      eventSource?.close();
     };
   }, []);
 
