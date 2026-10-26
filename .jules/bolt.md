@@ -99,3 +99,7 @@
 ## 2026-10-10 - [Optimize chained array map and filter calls]
 **Learning:** Found sequential array iterations (like `events.map().filter()` or a loop executing `.filter().map()`) inside `MfeMaeScatter.tsx` that unnecessarily traversed the array multiple times, causing O(N*M) allocations and computations.
 **Action:** Always condense multiple chained `.map()` or `.filter()` calls into a single O(N) iterative `for` loop, especially inside React render paths, and wrap it in a `useMemo` block to eliminate intermediate array garbage collection overhead and redundant work.
+
+## 2026-10-15 - [Condense chained array methods into single iteration]
+**Learning:** Found sequential array iterations (like `.map().filter()` or a loop executing `.filter().map().reduce()`) inside `QuantitativeRegimePanel.tsx` that unnecessarily traversed the array multiple times, causing intermediate array allocations and redundant CPU overhead.
+**Action:** Always condense multiple chained array transformations into a single O(N) iterative pass (e.g. using a single `.reduce()` or a standard `for` loop) to prevent intermediate garbage collection overhead and redundant work.
