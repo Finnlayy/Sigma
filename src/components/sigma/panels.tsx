@@ -718,7 +718,7 @@ export function LLMConsole() {
         <input value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void send()}
           className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px]" />
-        <Button size="sm" className="h-7" disabled={busy} onClick={() => void send()}><Send size={12} /></Button>
+        <Button size="sm" className="h-7" disabled={busy} aria-label="Send message" onClick={() => void send()}><Send size={12} /></Button>
       </div>
     </PanelShell>
   );
