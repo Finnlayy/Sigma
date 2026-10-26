@@ -29,3 +29,6 @@
 ## 2026-10-25 - [IPC/API Integration Insight]
 **Learning:** Raw WebSocket message handlers inside `MarketChart` and `LLMConsole` were exposed to corrupted payloads and inconsistent validation, failing silently or returning incomplete components due to schema/interface mismatch.
 **Action:** Enforced fail-closed constraints by wrapping all WebSocket `.onmessage` handlers in `MarketFeedMsgSchema` and `LlmMsgSchema` using strictly aligned Zod validation (`.parse()`), ensuring robust parsing failures are caught and explicitly logged via `console.error`.
+## 2026-11-13 - [IPC/API Integration Insight]
+**Learning:** The native EventSource reconnect behavior can be aggressive and mask connection issues, while missing schema validation silently drops corrupted telemetry payloads.
+**Action:** Always wrap EventSource telemetry streams with manual exponential backoff, explicit .close() on error to override native logic, and enforce strict Zod validation on all incoming event payloads.

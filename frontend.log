@@ -1,0 +1,318 @@
+
+> project-sigma@1.0.0 dev /app
+> vite
+
+
+  VITE v6.4.3  ready in 307 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://192.168.0.2:3000/
+7:56:42 AM [vite] (client) page reload .venv/lib64/python3.12/site-packages/playwright/driver/package/lib/vite/dashboard/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib64/python3.12/site-packages/playwright/driver/package/lib/vite/htmlReport/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib64/python3.12/site-packages/playwright/driver/package/lib/vite/recorder/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib64/python3.12/site-packages/playwright/driver/package/lib/vite/traceViewer/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib64/python3.12/site-packages/playwright/driver/package/lib/vite/traceViewer/snapshot.html
+7:56:42 AM [vite] (client) page reload .venv/lib64/python3.12/site-packages/playwright/driver/package/lib/vite/traceViewer/uiMode.html
+7:56:42 AM [vite] (client) page reload .venv/lib/python3.12/site-packages/playwright/driver/package/lib/vite/htmlReport/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib/python3.12/site-packages/playwright/driver/package/lib/vite/dashboard/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib/python3.12/site-packages/playwright/driver/package/lib/vite/recorder/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib/python3.12/site-packages/playwright/driver/package/lib/vite/traceViewer/index.html
+7:56:42 AM [vite] (client) page reload .venv/lib/python3.12/site-packages/playwright/driver/package/lib/vite/traceViewer/snapshot.html
+7:56:42 AM [vite] (client) page reload .venv/lib/python3.12/site-packages/playwright/driver/package/lib/vite/traceViewer/uiMode.html
+7:57:49 AM [vite] http proxy error: /api/v1/market/ohlc?symbol=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/market/ohlc?symbol=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/backtest/ohlc?pair=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:49 AM [vite] http proxy error: /api/backtest/ohlc?pair=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:53 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:54 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:54 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:57 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:57 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:57 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:59 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:57:59 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:01 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:04 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:04 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:05 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:05 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:05 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:09 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:09 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:09 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:13 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:13 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:13 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:14 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:14 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:17 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:19 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:19 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:21 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:21 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:21 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/market/ohlc?symbol=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/market/ohlc?symbol=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/backtest/ohlc?pair=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:34 AM [vite] http proxy error: /api/backtest/ohlc?pair=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:38 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:39 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:39 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:42 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:42 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:42 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:44 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:44 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:46 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:49 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:49 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:50 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:50 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:50 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:54 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:54 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:54 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:58 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:58 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:58 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:59 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:58:59 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:02 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:04 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:04 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:06 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:06 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:06 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/market/ohlc?symbol=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/market/ohlc?symbol=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/academy/badges
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/reward/matrix
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/v1/health
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/kraken/status
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/backtest/ohlc?pair=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:21 AM [vite] http proxy error: /api/backtest/ohlc?pair=BTC%2FUSD&interval=15&count=300
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+7:59:25 AM [vite] http proxy error: /api/v1/bots
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)

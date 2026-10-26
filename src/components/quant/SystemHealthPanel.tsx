@@ -4,10 +4,44 @@ import {
   Activity, ShieldAlert, Cpu, HardDrive, Zap, Radio, RefreshCw, 
   AlertTriangle, CheckCircle2, XCircle, Play, Pause, Flame, Server
 } from "lucide-react";
+import { z } from "zod";
 
 interface SystemHealthPanelProps {
   onRefresh?: () => void;
 }
+
+const TelemetrySchema = z.object({
+  state_machine: z.object({
+    state: z.string().optional(),
+    circuit_breaker: z.string().optional(),
+    active_path: z.string().optional(),
+    can_execute_orders: z.boolean().optional(),
+    last_trip_reason: z.string().nullable().optional()
+  }).optional(),
+  resource_guard: z.object({
+    cpu_percent: z.number().optional(),
+    memory_percent: z.number().optional(),
+    load_shedding_level: z.string().optional(),
+    dropped_events: z.number().optional(),
+    active_threads: z.number().optional()
+  }).optional(),
+  storage_tiering: z.object({
+    l1_shm_ringbuffer_bytes: z.number().optional(),
+    l1_capacity_bytes: z.number().optional(),
+    l2_duckdb_parquet_files: z.number().optional(),
+    l2_total_mb: z.number().optional(),
+    l3_rclone_sync_status: z.string().optional(),
+    ingestion_rate_events_per_sec: z.number().optional(),
+    avg_latency_microseconds: z.number().optional()
+  }).optional(),
+  watchdog: z.object({
+    watchdog_running: z.boolean().optional(),
+    heartbeat_healthy: z.boolean().optional(),
+    seconds_since_last_heartbeat: z.number().optional(),
+    circuit_breaker: z.string().optional()
+  }).optional(),
+  recent_logs: z.array(z.any()).optional()
+}).catchall(z.any());
 
 export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const [telemetry, setTelemetry] = useState<any>(null);
@@ -17,29 +51,56 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const [emergencyReason, setEmergencyReason] = useState<string>("");
 
   useEffect(() => {
-    // Connect to Server-Sent Events (SSE) stream
-    const eventSource = new EventSource("/api/quant/telemetry/stream");
+    let eventSource: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+    let closed = false;
 
-    eventSource.onopen = () => {
-      setIsConnected(true);
+    const connect = () => {
+      if (closed) return;
+      eventSource = new EventSource("/api/quant/telemetry/stream");
+
+      eventSource.onopen = () => {
+        setIsConnected(true);
+        retryCount = 0;
+      };
+
+      eventSource.addEventListener("telemetry", (event: any) => {
+        try {
+          const data = TelemetrySchema.parse(JSON.parse(event.data));
+          setTelemetry(data);
+          setLastPing(Date.now());
+        } catch (err) {
+          console.error("Failed to parse SSE telemetry:", err);
+        }
+      });
+
+      eventSource.onerror = () => {
+        setIsConnected(false);
+        if (eventSource) {
+          eventSource.close();
+        }
+        if (closed || reconnectTimer) return;
+
+        const delay = Math.min(1000 * 2 ** retryCount, 30000);
+        retryCount++;
+        console.warn(`[SystemHealthPanel] SSE disconnected — Reconnecting in ${delay}ms`);
+
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, delay);
+      };
     };
 
-    eventSource.addEventListener("telemetry", (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        setTelemetry(data);
-        setLastPing(Date.now());
-      } catch (err) {
-        console.error("Failed to parse SSE telemetry:", err);
-      }
-    });
-
-    eventSource.onerror = () => {
-      setIsConnected(false);
-    };
+    connect();
 
     return () => {
-      eventSource.close();
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, []);
 
