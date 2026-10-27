@@ -17,29 +17,53 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
   const [emergencyReason, setEmergencyReason] = useState<string>("");
 
   useEffect(() => {
-    // Connect to Server-Sent Events (SSE) stream
-    const eventSource = new EventSource("/api/quant/telemetry/stream");
+    let eventSource: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
 
-    eventSource.onopen = () => {
-      setIsConnected(true);
+    const connect = () => {
+      // Connect to Server-Sent Events (SSE) stream
+      eventSource = new EventSource("/api/quant/telemetry/stream");
+
+      eventSource.onopen = () => {
+        setIsConnected(true);
+        retryCount = 0;
+      };
+
+      eventSource.addEventListener("telemetry", (event: any) => {
+        try {
+          const data = JSON.parse(event.data);
+          setTelemetry(data);
+          setLastPing(Date.now());
+        } catch (err) {
+          console.error("Failed to parse SSE telemetry:", err);
+        }
+      });
+
+      eventSource.onerror = () => {
+        setIsConnected(false);
+        if (eventSource) {
+          eventSource.close();
+        }
+
+        const delay = Math.min(1000 * 2 ** retryCount, 30000);
+        retryCount++;
+
+        reconnectTimer = setTimeout(() => {
+          connect();
+        }, delay);
+      };
     };
 
-    eventSource.addEventListener("telemetry", (event: any) => {
-      try {
-        const data = JSON.parse(event.data);
-        setTelemetry(data);
-        setLastPing(Date.now());
-      } catch (err) {
-        console.error("Failed to parse SSE telemetry:", err);
-      }
-    });
-
-    eventSource.onerror = () => {
-      setIsConnected(false);
-    };
+    connect();
 
     return () => {
-      eventSource.close();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, []);
 
