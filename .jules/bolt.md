@@ -103,3 +103,7 @@
 ## 2026-10-15 - [Condense chained array methods into single iteration]
 **Learning:** Found sequential array iterations (like `.map().filter()` or a loop executing `.filter().map().reduce()`) inside `QuantitativeRegimePanel.tsx` that unnecessarily traversed the array multiple times, causing intermediate array allocations and redundant CPU overhead.
 **Action:** Always condense multiple chained array transformations into a single O(N) iterative pass (e.g. using a single `.reduce()` or a standard `for` loop) to prevent intermediate garbage collection overhead and redundant work.
+
+## 2026-10-28 - [Condense sequential array methods into single iteration]
+**Learning:** Found sequential array iterations (like `.filter().map()`) inside `MarketPanel.tsx` that unnecessarily traversed the array multiple times, causing intermediate array allocations and redundant CPU overhead. Specifically, `visibleOrderMarkers` was mapping an intermediate array that `positionedMarkers` immediately iterated over again.
+**Action:** Always condense multiple chained array transformations into a single O(N) iterative pass (e.g. using a single `.reduce()` or a standard `for` loop) to prevent intermediate garbage collection overhead and redundant work.
