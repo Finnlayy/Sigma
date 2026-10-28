@@ -7,3 +7,7 @@
 **Vulnerability:** Weak PRNG `Math.random()` used for generating DOM node/component IDs (`uid` in dock). While initially low impact for UI state, predictable IDs can be exploited in edge cases or flagged by scanners.
 **Learning:** `Math.random()` is not cryptographically secure. Relying on it for uniqueness can cause collisions or predictable sequences. Furthermore, when migrating to `window.crypto`, explicit SSR guards (`typeof window !== 'undefined'`) are strictly necessary to avoid crashing Node.js/Next environments where `window` is missing.
 **Prevention:** Use `window.crypto.getRandomValues()` for generating random bytes in browsers, ensuring to provide a safe fallback for SSR or node environments.
+## 2025-02-28 - [HTTP Security Headers Implementation]
+**Vulnerability:** Missing HTTP Security Headers in Express.js server setup.
+**Learning:** `helmet` is not used in this project. All custom HTTP headers like `X-Content-Type-Options`, `X-Frame-Options`, `Strict-Transport-Security`, and `X-XSS-Protection` must be applied manually via Express custom middleware (`app.use`).
+**Prevention:** Always implement HTTP security headers natively within custom middleware when initializing the server rather than adding third-party security libraries.
