@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { QueueMatrixData, StrategyQueueMatrix, TradeOrder } from "../types";
 import StrategyMatrixModal from "./StrategyMatrixModal";
+import { FeedBadge } from "./MarketPanel";
 
 interface QueueMatrixPanelProps {
   paperMatrix?: QueueMatrixData | null;
@@ -172,7 +173,7 @@ export default function QueueMatrixPanel({
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Net Total P&amp;L</span>
-            <div className={`text-xl font-bold mt-1 ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <div className={`text-xl font-bold mt-1 tabular-nums ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
               {isProfit ? '+' : ''}${matrix.totalPnL?.toFixed(2)}
             </div>
             <span className="text-[10px] text-zinc-400">
@@ -184,7 +185,7 @@ export default function QueueMatrixPanel({
 
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Win Rate (Closed)</span>
-            <div className="text-xl font-bold text-white mt-1">
+            <div className="text-xl font-bold text-white mt-1 tabular-nums">
               {matrix.winRate}%
             </div>
             <span className="text-[10px] text-zinc-400">
@@ -194,7 +195,7 @@ export default function QueueMatrixPanel({
 
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Profit Factor</span>
-            <div className="text-xl font-bold text-amber-400 mt-1">
+            <div className="text-xl font-bold text-amber-400 mt-1 tabular-nums">
               {matrix.profitFactor?.toFixed(2)}
             </div>
             <span className="text-[10px] text-zinc-500">
@@ -204,7 +205,7 @@ export default function QueueMatrixPanel({
 
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Sharpe Ratio</span>
-            <div className="text-xl font-bold text-indigo-400 mt-1">
+            <div className="text-xl font-bold text-indigo-400 mt-1 tabular-nums">
               {matrix.sharpeRatio?.toFixed(2)}
             </div>
             <span className="text-[10px] text-zinc-500">
@@ -214,7 +215,7 @@ export default function QueueMatrixPanel({
 
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Max Drawdown</span>
-            <div className="text-xl font-bold text-rose-400 mt-1">
+            <div className="text-xl font-bold text-rose-400 mt-1 tabular-nums">
               -{matrix.maxDrawdownPercent}%
             </div>
             <span className="text-[10px] text-zinc-500">
@@ -224,7 +225,7 @@ export default function QueueMatrixPanel({
 
           <div className="bg-zinc-900/80 border border-zinc-800 p-3.5 rounded-xl">
             <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Volume Traded</span>
-            <div className="text-xl font-bold text-zinc-200 mt-1">
+            <div className="text-xl font-bold text-zinc-200 mt-1 tabular-nums">
               ${matrix.volumeTradedUSD?.toLocaleString()}
             </div>
             <span className="text-[10px] text-zinc-500">
@@ -289,27 +290,24 @@ export default function QueueMatrixPanel({
                     </div>
 
                     <div className="flex items-center space-x-1">
-                      <span className={`w-2 h-2 rounded-full ${strat.status === 'active' ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
-                      <span className={`text-[9px] uppercase font-bold ${strat.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                        {strat.status}
-                      </span>
+                      <FeedBadge status={strat.status === 'active' ? 'CONNECTED' : 'DISCONNECTED'} />
                     </div>
                   </div>
 
                   <div className="pt-2 border-t border-zinc-800/80 grid grid-cols-3 gap-1 text-center w-full">
                     <div>
                       <span className="text-[9px] text-zinc-500 block">Win Rate</span>
-                      <span className="text-xs font-bold text-white">{strat.winRate}%</span>
+                      <span className="text-xs font-bold text-white tabular-nums">{strat.winRate}%</span>
                     </div>
                     <div>
                       <span className="text-[9px] text-zinc-500 block">Net P&amp;L</span>
-                      <span className={`text-xs font-bold ${stratProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <span className={`text-xs font-bold tabular-nums ${stratProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {stratProfit ? '+' : ''}${strat.totalPnL?.toFixed(0)}
                       </span>
                     </div>
                     <div>
                       <span className="text-[9px] text-zinc-500 block">Closed</span>
-                      <span className="text-xs font-bold text-zinc-300">{strat.totalTrades}</span>
+                      <span className="text-xs font-bold text-zinc-300 tabular-nums">{strat.totalTrades}</span>
                     </div>
                   </div>
                 </button>
