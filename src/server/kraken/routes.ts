@@ -96,7 +96,17 @@ export async function priceAssets(assets: string[]): Promise<PricedAssets> {
   const prices: PriceMap = {};
   const priced: string[] = [];
   const unpriced: string[] = [];
-  const wanted = Array.from(new Set(assets.map((a) => (a ?? '').trim().toUpperCase()).filter(Boolean)));
+
+  // Bolt Optimization: Replaced chained .map().filter() with a single O(N) iterative pass
+  // to avoid intermediate array allocations during ledger sync.
+  const wantedSet = new Set<string>();
+  for (const a of assets) {
+    const trimmed = (a ?? '').trim().toUpperCase();
+    if (trimmed) {
+      wantedSet.add(trimmed);
+    }
+  }
+  const wanted = Array.from(wantedSet);
 
   for (const asset of wanted) {
     if (asset === QUOTE_ASSET) {

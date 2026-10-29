@@ -684,7 +684,6 @@ export function LLMConsole() {
             }
           } catch (e) {
             console.error('Failed to parse LLM stream payload:', e, ev.data);
-            append(String(ev.data).slice(0, 400));
           }
         };
         ws.onerror = () => {
