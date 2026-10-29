@@ -107,3 +107,7 @@
 ## 2026-10-28 - [Condense sequential array methods into single iteration]
 **Learning:** Found sequential array iterations (like `.filter().map()`) inside `MarketPanel.tsx` that unnecessarily traversed the array multiple times, causing intermediate array allocations and redundant CPU overhead. Specifically, `visibleOrderMarkers` was mapping an intermediate array that `positionedMarkers` immediately iterated over again.
 **Action:** Always condense multiple chained array transformations into a single O(N) iterative pass (e.g. using a single `.reduce()` or a standard `for` loop) to prevent intermediate garbage collection overhead and redundant work.
+
+## 2024-11-20 - [Condense sequential array methods in data ingestion]
+**Learning:** Using chained `.map().filter()` (e.g. `assets.map().filter()`) when resolving items like Kraken assets creates unnecessary intermediate array allocations, adding GC overhead on hot paths like ledger synchronization.
+**Action:** Replace chained `.map().filter()` with a single O(N) `for` loop that directly populates the final data structure (like a `Set`) to prevent intermediate allocations.
