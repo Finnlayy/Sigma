@@ -118,7 +118,7 @@ export const Stat = ({ label, value, tone = 'text-zinc-100' }: { label: string; 
 
 const IconBtn = ({ onClick, title, children }: { onClick: () => void; title: string; children: React.ReactNode }) => (
   <button onClick={onClick} title={title} aria-label={title}
-    className="rounded border border-zinc-700 p-1 text-zinc-400 transition hover:border-sky-500 hover:text-sky-400">
+    className="rounded border border-zinc-700 p-1 text-zinc-400 transition hover:border-sky-500 hover:text-sky-400 focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:outline-none">
     {children}
   </button>
 );
@@ -684,7 +684,6 @@ export function LLMConsole() {
             }
           } catch (e) {
             console.error('Failed to parse LLM stream payload:', e, ev.data);
-            append(String(ev.data).slice(0, 400));
           }
         };
         ws.onerror = () => {
@@ -718,7 +717,7 @@ export function LLMConsole() {
         <input value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void send()}
           className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-[11px]" />
-        <Button size="sm" className="h-7" disabled={busy} onClick={() => void send()}><Send size={12} /></Button>
+        <Button size="sm" className="h-7" disabled={busy} aria-label="Send message" onClick={() => void send()}><Send size={12} /></Button>
       </div>
     </PanelShell>
   );

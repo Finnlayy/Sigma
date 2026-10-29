@@ -318,7 +318,7 @@ export default function SigmaTerminal() {
           ))}
         </ToggleGroup>
 
-        <Button variant="outline" size="icon-xs" title="Reset layout" onClick={() => applyPreset(preset)}>
+        <Button variant="outline" size="icon-xs" title="Reset layout" aria-label="Reset layout" onClick={() => applyPreset(preset)}>
           <RotateCcw className="size-3" />
         </Button>
 
