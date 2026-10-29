@@ -429,6 +429,7 @@ class AppState:
         from app.execution.deadman_switch_daemon import (DeadmanSwitchDaemon,
                                                          set_deadman)
         from app.execution.reliable_order_dispatcher import ReliableOrderDispatcher
+        from app.execution.paper_validation_lake import notify_paper_fill
         from app.execution.kraken_fill_reconciler import KrakenFillReconciler
         from app.ingestion.kraken_depth_adapter import (KrakenDepthAdapter,
                                                         set_kraken_depth_adapter)
@@ -448,10 +449,16 @@ class AppState:
         from app.optimizer.strategy_scorecard import (
             StrategyScorecard, set_strategy_scorecard,
         )
+        from app.tv.alert_driver import PlaywrightAlertDriver
         from app.tv.alert_provisioner import get_alert_provisioner
         from app.tv.worker import get_tv_queue
 
         cfg = self.config
+        session_path = cfg.tv_storage_state_path or bp.PATH_TV_STORAGE_STATE
+        alert_driver = None
+        if os.path.exists(session_path) and not os.environ.get("PYTEST_CURRENT_TEST"):
+            alert_driver = PlaywrightAlertDriver()
+        get_alert_provisioner(driver=alert_driver)
         self.safety = SafetyGuard(cfg, redis_client=self.redis, store=self.store)
         set_safety_guard(self.safety)
         if bool(getattr(cfg, "live_trading", False)) and not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -534,6 +541,7 @@ class AppState:
             futures_bridge=futures_bridge,
             paper_futures_bridge=paper_futures_bridge,
             receipts_log=cfg.orders_log_path,
+            notifier=notify_paper_fill,
         )
         self.fill_reconciler = KrakenFillReconciler(
             paper_futures_bridge,

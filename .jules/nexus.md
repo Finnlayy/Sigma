@@ -26,3 +26,10 @@
 ## 2026-10-02 - [IPC/API Integration Insight]
 **Learning:** Python backend IPC/pubsub handlers (e.g., Redis subscriptions in `routes_sigma.py`) were swallowing JSON parsing errors and propagating a 'raw' string fallback, violating fail-closed principles.
 **Action:** Always explicitly log parsing exceptions (using `logging.error`) and drop invalid payloads (via `continue` in loops) to enforce fail-closed boundaries and prevent propagating corrupt data.
+## 2026-10-25 - [IPC/API Integration Insight]
+**Learning:** Raw WebSocket message handlers inside `MarketChart` and `LLMConsole` were exposed to corrupted payloads and inconsistent validation, failing silently or returning incomplete components due to schema/interface mismatch.
+**Action:** Enforced fail-closed constraints by wrapping all WebSocket `.onmessage` handlers in `MarketFeedMsgSchema` and `LlmMsgSchema` using strictly aligned Zod validation (`.parse()`), ensuring robust parsing failures are caught and explicitly logged via `console.error`.
+
+## 2024-10-28 - [IPC/API Integration Insight]
+**Learning:** The LLM stream WebSocket handler was falling back to rendering raw string payloads when JSON parsing or schema validation failed, violating the fail-closed philosophy and risking UI corruption.
+**Action:** Removed the raw string fallback from the `catch` block in `src/components/sigma/panels.tsx`. Always explicitly drop malformed payloads and only log the error to `console.error`.

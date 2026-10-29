@@ -121,6 +121,31 @@ class FakeStrategyTesterDriver:
             },
         ]
 
+    def upsert_alert(self, name: str, symbol: str, interval: Any,
+                     webhook_url: str, message: str) -> Dict[str, Any]:
+        self.calls.append(f"upsert_alert:{name}")
+        return {
+            "tv_alert_id": f"tv:{name}",
+            "name": name, "symbol": symbol, "interval": str(interval),
+            "webhook_url": webhook_url, "message": message,
+        }
+
+    def enable_alert(self, tv_alert_id: str) -> Dict[str, Any]:
+        self.calls.append(f"enable_alert:{tv_alert_id}")
+        return {"ok": True, "tv_alert_id": tv_alert_id}
+
+    def disable_alert(self, tv_alert_id: str) -> Dict[str, Any]:
+        self.calls.append(f"disable_alert:{tv_alert_id}")
+        return {"ok": True, "tv_alert_id": tv_alert_id}
+
+    def delete_alert(self, tv_alert_id: str) -> Dict[str, Any]:
+        self.calls.append(f"delete_alert:{tv_alert_id}")
+        return {"ok": True, "tv_alert_id": tv_alert_id}
+
+    def list_alerts(self) -> List[Dict[str, Any]]:
+        self.calls.append("list_alerts")
+        return []
+
     def close(self) -> None:
         self.calls.append("close")
 

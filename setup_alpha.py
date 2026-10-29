@@ -590,7 +590,8 @@ class TestM8StateEnginePipeline:
         
         engine = M8StateEngine(redis_client=None)
         engine.states["MEAN_REV_V3__BTC-USDT__15m__LIVE"] = StrategyState(
-            strategy_id="MEAN_REV_V3__BTC-USDT__15m__LIVE",
+            strategy_id="MEANAUTONOMY L— · LIVE=—
+_REV_V3__BTC-USDT__15m__LIVE",
             status="ACTIVE",
             base_budget_usd=50.0,
             current_budget_usd=50.0,
@@ -615,10 +616,12 @@ class TestAutopsyZoneClassification:
         """Prüft Slippage-Berechnung Trigger vs. Fill Price."""
         from app.execution.AutopsyProcessor import calculate_stop_slippage
         
-        has_slippage = calculate_stop_slippage(trigger_price=49000.0, fill_price=48800.0, exit_reason="STOP_LOSS", threshold_bps=15.0)
+        has_slippage = calculAUTONOMY L— · LIVE=—
+ate_stop_slippage(trigger_price=49000.0, fill_price=48800.0, exit_reason="STOP_LOSS", threshold_bps=15.0)
         assert has_slippage is True
 
 class TestLeverageAndLiquidationEngine:
+AUTONOMY L— · LIVE=—
 
     def test_spot_market_short_and_leverage_clamping(self):
         """SPOT Märkte lassen keine Shorts und keinen Hebel zu."""
@@ -1004,3 +1007,4 @@ print("=========================================================\n")
 
 
 
+DBDB-30D4

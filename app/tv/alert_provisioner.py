@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core import blueprint as bp
 from app.core.config import SigmaConfig, load_config
+from app.core.public_url import resolve_public_url
 
 logger = logging.getLogger("app.tv.alert_provisioner")
 
@@ -110,6 +111,7 @@ class AlertProvisioner:
         self.driver = driver
         self.store_path = store_path or os.path.join(
             os.path.dirname(self.config.tv_jobs_dir), "tv_alerts.json")
+        self._explicit_base = bool(public_webhook_base)
         self.public_webhook_base = (public_webhook_base
                                     or os.environ.get("SIGMA_PUBLIC_URL", "http://127.0.0.1:8000"))
         self._alerts: Dict[str, AlertRecord] = {}
@@ -140,7 +142,12 @@ class AlertProvisioner:
         return bp.ALERT_NAME_TEMPLATE.format(strategy_id=strategy_id)
 
     def webhook_url(self) -> str:
-        return f"{self.public_webhook_base.rstrip('/')}{bp.WEBHOOK_INGEST_ROUTE}"
+        if self._explicit_base:
+            base = self.public_webhook_base
+        else:
+            resolved = resolve_public_url()
+            base = resolved.url or self.public_webhook_base
+        return f"{base.rstrip('/')}{bp.WEBHOOK_INGEST_ROUTE}"
 
     def get(self, strategy_id: str) -> Optional[AlertRecord]:
         return self._alerts.get(strategy_id)
@@ -221,6 +228,17 @@ class AlertProvisioner:
     def disable_all(self, reason: str = "kill_switch") -> List[Dict[str, Any]]:
         return [self.disable(sid, reason) for sid in list(self._alerts)]
 
+    def refresh_webhooks(self, strategy_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Re-upsert the webhook field after a public-URL change (message stays Schema A)."""
+        ids = strategy_ids if strategy_ids is not None else list(self._alerts)
+        out: List[Dict[str, Any]] = []
+        for sid in ids:
+            rec = self._alerts.get(sid)
+            if rec is None:
+                continue
+            out.append(self.upsert(sid, rec.symbol, rec.interval, enable=rec.enabled))
+        return out
+
     def reconcile_alerts(self, known_strategy_ids: List[str]) -> Dict[str, Any]:
         """§17.5 — Waisen-Alerts (Strategie gelöscht) abschalten und entfernen."""
         orphans = [sid for sid in self._alerts if sid not in known_strategy_ids]
@@ -265,3 +283,8 @@ def get_alert_provisioner(**kwargs) -> AlertProvisioner:
     if _provisioner is None:
         _provisioner = AlertProvisioner(**kwargs)
     return _provisioner
+
+
+def set_alert_provisioner(provisioner: Optional[AlertProvisioner]) -> None:
+    global _provisioner
+    _provisioner = provisioner

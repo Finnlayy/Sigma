@@ -29,6 +29,7 @@ from app.execution.LoopAPipeline import LoopAPipeline, SignalRequest
 from app.execution.SafetyGuard import get_safety_guard
 from app.execution.VirtualBotEngine import get_virtual_bot_engine
 from app.execution.deadman_switch_daemon import get_deadman
+from app.execution.paper_validation_lake import notify_paper_fill, record_ingest_outcome
 from app.optimizer.StrategyAllocator import get_allocator
 from app.optimizer.academy_progress import persist_academy_snapshot
 from app.optimizer.reward_shaping import get_reward_engine
@@ -42,6 +43,7 @@ from app.tv.scraper_client import ScraperUnavailable, get_scraper_client
 from app.tv.selector_manager import get_selector_manager
 from app.tv.worker import (JOB_KIND_BACKTEST, JOB_KIND_PULL_PARAMS, JOB_KIND_PUSH_CODE,
                            get_tv_queue)
+from sigma.orchestration.paper_validation_rotator import get_paper_validation_rotator
 
 logger = logging.getLogger("app.server.routes_sigma")
 router = APIRouter()
@@ -237,6 +239,23 @@ async def signal_ingest(request: Request,
                                    or x_sigma_webhook_secret)
 
 
+def _record_paper_validation_signal(alert: Any, outcome: str, *,
+                                    reason: str = "", code: str = "") -> None:
+    try:
+        record_ingest_outcome(
+            strategy_id=str(getattr(alert, "strategy_id", "") or ""),
+            symbol=str(getattr(alert, "symbol", "") or ""),
+            action=str(getattr(alert, "action", "") or ""),
+            outcome=outcome,
+            reason=reason,
+            code=code,
+            price=float(getattr(alert, "price", 0.0) or 0.0),
+            idempotency_key=str(getattr(alert, "idempotency_key", "") or ""),
+        )
+    except Exception as exc:
+        logger.warning("paper validation signal record failed: %s", exc)
+
+
 async def ingest_sigma_alert(raw: Dict[str, Any],
                              provided_secret: Optional[str]) -> SignalExecutionResponse:
     from app.core.exchange_clock import get_exchange_clock
@@ -302,6 +321,11 @@ async def ingest_sigma_alert(raw: Dict[str, Any],
 
     dispatcher = get_order_dispatcher()
     if dispatcher.seen(alert.idempotency_key):
+        _record_paper_validation_signal(
+            alert, "DUPLICATE",
+            reason="idempotency_key bereits verarbeitet",
+            code=bp.OrderAck.DUPLICATE_IGNORED.value,
+        )
         return SignalExecutionResponse(
             status="DUPLICATE_IGNORED", schema_family=family,
             strategy_id=alert.strategy_id, bot_id=alert.bot_id, symbol=alert.symbol,
@@ -362,6 +386,11 @@ async def ingest_sigma_alert(raw: Dict[str, Any],
                 confluence.reason,
                 confluence.reject_code or bp.ORDERBOOK_WALL_REJECT,
             )
+            _record_paper_validation_signal(
+                alert, "VETO",
+                reason=receipt.detail,
+                code=receipt.error_code,
+            )
             return SignalExecutionResponse(
                 status="VETO_ORDERBOOK", schema_family=family,
                 strategy_id=alert.strategy_id, bot_id=alert.bot_id,
@@ -407,6 +436,9 @@ async def ingest_sigma_alert(raw: Dict[str, Any],
             reason=result.reason, stage=result.stage, price=alert.price,
             stop_loss=alert.stop_loss, take_profit=alert.take_profit,
         )
+        _record_paper_validation_signal(
+            alert, "REJECTED", reason=result.reason, code=result.code,
+        )
         if result.status_code >= 400:
             raise HTTPException(status_code=result.status_code,
                                 detail=response.model_dump())
@@ -421,6 +453,9 @@ async def ingest_sigma_alert(raw: Dict[str, Any],
             execution_mode=alert.execution_mode, fixed_leverage=alert.fixed_leverage,
             detail=f"Loop A stage={result.stage}",
         )
+    _record_paper_validation_signal(
+        alert, "FILLED", reason=result.reason, code=result.code,
+    )
     return SignalExecutionResponse(
         status="EXECUTED", schema_family=family, strategy_id=alert.strategy_id,
         bot_id=alert.bot_id, symbol=alert.symbol, action=alert.action,
@@ -1552,6 +1587,7 @@ def get_order_dispatcher():
                 execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
                 futures=True,
             ),
+            notifier=notify_paper_fill,
         )
     return _ORDER_DISPATCHER
 
@@ -1656,6 +1692,25 @@ async def scheduler_telemetry():
     from app.core.scheduler_matrix import get_scheduler
 
     return get_scheduler().telemetry()
+
+
+@router.get(bp.PAPER_VALIDATION_STATUS_ROUTE)
+async def paper_validation_status():
+    return get_paper_validation_rotator().status()
+
+
+@router.get(bp.PAPER_VALIDATION_HISTORY_ROUTE)
+async def paper_validation_history(limit: int = 50):
+    return {"runs": get_paper_validation_rotator().history(limit=limit)}
+
+
+@router.post(bp.PAPER_VALIDATION_ROTATE_NOW_ROUTE)
+async def paper_validation_rotate_now(
+    request: Request,
+    x_sigma_settings_token: Optional[str] = Header(default=None),
+):
+    _require_operator(request, x_sigma_settings_token)
+    return get_paper_validation_rotator().tick(force=True)
 
 
 @router.post("/api/v1/orderbook/confluence")

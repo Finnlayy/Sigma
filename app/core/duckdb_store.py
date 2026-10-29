@@ -237,6 +237,32 @@ CREATE TABLE IF NOT EXISTS strategy_scorecard (
   win_rate DOUBLE,
   updated_at DOUBLE
 );
+
+CREATE TABLE IF NOT EXISTS paper_validation_cohorts (
+  cohort_id VARCHAR PRIMARY KEY,
+  started_at DOUBLE,
+  ends_at DOUBLE,
+  ended_at DOUBLE,
+  status VARCHAR,
+  strategy_ids VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS paper_validation_runs (
+  cohort_id VARCHAR,
+  strategy_id VARCHAR,
+  symbol VARCHAR,
+  interval_min INTEGER,
+  started_at DOUBLE,
+  ended_at DOUBLE,
+  signals INTEGER,
+  fills INTEGER,
+  rejected INTEGER,
+  net_pnl_pct DOUBLE,
+  profit_factor DOUBLE,
+  win_rate DOUBLE,
+  status VARCHAR,
+  PRIMARY KEY (cohort_id, strategy_id)
+);
 """
 
 
@@ -298,6 +324,34 @@ class DuckDBStore:
               balances_json VARCHAR,
               error VARCHAR,
               has_credentials INTEGER
+            )"""
+        )
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS paper_validation_cohorts (
+              cohort_id VARCHAR PRIMARY KEY,
+              started_at DOUBLE,
+              ends_at DOUBLE,
+              ended_at DOUBLE,
+              status VARCHAR,
+              strategy_ids VARCHAR
+            )"""
+        )
+        self._conn.execute(
+            """CREATE TABLE IF NOT EXISTS paper_validation_runs (
+              cohort_id VARCHAR,
+              strategy_id VARCHAR,
+              symbol VARCHAR,
+              interval_min INTEGER,
+              started_at DOUBLE,
+              ended_at DOUBLE,
+              signals INTEGER,
+              fills INTEGER,
+              rejected INTEGER,
+              net_pnl_pct DOUBLE,
+              profit_factor DOUBLE,
+              win_rate DOUBLE,
+              status VARCHAR,
+              PRIMARY KEY (cohort_id, strategy_id)
             )"""
         )
 
@@ -1116,6 +1170,97 @@ class DuckDBStore:
             "profit_factor": pf,
             "net_pnl": float(row.get("net_pnl") or 0.0),
         }
+
+    # ----------------------------------------------------- paper validation
+    @staticmethod
+    def _cohort_to_api(r: Dict[str, Any]) -> Dict[str, Any]:
+        raw_ids = r.get("strategy_ids") or "[]"
+        if isinstance(raw_ids, list):
+            ids = [str(x) for x in raw_ids]
+        else:
+            try:
+                parsed = json.loads(raw_ids)
+                ids = [str(x) for x in parsed] if isinstance(parsed, list) else []
+            except (TypeError, json.JSONDecodeError):
+                ids = [s for s in str(raw_ids).split(",") if s]
+        return {
+            "cohort_id": r.get("cohort_id"),
+            "started_at": r.get("started_at"),
+            "ends_at": r.get("ends_at"),
+            "ended_at": r.get("ended_at"),
+            "status": r.get("status"),
+            "strategy_ids": ids,
+        }
+
+    def upsert_paper_validation_cohort(self, record: Dict[str, Any]) -> None:
+        ids = record.get("strategy_ids") or []
+        if isinstance(ids, str):
+            blob = ids
+        else:
+            blob = json.dumps(list(ids))
+        self._exec(
+            """INSERT OR REPLACE INTO paper_validation_cohorts
+               (cohort_id, started_at, ends_at, ended_at, status, strategy_ids)
+               VALUES (?,?,?,?,?,?)""",
+            [
+                record["cohort_id"],
+                record.get("started_at"),
+                record.get("ends_at"),
+                record.get("ended_at"),
+                record.get("status") or "",
+                blob,
+            ],
+        )
+
+    def get_active_paper_validation_cohort(self) -> Optional[Dict[str, Any]]:
+        row = self._one(
+            "SELECT * FROM paper_validation_cohorts WHERE status=? "
+            "ORDER BY started_at DESC LIMIT 1",
+            ["ACTIVE"],
+        )
+        return self._cohort_to_api(row) if row else None
+
+    def list_paper_validation_cohorts(self, limit: int = 50) -> List[Dict[str, Any]]:
+        rows = self._rows(
+            "SELECT * FROM paper_validation_cohorts ORDER BY started_at DESC LIMIT ?",
+            [int(limit)],
+        )
+        return [self._cohort_to_api(r) for r in rows]
+
+    def upsert_paper_validation_run(self, record: Dict[str, Any]) -> None:
+        existing = self._one(
+            "SELECT * FROM paper_validation_runs WHERE cohort_id=? AND strategy_id=?",
+            [record.get("cohort_id"), record.get("strategy_id")],
+        ) or {}
+        merged = dict(existing)
+        merged.update({k: v for k, v in record.items() if v is not None or k in ("ended_at",)})
+        self._exec(
+            """INSERT OR REPLACE INTO paper_validation_runs
+               (cohort_id, strategy_id, symbol, interval_min, started_at, ended_at,
+                signals, fills, rejected, net_pnl_pct, profit_factor, win_rate, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                merged.get("cohort_id"),
+                merged.get("strategy_id"),
+                merged.get("symbol") or "",
+                int(merged.get("interval_min") or 15),
+                merged.get("started_at"),
+                merged.get("ended_at"),
+                int(merged.get("signals") or 0),
+                int(merged.get("fills") or 0),
+                int(merged.get("rejected") or 0),
+                _f(merged.get("net_pnl_pct")),
+                _f(merged.get("profit_factor")),
+                _f(merged.get("win_rate")),
+                merged.get("status") or "",
+            ],
+        )
+
+    def list_paper_validation_runs(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._rows(
+            "SELECT * FROM paper_validation_runs ORDER BY COALESCE(ended_at, started_at) DESC LIMIT ?",
+            [int(limit)],
+        )
 
 
 def _f(v: Any, default: float = 0.0) -> float:

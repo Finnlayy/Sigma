@@ -10,6 +10,7 @@
 #   bin/sigma-up                 # Login falls nötig, dann Stack
 #   bin/sigma-up --force-login   # immer neu einloggen
 #   bin/sigma-up --skip-login    # FakeDriver (kein Playwright)
+#   bin/sigma-up --foreground-ui # UI im Terminal halten und Browser öffnen
 #   bin/sigma-up --stop          # Stack stoppen (siehe bin/sigma-down)
 set -euo pipefail
 
@@ -24,6 +25,7 @@ export PYTHONUNBUFFERED=1
 
 FORCE_LOGIN=0
 SKIP_LOGIN=0
+FOREGROUND_UI=0
 TV_LOGIN_TIMEOUT="${TV_LOGIN_TIMEOUT:-600}"
 
 log() { printf '[sigma-up] %s\n' "$*"; }
@@ -37,6 +39,7 @@ for arg in "$@"; do
   case "$arg" in
     --force-login) FORCE_LOGIN=1 ;;
     --skip-login)  SKIP_LOGIN=1 ;;
+    --foreground-ui) FOREGROUND_UI=1 ;;
     --stop)        exec "$ROOT/bin/sigma-down" ;;
     -h|--help)     usage; exit 0 ;;
     *)             die "unknown flag: $arg" ;;
@@ -151,13 +154,24 @@ else
 fi
 
 if ! port_listening 3000; then
-  start_bg ui npm run dev
+  if [[ "$FOREGROUND_UI" -eq 0 ]]; then
+    start_bg ui "$ROOT/node_modules/.bin/vite"
+  fi
 else
   log "ui already on :3000"
 fi
 
 wait_http "http://127.0.0.1:8001/" || log "warning: scraper not answering yet"
 wait_http "http://127.0.0.1:8000/api/v1/health" || die "core did not become healthy"
+if [[ "$FOREGROUND_UI" -eq 1 ]] && ! port_listening 3000; then
+  log "backend stack ready; starting UI in this terminal"
+  exec "$ROOT/node_modules/.bin/vite" --open
+fi
+if [[ "$FOREGROUND_UI" -eq 1 ]]; then
+  log "UI already running — opening http://localhost:3000/"
+  xdg-open http://localhost:3000/ >/dev/null 2>&1 || true
+  exit 0
+fi
 wait_http "http://127.0.0.1:3000/" || die "ui did not become healthy"
 
 log "ready"

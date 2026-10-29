@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid,
   Tooltip, ReferenceLine, ResponsiveContainer, Legend,
@@ -41,12 +42,22 @@ export function MfeMaeScatter({ events }: { events: AutopsyEvent[] }) {
     );
   }
 
-  const zones = Array.from(new Set(events.map(e => e.autopsy_zone).filter(Boolean)));
-  const byZone: Record<string, any[]> = {};
-  for (const z of zones) {
-    byZone[z] = events
-      .filter(e => e.autopsy_zone === z)
-      .map(e => ({
+  // Bolt Optimization: Condense O(N) .map() and .filter() calls into a single O(N) iterative pass
+  // and wrap it in a useMemo hook to prevent redundant computation on every re-render.
+  const { zones, byZone } = useMemo(() => {
+    const uniqueZones = new Set<string>();
+    const grouped: Record<string, any[]> = {};
+
+    for (const e of events) {
+      if (!e.autopsy_zone) continue;
+
+      uniqueZones.add(e.autopsy_zone);
+
+      if (!grouped[e.autopsy_zone]) {
+        grouped[e.autopsy_zone] = [];
+      }
+
+      grouped[e.autopsy_zone].push({
         mfe: e.mfe_r ?? 0,
         mae: e.mae_r ?? 0,
         r: e.pnl_r ?? 0,
@@ -54,8 +65,14 @@ export function MfeMaeScatter({ events }: { events: AutopsyEvent[] }) {
         name: e.strategy_name,
         zone: e.autopsy_zone,
         id: e.trade_id,
-      }));
-  }
+      });
+    }
+
+    return {
+      zones: Array.from(uniqueZones),
+      byZone: grouped
+    };
+  }, [events]);
 
   return (
     <div className="w-full">
