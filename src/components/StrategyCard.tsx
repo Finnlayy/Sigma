@@ -158,6 +158,8 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
           {onPromote && (
             <button
               onClick={() => onPromote(state.strategy_id)}
+              title="Re-promote strategy"
+              aria-label="Re-promote strategy"
               className="flex-1 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-colors"
             >
               <ArrowUpCircle className="w-3 h-3" /> RE-PROMOTE
@@ -166,6 +168,8 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
           {onQuarantine && (
             <button
               onClick={() => onQuarantine(state.strategy_id)}
+              title="Quarantine strategy"
+              aria-label="Quarantine strategy"
               className="flex-1 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-colors"
             >
               <Ban className="w-3 h-3" /> QUARANTINE

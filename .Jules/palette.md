@@ -1,0 +1,3 @@
+## 2026-10-25 - Enhance Custom Toggle Accessibility and Focus States
+**Learning:** Custom UI toggles (like chart view modes and marker filters) were lacking 'aria-pressed' attributes, which is essential for screen readers to convey active states. Furthermore, icon-only utility buttons across panels were missing distinct keyboard focus states ('focus-visible').
+**Action:** Add 'aria-pressed' mapped to the boolean active state for all custom interactive toggles. Add explicit 'focus-visible:ring-2 focus-visible:outline-none' Tailwind classes to generic utility/icon buttons to ensure they remain keyboard navigable without relying on default browser styling or pure hover states.
