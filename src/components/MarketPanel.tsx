@@ -269,20 +269,16 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
     return { buyCount: buy, sellCount: sell };
   }, [pairOrders]);
 
-  // Filtered orders to display as markers based on toggle controls
-  const visibleOrderMarkers = useMemo(() => {
-    return pairOrders.filter(o => {
-      if (o.type === 'buy' && !showBuyMarkers) return false;
-      if (o.type === 'sell' && !showSellMarkers) return false;
-      return true;
-    });
-  }, [pairOrders, showBuyMarkers, showSellMarkers]);
-
   // Map each order to the nearest chart candle timestamp label for exact XAxis placement
+  // Bolt Optimization: Condensed .filter() and .map() into a single O(N) loop to eliminate intermediate array allocations.
   const positionedMarkers = useMemo(() => {
     if (chartCandles.length === 0) return [];
 
-    return visibleOrderMarkers.map(order => {
+    const markers = [];
+    for (const order of pairOrders) {
+      if (order.type === 'buy' && !showBuyMarkers) continue;
+      if (order.type === 'sell' && !showSellMarkers) continue;
+
       const orderMs = new Date(order.timestamp).getTime();
       
       // Binary search for closest candle timestamp
@@ -314,14 +310,15 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
         else if (right < 0) closestCandle = chartCandles[0];
       }
 
-      return {
+      markers.push({
         order,
         chartX: closestCandle.time,
         chartY: order.price,
         timestampMs: orderMs
-      };
-    });
-  }, [visibleOrderMarkers, chartCandles]);
+      });
+    }
+    return markers;
+  }, [pairOrders, chartCandles, showBuyMarkers, showSellMarkers]);
 
   // Selected order details object
   const activeSelectedOrder = useMemo(() => {

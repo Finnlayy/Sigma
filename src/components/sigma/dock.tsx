@@ -32,9 +32,10 @@ type FlexChild = { type: string; weight?: number; children?: FlexChild[]; compon
 
 let _seq = 0;
 const uid = (p = 'n') => {
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+  const cryptoAPI = (typeof window !== 'undefined' && window.crypto) || (typeof globalThis !== 'undefined' && globalThis.crypto);
+  if (cryptoAPI && cryptoAPI.getRandomValues) {
     const randomBytes = new Uint8Array(2);
-    window.crypto.getRandomValues(randomBytes);
+    cryptoAPI.getRandomValues(randomBytes);
     const randomStr = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
     return `${p}-${++_seq}-${randomStr}`;
   }
@@ -154,6 +155,8 @@ function DockTabset({
                 {PANEL_TITLES[p] ?? p}
                 <span
                   role="button"
+                  aria-label={`Close ${PANEL_TITLES[p] ?? p}`}
+                  title={`Close ${PANEL_TITLES[p] ?? p}`}
                   className="ml-1 rounded p-0.5 hover:bg-destructive/20 hover:text-destructive"
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(node.id, p); }}
                   onPointerDown={(e) => e.stopPropagation()}
