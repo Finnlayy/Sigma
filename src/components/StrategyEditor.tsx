@@ -442,7 +442,7 @@ if (diff > parameters.threshold) {
           {/* Trans-Session Manifest Status Pill */}
           <button
             onClick={handleOpenManifest}
-            className="bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800/60 hover:border-emerald-700 text-emerald-400 px-2.5 py-1 rounded text-[11px] font-mono transition-all flex items-center space-x-1.5"
+            className="bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800/60 hover:border-emerald-700 text-emerald-400 px-2.5 py-1 rounded text-[11px] font-mono transition-colors flex items-center space-x-1.5"
             title="Inspect trans-session persistent strategy manifest" aria-label="Inspect trans-session persistent strategy manifest"
           >
             <HardDrive className="w-3 h-3 text-emerald-400" />
@@ -454,7 +454,7 @@ if (diff > parameters.threshold) {
         <div className="flex items-center space-x-2">
           <button
             onClick={handleOpenManifest}
-            className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded text-xs font-mono transition-all flex items-center space-x-1.5"
+            className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded text-xs font-mono transition-colors flex items-center space-x-1.5"
           >
             <Settings className="w-3.5 h-3.5 text-zinc-400" />
             <span>Manage Manifest</span>
@@ -471,7 +471,7 @@ if (diff > parameters.threshold) {
                 setParamsStr("{\n  \"threshold\": 1.0\n}");
                 setCode(`// Write custom trading logic using standard hooks\n// available parameters:\n// 'currentPrice', 'prices', 'parameters', 'executeOrder(type, amount)'\n\nif (currentPrice < parameters.threshold) {\n  executeOrder('buy', 0.1);\n}`);
               }}
-              className="bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-850 hover:border-emerald-700 text-emerald-400 px-3 py-1.5 rounded text-xs font-mono transition-all flex items-center space-x-1"
+              className="bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-850 hover:border-emerald-700 text-emerald-400 px-3 py-1.5 rounded text-xs font-mono transition-colors flex items-center space-x-1"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Create Strategy</span>
@@ -479,7 +479,7 @@ if (diff > parameters.threshold) {
           ) : (
             <button
               onClick={() => setIsCreating(false)}
-              className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 px-3 py-1.5 rounded text-xs font-mono transition-all"
+              className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 px-3 py-1.5 rounded text-xs font-mono transition-colors"
             >
               Cancel
             </button>
@@ -551,7 +551,7 @@ if (diff > parameters.threshold) {
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
                   onClick={handleExportManifest}
-                  className="bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 px-3 py-1.5 rounded text-xs font-mono transition-all flex items-center space-x-1.5"
+                  className="bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 px-3 py-1.5 rounded text-xs font-mono transition-colors flex items-center space-x-1.5"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Export Manifest (.json)</span>
@@ -559,7 +559,7 @@ if (diff > parameters.threshold) {
 
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-700 text-zinc-200 px-3 py-1.5 rounded text-xs font-mono transition-all flex items-center space-x-1.5"
+                  className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-700 text-zinc-200 px-3 py-1.5 rounded text-xs font-mono transition-colors flex items-center space-x-1.5"
                 >
                   <Upload className="w-3.5 h-3.5 text-zinc-400" />
                   <span>Upload Backup JSON</span>
@@ -567,7 +567,7 @@ if (diff > parameters.threshold) {
 
                 <button
                   onClick={copyManifestJSON}
-                  className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-700 text-zinc-300 px-3 py-1.5 rounded text-xs font-mono transition-all flex items-center space-x-1.5"
+                  className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-700 text-zinc-300 px-3 py-1.5 rounded text-xs font-mono transition-colors flex items-center space-x-1.5"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-zinc-400" />}
                   <span>{copied ? "Copied!" : "Copy JSON"}</span>
@@ -575,7 +575,7 @@ if (diff > parameters.threshold) {
 
                 <button
                   onClick={handleResetManifest}
-                  className="bg-zinc-900 hover:bg-rose-950/40 border border-zinc-750 hover:border-rose-800 text-zinc-400 hover:text-rose-300 px-3 py-1.5 rounded text-xs font-mono transition-all flex items-center space-x-1.5 ml-auto"
+                  className="bg-zinc-900 hover:bg-rose-950/40 border border-zinc-750 hover:border-rose-800 text-zinc-400 hover:text-rose-300 px-3 py-1.5 rounded text-xs font-mono transition-colors flex items-center space-x-1.5 ml-auto"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-zinc-500" />
                   <span>Reset Seed Defaults</span>
@@ -597,7 +597,7 @@ if (diff > parameters.threshold) {
                   {importText.trim() && (
                     <button
                       onClick={() => handleImportManifest()}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-black font-semibold px-4 py-1.5 rounded text-xs font-mono transition-all"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-black font-semibold px-4 py-1.5 rounded text-xs font-mono transition-colors"
                     >
                       Commit & Apply Manifest Import
                     </button>
@@ -629,7 +629,7 @@ if (diff > parameters.threshold) {
             <div className="bg-zinc-900 px-4 py-2.5 border-t border-zinc-800 flex justify-end">
               <button
                 onClick={() => setIsManifestOpen(false)}
-                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-1.5 rounded text-xs font-mono transition-all"
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-1.5 rounded text-xs font-mono transition-colors"
               >
                 Close Inspector
               </button>
@@ -842,7 +842,7 @@ if (diff > parameters.threshold) {
               <button
                 type="button"
                 onClick={() => handleRequestQueueChange('paper')}
-                className={`p-2 rounded border text-left transition-all ${
+                className={`p-2 rounded border text-left transition-colors ${
                   executionMode === 'paper'
                     ? 'bg-amber-950/40 border-amber-600 text-amber-300 shadow-sm ring-1 ring-amber-500/20'
                     : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
@@ -860,7 +860,7 @@ if (diff > parameters.threshold) {
               <button
                 type="button"
                 onClick={() => handleRequestQueueChange('live')}
-                className={`p-2 rounded border text-left transition-all ${
+                className={`p-2 rounded border text-left transition-colors ${
                   executionMode === 'live'
                     ? 'bg-rose-950/40 border-rose-600 text-rose-300 shadow-sm ring-1 ring-rose-500/20'
                     : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
@@ -938,7 +938,7 @@ if (diff > parameters.threshold) {
                       key={pct}
                       type="button"
                       onClick={() => setHardStopPercent(pct)}
-                      className={`py-1 rounded border transition-all ${
+                      className={`py-1 rounded border transition-colors ${
                         hardStopPercent === pct
                           ? 'bg-rose-950 border-rose-700 text-rose-300 font-semibold'
                           : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800'
@@ -978,7 +978,7 @@ if (diff > parameters.threshold) {
               type="button"
               onClick={handleTriggerEmergencyStop}
               disabled={isTriggeringEmergency}
-              className="w-full bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/80 hover:border-rose-700 text-rose-300 hover:text-white py-1.5 px-2 rounded text-[11px] font-mono font-medium transition-all flex items-center justify-center space-x-1.5 group"
+              className="w-full bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/80 hover:border-rose-700 text-rose-300 hover:text-white py-1.5 px-2 rounded text-[11px] font-mono font-medium transition-colors flex items-center justify-center space-x-1.5 group"
               title="Immediately send emergency cancel-all signal to Kraken CLI" aria-label="Immediately send emergency cancel-all signal to Kraken CLI"
             >
               <AlertOctagon className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" />
@@ -1023,7 +1023,7 @@ if (diff > parameters.threshold) {
                     selectedStrategy.status === 'active' ? 'stop' : 'start',
                     executionMode
                   )}
-                  className={`flex-1 py-2 rounded text-xs font-mono font-bold transition-all flex items-center justify-center space-x-1.5 border shadow-sm ${
+                  className={`flex-1 py-2 rounded text-xs font-mono font-bold transition-colors flex items-center justify-center space-x-1.5 border shadow-sm ${
                     selectedStrategy.status === 'active'
                       ? 'bg-rose-950/60 border-rose-800 hover:bg-rose-900/60 text-rose-300'
                       : executionMode === 'live'
@@ -1048,7 +1048,7 @@ if (diff > parameters.threshold) {
                   onRestoreStrategy && (
                     <button
                       onClick={() => onRestoreStrategy(selectedStrategy.id)}
-                      className="bg-purple-950/60 border border-purple-800/80 hover:border-purple-600 hover:bg-purple-900/60 text-purple-300 px-3 rounded transition-all flex items-center space-x-1 text-xs font-mono font-semibold"
+                      className="bg-purple-950/60 border border-purple-800/80 hover:border-purple-600 hover:bg-purple-900/60 text-purple-300 px-3 rounded transition-colors flex items-center space-x-1 text-xs font-mono font-semibold"
                       title="Restore Strategy back to Active Orchestrator" aria-label="Restore Strategy back to Active Orchestrator"
                     >
                       <ArchiveRestore className="w-3.5 h-3.5" />
@@ -1063,7 +1063,7 @@ if (diff > parameters.threshold) {
                           onArchiveStrategy(selectedStrategy.id);
                         }
                       }}
-                      className="bg-zinc-950 border border-zinc-850 hover:border-amber-800/60 hover:bg-amber-950/20 text-zinc-500 hover:text-amber-400 px-3 rounded transition-all"
+                      className="bg-zinc-950 border border-zinc-850 hover:border-amber-800/60 hover:bg-amber-950/20 text-zinc-500 hover:text-amber-400 px-3 rounded transition-colors"
                       title="Move to Archives" aria-label="Move to Archives"
                     >
                       <Archive className="w-4 h-4" />
@@ -1077,7 +1077,7 @@ if (diff > parameters.threshold) {
                       onDeleteStrategy(selectedStrategy.id);
                     }
                   }}
-                  className="bg-zinc-950 border border-zinc-850 hover:border-rose-900/50 hover:bg-rose-950/20 text-zinc-500 hover:text-rose-400 px-3 rounded transition-all"
+                  className="bg-zinc-950 border border-zinc-850 hover:border-rose-900/50 hover:bg-rose-950/20 text-zinc-500 hover:text-rose-400 px-3 rounded transition-colors"
                   title="Delete Strategy" aria-label="Delete Strategy"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -1094,7 +1094,7 @@ if (diff > parameters.threshold) {
             <button
               onClick={isCreating ? handleCreateNew : handleSave}
               disabled={isSaving}
-              className="bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-950 disabled:text-emerald-700 text-black px-4 py-1 rounded text-xs font-mono font-semibold transition-all flex items-center space-x-1"
+              className="bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-950 disabled:text-emerald-700 text-black px-4 py-1 rounded text-xs font-mono font-semibold transition-colors flex items-center space-x-1"
             >
               {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
               <span>{isCreating ? "Deploy Worker" : "Commit Changes"}</span>

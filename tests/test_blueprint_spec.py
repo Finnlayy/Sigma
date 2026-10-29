@@ -296,6 +296,17 @@ def test_scorecard_initialize_constants():
     assert "scorecard_stage1_idle" in next(
         s.tasks for s in bp.SCHEDULER_MATRIX if int(s.tier) == 2
     )
+    assert "paper_validation_rotate" in next(
+        s.tasks for s in bp.SCHEDULER_MATRIX if int(s.tier) == 2
+    )
+    assert bp.TV_SUBSCRIPTION_TIERS["free"] == 0
+    assert dict(bp.TV_SUBSCRIPTION_TIERS) == {
+        "free": 0, "essential": 20, "plus": 100, "premium": 400, "ultimate": 1000,
+    }
+    assert bp.TV_SUBSCRIPTION_TIER_DEFAULT == "premium"
+    assert bp.PAPER_VALIDATION_COHORT_SIZE == 6
+    assert bp.PAPER_VALIDATION_ROTATION_HOURS == 6
+    assert bp.PAPER_VALIDATION_ALERT_SOFT_CAP == 300
 
 
 def test_virtual_bot_and_deadman_rules():

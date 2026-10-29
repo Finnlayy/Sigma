@@ -261,7 +261,7 @@ export default function QueueMatrixPanel({
                 <button
                   key={strat.strategyId}
                   onClick={() => handleOpenStrategyModal(strat, queueType)}
-                  className={`group text-left p-3.5 rounded-xl border transition-all relative overflow-hidden flex flex-col justify-between hover:scale-[1.01] hover:shadow-lg ${
+                  className={`group text-left p-3.5 rounded-xl border transition-colors relative overflow-hidden flex flex-col justify-between hover:scale-[1.01] hover:shadow-lg ${
                     strat.status === 'active'
                       ? 'bg-zinc-950/90 border-zinc-700/80 hover:border-emerald-500/80'
                       : 'bg-zinc-950/50 border-zinc-850 hover:border-zinc-700'
@@ -571,7 +571,7 @@ export default function QueueMatrixPanel({
         <div className="flex items-center space-x-2 bg-zinc-950 p-1 rounded-xl border border-zinc-800 font-mono text-xs">
           <button
             onClick={() => setSelectedView('paper')}
-            className={`px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center space-x-1.5 ${
+            className={`px-3.5 py-1.5 rounded-lg font-bold transition-colors flex items-center space-x-1.5 ${
               selectedView === 'paper'
                 ? 'bg-amber-950 text-amber-300 border border-amber-700/60 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -583,7 +583,7 @@ export default function QueueMatrixPanel({
 
           <button
             onClick={() => setSelectedView('live')}
-            className={`px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center space-x-1.5 ${
+            className={`px-3.5 py-1.5 rounded-lg font-bold transition-colors flex items-center space-x-1.5 ${
               selectedView === 'live'
                 ? 'bg-rose-950 text-rose-300 border border-rose-700/60 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -595,7 +595,7 @@ export default function QueueMatrixPanel({
 
           <button
             onClick={() => setSelectedView('dual')}
-            className={`px-3.5 py-1.5 rounded-lg font-bold transition-all flex items-center space-x-1.5 ${
+            className={`px-3.5 py-1.5 rounded-lg font-bold transition-colors flex items-center space-x-1.5 ${
               selectedView === 'dual'
                 ? 'bg-zinc-800 text-white border border-zinc-600 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'

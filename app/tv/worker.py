@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, List, Optional
 from app.backtest.tv_csv import cache_key, result_csv_to_backtest_result
 from app.core import blueprint as bp
 from app.core.config import SigmaConfig, load_config
+from app.tv.alert_driver import alert_driver_from_tester
 from app.tv.strategy_tester_driver import DriverError, get_driver
 
 logger = logging.getLogger("app.tv.worker")
@@ -166,7 +167,7 @@ class TvJobQueue:
             elif job.kind == JOB_KIND_PUSH_CODE:
                 job.result = self._do_push_code(drv, job)
             elif job.kind == JOB_KIND_ALERT_SYNC:
-                job.result = {"synced": True, "strategy_id": job.strategy_id}
+                job.result = self._do_alert_sync(drv, job)
             else:
                 raise DriverError(f"unknown job kind {job.kind!r}", "UNKNOWN_JOB_KIND")
             job.status = JOB_DONE
@@ -253,6 +254,32 @@ class TvJobQueue:
         if not out.get("compiled", False):
             raise DriverError(f"pine compile failed: {out.get('errors')}", "PINE_COMPILE_ERROR")
         job.progress = 0.9
+        return out
+
+    def _do_alert_sync(self, drv, job: TvJob) -> Dict[str, Any]:
+        alert_drv = alert_driver_from_tester(drv)
+        params = job.params or {}
+        action = str(params.get("action") or "upsert")
+        name = str(params.get("name") or "")
+        if not name and job.strategy_id:
+            name = bp.ALERT_NAME_TEMPLATE.format(strategy_id=job.strategy_id)
+        tv_id = str(params.get("tv_alert_id") or name)
+        if action == "enable":
+            return {**alert_drv.enable_alert(tv_id), "action": action, "strategy_id": job.strategy_id}
+        if action == "disable":
+            return {**alert_drv.disable_alert(tv_id), "action": action, "strategy_id": job.strategy_id}
+        if action == "delete":
+            return {**alert_drv.delete_alert(tv_id), "action": action, "strategy_id": job.strategy_id}
+        out = alert_drv.upsert_alert(
+            name=name,
+            symbol=job.symbol,
+            interval=job.interval,
+            webhook_url=str(params.get("webhook_url") or ""),
+            message=str(params.get("message") or ""),
+        )
+        out["action"] = action
+        out["strategy_id"] = job.strategy_id
+        out["synced"] = True
         return out
 
     def _write_artifact(self, job: TvJob, filename: str, content: str) -> str:

@@ -412,7 +412,7 @@ export default function MetricsPanel({
           <div className="flex items-center space-x-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-[10px]">
             <button
               onClick={() => setSelectedQueueTab('paper')}
-              className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 ${
                 selectedQueueTab === 'paper'
                   ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -423,7 +423,7 @@ export default function MetricsPanel({
             </button>
             <button
               onClick={() => setSelectedQueueTab('live')}
-              className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 ${
                 selectedQueueTab === 'live'
                   ? 'bg-rose-950 text-rose-300 border border-rose-800/60'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -498,7 +498,7 @@ export default function MetricsPanel({
                     <button
                       key={strat.strategyId}
                       onClick={() => setSelectedModalStrategy({ strategy: strat, queue: selectedQueueTab })}
-                      className="text-left bg-zinc-950/80 hover:bg-zinc-950 border border-zinc-800 hover:border-emerald-500/70 p-2.5 rounded-lg transition-all flex items-center justify-between group shadow-sm"
+                      className="text-left bg-zinc-950/80 hover:bg-zinc-950 border border-zinc-800 hover:border-emerald-500/70 p-2.5 rounded-lg transition-colors flex items-center justify-between group shadow-sm"
                     >
                       <div className="flex items-center space-x-2 min-w-0">
                         <div className={`w-7 h-7 rounded flex items-center justify-center font-bold text-[10px] border shrink-0 ${
@@ -785,12 +785,39 @@ export default function MetricsPanel({
                 // Bolt Optimization: Added O(1) map lookup for UI cross-referencing to eliminate O(N*M) .find() on each render loop
                 const tickerMap = new Map(tickers.map(t => [t.pair, t]));
 
-                const totalSpotUsd = Object.keys(displayBalances).reduce((acc, asset) => {
-                  const amount = displayBalances[asset] || 0;
-                  if (asset === 'USD') return acc + amount;
-                  const ticker = tickerMap.get(`${asset}USD`) || tickerMap.get(`${asset}/USD`);
-                  return acc + (ticker ? amount * ticker.price : 0);
-                }, 0);
+                // Bolt Optimization: Condense O(N) .reduce(), .filter(), and .map() calls into a single O(N) iterative pass
+                // to prevent redundant array allocations and multiple traversals of `displayBalances` keys on every render cycle.
+                let totalSpotUsd = 0;
+                const itemsToRender = [];
+
+                for (const asset of Object.keys(displayBalances)) {
+                  const val = displayBalances[asset] || 0;
+
+                  // Calculate totalSpotUsd exactly as before
+                  if (asset === 'USD') {
+                    totalSpotUsd += val;
+                  } else {
+                    const totalTicker = tickerMap.get(`${asset}USD`) || tickerMap.get(`${asset}/USD`);
+                    if (totalTicker) totalSpotUsd += val * totalTicker.price;
+                  }
+
+                  // Only process for rendering if it meets the criteria
+                  if (val > 0.000001 || asset === 'USD' || asset === 'EUR' || asset === 'GBP') {
+                    const isFiat = asset === 'USD' || asset === 'EUR' || asset === 'GBP' || asset === 'CAD';
+                    const symbol = asset === 'USD' ? '$' : asset === 'EUR' ? '€' : asset === 'GBP' ? '£' : asset === 'CAD' ? 'C$' : '';
+
+                    // UI specific ticker lookup (doesn't show USD value for fiat)
+                    const uiTicker = !isFiat ? (tickerMap.get(`${asset}USD`) || tickerMap.get(`${asset}/USD`)) : undefined;
+
+                    itemsToRender.push({
+                      asset,
+                      val,
+                      isFiat,
+                      symbol,
+                      usdValue: uiTicker ? val * uiTicker.price : undefined
+                    });
+                  }
+                }
 
                 return (
               <>
@@ -800,40 +827,30 @@ export default function MetricsPanel({
                     ${totalSpotUsd?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
-                {Object.keys(displayBalances)
-                  .filter(asset => (displayBalances[asset] || 0) > 0.000001 || asset === 'USD' || asset === 'EUR' || asset === 'GBP')
-                  .map((asset) => {
-                    const val = displayBalances[asset] || 0;
-                    const isFiat = asset === 'USD' || asset === 'EUR' || asset === 'GBP' || asset === 'CAD';
-                    const symbol = asset === 'USD' ? '$' : asset === 'EUR' ? '€' : asset === 'GBP' ? '£' : asset === 'CAD' ? 'C$' : '';
-                    const ticker = !isFiat ? (tickerMap.get(`${asset}USD`) || tickerMap.get(`${asset}/USD`)) : undefined;
-                    const usdValue = ticker ? val * ticker.price : undefined;
-
-                    return (
-                      <div key={asset} className="flex justify-between items-center text-xs border-b border-zinc-800/45 pb-1.5 last:border-0 last:pb-0">
-                        <div className="flex items-center space-x-1.5 min-w-0">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                          <span className="font-semibold text-zinc-200 truncate">{asset}</span>
-                          <span className="text-[9px] text-zinc-400 uppercase">{isFiat ? 'Fiat' : 'Spot'}</span>
-                        </div>
-                        <div className="flex flex-col items-end shrink-0 ml-2">
-                          <span className="text-white font-medium">
-                            {symbol}
-                            {val?.toLocaleString(undefined, { 
-                              minimumFractionDigits: isFiat ? 2 : 4,
-                              maximumFractionDigits: isFiat ? 2 : 6 
-                            })}
-                            {!symbol ? ` ${asset}` : ''}
-                          </span>
-                          {!isFiat && usdValue !== undefined && (
-                            <span className="text-[10px] text-emerald-400/80 mt-0.5">
-                              (${usdValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                {itemsToRender.map(({ asset, val, isFiat, symbol, usdValue }) => (
+                  <div key={asset} className="flex justify-between items-center text-xs border-b border-zinc-800/45 pb-1.5 last:border-0 last:pb-0">
+                    <div className="flex items-center space-x-1.5 min-w-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                      <span className="font-semibold text-zinc-200 truncate">{asset}</span>
+                      <span className="text-[9px] text-zinc-400 uppercase">{isFiat ? 'Fiat' : 'Spot'}</span>
+                    </div>
+                    <div className="flex flex-col items-end shrink-0 ml-2">
+                      <span className="text-white font-medium">
+                        {symbol}
+                        {val?.toLocaleString(undefined, {
+                          minimumFractionDigits: isFiat ? 2 : 4,
+                          maximumFractionDigits: isFiat ? 2 : 6
+                        })}
+                        {!symbol ? ` ${asset}` : ''}
+                      </span>
+                      {!isFiat && usdValue !== undefined && (
+                        <span className="text-[10px] text-emerald-400/80 mt-0.5">
+                          (${usdValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </>
                 );
               })()

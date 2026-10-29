@@ -28,7 +28,12 @@ function normalizeCrossImpact(raw: any): CrossImpactView | null {
   const incoming = Array.isArray(raw.matrix) ? raw.matrix : [];
   const assets: string[] = Array.isArray(raw.assets) && raw.assets.length
     ? raw.assets
-    : incoming.map((r: any) => r.symbol_a || r.asset).filter(Boolean);
+    // Bolt Optimization: Replaced O(N) chained .map().filter() with a single O(N) .reduce() pass to avoid intermediate array allocation
+    : incoming.reduce((acc: string[], r: any) => {
+        const val = r.symbol_a || r.asset;
+        if (val) acc.push(val);
+        return acc;
+      }, []);
   const cols = assets.length ? assets : FALLBACK_ASSETS;
 
   const matrix: CrossImpactRow[] = incoming.map((r: any) => {
@@ -45,8 +50,18 @@ function normalizeCrossImpact(raw: any): CrossImpactView | null {
         : typeof fromLag === "number" ? fromLag
         : 0;
     }
-    const off = cols.filter((c) => c !== asset).map((c) => Math.abs(correlations[c] || 0));
-    const spillover = off.length ? off.reduce((s, v) => s + v, 0) / off.length : 0;
+
+    // Bolt Optimization: Condense O(N) chained .filter().map().reduce() into a single O(N) iterative pass for spillover calculation
+    let spilloverSum = 0;
+    let spilloverCount = 0;
+    for (const col of cols) {
+      if (col !== asset) {
+        spilloverSum += Math.abs(correlations[col] || 0);
+        spilloverCount++;
+      }
+    }
+    const spillover = spilloverCount > 0 ? spilloverSum / spilloverCount : 0;
+
     return { asset, correlations, spillover };
   });
 
@@ -181,7 +196,7 @@ export function QuantitativeRegimePanel() {
             <button
               key={pair}
               onClick={() => setSelectedAsset(pair)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors ${
                 selectedAsset === pair
                   ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-bold"
                   : "bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700"

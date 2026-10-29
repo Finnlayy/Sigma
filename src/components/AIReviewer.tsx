@@ -213,7 +213,7 @@ export default function AIReviewer({
         <div className="flex space-x-1">
           <button
             onClick={() => setActiveTab('generate')}
-            className={`px-2.5 py-1 text-[11px] font-mono rounded transition-all flex items-center space-x-1 ${
+            className={`px-2.5 py-1 text-[11px] font-mono rounded transition-colors flex items-center space-x-1 ${
               activeTab === 'generate' ? 'bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold' : 'text-zinc-400 hover:text-white'
             }`}
           >
@@ -222,7 +222,7 @@ export default function AIReviewer({
           
           <button
             onClick={() => setActiveTab('audit')}
-            className={`px-2.5 py-1 text-[11px] font-mono rounded transition-all flex items-center space-x-1 ${
+            className={`px-2.5 py-1 text-[11px] font-mono rounded transition-colors flex items-center space-x-1 ${
               activeTab === 'audit' ? 'bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold' : 'text-zinc-400 hover:text-white'
             }`}
           >
@@ -234,7 +234,7 @@ export default function AIReviewer({
               setActiveTab('manifest');
               if (!manifestInsights) fetchManifestInsights();
             }}
-            className={`px-2.5 py-1 text-[11px] font-mono rounded transition-all flex items-center space-x-1 ${
+            className={`px-2.5 py-1 text-[11px] font-mono rounded transition-colors flex items-center space-x-1 ${
               activeTab === 'manifest' ? 'bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold' : 'text-zinc-400 hover:text-white'
             }`}
           >
@@ -297,7 +297,7 @@ export default function AIReviewer({
                 <button
                   onClick={() => handleGenerate("")}
                   disabled={isGenerating}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-black px-3.5 rounded text-xs font-mono font-semibold flex items-center space-x-1 transition-all disabled:bg-emerald-950"
+                  className="bg-emerald-500 hover:bg-emerald-400 text-black px-3.5 rounded text-xs font-mono font-semibold flex items-center space-x-1 transition-colors disabled:bg-emerald-950"
                 >
                   {isGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Build</span>}
                 </button>
@@ -316,7 +316,7 @@ export default function AIReviewer({
                         setPrompt(sug);
                         handleGenerate(sug);
                       }}
-                      className="w-full text-left bg-zinc-950/40 hover:bg-zinc-950 border border-zinc-800/60 hover:border-zinc-800 p-2.5 rounded text-xs font-mono text-zinc-400 hover:text-emerald-400 transition-all flex items-center justify-between"
+                      className="w-full text-left bg-zinc-950/40 hover:bg-zinc-950 border border-zinc-800/60 hover:border-zinc-800 p-2.5 rounded text-xs font-mono text-zinc-400 hover:text-emerald-400 transition-colors flex items-center justify-between"
                     >
                       <span>{sug}</span>
                       <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
@@ -373,7 +373,7 @@ export default function AIReviewer({
                     setAiResult(null);
                     setPrompt("");
                   }}
-                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-black py-2 rounded text-xs font-mono font-bold flex items-center justify-center space-x-1.5 transition-all"
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-black py-2 rounded text-xs font-mono font-bold flex items-center justify-center space-x-1.5 transition-colors"
                 >
                   <Check className="w-4 h-4" />
                   <span>LOAD INTO WORKSPACE & MANIFEST</span>
@@ -402,7 +402,7 @@ export default function AIReviewer({
               <button
                 onClick={handleDebugCode}
                 disabled={isDebugging || !currentCode}
-                className="w-full bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 disabled:bg-zinc-950/20 disabled:text-zinc-700 py-2.5 rounded text-xs font-mono font-medium text-white transition-all flex items-center justify-center space-x-1.5"
+                className="w-full bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 disabled:bg-zinc-950/20 disabled:text-zinc-700 py-2.5 rounded text-xs font-mono font-medium text-white transition-colors flex items-center justify-center space-x-1.5"
               >
                 {isDebugging ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5 text-emerald-400" />}
                 <span>{isDebugging ? "Scanning & Auditing Script..." : "Audit Active Strategy"}</span>
@@ -491,7 +491,7 @@ export default function AIReviewer({
                   <button
                     onClick={handleTweakStrategy}
                     disabled={isTweaking}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-black py-2 rounded text-xs font-mono font-bold flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-emerald-950"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-black py-2 rounded text-xs font-mono font-bold flex items-center justify-center space-x-1.5 transition-colors shadow-md shadow-emerald-950"
                   >
                     {isTweaking ? (
                       <>
@@ -581,7 +581,7 @@ export default function AIReviewer({
                   {onUpdateStrategy && currentStrategy && (
                     <button
                       onClick={handleApplyTweaksToCurrent}
-                      className="bg-emerald-500 hover:bg-emerald-400 text-black py-2 rounded text-xs font-mono font-bold flex items-center justify-center space-x-1.5 transition-all"
+                      className="bg-emerald-500 hover:bg-emerald-400 text-black py-2 rounded text-xs font-mono font-bold flex items-center justify-center space-x-1.5 transition-colors"
                     >
                       <Check className="w-3.5 h-3.5" />
                       <span>Apply Tweaks to Current</span>
@@ -590,7 +590,7 @@ export default function AIReviewer({
 
                   <button
                     onClick={handleSaveTweaksAsNew}
-                    className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 py-2 rounded text-xs font-mono font-semibold flex items-center justify-center space-x-1.5 transition-all"
+                    className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 py-2 rounded text-xs font-mono font-semibold flex items-center justify-center space-x-1.5 transition-colors"
                   >
                     <Sliders className="w-3.5 h-3.5 text-zinc-400" />
                     <span>Save as New Strategy</span>

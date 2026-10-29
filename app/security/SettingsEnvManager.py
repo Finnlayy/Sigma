@@ -48,6 +48,8 @@ RUNTIME_MAP: Dict[str, str] = {
     "SIGMA_TV_MCP_URL": "TradingView MCP URL (fake = sandbox)",
     "SIGMA_OLLAMA_URL": "Ollama URL",
     "SIGMA_PUBLIC_URL": "Public webhook base URL",
+    "SIGMA_NGROK_API_URL": "ngrok local API (tunnels)",
+    "SIGMA_PAPER_VALIDATION_ENABLED": "Paper-validation rotator (1 = on)",
 }
 
 WRITABLE: Dict[str, str] = {**ENV_MAP, **SECRET_MAP, **RUNTIME_MAP}
@@ -135,6 +137,16 @@ SETTING_SPECS: Dict[str, Dict[str, Any]] = {
         "kind": "url",
         "format": "http://host:port",
         "hint": "Öffentliche Webhook-Basis, z. B. http://127.0.0.1:8080 — muss mit http:// oder https:// beginnen.",
+    },
+    "SIGMA_NGROK_API_URL": {
+        "kind": "url",
+        "format": "http://127.0.0.1:4040/api/tunnels",
+        "hint": "ngrok Local-API, Default http://127.0.0.1:4040/api/tunnels.",
+    },
+    "SIGMA_PAPER_VALIDATION_ENABLED": {
+        "kind": "flag", "allowed": ["0", "1"],
+        "format": "0 oder 1",
+        "hint": "1 = 6h-Kohorten-Rotation aktiv, 0 = aus.",
     },
     "KRAKEN_API_KEY": {
         "kind": "secret",

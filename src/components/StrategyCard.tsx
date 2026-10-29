@@ -72,6 +72,7 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
       className={`bg-[#0a0a0c]/80 backdrop-blur-md shadow-2xl border border-white/10 rounded-xl p-3.5 space-y-2.5 ${
         state.status === "QUARANTINED" ? "border-red-800/70" : ""
       }`}
+      style={{ contain: "layout paint" }}
 
     >
       <div className="flex items-center justify-between gap-2">

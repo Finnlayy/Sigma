@@ -279,7 +279,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
             {currentStrategy && (
               <button
                 onClick={() => onOpenOrchestrator(currentStrategy)}
-                className="px-3 py-1.5 rounded border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-750 text-zinc-200 text-xs font-mono flex items-center space-x-1.5 transition-all"
+                className="px-3 py-1.5 rounded border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-750 text-zinc-200 text-xs font-mono flex items-center space-x-1.5 transition-colors"
                 title="Open code in Strategy Orchestrator"
               >
                 <Code2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -291,7 +291,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
               id="run-backtest-btn"
               onClick={handleRunBacktest}
               disabled={isLoading}
-              className={`px-4 py-2 rounded font-mono font-bold text-xs flex items-center space-x-2 transition-all shadow-md ${
+              className={`px-4 py-2 rounded font-mono font-bold text-xs flex items-center space-x-2 transition-colors shadow-md ${
                 isLoading
                   ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700'
                   : 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 hover:text-black active:scale-[0.98]'
@@ -499,7 +499,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
           <button
             onClick={handleRunBacktest}
             disabled={isLoading}
-            className="inline-flex items-center space-x-2 px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-zinc-950 font-mono font-bold text-xs transition-all shadow"
+            className="inline-flex items-center space-x-2 px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-zinc-950 font-mono font-bold text-xs transition-colors shadow"
           >
             <Play className="w-3.5 h-3.5 fill-zinc-950" />
             <span>Simulate Default Strategy (BTC/USD 15m)</span>
@@ -636,7 +636,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setActiveChartTab('equity')}
-                  className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-all ${
+                  className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-colors ${
                     activeChartTab === 'equity'
                       ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 shadow-sm'
                       : 'text-zinc-400 hover:text-white bg-zinc-950/40'
@@ -646,7 +646,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                 </button>
                 <button
                   onClick={() => setActiveChartTab('drawdown')}
-                  className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-all ${
+                  className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-colors ${
                     activeChartTab === 'drawdown'
                       ? 'bg-rose-950/80 text-rose-400 border border-rose-800/60 shadow-sm'
                       : 'text-zinc-400 hover:text-white bg-zinc-950/40'
@@ -656,7 +656,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                 </button>
                 <button
                   onClick={() => setActiveChartTab('price')}
-                  className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-all ${
+                  className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-colors ${
                     activeChartTab === 'price'
                       ? 'bg-zinc-800 text-zinc-200 border border-zinc-700 shadow-sm'
                       : 'text-zinc-400 hover:text-white bg-zinc-950/40'
@@ -790,7 +790,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                 <button
                   onClick={handleRunAIAnalysis}
                   disabled={isAnalyzingAI}
-                  className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-zinc-950 font-mono font-bold text-xs rounded flex items-center space-x-1.5 transition-all shadow-sm"
+                  className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-zinc-950 font-mono font-bold text-xs rounded flex items-center space-x-1.5 transition-colors shadow-sm"
                 >
                   {isAnalyzingAI ? (
                     <>
@@ -891,7 +891,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
                           id="btn-apply-ai-params"
                           onClick={handleApplyAITweaks}
                           disabled={isApplyingParams}
-                          className={`text-[10px] px-2.5 py-1 rounded font-mono font-medium flex items-center space-x-1.5 transition-all shadow-sm ${
+                          className={`text-[10px] px-2.5 py-1 rounded font-mono font-medium flex items-center space-x-1.5 transition-colors shadow-sm ${
                             isParamsApplied
                               ? 'bg-emerald-500 text-zinc-950 font-bold border border-emerald-400 scale-[1.02]'
                               : isApplyingParams

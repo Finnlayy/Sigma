@@ -95,7 +95,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
               onClick={() => setViewLimit('3')}
               title="Only show the last 3 runner log messages"
               aria-pressed={viewLimit === '3'}
-              className={`px-2 py-0.5 rounded transition-all flex items-center space-x-1 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+              className={`px-2 py-0.5 rounded transition-colors flex items-center space-x-1 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                 viewLimit === '3'
                   ? 'bg-emerald-950/80 text-emerald-400 font-bold border border-emerald-800/70 shadow-sm'
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -109,7 +109,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
               onClick={() => setViewLimit('all')}
               title="Show all recorded logs"
               aria-pressed={viewLimit === 'all'}
-              className={`px-2 py-0.5 rounded transition-all outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+              className={`px-2 py-0.5 rounded transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                 viewLimit === 'all'
                   ? 'bg-zinc-800 text-white font-bold border border-zinc-700 shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-300'
@@ -208,7 +208,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
         />
         <button
           onClick={handleSubmit}
-          className="bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700/80 px-2.5 py-1 rounded text-emerald-400 text-[11px] font-mono transition-all flex items-center space-x-1 shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+          className="bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-800/60 hover:border-emerald-700/80 px-2.5 py-1 rounded text-emerald-400 text-[11px] font-mono transition-colors flex items-center space-x-1 shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
         >
           <Play className="w-3 h-3" />
           <span>RUN</span>

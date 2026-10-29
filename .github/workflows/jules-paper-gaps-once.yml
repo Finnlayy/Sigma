@@ -1,0 +1,91 @@
+# One-shot: open a single Jules session for the project-alpha paper gaps.
+# Requires repo secret JULES_API_KEY. workflow_dispatch only.
+name: Jules paper gaps once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  open-session:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open one Jules session
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JULES_API_KEY}" ]; then
+            echo "JULES_API_KEY secret is missing on Sigma"
+            exit 1
+          fi
+          python3 -c 'import os; print("::add-mask::" + os.environ["JULES_API_KEY"], flush=True)'
+          python3 - << 'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          key = os.environ.get("JULES_API_KEY", "")
+          if not key.strip():
+              print("JULES_API_KEY secret is missing on Sigma")
+              raise SystemExit(1)
+
+          prompt = """Finish the open cross-book paper gaps on Finnlayy/project-alpha, starting from branch cursor/genetic-insample-population at commit 0119c2722d0b49c6e50822c42b0a59f774c2721b (subject: Save the cross-book paper worker so both-leg fills stay on the branch). Create a jules/* branch and a PR. Paper only. Never place a live order.
+
+          Do these in order, completely, with tests that assert the numeric or boolean contract:
+          1. Paper cash. set_paper_balance has no callers. A flatten writes a closed-trade row but paper_accounts never moves. Wire flatten net PnL into paper_accounts, and into the M8 budget if that is the existing candle-path contract.
+          2. Half-close. flatten currently closes both legs or neither (test_flatten_closes_both_legs_or_neither). When one opposite top can fill and the other cannot, close the fillable leg and keep the other open. Update the tests to match.
+          3. Exact pair binding from live books. Spot and futures names come from static maps (XBTUSD / PF_XBTUSD via KrakenSpotClient.pair_to_native and KrakenFuturesClient.symbol_to_contract). Bind the pair from the live AssetPairs and instruments payloads. test_native_pair_mapping_stays_on_the_kraken_clients locks the static maps; change that test only as part of the live-binding contract.
+          4. Paper campaign loop. There is no campaign type, module, or loop. Add the paper campaign loop that drives this cross-book worker. The only loop today is the per-instance daemon poll.
+
+          Prior branches are reference only. Do not reset the base onto them: cursor/cross-book-half-flatten-24bf, cursor/ltc-usd-exact-resolver-2ed4, cursor/alpha-campaign-book-6199, cursor/paper-learning-ledger-9f21.
+          ~/Sigma (Finnlayy/Sigma, kraken_paper) has passed over 900 tests. Use it as a read-only reference. Do not modify Sigma.
+          Do not commit scan dumps (alpha-gap-*, paper-gap-*, quant-workers.json, logs/, .agents/, agent.py, bin/kraken) or the google-antigravity requirements line.
+          Run tests/test_cross_book_kraken_spot_pro_paper.py and the tests you add. Do not mark the work done on file existence alone."""
+
+          body = {
+              "prompt": prompt,
+              "sourceContext": {
+                  "source": "sources/github/Finnlayy/project-alpha",
+                  "githubRepoContext": {
+                      "startingBranch": "cursor/genetic-insample-population",
+                  },
+              },
+              "requirePlanApproval": False,
+              "automationMode": "AUTO_CREATE_PR",
+          }
+          req = urllib.request.Request(
+              "https://jules.googleapis.com/v1alpha/sessions",
+              data=json.dumps(body).encode(),
+              method="POST",
+              headers={
+                  "X-Goog-Api-Key": key,
+                  "Content-Type": "application/json",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  raw = resp.read().decode()
+                  status = resp.status
+          except urllib.error.HTTPError as exc:
+              raw = exc.read().decode().replace(key, "[REDACTED]")
+              print(f"Jules API HTTP {exc.code}")
+              print(raw[:2000])
+              raise SystemExit(1)
+
+          raw = raw.replace(key, "[REDACTED]")
+          payload = json.loads(raw)
+          name = payload.get("name") or ""
+          sid = payload.get("id") or (name.split("/")[-1] if name else "")
+          url = payload.get("url") or (f"https://jules.google.com/session/{sid}" if sid else "")
+          print(f"Jules HTTP {status}")
+          print(f"Jules session name: {name}")
+          print(f"Jules session id: {sid}")
+          print(f"Jules session URL: {url}")
+          if not sid:
+              print("Jules response did not include a session id")
+              raise SystemExit(1)
+          PY

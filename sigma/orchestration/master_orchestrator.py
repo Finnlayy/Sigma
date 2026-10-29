@@ -25,6 +25,7 @@ from sigma.signals.timeframe_ladder import session_exec_pair
 from sigma.signals.volatility_throttle import VolatilityThrottleGate
 from sigma.orchestration.hourly_screening_gate import HourlyScreeningGate
 from sigma.orchestration.multi_asset_router import MultiAssetRouter
+from sigma.orchestration import paper_validation_rotator as paper_validation_mod
 from sigma.strategies.dual_hedge_grid import DualHedgeGrid
 from sigma.strategies.dynamic_channel_dca import DynamicChannelDCA
 from sigma.strategies.fractal_directional import FractalDirectional
@@ -156,6 +157,7 @@ class MasterOrchestrator:
             result["screening"] = screening
         if onnx_result is not None:
             result["onnx"] = onnx_result
+        result["paper_validation"] = self._paper_validation_ctx()
         return result
 
     def _poll_c(self) -> Any:
@@ -302,6 +304,7 @@ class MasterOrchestrator:
             out["screening"] = screening
         if onnx is not None:
             out["onnx"] = onnx
+        out["paper_validation"] = self._paper_validation_ctx()
         return out
 
     def _unwind_only(self, session, throttle, dual, pair, poly, wave=None,
@@ -312,6 +315,33 @@ class MasterOrchestrator:
                          screen, screening, onnx)
         out["status"] = "unwind_only"
         return out
+
+    def _paper_validation_ctx(self) -> Dict[str, Any]:
+        """Read-only cohort snapshot — never places orders."""
+        rot = paper_validation_mod._rotator
+        if rot is None:
+            return {
+                "available": True,
+                "state": "IDLE",
+                "reason": "",
+                "cohort_id": None,
+                "strategy_ids": [],
+                "remaining_s": 0.0,
+            }
+        try:
+            status = rot.status()
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
+        remaining = float(status.get("remaining_s") or 0.0)
+        cohort = status.get("cohort") or {}
+        return {
+            "available": True,
+            "state": status.get("state"),
+            "reason": status.get("reason"),
+            "cohort_id": (cohort or {}).get("cohort_id"),
+            "strategy_ids": list((cohort or {}).get("strategy_ids") or []),
+            "remaining_s": remaining,
+        }
 
     # ---------------------------------------------------- MP-05 screening ---
     def _screening_ctx(self, series, session, now) -> Optional[Dict[str, Any]]:

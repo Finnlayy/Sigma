@@ -148,11 +148,13 @@ PATH_LOG_CORE = "./data/logs/sigma_core.log"
 PATH_LOG_ORDERS = "./data/logs/orders.jsonl"
 PATH_LOG_TV_WORKER = "./data/logs/tv_worker.log"
 PATH_STRATEGIES = "./data/strategies"          # /{id}/parameters.csv, backtests/
-PATH_ACADEMY = "./data/academy"                # registry.json + training_dataset.json
+PATH_ACADEMY = "./data/academy"                # registry.json + training-dataset snapshots
 PATH_ACADEMY_REGISTRY = "./data/academy/registry.json"
 PATH_ACADEMY_TRAINING = "./data/academy/training_dataset.json"
+PATH_ACADEMY_PAPER_RUNS = "./data/academy/paper_validation_runs.json"
 PATH_DUCKDB = "./data/duckdb"
 PATH_PARQUET = "./data/parquet"
+PATH_PAPER_VALIDATION_LAKE = "./data/lake/paper_validation"
 PATH_SELECTORS_YAML = "./app/tv/selectors.yaml"
 PATH_L4_CONFIG = "config/autonomy-level-4.yaml"
 PATH_ONNX_REGIME = "./models/regime_classifier.onnx"
@@ -235,6 +237,10 @@ MODULES_NEW: Mapping[str, str] = MappingProxyType({
     "app/tv/selectors.yaml": "DOM-Fallbacks",
     "app/tv/selector_manager.py": "Self-Healing: lokal -> remote -> builtin",
     "app/tv/alert_provisioner.py": "TV Alert upsert/enable/disable; M8-gekoppelt",
+    "app/tv/alert_driver.py": "Playwright Alert-Dialog (webhook URL + Schema A)",
+    "app/core/public_url.py": "ngrok Local-API -> oeffentliche Webhook-Basis",
+    "sigma/orchestration/paper_validation_rotator.py": "6x6h Paper-Kohorte via TV-Alerts",
+    "app/execution/paper_validation_lake.py": "Signal/Fill-Parquet je Strategie+Kohorte",
     "app/tv/worker.py": "Redis/File-Queue Consumer",
     "app/tv/yaml_resolver.py": "Self-Heal selectors/param_bounds",
     "app/backtest/tv_csv.py": "Params/Trades/Perf -> BacktestResult",
@@ -956,7 +962,8 @@ SCHEDULER_MATRIX: Tuple[TierSpec, ...] = (
     TierSpec(SchedulerTier.T1_FAST_PULSE, "Fast Pulse", 20.0, None,
              ("deadman_heartbeat", "memory_watchdog", "kraken_fill_reconcile")),
     TierSpec(SchedulerTier.T2_MID, "Mid", 300.0, None,
-             ("macro_radar_scraper", "scorecard_stage1_idle")),
+             ("macro_radar_scraper", "scorecard_stage1_idle",
+              "paper_validation_rotate")),
     TierSpec(SchedulerTier.T3_REGIME, "Regime", 14400.0, None,
              ("strategy_allocator", "regime_recheck", "brier_drift",
               "regime_strategy_dispatcher")),
@@ -1017,10 +1024,24 @@ IDEMPOTENCY_KEY_TEMPLATE = "sig_{strategy_id}_{ticker}_{bar_time}"
 # =============================================================================
 
 TV_SUBSCRIPTION_TIERS: Mapping[str, int] = MappingProxyType({
-    "free": 1, "essential": 5, "plus": 10, "premium": 20,
+    "free": 0, "essential": 20, "plus": 100, "premium": 400, "ultimate": 1000,
 })
-TV_SUBSCRIPTION_TIER_DEFAULT = "essential"
+TV_SUBSCRIPTION_TIER_DEFAULT = "premium"
 TV_ALERT_ROTATION_ENABLED = True
+PAPER_VALIDATION_COHORT_SIZE = 6
+PAPER_VALIDATION_ROTATION_HOURS = 6
+PAPER_VALIDATION_ALERT_SOFT_CAP = 300
+PAPER_VALIDATION_ENABLED_ENV = "SIGMA_PAPER_VALIDATION_ENABLED"
+NGROK_API_URL = "http://127.0.0.1:4040/api/tunnels"
+NGROK_API_URL_ENV = "SIGMA_NGROK_API_URL"
+PUBLIC_URL_TTL_S = 30.0
+PAPER_VALIDATION_STATUS_ROUTE = "/api/v1/paper-validation/status"
+PAPER_VALIDATION_HISTORY_ROUTE = "/api/v1/paper-validation/history"
+PAPER_VALIDATION_ROTATE_NOW_ROUTE = "/api/v1/paper-validation/rotate-now"
+PAPER_VALIDATION_STATE_IDLE = "IDLE"
+PAPER_VALIDATION_STATE_ARMING = "ARMING"
+PAPER_VALIDATION_STATE_ACTIVE = "ACTIVE"
+PAPER_VALIDATION_STATE_CLOSING = "CLOSING"
 KRAKEN_MAX_CALL_COUNTER = 15.0
 KRAKEN_COUNTER_DECAY_PER_S = 0.50
 KRAKEN_EMERGENCY_RESERVE_TOKENS = 3.0

@@ -163,7 +163,7 @@ export function AcademyRegistryPanel() {
               <button
                 key={tab.id}
                 onClick={() => setActiveSubTab(tab.id as any)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                   activeSubTab === tab.id
                     ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
                     : "bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-700"
@@ -411,7 +411,7 @@ export function AcademyRegistryPanel() {
                 <div
                   key={strat.id}
                   onClick={() => { setSelectedStrategyId(strat.id); fetchCareerBook(strat.id); }}
-                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                  className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                     selectedStrategyId === strat.id
                       ? "bg-indigo-950/60 border-indigo-500/50 text-indigo-200"
                       : "bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800/80"

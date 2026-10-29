@@ -127,7 +127,7 @@ export default function StrategyMatrixModal({
               {onToggleRun && (
                 <button
                   onClick={() => onToggleRun(strategyMatrix.strategyId, strategyMatrix.status === 'active' ? 'stop' : 'start', queue)}
-                  className={`px-3 py-1.5 rounded text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-sm ${
+                  className={`px-3 py-1.5 rounded text-xs font-mono font-bold flex items-center space-x-1.5 transition-colors shadow-sm ${
                     strategyMatrix.status === 'active'
                       ? 'bg-rose-950/80 border border-rose-700 text-rose-200 hover:bg-rose-900'
                       : isPaper
@@ -153,7 +153,7 @@ export default function StrategyMatrixModal({
           <div className="flex items-center space-x-1 px-5 pt-3 border-b border-zinc-800/80 bg-zinc-950/40">
             <button
               onClick={() => setActiveTab('overview')}
-              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-all ${
+              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors ${
                 activeTab === 'overview'
                   ? 'border-emerald-500 text-white'
                   : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -163,7 +163,7 @@ export default function StrategyMatrixModal({
             </button>
             <button
               onClick={() => setActiveTab('trades')}
-              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
                 activeTab === 'trades'
                   ? 'border-emerald-500 text-white'
                   : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -176,7 +176,7 @@ export default function StrategyMatrixModal({
             </button>
             <button
               onClick={() => setActiveTab('config')}
-              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-all ${
+              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors ${
                 activeTab === 'config'
                   ? 'border-emerald-500 text-white'
                   : 'border-transparent text-zinc-400 hover:text-zinc-200'

@@ -23,6 +23,7 @@ def _ignored(rel: str) -> bool:
 def test_learning_paths_are_not_gitignored():
     assert not _ignored("data/academy/registry.json")
     assert not _ignored("data/academy/training_dataset.json")
+    assert not _ignored("data/academy/paper_validation_runs.json")
     assert not _ignored("data/strategies/demo/parameters.csv")
     assert not _ignored("models/regime_classifier.onnx")
     assert not _ignored("models/model.onnx")
@@ -35,6 +36,7 @@ def test_runtime_secrets_and_lake_stay_gitignored():
     assert _ignored("data/sigma.duckdb.wal")
     assert _ignored("data/duckdb/runtime.duckdb")
     assert _ignored("data/tv_exports/job/out.csv")
+    assert _ignored("data/lake/paper_validation/s1/c1/signals.parquet")
 
 
 def test_persist_academy_snapshot_writes_json(tmp_path):
