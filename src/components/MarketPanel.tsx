@@ -40,7 +40,7 @@ export function FeedBadge({ status }: { status: 'CONNECTED' | 'DISCONNECTED' }) 
     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
     : 'border-zinc-600/40 bg-zinc-700/20 text-zinc-400';
   return (
-    <span className={`rounded border px-1 py-0.5 text-[9px] font-bold tracking-wide ${tone}`}>
+    <span className={`rounded border px-1 py-0.5 font-mono tabular-nums text-[9px] font-bold tracking-wide ${tone}`}>
       {status}
     </span>
   );
