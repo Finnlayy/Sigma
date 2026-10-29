@@ -451,6 +451,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               <button
                 type="button"
                 onClick={() => setChartViewMode('price-executions')}
+                aria-pressed={chartViewMode === 'price-executions'}
                 className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-colors flex items-center space-x-1.5 ${
                   chartViewMode === 'price-executions'
                     ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
@@ -463,6 +464,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               <button
                 type="button"
                 onClick={() => setChartViewMode('equity')}
+                aria-pressed={chartViewMode === 'equity'}
                 className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-colors flex items-center space-x-1.5 ${
                   chartViewMode === 'equity'
                     ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
@@ -539,6 +541,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 <button
                   type="button"
                   onClick={() => setShowBuyMarkers(!showBuyMarkers)}
+                  aria-pressed={showBuyMarkers}
                   className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-colors ${
                     showBuyMarkers 
                       ? 'bg-emerald-950/70 border-emerald-600/80 text-emerald-300 shadow-xs' 
@@ -554,6 +557,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 <button
                   type="button"
                   onClick={() => setShowSellMarkers(!showSellMarkers)}
+                  aria-pressed={showSellMarkers}
                   className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-colors ${
                     showSellMarkers 
                       ? 'bg-rose-950/70 border-rose-600/80 text-rose-300 shadow-xs' 
@@ -574,6 +578,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                     key={q}
                     type="button"
                     onClick={() => setQueueFilter(q)}
+                    aria-pressed={queueFilter === q}
                     className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase transition-colors ${
                       queueFilter === q
                         ? q === 'live'
