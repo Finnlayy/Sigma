@@ -94,6 +94,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
               id="terminal-filter-last-3"
               onClick={() => setViewLimit('3')}
               title="Only show the last 3 runner log messages"
+              aria-label="Only show the last 3 runner log messages"
               aria-pressed={viewLimit === '3'}
               className={`px-2 py-0.5 rounded transition-colors flex items-center space-x-1 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                 viewLimit === '3'
@@ -108,6 +109,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
               id="terminal-filter-all"
               onClick={() => setViewLimit('all')}
               title="Show all recorded logs"
+              aria-label="Show all recorded logs"
               aria-pressed={viewLimit === 'all'}
               className={`px-2 py-0.5 rounded transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                 viewLimit === 'all'
@@ -122,6 +124,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
           <button 
             onClick={() => setAutoScroll(!autoScroll)}
             title="Toggle auto-scrolling terminal logs"
+            aria-label="Toggle auto-scrolling terminal logs"
             aria-pressed={autoScroll}
             className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
               autoScroll 
