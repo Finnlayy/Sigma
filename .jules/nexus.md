@@ -26,6 +26,3 @@
 ## 2026-10-02 - [IPC/API Integration Insight]
 **Learning:** Python backend IPC/pubsub handlers (e.g., Redis subscriptions in `routes_sigma.py`) were swallowing JSON parsing errors and propagating a 'raw' string fallback, violating fail-closed principles.
 **Action:** Always explicitly log parsing exceptions (using `logging.error`) and drop invalid payloads (via `continue` in loops) to enforce fail-closed boundaries and prevent propagating corrupt data.
-## 2026-10-02 - [IPC/API Integration Insight]
-**Learning:** Raw MarketChart WebSocket listener lacked strict schema validation via `MarketFeedSchema`, risking silent stream deaths on network blips.
-**Action:** Wrapped MarketChart websocket `.onmessage` handler in strict JSON schema validation using `MarketFeedSchema.parse(JSON.parse(ev.data))`.
