@@ -504,7 +504,7 @@ if (diff > parameters.threshold) {
               </div>
               <button 
                 onClick={() => setIsManifestOpen(false)}
-                className="text-zinc-500 hover:text-white transition-colors"
+                className="text-zinc-500 hover:text-white transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded"
                 title="Close Manifest Modal" aria-label="Close Manifest Modal"
               >
                 <X className="w-4 h-4" />
@@ -613,7 +613,8 @@ if (diff > parameters.threshold) {
                   </span>
                   <button 
                     onClick={fetchManifest}
-                    className="text-zinc-500 hover:text-emerald-400 text-[10px] flex items-center space-x-1"
+                    className="text-zinc-500 hover:text-emerald-400 text-[10px] flex items-center space-x-1 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded"
+                    title="Refresh manifest" aria-label="Refresh manifest"
                   >
                     <RefreshCw className={`w-3 h-3 ${isLoadingManifest ? 'animate-spin' : ''}`} />
                     <span>Refresh</span>
