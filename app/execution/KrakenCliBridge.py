@@ -540,6 +540,11 @@ def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int
         # block path traversal in args
         if '..' in arg and '/' in arg:
             return "", "EGeneral:Invalid argument — path traversal detected", 1
+        
+        # Security block: restrict -- arguments to known flags
+        if arg.startswith("--"):
+            if not any(arg.startswith(prefix) for prefix in ALLOWED_FLAGS_PREFIXES):
+                return "", f"EGeneral:Invalid argument — unallowed flag {arg}", 1
     try:
         proc = subprocess.run(
             argv,
