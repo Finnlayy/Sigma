@@ -1460,9 +1460,13 @@ export function NetronVisualizerPanel() {
   const port: number = data?.port ?? 8082;
   const host = typeof window !== 'undefined' ? window.location.host : '';
   const previewMatch = /^\d+-(.+)$/.exec(host);
-  const url: string = previewMatch
+  let url: string = previewMatch
     ? `${window.location.protocol}//${port}-${previewMatch[1]}`
     : (data?.url ?? `http://localhost:${port}`);
+
+  if (url.toLowerCase().trim().startsWith('javascript:')) {
+    url = '#';
+  }
 
   const inspect = async (tag: string) => {
     await sigmaApi.inspectModel(tag);
