@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import { motion } from "motion/react";
 import {
   Zap, Pause, Ban, Skull, ArrowUpCircle, Wallet, Activity,
@@ -65,6 +65,13 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
     state.status === "ACTIVE" ? "bg-emerald-500" :
     state.status === "THROTTLED" ? "bg-amber-500" : "bg-red-500";
 
+  const prevPctRef = useRef(pct);
+  let willChangeStyle = "auto";
+  if (prevPctRef.current !== pct) {
+    willChangeStyle = "transform";
+    prevPctRef.current = pct;
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -114,8 +121,11 @@ export const StrategyCard = memo(function StrategyCard({ state, name, symbol, on
             style={{
               transform: `scaleX(${pct / 100})`,
               transformOrigin: "left",
-              willChange: "transform",
+              willChange: willChangeStyle,
               transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+            onTransitionEnd={(e) => {
+              (e.currentTarget as HTMLElement).style.willChange = 'auto';
             }}
           />
         </div>
