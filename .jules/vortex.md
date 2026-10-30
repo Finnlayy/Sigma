@@ -3,8 +3,8 @@
 **Action:** Hardware-acceleration rule applied: Switched from animating `width` to using `transform: scaleX(...)` on the GPU composite layer along with `transform-origin: left` to achieve equivalent visuals with zero CPU layout thrashing. Also enforced `contain: layout paint;` on isolated trading cards to restrict rendering calculations.
 
 ## 2024-03-24 - [Graphics / Rendering Insight]
-**Learning:** [GPU / Framerate bottleneck root cause] Layout thrashing caused by animating width on budget progress bar in StrategyCard.
-**Action:** [Hardware-acceleration rule applied] Replaced transition-all and width animation with transform: scaleX and transform-origin: left for GPU-accelerated transition, and added contain: layout paint to isolate layout operations.
+**Learning:** Layout thrashing caused by animating width on budget progress bar in StrategyCard.
+**Action:** Replaced transition-all and width animation with transform: scaleX and transform-origin: left for GPU-accelerated transition, and added contain: layout paint to isolate layout operations.
 
 ## 2025-02-23 - [Graphics / Rendering Insight]
 **Learning:** Found a layout-thrashing pattern triggered by live strategy list re-renders where animating `width` directly via `transition-all` on progress bars caused synchronous CPU layout recalculations and degraded framerate.
@@ -25,3 +25,6 @@
 ## 2024-03-24 - [Graphics / Rendering Insight]
 **Learning:** Using `transition-all` on the Confirm button in `StrategyQueueConfirmModal.tsx` triggers CPU layout-thrashing by animating non-composite properties, leading to degraded framerates.
 **Action:** Replaced `transition-all` with `transition-colors` to restrict animations strictly to composite/paint layer properties, ensuring zero-lag GPU execution.
+## 2026-10-15 - [Graphics / Rendering Insight]
+**Learning:** Found that unbounded `will-change: transform` on `StrategyCard` progress bars caused GPU memory leaks by maintaining composite layers indefinitely, degrading performance.
+**Action:** Implemented `onTransitionEnd` cleanup to dynamically remove `will-change` after the transition sequence finishes, freeing up GPU memory.
