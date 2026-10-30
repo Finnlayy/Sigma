@@ -9,14 +9,6 @@ async function startServer() {
   app.disable('x-powered-by'); // Security: Do not leak Express version
   const PORT = 3000;
 
-  // Add security headers using custom middleware
-  app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    next();
-  });
-
   app.use(cors());
   app.use(express.json());
 
