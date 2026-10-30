@@ -666,11 +666,23 @@ export function LLMConsole() {
         is_complete: z.boolean().optional()
       }).catchall(z.any());
 
-      const ws = new WebSocket(sigmaApi.llmStreamUrl());
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('LLM stream timeout')), 20000);
+        let ws: WebSocket | null = null;
+        let timer: ReturnType<typeof setTimeout>;
+
+        const cleanup = () => {
+          clearTimeout(timer);
+          try { ws?.close(); } catch { /* ignore */ }
+        };
+
+        timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('LLM stream timeout'));
+        }, 20000);
+
+        ws = new WebSocket(sigmaApi.llmStreamUrl());
         ws.onopen = () => {
-          ws.send(JSON.stringify({ session_id: 'terminal', prompt }));
+          ws?.send(JSON.stringify({ session_id: 'terminal', prompt }));
         };
         ws.onmessage = (ev) => {
           try {
@@ -678,8 +690,7 @@ export function LLMConsole() {
             if (msg.content_chunk) append(String(msg.content_chunk).trimEnd());
             if (msg.tool_result) append(JSON.stringify(msg.tool_result).slice(0, 800));
             if (msg.is_complete) {
-              clearTimeout(timer);
-              ws.close();
+              cleanup();
               resolve();
             }
           } catch (e) {
@@ -687,11 +698,11 @@ export function LLMConsole() {
           }
         };
         ws.onerror = () => {
-          clearTimeout(timer);
+          cleanup();
           reject(new Error('Ollama/stream unavailable'));
         };
         ws.onclose = () => {
-          clearTimeout(timer);
+          cleanup();
           resolve();
         };
       });
