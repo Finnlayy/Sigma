@@ -1499,7 +1499,7 @@ export function NetronVisualizerPanel() {
         {!models?.length && <span className="text-[10px] text-zinc-600">Keine .onnx Modelle in {data?.models_dir}</span>}
       </div>
       {data?.running ? (
-        <iframe key={nonce} src={url} title="Netron"
+        <iframe key={nonce} src={sanitizeUrl(url)} title="Netron"
           className="h-[420px] w-full rounded border border-zinc-800 bg-[#0a0a0c]/80 backdrop-blur-md" />
       ) : (
         <div className="flex h-[200px] items-center justify-center rounded border border-white/5 bg-[#0a0a0c]/80 backdrop-blur-md text-[11px] text-zinc-600">
