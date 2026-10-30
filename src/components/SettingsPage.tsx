@@ -141,7 +141,10 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
     for (const row of rows) {
       (map[row.group] ??= []).push(row);
     }
-    return order.filter((g) => map[g]?.length).map((g) => [g, map[g]] as const);
+    return order.reduce((acc: [string, SettingRow[]][], g) => {
+      if (map[g]?.length) acc.push([g, map[g]]);
+      return acc;
+    }, []);
   }, [rows]);
 
   const pulse = (key: string, next: SaveFlash) => {

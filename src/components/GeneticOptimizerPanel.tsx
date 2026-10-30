@@ -158,9 +158,12 @@ export function GeneticOptimizerPanel({
                 className="w-full bg-zinc-900 border border-purple-800/60 text-zinc-200 rounded px-2 py-1.5 text-xs font-mono focus:border-purple-400 focus:outline-none"
               >
                 <option value="none">Pure Exploration</option>
-                {strategies.filter(s => s.status !== 'archived').map(s => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.assetPair})</option>
-                ))}
+                {strategies.reduce((acc: React.JSX.Element[], s) => {
+                  if (s.status !== 'archived') {
+                    acc.push(<option key={s.id} value={s.id}>{s.name} ({s.assetPair})</option>);
+                  }
+                  return acc;
+                }, [])}
               </select>
             </div>
             <div>

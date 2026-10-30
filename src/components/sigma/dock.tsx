@@ -44,7 +44,10 @@ const uid = (p = 'n') => {
 
 export function fromFlexLayout(node: FlexChild, depth = 0): DockNode {
   if (node.type === 'tabset') {
-    const panels = (node.children ?? []).map((c) => c.component).filter(Boolean) as string[];
+    const panels = (node.children ?? []).reduce((acc: string[], c) => {
+      if (c.component) acc.push(c.component);
+      return acc;
+    }, []);
     return {
       type: 'tabset',
       id: uid('ts'),

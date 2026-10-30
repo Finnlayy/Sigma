@@ -138,7 +138,10 @@ export function StrategyLibraryPanel() {
   };
 
   const importTv = async (ids?: string[]) => {
-    const scriptIds = ids ?? Object.entries(tvPicked).filter(([, on]) => on).map(([id]) => id);
+    const scriptIds = ids ?? Object.entries(tvPicked).reduce((acc: string[], [id, on]) => {
+      if (on) acc.push(id);
+      return acc;
+    }, []);
     if (!scriptIds?.length) {
       setStatus('select at least one TV script');
       return;
