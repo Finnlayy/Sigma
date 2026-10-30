@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { Rnd } from "react-rnd";
 import { 
   X, TrendingUp, TrendingDown, Target, Activity, ShieldAlert,
   Zap, Clock, DollarSign, BarChart2, Layers, Play, Square,
@@ -70,17 +70,12 @@ export default function StrategyMatrixModal({
   [strategyMatrix.trades, tradeFilter]);
 
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 12 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 12 }}
-          transition={{ duration: 0.18 }}
-          className="bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden text-zinc-100 font-sans"
+    <div className="fixed inset-0 z-50 pointer-events-none">
+        <Rnd dragHandleClassName="drag-handle"
+          default={{ x: window.innerWidth / 2 - 450, y: window.innerHeight / 2 - 300, width: 900, height: 600 }} minWidth={600} minHeight={400} bounds="window" className="bg-zinc-900 border border-zinc-700/80 rounded-xl shadow-2xl flex flex-col overflow-hidden text-zinc-100 font-sans pointer-events-auto"
         >
           {/* Modal Header */}
-          <div className="p-5 border-b border-zinc-800 bg-zinc-950/70 flex items-center justify-between flex-wrap gap-3">
+          <div className="drag-handle p-5 border-b border-zinc-800 bg-zinc-950/70 flex items-center justify-between flex-wrap gap-3 cursor-move">
             <div className="flex items-center space-x-3.5">
               <div className={`p-2.5 rounded-lg border font-mono font-bold text-sm ${
                 strategyMatrix.assetPair.startsWith('BTC') || strategyMatrix.assetPair.startsWith('XBT')
@@ -533,7 +528,7 @@ export default function StrategyMatrixModal({
           </div>
 
           {/* Modal Footer */}
-          <div className="p-4 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between text-xs font-mono text-zinc-500">
+          <div className="drag-handle p-4 border-t border-zinc-800 bg-zinc-950/80 flex items-center justify-between text-xs font-mono text-zinc-500 cursor-move">
             <span>Kraken Strategy Matrix Inspector • {strategyMatrix.strategyId}</span>
             <button
               onClick={onClose}
@@ -542,8 +537,7 @@ export default function StrategyMatrixModal({
               Close Template
             </button>
           </div>
-        </motion.div>
+        </Rnd>
       </div>
-    </AnimatePresence>
   );
 }
