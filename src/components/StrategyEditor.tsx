@@ -908,9 +908,10 @@ if (diff > parameters.threshold) {
               <button
                 type="button"
                 role="switch"
+                aria-label="Toggle Global Hard Stop"
                 aria-checked={hardStopEnabled}
                 onClick={() => setHardStopEnabled(!hardStopEnabled)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
                   hardStopEnabled ? 'bg-rose-600' : 'bg-zinc-800'
                 }`}
               >
