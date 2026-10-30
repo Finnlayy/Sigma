@@ -160,7 +160,7 @@ function renderGrid(id, data) {
                 if (v > 0) dv = '+' + dv;
             }
         }
-        h += `<div class="data-card"><div class="data-label">${k.replace(/_/g,' ').replace(/\./g,' ')}</div><div class="data-value ${cls}">${dv}</div></div>`;
+        h += `<div class="data-card"><div class="data-label">${escapeHtml(k.replace(/_/g,' ').replace(/\./g,' '))}</div><div class="data-value ${cls}">${escapeHtml(dv)}</div></div>`;
     }
     c.innerHTML = h + '</div>';
 }
@@ -168,13 +168,13 @@ function renderGrid(id, data) {
 function renderOHLCV(data) {
     const c = el('ohlcv');
     if (!data || !data.length) { c.innerHTML = '<div class="no-data">No OHLCV data.</div>'; return; }
-    let h = `<div class="info-banner">${data.length} candles · ${sym.exchange}:${sym.ticker} · ${sym.timeframe}</div>`;
+    let h = `<div class="info-banner">${data.length} candles · ${escapeHtml(sym.exchange)}:${escapeHtml(sym.ticker)} · ${escapeHtml(sym.timeframe)}</div>`;
     h += '<div class="table-wrap"><table><thead><tr><th>#</th><th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>';
     for (const r of data) {
         const chg = r.close - r.open;
         const cls = chg >= 0 ? 'pos' : 'neg';
         const ts = r.timestamp ? new Date(r.timestamp * 1000).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
-        h += `<tr><td>${r.index??''}</td><td>${ts}</td><td>${f2(r.open)}</td><td>${f2(r.high)}</td><td>${f2(r.low)}</td><td class="${cls}">${f2(r.close)}</td><td>${r.volume != null ? fmtNum(r.volume) : '—'}</td></tr>`;
+        h += `<tr><td>${escapeHtml(r.index??'')}</td><td>${escapeHtml(ts)}</td><td>${escapeHtml(f2(r.open))}</td><td>${escapeHtml(f2(r.high))}</td><td>${escapeHtml(f2(r.low))}</td><td class="${cls}">${escapeHtml(f2(r.close))}</td><td>${escapeHtml(r.volume != null ? fmtNum(r.volume) : '—')}</td></tr>`;
     }
     c.innerHTML = h + '</tbody></table></div>';
 }
@@ -184,7 +184,7 @@ function renderTable(containerId, data) {
     if (!data || !data.length) { c.innerHTML = '<div class="no-data">No data.</div>'; return; }
     const keys = Object.keys(data[0]);
     let h = '<div class="table-wrap"><table><thead><tr>';
-    keys.forEach(k => h += `<th>${k.replace(/_/g,' ')}</th>`);
+    keys.forEach(k => h += `<th>${escapeHtml(k.replace(/_/g,' '))}</th>`);
     h += '</tr></thead><tbody>';
     for (const row of data) {
         h += '<tr>';
@@ -197,7 +197,7 @@ function renderTable(containerId, data) {
                 if ((k === 'change' || k === 'change_abs') && parseFloat(v) > 0) v = '+' + v;
             }
             if (v === null || v === undefined) v = '—';
-            h += `<td class="${cls}">${v}</td>`;
+            h += `<td class="${cls}">${escapeHtml(v)}</td>`;
         }
         h += '</tr>';
     }
@@ -217,6 +217,16 @@ async function safeFetch(url) {
 }
 
 function ex(s) { return s.status === 'fulfilled' && s.value ? s.value.data : null; }
+
+function escapeHtml(unsafe) {
+    if (unsafe == null) return '';
+    return String(unsafe)
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
 
 function fmtNum(n) {
     if (n == null) return '—';
