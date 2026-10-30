@@ -1148,12 +1148,11 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
                 await asyncio.sleep(5.0)
                 try:
                     candles, meta = client.fetch_ohlc_with_meta(symbol, interval, 100)
-                    await websocket.send_text(_json.dumps({
-                        "type": "candles",
-                        "symbol": symbol,
-                        "candles": candles[-1:],
-                        "feed": meta,
-                    }))
+                    if candles:
+                        await websocket.send_text(_json.dumps({
+                            "channel": candle_channel,
+                            "data": {"candle": candles[-1]},
+                        }))
                 except Exception:
                     await asyncio.sleep(5.0)
     except WebSocketDisconnect:
@@ -1181,7 +1180,12 @@ async def llm_stream(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            payload = await websocket.receive_json()
+            try:
+                payload = await websocket.receive_json()
+            except Exception as exc:
+                import logging
+                logging.error(f"Failed to parse LLM stream input payload: {exc}")
+                continue
             session = str(payload.get("session_id") or "default")
             call = payload.get("tool_call")
             if call:
