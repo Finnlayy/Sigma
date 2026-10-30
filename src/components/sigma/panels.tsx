@@ -652,7 +652,10 @@ export function LLMConsole() {
     setInput('');
     try {
       const tools = await sigmaApi.llmTools();
-      const names: string[] = (tools?.tools ?? []).map((t: { name?: string }) => t.name).filter(Boolean);
+      const names: string[] = (tools?.tools ?? []).reduce((acc: string[], t: { name?: string }) => {
+        if (t.name) acc.push(t.name);
+        return acc;
+      }, []);
       const match = names.find((n) => prompt.startsWith(n) || prompt.includes(n));
       if (match && !prompt.includes(' ')) {
         const out = await sigmaApi.llmToolCall(match, {});

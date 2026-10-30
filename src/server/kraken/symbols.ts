@@ -111,6 +111,9 @@ export function mapAssetPairs(result: RawAssetPairs | null): KrakenAssetPairsRes
     total: symbols.length,
     symbols,
     quotes,
-    popularSymbols: symbols.filter((s) => popularSet.has(s.symbol)).map((s) => s.symbol),
+    popularSymbols: symbols.reduce((acc: string[], s) => {
+      if (popularSet.has(s.symbol)) acc.push(s.symbol);
+      return acc;
+    }, []),
   };
 }
