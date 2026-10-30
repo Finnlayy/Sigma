@@ -68,6 +68,14 @@ interface PricePoint {
   ordersCount?: number;
 }
 
+
+function secureRandom(): number {
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    return window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1);
+  }
+  return Math.random();
+}
+
 export default function MarketPanel({ tickers, orders, portfolioHistory, onResetHistory }: MarketPanelProps) {
   const [prevPrices, setPrevPrices] = useState<Record<string, number>>({});
   const [flashStates, setFlashStates] = useState<Record<string, 'up' | 'down' | null>>({});
@@ -152,7 +160,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
         const fallbackPoints: PricePoint[] = [];
         for (let i = 40; i >= 0; i--) {
           const t = new Date(now - i * intervalMin * 60 * 1000);
-          const noise = (Math.sin(i / 3) * 0.008 + (Math.random() - 0.5) * 0.004) * basePrice;
+          const noise = (Math.sin(i / 3) * 0.008 + (secureRandom() - 0.5) * 0.004) * basePrice;
           const p = Number((basePrice + noise)?.toFixed(2));
           fallbackPoints.push({
             time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
@@ -163,7 +171,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             high: p * 1.002,
             low: p * 0.998,
             close: p,
-            volume: Math.floor(Math.random() * 50 + 10)
+            volume: Math.floor(secureRandom() * 50 + 10)
           });
         }
         setChartCandles(fallbackPoints);
