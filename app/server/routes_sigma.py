@@ -1181,7 +1181,14 @@ async def llm_stream(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            payload = await websocket.receive_json()
+            try:
+                payload = await websocket.receive_json()
+            except WebSocketDisconnect:
+                raise
+            except Exception as exc:
+                import logging
+                logging.error(f"Failed to parse LLM WS payload: {exc}")
+                continue
             session = str(payload.get("session_id") or "default")
             call = payload.get("tool_call")
             if call:
