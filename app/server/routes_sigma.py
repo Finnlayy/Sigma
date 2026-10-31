@@ -1110,11 +1110,14 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
     pubsub = None
     try:
         from app.core.redis_client import get_redis
-        redis = await get_redis()
+        from app.core.config import load_config
+        cfg = load_config()
+        redis = await get_redis(cfg)
         if redis is not None:
             pubsub = redis.pubsub()
             await pubsub.subscribe(candle_channel, exec_channel)
-    except Exception:
+    except Exception as exc:
+        logging.error(f"Failed to initialize pubsub: {exc}")
         pubsub = None
 
     try:
