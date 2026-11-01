@@ -1110,7 +1110,7 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
     pubsub = None
     try:
         from app.core.redis_client import get_redis
-        redis = await get_redis()
+        redis = await get_redis(load_config())
         if redis is not None:
             pubsub = redis.pubsub()
             await pubsub.subscribe(candle_channel, exec_channel)
