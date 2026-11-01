@@ -118,7 +118,7 @@ export default function QueueMatrixPanel({
       });
     }, [matrix.allTimeTrades, tradeSearch, tradeTypeFilter]);
 
-    const PIE_COLORS = ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
+    const PIE_BG_CLASSES = ['bg-emerald-500', 'bg-indigo-500', 'bg-amber-500', 'bg-pink-500', 'bg-violet-500', 'bg-cyan-500'];
 
     return (
       <div className="space-y-6">
@@ -407,16 +407,16 @@ export default function QueueMatrixPanel({
                   <div key={asset.pair} className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-800/80 space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-white flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS?.length] }} />
+                        <span className={`w-2 h-2 rounded-full ${PIE_BG_CLASSES[idx % PIE_BG_CLASSES?.length]}`} />
                         {asset.pair}
                       </span>
-                      <span className={`font-bold ${asset.netPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <span className={`font-bold font-mono tabular-nums ${asset.netPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {asset.netPnL >= 0 ? '+' : ''}${asset.netPnL?.toFixed(2)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-zinc-500">
-                      <span>Volume: ${asset.volumeUSD?.toLocaleString()}</span>
-                      <span>Win: {asset.winRate}% ({asset.tradesCount} orders)</span>
+                      <span className="font-mono tabular-nums">Volume: ${asset.volumeUSD?.toLocaleString()}</span>
+                      <span className="font-mono tabular-nums">Win: {asset.winRate}% ({asset.tradesCount} orders)</span>
                     </div>
                   </div>
                 ))
