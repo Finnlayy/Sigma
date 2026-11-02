@@ -1,9 +1,21 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import {
-  ShieldAlert, ShieldCheck, Scale, Cpu, Zap, Activity, RefreshCw,
-  CheckCircle2, XCircle, AlertTriangle, ArrowRight, BarChart3, Calculator,
-  PiggyBank, Layers
+  ShieldAlert,
+  ShieldCheck,
+  Scale,
+  Cpu,
+  Zap,
+  Activity,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  Calculator,
+  PiggyBank,
+  Layers,
 } from "lucide-react";
 import { safeFetchJson } from "../../lib/api";
 import { StrategyCard, M8InstanceState } from "../StrategyCard";
@@ -21,9 +33,17 @@ export function ExecutionRiskPanel() {
     setM8Refreshing(true);
     try {
       const [states, v, auto] = await Promise.all([
-        safeFetchJson<{ states: Record<string, M8InstanceState> }>("/api/m8/states", undefined, 4000),
+        safeFetchJson<{ states: Record<string, M8InstanceState> }>(
+          "/api/m8/states",
+          undefined,
+          4000,
+        ),
         safeFetchJson<any>("/api/m8/vault", undefined, 4000),
-        safeFetchJson<{ events: AutopsyEvent[]; zoneDistribution: any }>("/api/m8/autopsies?limit=120", undefined, 4000),
+        safeFetchJson<{ events: AutopsyEvent[]; zoneDistribution: any }>(
+          "/api/m8/autopsies?limit=120",
+          undefined,
+          4000,
+        ),
       ]);
       if (states?.states) setM8States(states.states);
       if (v) setVault(v);
@@ -49,7 +69,7 @@ export function ExecutionRiskPanel() {
   const [judgeSymbol, setJudgeSymbol] = useState<string>("BTC/USD");
   const [orderQty, setOrderQty] = useState<number>(0.5);
   const [orderSide, setOrderSide] = useState<string>("BUY");
-  const [winRate, setWinRate] = useState<number>(0.60);
+  const [winRate, setWinRate] = useState<number>(0.6);
   const [winLossRatio, setWinLossRatio] = useState<number>(1.8);
   const [targetVol, setTargetVol] = useState<number>(0.15);
   const [judgeResult, setJudgeResult] = useState<any>(null);
@@ -82,18 +102,22 @@ export function ExecutionRiskPanel() {
   const runJudgeEvaluation = async () => {
     setIsLoadingJudge(true);
     try {
-      const data = await safeFetchJson<any>("/api/quant/execution/m8-judge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol: judgeSymbol,
-          qty: orderQty,
-          side: orderSide,
-          winRate,
-          winLossRatio,
-          targetVol
-        })
-      }, 4000);
+      const data = await safeFetchJson<any>(
+        "/api/quant/execution/m8-judge",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            symbol: judgeSymbol,
+            qty: orderQty,
+            side: orderSide,
+            winRate,
+            winLossRatio,
+            targetVol,
+          }),
+        },
+        4000,
+      );
       if (data) {
         setJudgeResult(data);
       }
@@ -107,16 +131,20 @@ export function ExecutionRiskPanel() {
   const runImpactSimulation = async () => {
     setIsLoadingImpact(true);
     try {
-      const data = await safeFetchJson<any>("/api/quant/market-impact/simulate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol: judgeSymbol,
-          orderQty: impactQty,
-          side: orderSide,
-          dailyVolume
-        })
-      }, 4000);
+      const data = await safeFetchJson<any>(
+        "/api/quant/market-impact/simulate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            symbol: judgeSymbol,
+            orderQty: impactQty,
+            side: orderSide,
+            dailyVolume,
+          }),
+        },
+        4000,
+      );
       if (data) {
         setImpactResult(data);
       }
@@ -130,7 +158,11 @@ export function ExecutionRiskPanel() {
   const runReconciliation = async () => {
     setIsLoadingAudit(true);
     try {
-      const data = await safeFetchJson<any>("/api/quant/reconciliation/run", { method: "POST" }, 4000);
+      const data = await safeFetchJson<any>(
+        "/api/quant/reconciliation/run",
+        { method: "POST" },
+        4000,
+      );
       if (data) {
         setAuditResult(data);
       }
@@ -144,7 +176,11 @@ export function ExecutionRiskPanel() {
   const runRLInference = async () => {
     setIsLoadingRL(true);
     try {
-      const data = await safeFetchJson<any>("/api/quant/engine/rl-fast-path", { method: "POST" }, 4000);
+      const data = await safeFetchJson<any>(
+        "/api/quant/engine/rl-fast-path",
+        { method: "POST" },
+        4000,
+      );
       if (data) {
         setRlInference(data);
       }
@@ -156,14 +192,54 @@ export function ExecutionRiskPanel() {
   };
 
   const defaultGates = [
-    { gate: "Gate 1", name: "Volatility Threshold Guard", passed: true, reason: "Current vol 2.4% <= Max 4.5%" },
-    { gate: "Gate 2", name: "Spread & Liquidity Filter", passed: true, reason: "Spread 3.0 bps <= Max 8.0 bps" },
-    { gate: "Gate 3", name: "Cross-Correlation Guard", passed: true, reason: "Systemic portfolio beta 0.65 <= Max 0.85" },
-    { gate: "Gate 4", name: "Maximum Drawdown Floor", passed: true, reason: "Rolling drawdown 3.2% <= Cutoff 12.0%" },
-    { gate: "Gate 5", name: "Order Size & ADV Limit", passed: true, reason: "Order ratio 0.01% of ADV <= Max 2.5%" },
-    { gate: "Gate 6", name: "FinBERT News Shock Filter", passed: true, reason: "Sentiment score neutral/safe" },
-    { gate: "Gate 7", name: "Regime Alignment Check", passed: true, reason: "Strategy matches DFA Hurst trend" },
-    { gate: "Gate 8", name: "Global Circuit Breaker", passed: true, reason: "System directive state: NORMAL" }
+    {
+      gate: "Gate 1",
+      name: "Volatility Threshold Guard",
+      passed: true,
+      reason: "Current vol 2.4% <= Max 4.5%",
+    },
+    {
+      gate: "Gate 2",
+      name: "Spread & Liquidity Filter",
+      passed: true,
+      reason: "Spread 3.0 bps <= Max 8.0 bps",
+    },
+    {
+      gate: "Gate 3",
+      name: "Cross-Correlation Guard",
+      passed: true,
+      reason: "Systemic portfolio beta 0.65 <= Max 0.85",
+    },
+    {
+      gate: "Gate 4",
+      name: "Maximum Drawdown Floor",
+      passed: true,
+      reason: "Rolling drawdown 3.2% <= Cutoff 12.0%",
+    },
+    {
+      gate: "Gate 5",
+      name: "Order Size & ADV Limit",
+      passed: true,
+      reason: "Order ratio 0.01% of ADV <= Max 2.5%",
+    },
+    {
+      gate: "Gate 6",
+      name: "FinBERT News Shock Filter",
+      passed: true,
+      reason: "Sentiment score neutral/safe",
+    },
+    {
+      gate: "Gate 7",
+      name: "Regime Alignment Check",
+      passed: true,
+      reason: "Strategy matches DFA Hurst trend",
+    },
+    {
+      gate: "Gate 8",
+      name: "Global Circuit Breaker",
+      passed: true,
+      reason: "System directive state: NORMAL",
+    },
   ];
 
   const gatesList = judgeResult?.m8_verdict?.gates || defaultGates;
@@ -181,7 +257,8 @@ export function ExecutionRiskPanel() {
                 M8 State Engine — ACTIVE → THROTTLED → QUARANTINED → RETIRED
               </h3>
               <p className="text-xs text-zinc-400 text-slate-400">
-                Vault Profit Sweep (100% v1.2.0) · TradeAutopsy 5-Zonen · Redis-Fast-Path
+                Vault Profit Sweep (100% v1.2.0) · TradeAutopsy 5-Zonen ·
+                Redis-Fast-Path
               </p>
             </div>
           </div>
@@ -191,7 +268,9 @@ export function ExecutionRiskPanel() {
               disabled={m8Refreshing}
               className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold tracking-wider transition-colors flex items-center gap-1.5"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${m8Refreshing ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${m8Refreshing ? "animate-spin" : ""}`}
+              />
               REFRESH
             </button>
           </div>
@@ -232,14 +311,18 @@ export function ExecutionRiskPanel() {
                 </span>
               </div>
               <div className="text-[10px] font-mono text-slate-500 mb-2">
-                {vault?.entries_count ?? 0} Sweeps · letzter: {vault?.last_sweep
+                {vault?.entries_count ?? 0} Sweeps · letzter:{" "}
+                {vault?.last_sweep
                   ? `${vault.last_sweep.amount_usd?.toFixed(2)} USD von ${vault.last_sweep.strategy_id?.split("__")[0]}`
                   : "—"}
               </div>
-              {(zoneDist) && (
+              {zoneDist && (
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(zoneDist).map(([z, n]: [string, any]) => (
-                    <span key={z} className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-300">
+                    <span
+                      key={z}
+                      className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-300"
+                    >
                       {z}: <span className="font-bold">{n}</span>
                     </span>
                   ))}
@@ -266,19 +349,28 @@ export function ExecutionRiskPanel() {
                 M8 Judge & 8 Reject-Gates Gatekeeper (Modul 09)
               </h3>
               <p className="text-xs text-slate-400">
-                Multi-layer order pre-flight validation, Fractional Kelly sizing & Volatility Targeting
+                Multi-layer order pre-flight validation, Fractional Kelly sizing
+                & Volatility Targeting
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className={`px-3 py-1 rounded-lg text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 ${
-              allGatesPassed
-                ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40"
-                : "bg-red-950/80 text-red-300 border border-red-500/40"
-            }`}>
-              {allGatesPassed ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-red-400" />}
-              {allGatesPassed ? "ORDER APPROVED FOR EXECUTION" : "ORDER REJECTED BY M8"}
+            <span
+              className={`px-3 py-1 rounded-lg text-xs font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                allGatesPassed
+                  ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40"
+                  : "bg-red-950/80 text-red-300 border border-red-500/40"
+              }`}
+            >
+              {allGatesPassed ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <XCircle className="w-4 h-4 text-red-400" />
+              )}
+              {allGatesPassed
+                ? "ORDER APPROVED FOR EXECUTION"
+                : "ORDER REJECTED BY M8"}
             </span>
 
             <button
@@ -286,7 +378,9 @@ export function ExecutionRiskPanel() {
               disabled={isLoadingJudge}
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold tracking-wider transition-colors flex items-center gap-1.5"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingJudge ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${isLoadingJudge ? "animate-spin" : ""}`}
+              />
               RE-EVALUATE
             </button>
           </div>
@@ -304,15 +398,25 @@ export function ExecutionRiskPanel() {
               }`}
             >
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">{g.gate || `Gate ${idx + 1}`}</span>
+                <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">
+                  {g.gate || `Gate ${idx + 1}`}
+                </span>
                 {g.passed ? (
-                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded">PASS</span>
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded">
+                    PASS
+                  </span>
                 ) : (
-                  <span className="text-[10px] font-bold text-red-400 bg-red-950/60 px-1.5 py-0.5 rounded">REJECT</span>
+                  <span className="text-[10px] font-bold text-red-400 bg-red-950/60 px-1.5 py-0.5 rounded">
+                    REJECT
+                  </span>
                 )}
               </div>
-              <h5 className="text-xs font-semibold text-slate-200 mb-1">{g.name}</h5>
-              <p className="text-[10px] text-slate-400 leading-tight">{g.reason}</p>
+              <h5 className="text-xs font-semibold text-slate-200 mb-1">
+                {g.name}
+              </h5>
+              <p className="text-[10px] text-slate-400 leading-tight">
+                {g.reason}
+              </p>
             </div>
           ))}
         </div>
@@ -334,9 +438,13 @@ export function ExecutionRiskPanel() {
                 <option value="SOL/USD">SOL/USD</option>
               </select>
               <button
-                onClick={() => setOrderSide(orderSide === "BUY" ? "SELL" : "BUY")}
+                onClick={() =>
+                  setOrderSide(orderSide === "BUY" ? "SELL" : "BUY")
+                }
                 className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold ${
-                  orderSide === "BUY" ? "bg-emerald-600 text-white" : "bg-red-600 text-white"
+                  orderSide === "BUY"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-red-600 text-white"
                 }`}
               >
                 {orderSide}
@@ -347,7 +455,9 @@ export function ExecutionRiskPanel() {
           <div>
             <div className="flex justify-between text-[11px] text-slate-400 mb-1">
               <span>Historical Win Rate:</span>
-              <span className="font-mono text-cyan-400">{(winRate * 100)?.toFixed(0)}%</span>
+              <span className="font-mono text-cyan-400">
+                {(winRate * 100)?.toFixed(0)}%
+              </span>
             </div>
             <input
               type="range"
@@ -363,7 +473,9 @@ export function ExecutionRiskPanel() {
           <div>
             <div className="flex justify-between text-[11px] text-slate-400 mb-1">
               <span>Target Volatility (Annual):</span>
-              <span className="font-mono text-amber-400">{(targetVol * 100)?.toFixed(0)}%</span>
+              <span className="font-mono text-amber-400">
+                {(targetVol * 100)?.toFixed(0)}%
+              </span>
             </div>
             <input
               type="range"
@@ -377,13 +489,17 @@ export function ExecutionRiskPanel() {
           </div>
 
           <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 text-center">
-            <span className="text-[10px] uppercase tracking-wider text-slate-400">Optimal Kelly Sizing</span>
+            <span className="text-[10px] uppercase tracking-wider text-slate-400">
+              Optimal Kelly Sizing
+            </span>
             <p className="text-lg font-bold font-mono text-emerald-400 mt-0.5">
-              {judgeResult?.kelly_sizing?.recommended_fraction 
-                ? `${(judgeResult.kelly_sizing.recommended_fraction * 100)?.toFixed(1)}% Equity` 
+              {judgeResult?.kelly_sizing?.recommended_fraction
+                ? `${(judgeResult.kelly_sizing.recommended_fraction * 100)?.toFixed(1)}% Equity`
                 : "14.2% Equity"}
             </p>
-            <span className="text-[10px] text-slate-400">Half-Kelly (f* / 2) Vol-Targeted</span>
+            <span className="text-[10px] text-slate-400">
+              Half-Kelly (f* / 2) Vol-Targeted
+            </span>
           </div>
         </div>
       </div>
@@ -407,23 +523,31 @@ export function ExecutionRiskPanel() {
 
             <div className="space-y-3 text-xs mb-4">
               <div>
-                <label className="text-[10px] uppercase text-slate-400 block mb-1">Order Quantity (BTC)</label>
+                <label className="text-[10px] uppercase text-slate-400 block mb-1">
+                  Order Quantity (BTC)
+                </label>
                 <input
                   type="number"
                   step="0.5"
                   value={impactQty}
-                  onChange={(e) => setImpactQty(parseFloat(e.target.value) || 0)}
+                  onChange={(e) =>
+                    setImpactQty(parseFloat(e.target.value) || 0)
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] uppercase text-slate-400 block mb-1">Estimated 24h ADV (BTC)</label>
+                <label className="text-[10px] uppercase text-slate-400 block mb-1">
+                  Estimated 24h ADV (BTC)
+                </label>
                 <input
                   type="number"
                   step="500"
                   value={dailyVolume}
-                  onChange={(e) => setDailyVolume(parseFloat(e.target.value) || 1)}
+                  onChange={(e) =>
+                    setDailyVolume(parseFloat(e.target.value) || 1)
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none"
                 />
               </div>
@@ -473,12 +597,16 @@ export function ExecutionRiskPanel() {
                   Reconciliation Daemon (Modul 12)
                 </h4>
               </div>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
-                auditResult?.reconciled ?? true
-                  ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                  : "bg-red-950 text-red-300 border border-red-800"
-              }`}>
-                {auditResult?.reconciled ?? true ? "100% IN SYNC" : "DISCREPANCY"}
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                  (auditResult?.reconciled ?? true)
+                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                    : "bg-red-950 text-red-300 border border-red-800"
+                }`}
+              >
+                {(auditResult?.reconciled ?? true)
+                  ? "100% IN SYNC"
+                  : "DISCREPANCY"}
               </span>
             </div>
 
@@ -486,11 +614,15 @@ export function ExecutionRiskPanel() {
               <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Local State Balances:</span>
-                  <span className="font-mono text-slate-200">100,000.00 USD</span>
+                  <span className="font-mono text-slate-200">
+                    100,000.00 USD
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Exchange Ledger Sync:</span>
-                  <span className="font-mono text-slate-200">100,000.00 USD</span>
+                  <span className="font-mono text-slate-200">
+                    100,000.00 USD
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Position Drift:</span>
@@ -498,7 +630,9 @@ export function ExecutionRiskPanel() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Auto-Heal Engine:</span>
-                  <span className="font-mono text-cyan-400">ARMED & ACTIVE</span>
+                  <span className="font-mono text-cyan-400">
+                    ARMED & ACTIVE
+                  </span>
                 </div>
               </div>
             </div>
@@ -510,7 +644,9 @@ export function ExecutionRiskPanel() {
               disabled={isLoadingAudit}
               className="w-full py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded text-[11px] font-semibold transition-colors flex items-center justify-center gap-1.5"
             >
-              <RefreshCw className={`w-3 h-3 ${isLoadingAudit ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-3 h-3 ${isLoadingAudit ? "animate-spin" : ""}`}
+              />
               EXECUTE AUDIT & AUTO-HEAL
             </button>
           </div>
@@ -536,7 +672,9 @@ export function ExecutionRiskPanel() {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Inference Latency:</span>
                   <span className="font-mono text-emerald-400">
-                    {rlInference?.inference_time_ms != null ? `${rlInference.inference_time_ms?.toFixed(2)} ms` : "—"}
+                    {rlInference?.inference_time_ms != null
+                      ? `${rlInference.inference_time_ms?.toFixed(2)} ms`
+                      : "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -548,16 +686,18 @@ export function ExecutionRiskPanel() {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Critic Value Q(s, a):</span>
                   <span className="font-mono text-cyan-300">
-                    {rlInference?.q_value != null ? `+${rlInference.q_value?.toFixed(4)}` : "—"}
+                    {rlInference?.q_value != null
+                      ? `+${rlInference.q_value?.toFixed(4)}`
+                      : "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Fast vs Safe Routing:</span>
-                    <span className="font-mono text-purple-300">
-                      {rlInference?.fast_path_share != null
-                        ? `${(rlInference.fast_path_share * 100)?.toFixed(1)}% / ${((rlInference.safe_path_share || 0) * 100)?.toFixed(1)}%`
-                        : "—"}
-                    </span>
+                  <span className="font-mono text-purple-300">
+                    {rlInference?.fast_path_share != null
+                      ? `${(rlInference.fast_path_share * 100)?.toFixed(1)}% / ${((rlInference.safe_path_share || 0) * 100)?.toFixed(1)}%`
+                      : "—"}
+                  </span>
                 </div>
               </div>
             </div>

@@ -7,7 +7,7 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { Lock, ShieldAlert, X } from 'lucide-react';
+import { Lock, ShieldAlert, X } from "lucide-react";
 
 export interface OperatorConfirmModalProps {
   open: boolean;
@@ -25,7 +25,7 @@ export function OperatorConfirmModal({
   open,
   title,
   detail,
-  confirmLabel = 'Bestätigen (Operator)',
+  confirmLabel = "Bestätigen (Operator)",
   busy = false,
   blockedReason = null,
   onConfirm,
@@ -52,9 +52,12 @@ export function OperatorConfirmModal({
               <ShieldAlert size={18} />
             </div>
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-wider text-white">{title}</h3>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                {title}
+              </h3>
               <p className="mt-0.5 text-[11px] text-zinc-400">
-                Operator-Token + Bestätigungs-Modal — kein Auto-Deploy, keine Orders.
+                Operator-Token + Bestätigungs-Modal — kein Auto-Deploy, keine
+                Orders.
               </p>
             </div>
           </div>
@@ -95,7 +98,7 @@ export function OperatorConfirmModal({
             onClick={onConfirm}
             className="rounded border border-amber-600/60 bg-amber-600/20 px-3 py-1.5 text-[11px] font-semibold text-amber-200 hover:bg-amber-600/30 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy ? '…' : confirmLabel}
+            {busy ? "…" : confirmLabel}
           </button>
         </div>
       </div>
@@ -104,7 +107,7 @@ export function OperatorConfirmModal({
 }
 
 /** Fokus/ Prefill-Hinweis für Fractal-/Ladder-Panels (Scout → Provisionieren). */
-export const SIGMA_FOCUS_PANEL_EVENT = 'sigma:focus-panel';
+export const SIGMA_FOCUS_PANEL_EVENT = "sigma:focus-panel";
 
 export type SigmaFocusPanelDetail = {
   panelId: string;
@@ -114,10 +117,10 @@ export type SigmaFocusPanelDetail = {
 };
 
 export function requestFocusPanel(detail: SigmaFocusPanelDetail): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(SIGMA_FOCUS_PANEL_EVENT, { detail }));
   try {
-    sessionStorage.setItem('sigma:provision-hint', JSON.stringify(detail));
+    sessionStorage.setItem("sigma:provision-hint", JSON.stringify(detail));
   } catch {
     /* ignore */
   }

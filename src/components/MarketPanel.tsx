@@ -1,46 +1,53 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { 
-  ResponsiveContainer, 
-  ComposedChart, 
-  Area, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  Tooltip, 
-  ReferenceDot, 
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ReferenceDot,
   CartesianGrid,
-  AreaChart
+  AreaChart,
 } from "recharts";
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  DollarSign, 
-  Activity, 
-  RotateCcw, 
-  Globe, 
-  Filter, 
-  Eye, 
-  ArrowUpRight, 
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Activity,
+  RotateCcw,
+  Globe,
+  Filter,
+  Eye,
+  ArrowUpRight,
   ArrowDownRight,
-  Layers, 
-  Clock, 
-  Sparkles, 
-  BarChart2, 
-  CheckCircle2, 
+  Layers,
+  Clock,
+  Sparkles,
+  BarChart2,
+  CheckCircle2,
   SlidersHorizontal,
   ChevronRight,
-  Tag
+  Tag,
 } from "lucide-react";
 import { MarketTicker, TradeOrder, KrakenSymbolInfo } from "../types";
 import KrakenSymbolModal from "./KrakenSymbolModal";
 import { safeFetchJson } from "../lib/api";
 
-export function FeedBadge({ status }: { status: 'CONNECTED' | 'DISCONNECTED' }) {
-  const tone = status === 'CONNECTED'
-    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-    : 'border-zinc-600/40 bg-zinc-700/20 text-zinc-400';
+export function FeedBadge({
+  status,
+}: {
+  status: "CONNECTED" | "DISCONNECTED";
+}) {
+  const tone =
+    status === "CONNECTED"
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+      : "border-zinc-600/40 bg-zinc-700/20 text-zinc-400";
   return (
-    <span className={`rounded border px-1 py-0.5 font-mono tabular-nums text-[9px] font-bold tracking-wide ${tone}`}>
+    <span
+      className={`rounded border px-1 py-0.5 font-mono tabular-nums text-[9px] font-bold tracking-wide ${tone}`}
+    >
       {status}
     </span>
   );
@@ -68,22 +75,36 @@ interface PricePoint {
   ordersCount?: number;
 }
 
-
 function secureRandom(): number {
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
-    return window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1);
+  if (
+    typeof window !== "undefined" &&
+    window.crypto &&
+    window.crypto.getRandomValues
+  ) {
+    return (
+      window.crypto.getRandomValues(new Uint32Array(1))[0] / (0xffffffff + 1)
+    );
   }
   return Math.random();
 }
 
-export default function MarketPanel({ tickers, orders, portfolioHistory, onResetHistory }: MarketPanelProps) {
+export default function MarketPanel({
+  tickers,
+  orders,
+  portfolioHistory,
+  onResetHistory,
+}: MarketPanelProps) {
   const [prevPrices, setPrevPrices] = useState<Record<string, number>>({});
-  const [flashStates, setFlashStates] = useState<Record<string, 'up' | 'down' | null>>({});
+  const [flashStates, setFlashStates] = useState<
+    Record<string, "up" | "down" | null>
+  >({});
   const [isResetting, setIsResetting] = useState(false);
 
   // Active chart view mode: 'price-executions' | 'equity'
-  const [chartViewMode, setChartViewMode] = useState<'price-executions' | 'equity'>('price-executions');
-  
+  const [chartViewMode, setChartViewMode] = useState<
+    "price-executions" | "equity"
+  >("price-executions");
+
   // Selected pair for price chart & order execution overlay
   const [selectedPair, setSelectedPair] = useState<string>(() => {
     return tickers[0]?.pair || "BTC/USD";
@@ -95,8 +116,10 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
   // Marker visibility & filter states
   const [showBuyMarkers, setShowBuyMarkers] = useState<boolean>(true);
   const [showSellMarkers, setShowSellMarkers] = useState<boolean>(true);
-  const [queueFilter, setQueueFilter] = useState<'all' | 'paper' | 'live'>('all');
-  
+  const [queueFilter, setQueueFilter] = useState<"all" | "paper" | "live">(
+    "all",
+  );
+
   // Selected/highlighted order
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
@@ -111,7 +134,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
 
   // Make sure selectedPair is valid when tickers change
   useEffect(() => {
-    if (tickers.length > 0 && !tickers.some(t => t.pair === selectedPair)) {
+    if (tickers.length > 0 && !tickers.some((t) => t.pair === selectedPair)) {
       setSelectedPair(tickers[0].pair);
     }
   }, [tickers, selectedPair]);
@@ -133,12 +156,20 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
           volume: number;
           timestamp: string;
         }>;
-      }>(`/api/backtest/ohlc?pair=${encodeURIComponent(pair)}&interval=${intervalMin}&count=80`, undefined, 5000);
+      }>(
+        `/api/backtest/ohlc?pair=${encodeURIComponent(pair)}&interval=${intervalMin}&count=80`,
+        undefined,
+        5000,
+      );
 
       if (data && Array.isArray(data.candles) && data.candles.length > 0) {
-        const points: PricePoint[] = data.candles.map(c => {
+        const points: PricePoint[] = data.candles.map((c) => {
           const dateObj = new Date(c.timestamp || c.time * 1000);
-          const timeLabel = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+          const timeLabel = dateObj.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
           return {
             time: timeLabel,
             fullTimestamp: dateObj.toISOString(),
@@ -148,22 +179,30 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             high: c.high,
             low: c.low,
             close: c.close,
-            volume: c.volume || 0
+            volume: c.volume || 0,
           };
         });
         setChartCandles(points);
       } else {
         // Synthesize fallback baseline points around the ticker price if API returns empty
-        const curTicker = tickers.find(t => t.pair === pair);
-        const basePrice = curTicker?.price || (pair.includes('BTC') ? 85000 : pair.includes('ETH') ? 2900 : 160);
+        const curTicker = tickers.find((t) => t.pair === pair);
+        const basePrice =
+          curTicker?.price ||
+          (pair.includes("BTC") ? 85000 : pair.includes("ETH") ? 2900 : 160);
         const now = Date.now();
         const fallbackPoints: PricePoint[] = [];
         for (let i = 40; i >= 0; i--) {
           const t = new Date(now - i * intervalMin * 60 * 1000);
-          const noise = (Math.sin(i / 3) * 0.008 + (secureRandom() - 0.5) * 0.004) * basePrice;
+          const noise =
+            (Math.sin(i / 3) * 0.008 + (secureRandom() - 0.5) * 0.004) *
+            basePrice;
           const p = Number((basePrice + noise)?.toFixed(2));
           fallbackPoints.push({
-            time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+            time: t.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            }),
             fullTimestamp: t.toISOString(),
             timestampMs: t.getTime(),
             price: p,
@@ -171,7 +210,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             high: p * 1.002,
             low: p * 0.998,
             close: p,
-            volume: Math.floor(secureRandom() * 50 + 10)
+            volume: Math.floor(secureRandom() * 50 + 10),
           });
         }
         setChartCandles(fallbackPoints);
@@ -190,7 +229,11 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
   const fetchKrakenSymbols = async () => {
     setIsLoadingSymbols(true);
     try {
-      const data = await safeFetchJson<{ symbols?: KrakenSymbolInfo[] }>("/api/kraken/symbols", undefined, 4000);
+      const data = await safeFetchJson<{ symbols?: KrakenSymbolInfo[] }>(
+        "/api/kraken/symbols",
+        undefined,
+        4000,
+      );
       if (data && Array.isArray(data.symbols)) {
         setKrakenSymbols(data.symbols);
       }
@@ -224,13 +267,13 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
 
   // Flash prices on ticker update
   useEffect(() => {
-    const newFlashStates: Record<string, 'up' | 'down' | null> = {};
+    const newFlashStates: Record<string, "up" | "down" | null> = {};
     let changed = false;
 
     tickers.forEach((t) => {
       const prevPrice = prevPrices[t.pair];
       if (prevPrice !== undefined && prevPrice !== t.price) {
-        newFlashStates[t.pair] = t.price > prevPrice ? 'up' : 'down';
+        newFlashStates[t.pair] = t.price > prevPrice ? "up" : "down";
         changed = true;
       } else {
         newFlashStates[t.pair] = null;
@@ -239,9 +282,11 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
 
     if (changed) {
       setFlashStates(newFlashStates);
-      
+
       const currentPrices: Record<string, number> = {};
-      tickers.forEach(t => { currentPrices[t.pair] = t.price; });
+      tickers.forEach((t) => {
+        currentPrices[t.pair] = t.price;
+      });
       setPrevPrices(currentPrices);
 
       const timer = setTimeout(() => {
@@ -250,17 +295,19 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
       return () => clearTimeout(timer);
     } else {
       const currentPrices: Record<string, number> = {};
-      tickers.forEach(t => { currentPrices[t.pair] = t.price; });
+      tickers.forEach((t) => {
+        currentPrices[t.pair] = t.price;
+      });
       setPrevPrices(currentPrices);
     }
   }, [tickers]);
 
   // Filter orders for the selected pair and execution queue
   const pairOrders = useMemo(() => {
-    return orders.filter(o => {
+    return orders.filter((o) => {
       if (o.pair !== selectedPair) return false;
-      if (queueFilter === 'paper' && o.executionMode === 'live') return false;
-      if (queueFilter === 'live' && o.executionMode !== 'live') return false;
+      if (queueFilter === "paper" && o.executionMode === "live") return false;
+      if (queueFilter === "live" && o.executionMode !== "live") return false;
       return true;
     });
   }, [orders, selectedPair, queueFilter]);
@@ -271,8 +318,8 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
     let buy = 0;
     let sell = 0;
     for (const o of pairOrders) {
-      if (o.type === 'buy') buy++;
-      else if (o.type === 'sell') sell++;
+      if (o.type === "buy") buy++;
+      else if (o.type === "sell") sell++;
     }
     return { buyCount: buy, sellCount: sell };
   }, [pairOrders]);
@@ -284,11 +331,11 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
 
     const markers = [];
     for (const order of pairOrders) {
-      if (order.type === 'buy' && !showBuyMarkers) continue;
-      if (order.type === 'sell' && !showSellMarkers) continue;
+      if (order.type === "buy" && !showBuyMarkers) continue;
+      if (order.type === "sell" && !showSellMarkers) continue;
 
       const orderMs = new Date(order.timestamp).getTime();
-      
+
       // Binary search for closest candle timestamp
       let left = 0;
       let right = chartCandles.length - 1;
@@ -311,10 +358,12 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
         // If not exact match, compare neighbors
         const diffLeft = Math.abs(chartCandles[left].timestampMs - orderMs);
         const diffRight = Math.abs(chartCandles[right].timestampMs - orderMs);
-        closestCandle = diffLeft < diffRight ? chartCandles[left] : chartCandles[right];
+        closestCandle =
+          diffLeft < diffRight ? chartCandles[left] : chartCandles[right];
       } else if (left > right) {
         // Out of bounds check
-        if (left >= chartCandles.length) closestCandle = chartCandles[chartCandles.length - 1];
+        if (left >= chartCandles.length)
+          closestCandle = chartCandles[chartCandles.length - 1];
         else if (right < 0) closestCandle = chartCandles[0];
       }
 
@@ -322,7 +371,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
         order,
         chartX: closestCandle.time,
         chartY: order.price,
-        timestampMs: orderMs
+        timestampMs: orderMs,
       });
     }
     return markers;
@@ -331,17 +380,17 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
   // Selected order details object
   const activeSelectedOrder = useMemo(() => {
     if (!selectedOrderId) return null;
-    return orders.find(o => o.id === selectedOrderId) || null;
+    return orders.find((o) => o.id === selectedOrderId) || null;
   }, [selectedOrderId, orders]);
 
   // Currently selected ticker info
   const currentTicker = useMemo(() => {
-    return tickers.find(t => t.pair === selectedPair) || tickers[0];
+    return tickers.find((t) => t.pair === selectedPair) || tickers[0];
   }, [tickers, selectedPair]);
 
   // Calculate Price Range (Min & Max for domain)
   const priceDomain = useMemo(() => {
-    if (chartCandles.length === 0) return ['auto', 'auto'];
+    if (chartCandles.length === 0) return ["auto", "auto"];
 
     // Bolt Optimization: Prevent Call Stack Limit & Memory Bloat
     // Replaced `.map()` and `Math.min(...prices)` with a single O(N) iteration
@@ -362,7 +411,10 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
     }
 
     const padding = (max - min) * 0.08 || min * 0.01;
-    return [Math.max(0, Number((min - padding)?.toFixed(2))), Number((max + padding)?.toFixed(2))];
+    return [
+      Math.max(0, Number((min - padding)?.toFixed(2))),
+      Number((max + padding)?.toFixed(2)),
+    ];
   }, [chartCandles, positionedMarkers]);
 
   // Bolt Optimization: Group markers by chartX to allow O(1) lookups in the Recharts Tooltip
@@ -390,10 +442,18 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               title="Open Kraken and Kraken Pro symbol catalog directory"
             >
               <Globe className="w-2.5 h-2.5 mr-0.5" />
-              <span>Catalog ({krakenSymbols.length > 0 ? `${krakenSymbols.length?.toLocaleString()}` : '1,400+'})</span>
+              <span>
+                Catalog (
+                {krakenSymbols.length > 0
+                  ? `${krakenSymbols.length?.toLocaleString()}`
+                  : "1,400+"}
+                )
+              </span>
             </button>
           </div>
-          <FeedBadge status={tickers.length > 0 ? 'CONNECTED' : 'DISCONNECTED'} />
+          <FeedBadge
+            status={tickers.length > 0 ? "CONNECTED" : "DISCONNECTED"}
+          />
         </h4>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -401,7 +461,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             const flash = flashStates[ticker.pair];
             const isUp = ticker.change24h >= 0;
             const isSelected = ticker.pair === selectedPair;
-            
+
             return (
               <button
                 key={ticker.pair}
@@ -411,36 +471,59 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   setSelectedOrderId(null);
                 }}
                 className={`border rounded p-2.5 text-left transition-colors duration-200 cursor-pointer ${
-                  isSelected 
-                    ? 'bg-zinc-800/90 border-emerald-500/80 shadow-sm ring-1 ring-emerald-500/30' 
-                    : flash === 'up' ? 'bg-emerald-950/40 border-emerald-500/50' :
-                      flash === 'down' ? 'bg-rose-950/40 border-rose-500/50' :
-                      'bg-zinc-950/50 border-zinc-800/90 hover:border-zinc-700 hover:bg-zinc-900/60'
+                  isSelected
+                    ? "bg-zinc-800/90 border-emerald-500/80 shadow-sm ring-1 ring-emerald-500/30"
+                    : flash === "up"
+                      ? "bg-emerald-950/40 border-emerald-500/50"
+                      : flash === "down"
+                        ? "bg-rose-950/40 border-rose-500/50"
+                        : "bg-zinc-950/50 border-zinc-800/90 hover:border-zinc-700 hover:bg-zinc-900/60"
                 }`}
               >
                 <div className="flex justify-between items-start">
-                  <span className={`text-[11px] font-mono font-bold ${isSelected ? 'text-emerald-400' : 'text-zinc-300'}`}>
+                  <span
+                    className={`text-[11px] font-mono font-bold ${isSelected ? "text-emerald-400" : "text-zinc-300"}`}
+                  >
                     {ticker.pair}
                   </span>
-                  <span className={`text-[10px] font-mono tabular-nums font-semibold flex items-center ${
-                    isUp ? 'text-emerald-400' : 'text-rose-400'
-                  }`}>
-                    {isUp ? <TrendingUp className="w-2.5 h-2.5 mr-0.5" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5" />}
-                    {isUp ? '+' : ''}{ticker.change24h}%
+                  <span
+                    className={`text-[10px] font-mono tabular-nums font-semibold flex items-center ${
+                      isUp ? "text-emerald-400" : "text-rose-400"
+                    }`}
+                  >
+                    {isUp ? (
+                      <TrendingUp className="w-2.5 h-2.5 mr-0.5" />
+                    ) : (
+                      <TrendingDown className="w-2.5 h-2.5 mr-0.5" />
+                    )}
+                    {isUp ? "+" : ""}
+                    {ticker.change24h}%
                   </span>
                 </div>
 
                 <div className="mt-1">
                   <span className="text-xs font-mono tabular-nums font-bold text-white tracking-tight">
-                    ${ticker.price?.toLocaleString(undefined, { 
-                      minimumFractionDigits: ticker.pair.includes('XRP') ? 4 : 2,
-                      maximumFractionDigits: ticker.pair.includes('XRP') ? 4 : 2
+                    $
+                    {ticker.price?.toLocaleString(undefined, {
+                      minimumFractionDigits: ticker.pair.includes("XRP")
+                        ? 4
+                        : 2,
+                      maximumFractionDigits: ticker.pair.includes("XRP")
+                        ? 4
+                        : 2,
                     })}
                   </span>
                   <div className="flex justify-between items-center text-[8px] font-mono text-zinc-500 mt-0.5">
-                    <span>Vol: {ticker.volume > 1000 ? `${(ticker.volume / 1000)?.toFixed(1)}k` : ticker.volume}</span>
+                    <span>
+                      Vol:{" "}
+                      {ticker.volume > 1000
+                        ? `${(ticker.volume / 1000)?.toFixed(1)}k`
+                        : ticker.volume}
+                    </span>
                     {isSelected && (
-                      <span className="text-emerald-400/90 font-semibold uppercase">ACTIVE</span>
+                      <span className="text-emerald-400/90 font-semibold uppercase">
+                        ACTIVE
+                      </span>
                     )}
                   </div>
                 </div>
@@ -458,12 +541,12 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             <div className="flex items-center bg-zinc-950 p-0.5 rounded border border-zinc-800">
               <button
                 type="button"
-                onClick={() => setChartViewMode('price-executions')}
-                aria-pressed={chartViewMode === 'price-executions'}
+                onClick={() => setChartViewMode("price-executions")}
+                aria-pressed={chartViewMode === "price-executions"}
                 className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-colors flex items-center space-x-1.5 ${
-                  chartViewMode === 'price-executions'
-                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200'
+                  chartViewMode === "price-executions"
+                    ? "bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
                 <BarChart2 className="w-3 h-3" />
@@ -471,12 +554,12 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               </button>
               <button
                 type="button"
-                onClick={() => setChartViewMode('equity')}
-                aria-pressed={chartViewMode === 'equity'}
+                onClick={() => setChartViewMode("equity")}
+                aria-pressed={chartViewMode === "equity"}
                 className={`px-2.5 py-1 text-[10px] font-mono font-semibold rounded transition-colors flex items-center space-x-1.5 ${
-                  chartViewMode === 'equity'
-                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-200'
+                  chartViewMode === "equity"
+                    ? "bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
                 <TrendingUp className="w-3 h-3" />
@@ -484,7 +567,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               </button>
             </div>
 
-            {chartViewMode === 'price-executions' && (
+            {chartViewMode === "price-executions" && (
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-zinc-950 text-zinc-300 border border-zinc-800">
                 {selectedPair}
               </span>
@@ -492,24 +575,26 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
           </div>
 
           {/* Timeframe & Refresh Controls for Price Chart */}
-          {chartViewMode === 'price-executions' ? (
+          {chartViewMode === "price-executions" ? (
             <div className="flex items-center space-x-2 text-[10px] font-mono">
-              <span className="text-zinc-500 text-[9px] uppercase tracking-wider hidden sm:inline">Interval:</span>
+              <span className="text-zinc-500 text-[9px] uppercase tracking-wider hidden sm:inline">
+                Interval:
+              </span>
               <div className="flex items-center bg-zinc-950 rounded border border-zinc-800 p-0.5">
                 {[
                   { label: "1m", val: 1 },
                   { label: "5m", val: 5 },
                   { label: "15m", val: 15 },
-                  { label: "1h", val: 60 }
-                ].map(tf => (
+                  { label: "1h", val: 60 },
+                ].map((tf) => (
                   <button
                     key={tf.val}
                     type="button"
                     onClick={() => setInterval(tf.val)}
                     className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                      interval === tf.val 
-                        ? 'bg-zinc-800 text-white shadow-xs' 
-                        : 'text-zinc-500 hover:text-zinc-300'
+                      interval === tf.val
+                        ? "bg-zinc-800 text-white shadow-xs"
+                        : "text-zinc-500 hover:text-zinc-300"
                     }`}
                   >
                     {tf.label}
@@ -524,7 +609,9 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                 className="p-1 rounded bg-zinc-950 text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition-colors disabled:opacity-50"
                 title="Refresh Price Timeseries"
               >
-                <RotateCcw className={`w-3 h-3 ${isLoadingChart ? 'animate-spin text-emerald-400' : ''}`} />
+                <RotateCcw
+                  className={`w-3 h-3 ${isLoadingChart ? "animate-spin text-emerald-400" : ""}`}
+                />
               </button>
             </div>
           ) : (
@@ -535,7 +622,7 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
         </div>
 
         {/* Chart View 1: Price Timeseries with Visual Buy/Sell Execution Overlays */}
-        {chartViewMode === 'price-executions' ? (
+        {chartViewMode === "price-executions" ? (
           <div>
             {/* Filter Toolbar for Markers & Queues */}
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3 bg-zinc-950/60 p-2 rounded border border-zinc-800/80 text-[10px] font-mono">
@@ -551,9 +638,9 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   onClick={() => setShowBuyMarkers(!showBuyMarkers)}
                   aria-pressed={showBuyMarkers}
                   className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-colors ${
-                    showBuyMarkers 
-                      ? 'bg-emerald-950/70 border-emerald-600/80 text-emerald-300 shadow-xs' 
-                      : 'bg-zinc-900 border-zinc-800 text-zinc-500 opacity-60'
+                    showBuyMarkers
+                      ? "bg-emerald-950/70 border-emerald-600/80 text-emerald-300 shadow-xs"
+                      : "bg-zinc-900 border-zinc-800 text-zinc-500 opacity-60"
                   }`}
                   title="Toggle visual Buy execution triangles on chart"
                 >
@@ -567,9 +654,9 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   onClick={() => setShowSellMarkers(!showSellMarkers)}
                   aria-pressed={showSellMarkers}
                   className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-colors ${
-                    showSellMarkers 
-                      ? 'bg-rose-950/70 border-rose-600/80 text-rose-300 shadow-xs' 
-                      : 'bg-zinc-900 border-zinc-800 text-zinc-500 opacity-60'
+                    showSellMarkers
+                      ? "bg-rose-950/70 border-rose-600/80 text-rose-300 shadow-xs"
+                      : "bg-zinc-900 border-zinc-800 text-zinc-500 opacity-60"
                   }`}
                   title="Toggle visual Sell execution triangles on chart"
                 >
@@ -580,8 +667,10 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
 
               {/* Queue Isolator Filter */}
               <div className="flex items-center space-x-1.5">
-                <span className="text-zinc-500 text-[9px] uppercase">Queue:</span>
-                {(['all', 'paper', 'live'] as const).map(q => (
+                <span className="text-zinc-500 text-[9px] uppercase">
+                  Queue:
+                </span>
+                {(["all", "paper", "live"] as const).map((q) => (
                   <button
                     key={q}
                     type="button"
@@ -589,12 +678,12 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                     aria-pressed={queueFilter === q}
                     className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase transition-colors ${
                       queueFilter === q
-                        ? q === 'live'
-                          ? 'bg-rose-950 text-rose-300 border border-rose-700'
-                          : q === 'paper'
-                          ? 'bg-amber-950 text-amber-300 border border-amber-700'
-                          : 'bg-zinc-800 text-zinc-200 border border-zinc-700'
-                        : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+                        ? q === "live"
+                          ? "bg-rose-950 text-rose-300 border border-rose-700"
+                          : q === "paper"
+                            ? "bg-amber-950 text-amber-300 border border-amber-700"
+                            : "bg-zinc-800 text-zinc-200 border border-zinc-700"
+                        : "text-zinc-500 hover:text-zinc-300 border border-transparent"
                     }`}
                   >
                     {q}
@@ -615,56 +704,100 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               )}
 
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartCandles} margin={{ top: 12, right: 10, left: -15, bottom: 5 }}>
+                <ComposedChart
+                  data={chartCandles}
+                  margin={{ top: 12, right: 10, left: -15, bottom: 5 }}
+                >
                   <defs>
-                    <linearGradient id="colorPriceArea" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient
+                      id="colorPriceArea"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
                       <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.0} />
+                      <stop
+                        offset="95%"
+                        stopColor="#0ea5e9"
+                        stopOpacity={0.0}
+                      />
                     </linearGradient>
                   </defs>
-                  
-                  <CartesianGrid stroke="#27272a" strokeDasharray="2 2" vertical={false} opacity={0.4} />
-                  <XAxis dataKey="time" stroke="#52525b" fontSize={9} tickLine={false} />
-                  <YAxis 
-                    stroke="#52525b" 
-                    fontSize={9} 
-                    tickLine={false} 
-                    domain={priceDomain as any} 
+
+                  <CartesianGrid
+                    stroke="#27272a"
+                    strokeDasharray="2 2"
+                    vertical={false}
+                    opacity={0.4}
+                  />
+                  <XAxis
+                    dataKey="time"
+                    stroke="#52525b"
+                    fontSize={9}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    stroke="#52525b"
+                    fontSize={9}
+                    tickLine={false}
+                    domain={priceDomain as any}
                     tickFormatter={(val) => `$${Number(val)?.toLocaleString()}`}
                   />
-                  
-                  <Tooltip 
-                    contentStyle={{ 
+
+                  <Tooltip
+                    contentStyle={{
                       backgroundColor: "rgba(10, 10, 12, 0.8)",
                       borderColor: "rgba(255, 255, 255, 0.1)",
                       backdropFilter: "blur(12px)",
                       borderRadius: "12px",
-                      boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)"
+                      boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
                     }}
-                    labelStyle={{ color: "#a1a1aa", fontFamily: "monospace", fontSize: "11px", fontWeight: "bold" }}
+                    labelStyle={{
+                      color: "#a1a1aa",
+                      fontFamily: "monospace",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                    }}
                     content={({ active, payload, label }) => {
-                      if (!active || !payload || payload.length === 0) return null;
+                      if (!active || !payload || payload.length === 0)
+                        return null;
                       const point = payload[0].payload as PricePoint;
-                      
+
                       // Check if there are matching order markers at this time point
-                      const matchingMarkers = markersByTime.get(String(label)) || [];
+                      const matchingMarkers =
+                        markersByTime.get(String(label)) || [];
 
                       return (
                         <div className="bg-zinc-900 border border-zinc-700/80 rounded p-2.5 text-xs font-mono shadow-xl space-y-1.5 min-w-44">
                           <div className="flex justify-between items-center text-zinc-400 text-[10px] border-b border-zinc-800 pb-1">
                             <span>{label}</span>
-                            <span className="text-zinc-500 font-bold">{selectedPair}</span>
+                            <span className="text-zinc-500 font-bold">
+                              {selectedPair}
+                            </span>
                           </div>
 
                           <div className="flex justify-between items-center text-zinc-200">
                             <span className="text-zinc-400">Price:</span>
-                            <span className="font-bold font-mono tabular-nums text-sky-400">${point.price?.toLocaleString()}</span>
+                            <span className="font-bold font-mono tabular-nums text-sky-400">
+                              ${point.price?.toLocaleString()}
+                            </span>
                           </div>
 
                           {point.high !== undefined && (
                             <div className="grid grid-cols-2 gap-x-2 text-[10px] text-zinc-400 pt-0.5">
-                              <div>High: <span className="text-zinc-300 font-mono tabular-nums">${point.high?.toLocaleString()}</span></div>
-                              <div>Low: <span className="text-zinc-300 font-mono tabular-nums">${point.low?.toLocaleString()}</span></div>
+                              <div>
+                                High:{" "}
+                                <span className="text-zinc-300 font-mono tabular-nums">
+                                  ${point.high?.toLocaleString()}
+                                </span>
+                              </div>
+                              <div>
+                                Low:{" "}
+                                <span className="text-zinc-300 font-mono tabular-nums">
+                                  ${point.low?.toLocaleString()}
+                                </span>
+                              </div>
                             </div>
                           )}
 
@@ -672,28 +805,43 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                           {matchingMarkers.length > 0 && (
                             <div className="mt-2 pt-1.5 border-t border-zinc-800 space-y-1.5">
                               <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
-                                <span>🎯 Executed Orders ({matchingMarkers.length})</span>
+                                <span>
+                                  🎯 Executed Orders ({matchingMarkers.length})
+                                </span>
                               </div>
                               {matchingMarkers.map((m, i) => (
-                                <div 
-                                  key={i} 
+                                <div
+                                  key={i}
                                   className={`p-1.5 rounded text-[10px] border ${
-                                    m.order.type === 'buy'
-                                      ? 'bg-emerald-950/70 border-emerald-700 text-emerald-300'
-                                      : 'bg-rose-950/70 border-rose-700 text-rose-300'
+                                    m.order.type === "buy"
+                                      ? "bg-emerald-950/70 border-emerald-700 text-emerald-300"
+                                      : "bg-rose-950/70 border-rose-700 text-rose-300"
                                   }`}
                                 >
                                   <div className="flex justify-between items-center font-bold">
-                                    <span>{m.order.type === 'buy' ? '▲ BUY' : '▼ SELL'}</span>
-                                    <span className="font-mono tabular-nums">${m.order.price?.toLocaleString()}</span>
+                                    <span>
+                                      {m.order.type === "buy"
+                                        ? "▲ BUY"
+                                        : "▼ SELL"}
+                                    </span>
+                                    <span className="font-mono tabular-nums">
+                                      ${m.order.price?.toLocaleString()}
+                                    </span>
                                   </div>
                                   <div className="flex justify-between text-[9px] opacity-80 mt-0.5">
-                                    <span className="font-mono tabular-nums">{m.order.amount} {selectedPair.split('/')[0]}</span>
-                                    <span className="font-mono tabular-nums">${m.order.total?.toLocaleString()} USD</span>
+                                    <span className="font-mono tabular-nums">
+                                      {m.order.amount}{" "}
+                                      {selectedPair.split("/")[0]}
+                                    </span>
+                                    <span className="font-mono tabular-nums">
+                                      ${m.order.total?.toLocaleString()} USD
+                                    </span>
                                   </div>
                                   <div className="flex justify-between items-center text-[8px] opacity-70 mt-0.5">
                                     <span>{m.order.strategyName}</span>
-                                    <span className="uppercase">{m.order.executionMode || 'paper'}</span>
+                                    <span className="uppercase">
+                                      {m.order.executionMode || "paper"}
+                                    </span>
                                   </div>
                                 </div>
                               ))}
@@ -705,19 +853,19 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   />
 
                   {/* Shaded Price Area under curve */}
-                  <Area 
-                    type="monotone" 
-                    dataKey="price" 
-                    stroke="#0284c7" 
+                  <Area
+                    type="monotone"
+                    dataKey="price"
+                    stroke="#0284c7"
                     strokeWidth={2}
-                    fillOpacity={1} 
-                    fill="url(#colorPriceArea)" 
+                    fillOpacity={1}
+                    fill="url(#colorPriceArea)"
                     isAnimationActive={false}
                   />
 
                   {/* VISUALLY OVERLAID ORDER EXECUTION MARKERS */}
                   {positionedMarkers.map((marker, idx) => {
-                    const isBuy = marker.order.type === 'buy';
+                    const isBuy = marker.order.type === "buy";
                     const isSelected = selectedOrderId === marker.order.id;
                     const markerKey = `order-marker-${marker.order.id || idx}-${marker.chartX}`;
 
@@ -729,13 +877,23 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                         r={8}
                         shape={(props: any) => {
                           const { cx, cy } = props;
-                          if (cx === undefined || cy === undefined || isNaN(cx) || isNaN(cy)) return null;
+                          if (
+                            cx === undefined ||
+                            cy === undefined ||
+                            isNaN(cx) ||
+                            isNaN(cy)
+                          )
+                            return null;
 
                           return (
-                            <g 
+                            <g
                               className="cursor-pointer transition-transform duration-150 hover:scale-125"
                               onClick={() => {
-                                setSelectedOrderId(marker.order.id === selectedOrderId ? null : marker.order.id);
+                                setSelectedOrderId(
+                                  marker.order.id === selectedOrderId
+                                    ? null
+                                    : marker.order.id,
+                                );
                               }}
                             >
                               {/* Selected ring / pulsing aura */}
@@ -810,7 +968,11 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               </div>
 
               <div className="text-[9px] text-zinc-500">
-                Plotted: <strong className="text-zinc-300">{positionedMarkers.length}</strong> markers on {selectedPair}
+                Plotted:{" "}
+                <strong className="text-zinc-300">
+                  {positionedMarkers.length}
+                </strong>{" "}
+                markers on {selectedPair}
               </div>
             </div>
 
@@ -819,19 +981,27 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
               <div className="mt-3 p-3 rounded-lg bg-zinc-950 border border-zinc-700/80 shadow-md text-xs font-mono animate-fadeIn">
                 <div className="flex justify-between items-start mb-2 pb-1.5 border-b border-zinc-800">
                   <div className="flex items-center space-x-2">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      activeSelectedOrder.type === 'buy'
-                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700'
-                        : 'bg-rose-950/80 text-rose-300 border border-rose-700'
-                    }`}>
-                      {activeSelectedOrder.type === 'buy' ? '▲ BUY EXECUTION' : '▼ SELL EXECUTION'}
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        activeSelectedOrder.type === "buy"
+                          ? "bg-emerald-950/80 text-emerald-300 border border-emerald-700"
+                          : "bg-rose-950/80 text-rose-300 border border-rose-700"
+                      }`}
+                    >
+                      {activeSelectedOrder.type === "buy"
+                        ? "▲ BUY EXECUTION"
+                        : "▼ SELL EXECUTION"}
                     </span>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
-                      activeSelectedOrder.executionMode === 'live'
-                        ? 'bg-rose-950 text-rose-300 border border-rose-800'
-                        : 'bg-amber-950 text-amber-300 border border-amber-800'
-                    }`}>
-                      {activeSelectedOrder.executionMode === 'live' ? 'LIVE L4' : 'PAPER L2'}
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                        activeSelectedOrder.executionMode === "live"
+                          ? "bg-rose-950 text-rose-300 border border-rose-800"
+                          : "bg-amber-950 text-amber-300 border border-amber-800"
+                      }`}
+                    >
+                      {activeSelectedOrder.executionMode === "live"
+                        ? "LIVE L4"
+                        : "PAPER L2"}
                     </span>
                   </div>
                   <button
@@ -847,25 +1017,47 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
                   <div>
-                    <span className="text-zinc-500 block text-[9px] uppercase">Execution Price</span>
-                    <span className="font-bold text-white font-mono tabular-nums">${activeSelectedOrder.price?.toLocaleString()}</span>
+                    <span className="text-zinc-500 block text-[9px] uppercase">
+                      Execution Price
+                    </span>
+                    <span className="font-bold text-white font-mono tabular-nums">
+                      ${activeSelectedOrder.price?.toLocaleString()}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-zinc-500 block text-[9px] uppercase">Order Amount</span>
-                    <span className="font-bold text-zinc-200 font-mono tabular-nums">{activeSelectedOrder.amount} {activeSelectedOrder.pair.split('/')[0]}</span>
+                    <span className="text-zinc-500 block text-[9px] uppercase">
+                      Order Amount
+                    </span>
+                    <span className="font-bold text-zinc-200 font-mono tabular-nums">
+                      {activeSelectedOrder.amount}{" "}
+                      {activeSelectedOrder.pair.split("/")[0]}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-zinc-500 block text-[9px] uppercase">USD Volume</span>
-                    <span className="font-bold text-emerald-400 font-mono tabular-nums">${activeSelectedOrder.total?.toLocaleString()}</span>
+                    <span className="text-zinc-500 block text-[9px] uppercase">
+                      USD Volume
+                    </span>
+                    <span className="font-bold text-emerald-400 font-mono tabular-nums">
+                      ${activeSelectedOrder.total?.toLocaleString()}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-zinc-500 block text-[9px] uppercase">Strategy</span>
-                    <span className="font-medium text-zinc-300 truncate block">{activeSelectedOrder.strategyName}</span>
+                    <span className="text-zinc-500 block text-[9px] uppercase">
+                      Strategy
+                    </span>
+                    <span className="font-medium text-zinc-300 truncate block">
+                      {activeSelectedOrder.strategyName}
+                    </span>
                   </div>
                 </div>
                 <div className="mt-2 pt-1 text-[9px] text-zinc-500 flex justify-between">
-                  <span className="font-mono tabular-nums">Timestamp: {new Date(activeSelectedOrder.timestamp)?.toLocaleString()}</span>
-                  <span className="text-zinc-400 font-mono tabular-nums">ID: {activeSelectedOrder.id}</span>
+                  <span className="font-mono tabular-nums">
+                    Timestamp:{" "}
+                    {new Date(activeSelectedOrder.timestamp)?.toLocaleString()}
+                  </span>
+                  <span className="text-zinc-400 font-mono tabular-nums">
+                    ID: {activeSelectedOrder.id}
+                  </span>
                 </div>
               </div>
             )}
@@ -875,29 +1067,69 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
           <div>
             <div className="h-56 w-full text-xs font-mono">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={portfolioHistory} margin={{ top: 10, right: 5, left: -20, bottom: 5 }}>
+                <AreaChart
+                  data={portfolioHistory}
+                  margin={{ top: 10, right: 5, left: -20, bottom: 5 }}
+                >
                   <defs>
-                    <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                    <linearGradient
+                      id="colorBalance"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="5%"
+                        stopColor="#10b981"
+                        stopOpacity={0.25}
+                      />
+                      <stop
+                        offset="95%"
+                        stopColor="#10b981"
+                        stopOpacity={0.0}
+                      />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#27272a" strokeDasharray="2 2" vertical={false} opacity={0.4} />
-                  <XAxis dataKey="time" stroke="#52525b" fontSize={9} tickLine={false} />
-                  <YAxis stroke="#52525b" fontSize={9} tickLine={false} domain={['auto', 'auto']} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: "rgba(10, 10, 12, 0.8)", borderColor: "rgba(255, 255, 255, 0.1)", backdropFilter: "blur(12px)", borderRadius: "12px" }}
+                  <CartesianGrid
+                    stroke="#27272a"
+                    strokeDasharray="2 2"
+                    vertical={false}
+                    opacity={0.4}
+                  />
+                  <XAxis
+                    dataKey="time"
+                    stroke="#52525b"
+                    fontSize={9}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    stroke="#52525b"
+                    fontSize={9}
+                    tickLine={false}
+                    domain={["auto", "auto"]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "rgba(10, 10, 12, 0.8)",
+                      borderColor: "rgba(255, 255, 255, 0.1)",
+                      backdropFilter: "blur(12px)",
+                      borderRadius: "12px",
+                    }}
                     labelStyle={{ color: "#a1a1aa", fontFamily: "monospace" }}
                     itemStyle={{ color: "#10b981", fontFamily: "monospace" }}
-                    formatter={(value: any) => [`$${Number(value)?.toLocaleString()}`, "Equity Balance"]}
+                    formatter={(value: any) => [
+                      `$${Number(value)?.toLocaleString()}`,
+                      "Equity Balance",
+                    ]}
                   />
-                  <Area 
-                    type="monotone" 
-                    dataKey="balance" 
-                    stroke="#10b981" 
+                  <Area
+                    type="monotone"
+                    dataKey="balance"
+                    stroke="#10b981"
                     strokeWidth={1.5}
-                    fillOpacity={1} 
-                    fill="url(#colorBalance)" 
+                    fillOpacity={1}
+                    fill="url(#colorBalance)"
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -921,61 +1153,80 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
             id="btn-reset-trade-history"
             onClick={handleResetHistory}
             disabled={isResetting}
-            title="Reset trade history and strategy P&L scorecards to zero baseline" aria-label="Reset trade history and strategy P&L scorecards to zero baseline"
+            title="Reset trade history and strategy P&L scorecards to zero baseline"
+            aria-label="Reset trade history and strategy P&L scorecards to zero baseline"
             className="flex items-center space-x-1 text-[10px] font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700/80 px-2 py-1 rounded transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <RotateCcw className={`w-3 h-3 ${isResetting ? 'animate-spin text-emerald-400' : ''}`} />
-            <span>{isResetting ? 'Resetting...' : 'Reset History'}</span>
+            <RotateCcw
+              className={`w-3 h-3 ${isResetting ? "animate-spin text-emerald-400" : ""}`}
+            />
+            <span>{isResetting ? "Resetting..." : "Reset History"}</span>
           </button>
         </div>
 
         <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1 terminal-scroll">
           {orders.length === 0 ? (
             <div className="p-4 text-center border border-dashed border-zinc-800/80 rounded">
-              <p className="text-[11px] font-mono text-zinc-500">No trading orders logged in ledger queue.</p>
+              <p className="text-[11px] font-mono text-zinc-500">
+                No trading orders logged in ledger queue.
+              </p>
             </div>
           ) : (
             orders.map((order, idx) => {
               const orderTime = new Date(order.timestamp).toLocaleTimeString();
-              const isBuy = order.type === 'buy';
-              const uniqueKey = `${order.id || 'order'}-${order.timestamp || ''}-${idx}`;
+              const isBuy = order.type === "buy";
+              const uniqueKey = `${order.id || "order"}-${order.timestamp || ""}-${idx}`;
               const isHighlighted = selectedOrderId === order.id;
-              
+
               return (
-                <div 
-                  key={uniqueKey} 
+                <div
+                  key={uniqueKey}
                   onClick={() => {
                     setSelectedPair(order.pair);
-                    setSelectedOrderId(order.id === selectedOrderId ? null : order.id);
-                    setChartViewMode('price-executions');
+                    setSelectedOrderId(
+                      order.id === selectedOrderId ? null : order.id,
+                    );
+                    setChartViewMode("price-executions");
                   }}
                   className={`border rounded p-2.5 text-xs font-mono transition-colors cursor-pointer ${
                     isHighlighted
-                      ? 'bg-zinc-800/90 border-emerald-500/90 shadow-md ring-1 ring-emerald-500/30'
-                      : 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-900/80 hover:border-zinc-700'
+                      ? "bg-zinc-800/90 border-emerald-500/90 shadow-md ring-1 ring-emerald-500/30"
+                      : "bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-900/80 hover:border-zinc-700"
                   }`}
                   title="Click to locate and overlay this order on the Price Chart"
                 >
                   <div className="flex justify-between items-center mb-1">
                     <div className="flex items-center space-x-1.5">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                        isBuy ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-900/40' : 'bg-rose-950/60 text-rose-400 border border-rose-900/40'
-                      }`}>
-                        {isBuy ? '▲ BUY' : '▼ SELL'}
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          isBuy
+                            ? "bg-emerald-950/60 text-emerald-400 border border-emerald-900/40"
+                            : "bg-rose-950/60 text-rose-400 border border-rose-900/40"
+                        }`}
+                      >
+                        {isBuy ? "▲ BUY" : "▼ SELL"}
                       </span>
-                      <span className="text-[10px] font-bold text-zinc-300">{order.pair}</span>
+                      <span className="text-[10px] font-bold text-zinc-300">
+                        {order.pair}
+                      </span>
                       {order.executionMode && (
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
-                          order.executionMode === 'live'
-                            ? 'bg-rose-950/80 border border-rose-800 text-rose-300'
-                            : 'bg-amber-950/80 border border-amber-800 text-amber-300'
-                        }`}>
-                          {order.executionMode === 'live' ? 'LIVE L4' : 'PAPER L2'}
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
+                            order.executionMode === "live"
+                              ? "bg-rose-950/80 border border-rose-800 text-rose-300"
+                              : "bg-amber-950/80 border border-amber-800 text-amber-300"
+                          }`}
+                        >
+                          {order.executionMode === "live"
+                            ? "LIVE L4"
+                            : "PAPER L2"}
                         </span>
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
-                      <span className="text-[10px] text-zinc-500">{orderTime}</span>
+                      <span className="text-[10px] text-zinc-500">
+                        {orderTime}
+                      </span>
                       <span className="text-[9px] text-sky-400/80 hover:text-sky-300 flex items-center">
                         <Tag className="w-2.5 h-2.5 mr-0.5" />
                         <span>Chart</span>
@@ -984,13 +1235,21 @@ export default function MarketPanel({ tickers, orders, portfolioHistory, onReset
                   </div>
 
                   <div className="flex justify-between items-baseline">
-                    <span className="text-zinc-300 font-semibold font-mono tabular-nums">{order.amount} {order.pair.split('/')[0]}</span>
-                    <span className="text-zinc-400 font-mono tabular-nums">@ ${order.price?.toLocaleString()}</span>
+                    <span className="text-zinc-300 font-semibold font-mono tabular-nums">
+                      {order.amount} {order.pair.split("/")[0]}
+                    </span>
+                    <span className="text-zinc-400 font-mono tabular-nums">
+                      @ ${order.price?.toLocaleString()}
+                    </span>
                   </div>
 
                   <div className="flex justify-between items-center text-[10px] text-zinc-500 mt-1 border-t border-zinc-900/90 pt-1">
-                    <span className="truncate max-w-[180px]">{order.strategyName}</span>
-                    <span className="text-zinc-400 font-medium font-mono tabular-nums">${order.total?.toLocaleString()} USD</span>
+                    <span className="truncate max-w-[180px]">
+                      {order.strategyName}
+                    </span>
+                    <span className="text-zinc-400 font-medium font-mono tabular-nums">
+                      ${order.total?.toLocaleString()} USD
+                    </span>
                   </div>
                 </div>
               );

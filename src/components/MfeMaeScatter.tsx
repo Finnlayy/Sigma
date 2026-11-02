@@ -1,7 +1,15 @@
 import { useMemo } from "react";
 import {
-  ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid,
-  Tooltip, ReferenceLine, ResponsiveContainer, Legend,
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  ZAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+  ResponsiveContainer,
+  Legend,
 } from "recharts";
 
 export interface AutopsyEvent {
@@ -26,6 +34,14 @@ const ZONE_COLORS: Record<string, string> = {
   CLEAN_LOSS: "#38bdf8",
   BAD: "#ef4444",
   NEUTRAL_LOSS: "#a1a1aa",
+};
+
+const ZONE_BG_CLASSES: Record<string, string> = {
+  GOOD: "bg-emerald-500",
+  WATCH: "bg-amber-500",
+  CLEAN_LOSS: "bg-sky-400",
+  BAD: "bg-red-500",
+  NEUTRAL_LOSS: "bg-zinc-400",
 };
 
 /**
@@ -70,7 +86,7 @@ export function MfeMaeScatter({ events }: { events: AutopsyEvent[] }) {
 
     return {
       zones: Array.from(uniqueZones),
-      byZone: grouped
+      byZone: grouped,
     };
   }, [events]);
 
@@ -97,15 +113,35 @@ export function MfeMaeScatter({ events }: { events: AutopsyEvent[] }) {
           />
           <ZAxis type="number" dataKey="r" range={[50, 500]} />
           <ReferenceLine x={0} stroke="#475569" />
-          <ReferenceLine y={0.5} stroke="#ef4444" strokeDasharray="4 4" label={{ value: "BAD-Gate 0.5R", fill: "#ef4444", fontSize: 9 }} />
-          <ReferenceLine y={1.82} stroke="#10b981" strokeDasharray="4 4" label={{ value: "Capture 0.55 @ mfe 3.3R", fill: "#10b981", fontSize: 9 }} />
+          <ReferenceLine
+            y={0.5}
+            stroke="#ef4444"
+            strokeDasharray="4 4"
+            label={{ value: "BAD-Gate 0.5R", fill: "#ef4444", fontSize: 9 }}
+          />
+          <ReferenceLine
+            y={1.82}
+            stroke="#10b981"
+            strokeDasharray="4 4"
+            label={{
+              value: "Capture 0.55 @ mfe 3.3R",
+              fill: "#10b981",
+              fontSize: 9,
+            }}
+          />
           <Tooltip
             cursor={{ strokeDasharray: "3 3" }}
             contentStyle={{
-              background: "#020617", border: "1px solid #1e293b",
-              borderRadius: 8, fontSize: 11, fontFamily: "monospace",
+              background: "#020617",
+              border: "1px solid #1e293b",
+              borderRadius: 8,
+              fontSize: 11,
+              fontFamily: "monospace",
             }}
-            formatter={(value: any, name: any) => [Number(value)?.toFixed(3), name]}
+            formatter={(value: any, name: any) => [
+              Number(value)?.toFixed(3),
+              name,
+            ]}
             labelFormatter={() => ""}
           />
           <Legend
@@ -113,7 +149,7 @@ export function MfeMaeScatter({ events }: { events: AutopsyEvent[] }) {
             iconType="circle"
             iconSize={7}
           />
-          {zones.map(z => (
+          {zones.map((z) => (
             <Scatter
               key={z}
               name={z}
@@ -125,9 +161,12 @@ export function MfeMaeScatter({ events }: { events: AutopsyEvent[] }) {
         </ScatterChart>
       </ResponsiveContainer>
       <div className="flex flex-wrap gap-3 justify-center pt-1">
-        {Object.entries(ZONE_COLORS).map(([z, c]) => (
-          <span key={z} className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full" style={{ background: c }} />
+        {Object.entries(ZONE_BG_CLASSES).map(([z, bgClass]) => (
+          <span
+            key={z}
+            className="text-[10px] font-mono text-slate-400 flex items-center gap-1"
+          >
+            <span className={`w-2 h-2 rounded-full ${bgClass}`} />
             {z} ({byZone[z]?.length || 0})
           </span>
         ))}

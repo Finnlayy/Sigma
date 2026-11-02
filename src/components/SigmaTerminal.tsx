@@ -6,220 +6,239 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { LayoutGrid, Plus, RotateCcw, ShieldAlert, Wifi, WifiOff } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { PANEL_REGISTRY, PANEL_TITLES } from './sigma/panels';
+  LayoutGrid,
+  Plus,
+  RotateCcw,
+  ShieldAlert,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
-  SigmaDock, addPanelToActive, collectPanels, fromFlexLayout, type DockNode,
-} from './sigma/dock';
-import { sigmaApi, type HealthResponse } from '../lib/sigmaApi';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { PANEL_REGISTRY, PANEL_TITLES } from "./sigma/panels";
 import {
-  SIGMA_FOCUS_PANEL_EVENT, type SigmaFocusPanelDetail,
-} from './sigma/OperatorConfirmModal';
+  SigmaDock,
+  addPanelToActive,
+  collectPanels,
+  fromFlexLayout,
+  type DockNode,
+} from "./sigma/dock";
+import { sigmaApi, type HealthResponse } from "../lib/sigmaApi";
+import {
+  SIGMA_FOCUS_PANEL_EVENT,
+  type SigmaFocusPanelDetail,
+} from "./sigma/OperatorConfirmModal";
 
-const STORAGE_KEY = 'sigma.terminal.layout.v2';
-const PRESET_KEY = 'sigma.terminal.preset.v1';
+const STORAGE_KEY = "sigma.terminal.layout.v2";
+const PRESET_KEY = "sigma.terminal.preset.v1";
 
 export const PRESETS = [
-  'BOT_COCKPIT', 'PINE_IDE', 'RISK_RADAR', 'SENTINEL_OPS',
-  'CAPITAL_OPS', 'PAPER_LAB', 'OBSERVABILITY', 'ML_INSPECTOR',
-  'OVERVIEW', 'LIBRARY', 'QUANT', 'CONFIG',
-  'QUANTUM_OPS', 'POSITION_DESK', 'RESEARCH_LAB',
+  "BOT_COCKPIT",
+  "PINE_IDE",
+  "RISK_RADAR",
+  "SENTINEL_OPS",
+  "CAPITAL_OPS",
+  "PAPER_LAB",
+  "OBSERVABILITY",
+  "ML_INSPECTOR",
+  "OVERVIEW",
+  "LIBRARY",
+  "QUANT",
+  "CONFIG",
+  "QUANTUM_OPS",
+  "POSITION_DESK",
+  "RESEARCH_LAB",
 ] as const;
 export type Preset = (typeof PRESETS)[number];
 
-const tab = (component: string) => ({ type: 'tab' as const, component });
-const row = (weight: number, children: unknown[]) => ({ type: 'row', weight, children });
+const tab = (component: string) => ({ type: "tab" as const, component });
+const row = (weight: number, children: unknown[]) => ({
+  type: "row",
+  weight,
+  children,
+});
 const set = (weight: number, components: string[]) => ({
-  type: 'tabset', weight, children: components.map(tab),
+  type: "tabset",
+  weight,
+  children: components.map(tab),
 });
 
-const PRESET_LAYOUTS: Record<Preset, { type: string; weight?: number; children?: unknown[] }> = {
+const PRESET_LAYOUTS: Record<
+  Preset,
+  { type: string; weight?: number; children?: unknown[] }
+> = {
   BOT_COCKPIT: {
-    type: 'row',
+    type: "row",
     children: [
-      row(70, [
-        set(60, ['MarketChart']),
-        set(40, ['VirtualBotDeck']),
-      ]),
+      row(70, [set(60, ["MarketChart"]), set(40, ["VirtualBotDeck"])]),
       row(30, [
-        set(50, ['RewardXPMatrixPanel', 'MarketRadarPanel']),
-        set(50, ['AcademyBadgeMatrix', 'TelegramOperatorPanel']),
+        set(50, ["RewardXPMatrixPanel", "MarketRadarPanel"]),
+        set(50, ["AcademyBadgeMatrix", "TelegramOperatorPanel"]),
       ]),
     ],
   },
   PINE_IDE: {
-    type: 'row',
+    type: "row",
     children: [
-      set(55, ['PineStudio']),
+      set(55, ["PineStudio"]),
       row(45, [
-        set(60, ['MarketChart']),
-        set(40, ['TvJobsPanel', 'AcademyBadgeMatrix']),
+        set(60, ["MarketChart"]),
+        set(40, ["TvJobsPanel", "AcademyBadgeMatrix"]),
       ]),
     ],
   },
   RISK_RADAR: {
-    type: 'row',
+    type: "row",
     children: [
-      row(60, [
-        set(45, ['RiskGauges']),
-        set(55, ['MarketChart']),
-      ]),
+      row(60, [set(45, ["RiskGauges"]), set(55, ["MarketChart"])]),
       row(40, [
-        set(34, ['DeadmanSwitchPanel', 'MarketRadarPanel']),
-        set(33, ['MemoryWatchdogPanel']),
-        set(33, ['SelfOptimizingMLPanel']),
+        set(34, ["DeadmanSwitchPanel", "MarketRadarPanel"]),
+        set(33, ["MemoryWatchdogPanel"]),
+        set(33, ["SelfOptimizingMLPanel"]),
       ]),
     ],
   },
   SENTINEL_OPS: {
-    type: 'row',
+    type: "row",
     children: [
       row(55, [
-        set(34, ['DeadmanSwitchPanel']),
-        set(33, ['MemoryWatchdogPanel']),
-        set(33, ['RiskGauges']),
+        set(34, ["DeadmanSwitchPanel"]),
+        set(33, ["MemoryWatchdogPanel"]),
+        set(33, ["RiskGauges"]),
       ]),
       row(45, [
-        set(50, ['TelegramOperatorPanel', 'LLMConsole']),
-        set(50, ['TvJobsPanel', 'SelfOptimizingMLPanel']),
+        set(50, ["TelegramOperatorPanel", "LLMConsole"]),
+        set(50, ["TvJobsPanel", "SelfOptimizingMLPanel"]),
       ]),
     ],
   },
   CAPITAL_OPS: {
-    type: 'row',
+    type: "row",
     children: [
       row(55, [
-        set(34, ['FlywheelBudgetPanel']),
-        set(33, ['OrderReceiptsPanel']),
-        set(33, ['ContagionRadarPanel']),
+        set(34, ["FlywheelBudgetPanel"]),
+        set(33, ["OrderReceiptsPanel"]),
+        set(33, ["ContagionRadarPanel"]),
       ]),
       row(45, [
-        set(34, ['OrderbookConfluencePanel']),
-        set(33, ['SchedulerTelemetryPanel']),
-        set(33, ['RateLimiterPanel']),
+        set(34, ["OrderbookConfluencePanel"]),
+        set(33, ["SchedulerTelemetryPanel"]),
+        set(33, ["RateLimiterPanel"]),
       ]),
     ],
   },
   ML_INSPECTOR: {
-    type: 'row',
+    type: "row",
     children: [
-      set(60, ['NetronVisualizerPanel']),
-      set(40, ['SelfOptimizingMLPanel', 'AcademyBadgeMatrix']),
+      set(60, ["NetronVisualizerPanel"]),
+      set(40, ["SelfOptimizingMLPanel", "AcademyBadgeMatrix"]),
     ],
   },
   OBSERVABILITY: {
-    type: 'row',
+    type: "row",
     children: [
-      set(60, ['ProcessLogView']),
+      set(60, ["ProcessLogView"]),
       row(40, [
-        set(50, ['DiagnosticsErrorPanel']),
-        set(50, ['SchedulerTelemetryPanel']),
+        set(50, ["DiagnosticsErrorPanel"]),
+        set(50, ["SchedulerTelemetryPanel"]),
       ]),
     ],
   },
   PAPER_LAB: {
-    type: 'row',
+    type: "row",
     children: [
-      row(60, [
-        set(50, ['PaperLabPanel']),
-        set(50, ['MarketChart']),
-      ]),
+      row(60, [set(50, ["PaperLabPanel"]), set(50, ["MarketChart"])]),
       row(40, [
-        set(50, ['VirtualBotDeck']),
-        set(50, ['AcademyBadgeMatrix', 'OrderReceiptsPanel']),
+        set(50, ["VirtualBotDeck"]),
+        set(50, ["AcademyBadgeMatrix", "OrderReceiptsPanel"]),
       ]),
     ],
   },
   OVERVIEW: {
-    type: 'row',
+    type: "row",
     children: [
-      row(65, [
-        set(60, ['OverviewMetricsPanel']),
-        set(40, ['MarketChart']),
-      ]),
-      row(35, [
-        set(50, ['QueueMatrixPanel']),
-        set(50, ['LedgersPanel']),
-      ]),
+      row(65, [set(60, ["OverviewMetricsPanel"]), set(40, ["MarketChart"])]),
+      row(35, [set(50, ["QueueMatrixPanel"]), set(50, ["LedgersPanel"])]),
     ],
   },
   LIBRARY: {
-    type: 'row',
+    type: "row",
     children: [
-      set(55, ['StrategyLibraryPanel']),
+      set(55, ["StrategyLibraryPanel"]),
       row(45, [
-        set(55, ['PineStudio']),
-        set(45, ['BacktestPanel', 'GeneticPanel']),
+        set(55, ["PineStudio"]),
+        set(45, ["BacktestPanel", "GeneticPanel"]),
       ]),
     ],
   },
   QUANT: {
-    type: 'row',
+    type: "row",
     children: [
-      set(40, ['SystemHealthPanel']),
+      set(40, ["SystemHealthPanel"]),
       row(60, [
-        set(50, ['RegimePanel']),
-        set(50, ['ExecutionRiskPanel', 'AcademyRegistryPanel']),
+        set(50, ["RegimePanel"]),
+        set(50, ["ExecutionRiskPanel", "AcademyRegistryPanel"]),
       ]),
     ],
   },
   CONFIG: {
-    type: 'row',
+    type: "row",
     children: [
-      set(55, ['SettingsPanel']),
-      row(45, [
-        set(50, ['DeadmanSwitchPanel']),
-        set(50, ['RiskGauges']),
-      ]),
+      set(55, ["SettingsPanel"]),
+      row(45, [set(50, ["DeadmanSwitchPanel"]), set(50, ["RiskGauges"])]),
     ],
   },
   // MP-17 — Sigma-Forschungs-Presets (UI-Spezifikation §4)
   QUANTUM_OPS: {
-    type: 'row',
+    type: "row",
     children: [
-      set(60, ['QuantumRegimePanel_']),
+      set(60, ["QuantumRegimePanel_"]),
       row(40, [
-        set(50, ['PowerPhysicsPanel_']),
-        set(50, ['SymbolScoutPanel_']),
+        set(50, ["PowerPhysicsPanel_"]),
+        set(50, ["SymbolScoutPanel_"]),
       ]),
       row(60, [
-        set(50, ['MarketChart', 'MarketGeometryPanel_']),
-        set(50, ['PolymarketPanel_', 'OnnxBrainPanel_']),
+        set(50, ["MarketChart", "MarketGeometryPanel_"]),
+        set(50, ["PolymarketPanel_", "OnnxBrainPanel_"]),
       ]),
     ],
   },
   POSITION_DESK: {
-    type: 'row',
+    type: "row",
     children: [
-      set(50, ['LadderArchitectPanel_', 'FractalTradePanel_']),
+      set(50, ["LadderArchitectPanel_", "FractalTradePanel_"]),
       row(50, [
-        set(60, ['MarketChart']),
-        set(40, ['RiskGuardPanel_', 'UnwindPanel_', 'ProvisionerPanel_']),
+        set(60, ["MarketChart"]),
+        set(40, ["RiskGuardPanel_", "UnwindPanel_", "ProvisionerPanel_"]),
       ]),
     ],
   },
   RESEARCH_LAB: {
-    type: 'row',
+    type: "row",
     children: [
-      set(55, ['ResearchLabPanel_']),
+      set(55, ["ResearchLabPanel_"]),
       row(45, [
-        set(50, ['PowerPhysicsPanel_', 'BacktestPanel']),
-        set(50, ['GeneticPanel', 'MarketChart']),
+        set(50, ["PowerPhysicsPanel_", "BacktestPanel"]),
+        set(50, ["GeneticPanel", "MarketChart"]),
       ]),
     ],
   },
 };
 
 function buildTree(preset: Preset): DockNode {
-  return fromFlexLayout(PRESET_LAYOUTS[preset] as Parameters<typeof fromFlexLayout>[0]);
+  return fromFlexLayout(
+    PRESET_LAYOUTS[preset] as Parameters<typeof fromFlexLayout>[0],
+  );
 }
 
 function loadTree(preset: Preset): DockNode {
@@ -229,25 +248,31 @@ function loadTree(preset: Preset): DockNode {
       const parsed = JSON.parse(stored) as { preset?: string; tree?: DockNode };
       if (parsed.preset === preset && parsed.tree) return parsed.tree;
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return buildTree(preset);
 }
 
 export default function SigmaTerminal() {
-  const [preset, setPreset] = useState<Preset>(() =>
-    (localStorage.getItem(PRESET_KEY) as Preset) || 'BOT_COCKPIT');
-  const [tree, setTree] = useState<DockNode>(() => loadTree(
-    (localStorage.getItem(PRESET_KEY) as Preset) || 'BOT_COCKPIT'));
-  const [activeTabset, setActiveTabset] = useState('');
+  const [preset, setPreset] = useState<Preset>(
+    () => (localStorage.getItem(PRESET_KEY) as Preset) || "BOT_COCKPIT",
+  );
+  const [tree, setTree] = useState<DockNode>(() =>
+    loadTree((localStorage.getItem(PRESET_KEY) as Preset) || "BOT_COCKPIT"),
+  );
+  const [activeTabset, setActiveTabset] = useState("");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   useEffect(() => {
     const load = () => {
       void sigmaApi.health().then(setHealth);
-      void fetch('/api/kraken/status')
-        .then((r) => r.ok ? r.json() : null)
-        .then((d) => { if (d?.latencyMs != null) setLatencyMs(d.latencyMs); })
+      void fetch("/api/kraken/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d?.latencyMs != null) setLatencyMs(d.latencyMs);
+        })
         .catch(() => undefined);
     };
     load();
@@ -264,8 +289,13 @@ export default function SigmaTerminal() {
         const target = activeTabset || collectFirstTabset(prev);
         const next = addPanelToActive(prev, target, detail.panelId);
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({ preset, tree: next }));
-        } catch { /* ignore */ }
+          localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({ preset, tree: next }),
+          );
+        } catch {
+          /* ignore */
+        }
         return next;
       });
     };
@@ -273,12 +303,20 @@ export default function SigmaTerminal() {
     return () => window.removeEventListener(SIGMA_FOCUS_PANEL_EVENT, onFocus);
   }, [activeTabset, preset]);
 
-  const persist = useCallback((next: DockNode, p = preset) => {
-    setTree(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ preset: p, tree: next }));
-    } catch { /* quota */ }
-  }, [preset]);
+  const persist = useCallback(
+    (next: DockNode, p = preset) => {
+      setTree(next);
+      try {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ preset: p, tree: next }),
+        );
+      } catch {
+        /* quota */
+      }
+    },
+    [preset],
+  );
 
   const applyPreset = (p: Preset) => {
     setPreset(p);
@@ -308,17 +346,29 @@ export default function SigmaTerminal() {
           size="sm"
           variant="outline"
           value={preset}
-          onValueChange={(v) => { if (v) applyPreset(v as Preset); }}
+          onValueChange={(v) => {
+            if (v) applyPreset(v as Preset);
+          }}
           className="flex-wrap justify-start"
         >
           {PRESETS.map((p) => (
-            <ToggleGroupItem key={p} value={p} className="h-7 px-2 text-[10px] font-semibold tracking-wide">
-              {p.replace(/_/g, ' ')}
+            <ToggleGroupItem
+              key={p}
+              value={p}
+              className="h-7 px-2 text-[10px] font-semibold tracking-wide"
+            >
+              {p.replace(/_/g, " ")}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
 
-        <Button variant="outline" size="icon-xs" title="Reset layout" aria-label="Reset layout" onClick={() => applyPreset(preset)}>
+        <Button
+          variant="outline"
+          size="icon-xs"
+          title="Reset layout"
+          aria-label="Reset layout"
+          onClick={() => applyPreset(preset)}
+        >
           <RotateCcw className="size-3" />
         </Button>
 
@@ -329,7 +379,10 @@ export default function SigmaTerminal() {
                 <Plus className="size-3" /> Panel
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="max-h-72 overflow-auto">
+            <DropdownMenuContent
+              align="start"
+              className="max-h-72 overflow-auto"
+            >
               {missing.map((m) => (
                 <DropdownMenuItem
                   key={m}
@@ -346,25 +399,43 @@ export default function SigmaTerminal() {
         )}
 
         <div className="ml-auto flex items-center gap-2 font-mono text-[10px]">
-          <Badge variant={online ? 'outline' : 'destructive'} className="gap-1">
+          <Badge variant={online ? "outline" : "destructive"} className="gap-1">
             {online ? <Wifi size={11} /> : <WifiOff size={11} />} core:8000
           </Badge>
-          <span className={health?.scraper_ok ? 'text-emerald-400' : 'text-muted-foreground'}>scraper:8001</span>
-          <span className={health?.tv_worker_ok ? 'text-emerald-400' : 'text-muted-foreground'}>tv-worker</span>
-          <Badge variant={health?.live_trading ? 'destructive' : 'secondary'}>
-            {health?.live_trading ? 'LIVE' : 'SHADOW'}
+          <span
+            className={
+              health?.scraper_ok ? "text-emerald-400" : "text-muted-foreground"
+            }
+          >
+            scraper:8001
+          </span>
+          <span
+            className={
+              health?.tv_worker_ok
+                ? "text-emerald-400"
+                : "text-muted-foreground"
+            }
+          >
+            tv-worker
+          </span>
+          <Badge variant={health?.live_trading ? "destructive" : "secondary"}>
+            {health?.live_trading ? "LIVE" : "SHADOW"}
           </Badge>
           <span className="text-muted-foreground">
-            {latencyMs != null ? `${latencyMs}ms` : '—'}
+            {latencyMs != null ? `${latencyMs}ms` : "—"}
           </span>
           <span className="text-muted-foreground">
-            L{health?.blueprint?.autonomy_level ?? 4} · v{health?.blueprint?.blueprint_version ?? '1.2.0'}
+            L{health?.blueprint?.autonomy_level ?? 4} · v
+            {health?.blueprint?.blueprint_version ?? "1.2.0"}
           </span>
         </div>
       </div>
 
       {killed && (
-        <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
+        <Alert
+          variant="destructive"
+          className="rounded-none border-x-0 border-t-0"
+        >
           <ShieldAlert />
           <AlertTitle>KILL SWITCH ENGAGED</AlertTitle>
           <AlertDescription>
@@ -386,6 +457,6 @@ export default function SigmaTerminal() {
 }
 
 function collectFirstTabset(node: DockNode): string {
-  if (node.type === 'tabset') return node.id;
+  if (node.type === "tabset") return node.id;
   return collectFirstTabset(node.children[0]);
 }

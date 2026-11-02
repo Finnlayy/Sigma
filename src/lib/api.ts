@@ -18,9 +18,9 @@ export interface DashboardInitResponse {
  * Guaranteed never to hang or throw unhandled exceptions.
  */
 export async function safeFetchJson<T>(
-  url: string, 
-  options?: RequestInit, 
-  timeoutMs: number = 4000
+  url: string,
+  options?: RequestInit,
+  timeoutMs: number = 4000,
 ): Promise<T | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -28,7 +28,7 @@ export async function safeFetchJson<T>(
   try {
     const res = await fetch(url, {
       ...options,
-      signal: controller.signal
+      signal: controller.signal,
     });
     clearTimeout(timer);
 
@@ -61,7 +61,7 @@ export async function safeMutation<T>(
   url: string,
   method: "POST" | "PUT" | "DELETE",
   body?: any,
-  timeoutMs: number = 6000
+  timeoutMs: number = 6000,
 ): Promise<{ ok: boolean; data?: T; error?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -71,7 +71,7 @@ export async function safeMutation<T>(
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal
+      signal: controller.signal,
     });
     clearTimeout(timer);
 
@@ -91,9 +91,12 @@ export async function safeMutation<T>(
     return { ok: true };
   } catch (err: any) {
     clearTimeout(timer);
-    return { 
-      ok: false, 
-      error: err?.name === "AbortError" ? "Request timed out" : (err?.message || "Network error") 
+    return {
+      ok: false,
+      error:
+        err?.name === "AbortError"
+          ? "Request timed out"
+          : err?.message || "Network error",
     };
   }
 }

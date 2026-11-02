@@ -1,10 +1,29 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { 
-  TrendingUp, TrendingDown, Activity, AlertCircle, CheckCircle2, 
-  HelpCircle, RefreshCw, Layers, ShieldCheck, Newspaper, Flame, Gauge, ArrowRight
+import {
+  TrendingUp,
+  TrendingDown,
+  Activity,
+  AlertCircle,
+  CheckCircle2,
+  HelpCircle,
+  RefreshCw,
+  Layers,
+  ShieldCheck,
+  Newspaper,
+  Flame,
+  Gauge,
+  ArrowRight,
 } from "lucide-react";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts";
 import { safeFetchJson } from "../../lib/api";
 
 const FALLBACK_ASSETS = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD"];
@@ -26,14 +45,15 @@ type CrossImpactView = {
 function normalizeCrossImpact(raw: any): CrossImpactView | null {
   if (!raw) return null;
   const incoming = Array.isArray(raw.matrix) ? raw.matrix : [];
-  const assets: string[] = Array.isArray(raw.assets) && raw.assets.length
-    ? raw.assets
-    // Bolt Optimization: Replaced O(N) chained .map().filter() with a single O(N) .reduce() pass to avoid intermediate array allocation
-    : incoming.reduce((acc: string[], r: any) => {
-        const val = r.symbol_a || r.asset;
-        if (val) acc.push(val);
-        return acc;
-      }, []);
+  const assets: string[] =
+    Array.isArray(raw.assets) && raw.assets.length
+      ? raw.assets
+      : // Bolt Optimization: Replaced O(N) chained .map().filter() with a single O(N) .reduce() pass to avoid intermediate array allocation
+        incoming.reduce((acc: string[], r: any) => {
+          const val = r.symbol_a || r.asset;
+          if (val) acc.push(val);
+          return acc;
+        }, []);
   const cols = assets.length ? assets : FALLBACK_ASSETS;
 
   const matrix: CrossImpactRow[] = incoming.map((r: any) => {
@@ -46,9 +66,12 @@ function normalizeCrossImpact(raw: any): CrossImpactView | null {
       }
       const fromLegacy = r.correlations?.[col];
       const fromLag = r.lags?.[col]?.best_corr;
-      correlations[col] = typeof fromLegacy === "number" ? fromLegacy
-        : typeof fromLag === "number" ? fromLag
-        : 0;
+      correlations[col] =
+        typeof fromLegacy === "number"
+          ? fromLegacy
+          : typeof fromLag === "number"
+            ? fromLag
+            : 0;
     }
 
     // Bolt Optimization: Condense O(N) chained .filter().map().reduce() into a single O(N) iterative pass for spillover calculation
@@ -65,7 +88,10 @@ function normalizeCrossImpact(raw: any): CrossImpactView | null {
     return { asset, correlations, spillover };
   });
 
-  let lead_asset = typeof raw.lead_asset === "string" ? raw.lead_asset : (cols[0] || FALLBACK_ASSETS[0]);
+  let lead_asset =
+    typeof raw.lead_asset === "string"
+      ? raw.lead_asset
+      : cols[0] || FALLBACK_ASSETS[0];
   let lead_lag_bars = 0;
   let bestAbs = 0;
   for (const r of incoming) {
@@ -88,9 +114,12 @@ export function QuantitativeRegimePanel() {
   const [selectedAsset, setSelectedAsset] = useState<string>("BTC/USD");
   const [dfaData, setDfaData] = useState<any>(null);
   const [ampelData, setAmpelData] = useState<any>(null);
-  const [crossImpactData, setCrossImpactData] = useState<CrossImpactView | null>(null);
+  const [crossImpactData, setCrossImpactData] =
+    useState<CrossImpactView | null>(null);
   const [sentimentResult, setSentimentResult] = useState<any>(null);
-  const [customHeadline, setCustomHeadline] = useState<string>("SEC approves landmark multi-crypto ETF basket with instant spot settlement");
+  const [customHeadline, setCustomHeadline] = useState<string>(
+    "SEC approves landmark multi-crypto ETF basket with instant spot settlement",
+  );
   const [isLoadingDFA, setIsLoadingDFA] = useState<boolean>(false);
   const [isLoadingAmpel, setIsLoadingAmpel] = useState<boolean>(false);
   const [isLoadingSentiment, setIsLoadingSentiment] = useState<boolean>(false);
@@ -106,7 +135,11 @@ export function QuantitativeRegimePanel() {
   const fetchDFA = async () => {
     setIsLoadingDFA(true);
     try {
-      const data = await safeFetchJson<any>(`/api/quant/dfa/hurst?symbol=${encodeURIComponent(selectedAsset)}`, undefined, 4000);
+      const data = await safeFetchJson<any>(
+        `/api/quant/dfa/hurst?symbol=${encodeURIComponent(selectedAsset)}`,
+        undefined,
+        4000,
+      );
       if (data) {
         setDfaData(data);
       }
@@ -120,7 +153,11 @@ export function QuantitativeRegimePanel() {
   const fetchAmpel = async () => {
     setIsLoadingAmpel(true);
     try {
-      const data = await safeFetchJson<any>(`/api/quant/regime/ampel?symbol=${encodeURIComponent(selectedAsset)}`, undefined, 4000);
+      const data = await safeFetchJson<any>(
+        `/api/quant/regime/ampel?symbol=${encodeURIComponent(selectedAsset)}`,
+        undefined,
+        4000,
+      );
       if (data) {
         setAmpelData(data);
       }
@@ -133,7 +170,11 @@ export function QuantitativeRegimePanel() {
 
   const fetchCrossImpact = async () => {
     try {
-      const data = await safeFetchJson<any>("/api/quant/lead-lag/cross-impact", undefined, 4000);
+      const data = await safeFetchJson<any>(
+        "/api/quant/lead-lag/cross-impact",
+        undefined,
+        4000,
+      );
       const view = normalizeCrossImpact(data);
       if (view) {
         setCrossImpactData(view);
@@ -146,11 +187,15 @@ export function QuantitativeRegimePanel() {
   const fetchSentiment = async (text: string) => {
     setIsLoadingSentiment(true);
     try {
-      const data = await safeFetchJson<any>("/api/quant/sentiment/score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
-      }, 4000);
+      const data = await safeFetchJson<any>(
+        "/api/quant/sentiment/score",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        },
+        4000,
+      );
       if (data) {
         setSentimentResult(data);
       }
@@ -162,18 +207,27 @@ export function QuantitativeRegimePanel() {
   };
 
   // Mock fluctuation curve points for DFA chart if not returned from backend
-  const dfaPlotPoints = Array.isArray(dfaData?.fluctuation_curve) ? dfaData.fluctuation_curve : [
-    { scale: 8, fluctuation: 0.0012, fit: 0.0011 },
-    { scale: 16, fluctuation: 0.0019, fit: 0.0018 },
-    { scale: 32, fluctuation: 0.0029, fit: 0.0030 },
-    { scale: 64, fluctuation: 0.0048, fit: 0.0049 },
-    { scale: 128, fluctuation: 0.0079, fit: 0.0080 },
-    { scale: 256, fluctuation: 0.0131, fit: 0.0130 },
-    { scale: 512, fluctuation: 0.0212, fit: 0.0210 }
-  ];
+  const dfaPlotPoints = Array.isArray(dfaData?.fluctuation_curve)
+    ? dfaData.fluctuation_curve
+    : [
+        { scale: 8, fluctuation: 0.0012, fit: 0.0011 },
+        { scale: 16, fluctuation: 0.0019, fit: 0.0018 },
+        { scale: 32, fluctuation: 0.0029, fit: 0.003 },
+        { scale: 64, fluctuation: 0.0048, fit: 0.0049 },
+        { scale: 128, fluctuation: 0.0079, fit: 0.008 },
+        { scale: 256, fluctuation: 0.0131, fit: 0.013 },
+        { scale: 512, fluctuation: 0.0212, fit: 0.021 },
+      ];
 
-  const hurstExponent = dfaData?.hurst_exponent !== undefined ? dfaData.hurst_exponent : 0.62;
-  const hurstRegime = dfaData?.regime || (hurstExponent > 0.55 ? "TRENDING" : hurstExponent < 0.45 ? "MEAN_REVERTING" : "RANDOM_WALK");
+  const hurstExponent =
+    dfaData?.hurst_exponent !== undefined ? dfaData.hurst_exponent : 0.62;
+  const hurstRegime =
+    dfaData?.regime ||
+    (hurstExponent > 0.55
+      ? "TRENDING"
+      : hurstExponent < 0.45
+        ? "MEAN_REVERTING"
+        : "RANDOM_WALK");
 
   return (
     <div className="space-y-6" id="quant-regime-panel">
@@ -186,7 +240,8 @@ export function QuantitativeRegimePanel() {
               Quantitative Regime & Signal Intelligence (Modules 03, 10, 14, 15)
             </h3>
             <p className="text-xs text-slate-400">
-              Detrended Fluctuation Analysis (DFA), Asset Calibration Ampelsystem, FinBERT Sentiment & Lead-Lag Matrix
+              Detrended Fluctuation Analysis (DFA), Asset Calibration
+              Ampelsystem, FinBERT Sentiment & Lead-Lag Matrix
             </p>
           </div>
         </div>
@@ -206,11 +261,16 @@ export function QuantitativeRegimePanel() {
             </button>
           ))}
           <button
-            onClick={() => { fetchDFA(); fetchAmpel(); }}
+            onClick={() => {
+              fetchDFA();
+              fetchAmpel();
+            }}
             className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors ml-1"
             title="Recalculate regimes"
           >
-            <RefreshCw className={`w-4 h-4 ${isLoadingDFA || isLoadingAmpel ? "animate-spin text-indigo-400" : ""}`} />
+            <RefreshCw
+              className={`w-4 h-4 ${isLoadingDFA || isLoadingAmpel ? "animate-spin text-indigo-400" : ""}`}
+            />
           </button>
         </div>
       </div>
@@ -227,13 +287,15 @@ export function QuantitativeRegimePanel() {
                   DFA & Hurst Regime Exponent (Modul 03)
                 </h4>
               </div>
-              <span className={`px-2.5 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider ${
-                hurstRegime === "TRENDING"
-                  ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40"
-                  : hurstRegime === "MEAN_REVERTING"
-                  ? "bg-purple-950/80 text-purple-300 border border-purple-500/40"
-                  : "bg-blue-950/80 text-blue-300 border border-blue-500/40"
-              }`}>
+              <span
+                className={`px-2.5 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider ${
+                  hurstRegime === "TRENDING"
+                    ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40"
+                    : hurstRegime === "MEAN_REVERTING"
+                      ? "bg-purple-950/80 text-purple-300 border border-purple-500/40"
+                      : "bg-blue-950/80 text-blue-300 border border-blue-500/40"
+                }`}
+              >
                 {hurstRegime}
               </span>
             </div>
@@ -241,21 +303,35 @@ export function QuantitativeRegimePanel() {
             {/* Hurst Metric & Scale Visualizer */}
             <div className="grid grid-cols-3 gap-3 p-3 bg-slate-950/60 rounded-xl border border-slate-800/60 mb-4">
               <div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Hurst (H)</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
+                  Hurst (H)
+                </span>
                 <p className="text-xl font-bold font-mono text-cyan-300 mt-0.5">
-                  {typeof hurstExponent === "number" ? hurstExponent?.toFixed(4) : "0.6200"}
+                  {typeof hurstExponent === "number"
+                    ? hurstExponent?.toFixed(4)
+                    : "0.6200"}
                 </p>
               </div>
               <div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Persistence</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
+                  Persistence
+                </span>
                 <p className="text-xs font-bold text-slate-200 mt-1">
-                  {hurstExponent > 0.55 ? "Strong Trend Follow" : hurstExponent < 0.45 ? "High Mean Reversion" : "Geometric Brown."}
+                  {hurstExponent > 0.55
+                    ? "Strong Trend Follow"
+                    : hurstExponent < 0.45
+                      ? "High Mean Reversion"
+                      : "Geometric Brown."}
                 </p>
               </div>
               <div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Confidence (R²)</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
+                  Confidence (R²)
+                </span>
                 <p className="text-sm font-mono text-emerald-400 mt-0.5">
-                  {dfaData?.r_squared ? `${(dfaData.r_squared * 100)?.toFixed(1)}%` : "98.4%"}
+                  {dfaData?.r_squared
+                    ? `${(dfaData.r_squared * 100)?.toFixed(1)}%`
+                    : "98.4%"}
                 </p>
               </div>
             </div>
@@ -263,24 +339,59 @@ export function QuantitativeRegimePanel() {
             {/* DFA Log-Log Fluctuation Curve */}
             <div className="h-44 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dfaPlotPoints} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <LineChart
+                  data={dfaPlotPoints}
+                  margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="scale" stroke="#64748b" tick={{ fontSize: 10 }} />
+                  <XAxis
+                    dataKey="scale"
+                    stroke="#64748b"
+                    tick={{ fontSize: 10 }}
+                  />
                   <YAxis stroke="#64748b" tick={{ fontSize: 10 }} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "8px", fontSize: "11px" }}
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#0f172a",
+                      borderColor: "#334155",
+                      borderRadius: "8px",
+                      fontSize: "11px",
+                    }}
                     itemStyle={{ color: "#38bdf8" }}
                   />
-                  <Line type="monotone" dataKey="fluctuation" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3 }} name="Log Fluctuation F(s)" />
-                  <Line type="monotone" dataKey="fit" stroke="#94a3b8" strokeDasharray="3 3" strokeWidth={1.5} dot={false} name="Fitted Slope (H)" />
+                  <Line
+                    type="monotone"
+                    dataKey="fluctuation"
+                    stroke="#38bdf8"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    name="Log Fluctuation F(s)"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="fit"
+                    stroke="#94a3b8"
+                    strokeDasharray="3 3"
+                    strokeWidth={1.5}
+                    dot={false}
+                    name="Fitted Slope (H)"
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-400 flex justify-between">
-            <span>DFA Window Scales: <strong className="text-slate-200 font-mono">s ∈ [8, 512]</strong></span>
-            <span>Regime Classification: <strong className="text-cyan-300 font-mono">DFA-Polynomial-1</strong></span>
+            <span>
+              DFA Window Scales:{" "}
+              <strong className="text-slate-200 font-mono">s ∈ [8, 512]</strong>
+            </span>
+            <span>
+              Regime Classification:{" "}
+              <strong className="text-cyan-300 font-mono">
+                DFA-Polynomial-1
+              </strong>
+            </span>
           </div>
         </div>
 
@@ -294,14 +405,18 @@ export function QuantitativeRegimePanel() {
                   Asset Calibrator Ampelsystem (Modul 14)
                 </h4>
               </div>
-              <span className={`px-2.5 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider ${
-                ampelData?.traffic_light === "GREEN" || !ampelData?.traffic_light
-                  ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40"
-                  : ampelData?.traffic_light === "YELLOW"
-                  ? "bg-amber-950/80 text-amber-300 border border-amber-500/40"
-                  : "bg-red-950/80 text-red-300 border border-red-500/40"
-              }`}>
-                ● {ampelData?.traffic_light || "GREEN"} : {ampelData?.status || "TRADABLE"}
+              <span
+                className={`px-2.5 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider ${
+                  ampelData?.traffic_light === "GREEN" ||
+                  !ampelData?.traffic_light
+                    ? "bg-emerald-950/80 text-emerald-300 border border-emerald-500/40"
+                    : ampelData?.traffic_light === "YELLOW"
+                      ? "bg-amber-950/80 text-amber-300 border border-amber-500/40"
+                      : "bg-red-950/80 text-red-300 border border-red-500/40"
+                }`}
+              >
+                ● {ampelData?.traffic_light || "GREEN"} :{" "}
+                {ampelData?.status || "TRADABLE"}
               </span>
             </div>
 
@@ -311,11 +426,18 @@ export function QuantitativeRegimePanel() {
               <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800/80 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-200">Variance Ratio Test (VR)</span>
-                    <span className="text-[10px] text-slate-400">Random Walk Hypo.</span>
+                    <span className="text-xs font-semibold text-slate-200">
+                      Variance Ratio Test (VR)
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Random Walk Hypo.
+                    </span>
                   </div>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    Stat: {ampelData?.variance_ratio?.stat?.toFixed(3) || "1.042"} | p-val: {ampelData?.variance_ratio?.p_value?.toFixed(4) || "0.2450"}
+                    Stat:{" "}
+                    {ampelData?.variance_ratio?.stat?.toFixed(3) || "1.042"} |
+                    p-val:{" "}
+                    {ampelData?.variance_ratio?.p_value?.toFixed(4) || "0.2450"}
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
@@ -327,11 +449,18 @@ export function QuantitativeRegimePanel() {
               <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800/80 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-200">Ljung-Box Q-Test</span>
-                    <span className="text-[10px] text-slate-400">Autocorrelation Lag 10</span>
+                    <span className="text-xs font-semibold text-slate-200">
+                      Ljung-Box Q-Test
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Autocorrelation Lag 10
+                    </span>
                   </div>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    Q-Stat: {ampelData?.ljung_box?.q_stat?.toFixed(2) || "12.80"} | p-val: {ampelData?.ljung_box?.p_value?.toFixed(4) || "0.0820"}
+                    Q-Stat:{" "}
+                    {ampelData?.ljung_box?.q_stat?.toFixed(2) || "12.80"} |
+                    p-val:{" "}
+                    {ampelData?.ljung_box?.p_value?.toFixed(4) || "0.0820"}
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
@@ -343,11 +472,17 @@ export function QuantitativeRegimePanel() {
               <div className="p-3 bg-slate-950/50 rounded-lg border border-slate-800/80 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-200">Engle ARCH-LM Test</span>
-                    <span className="text-[10px] text-slate-400">Volatility Clustering</span>
+                    <span className="text-xs font-semibold text-slate-200">
+                      Engle ARCH-LM Test
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Volatility Clustering
+                    </span>
                   </div>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    LM-Stat: {ampelData?.arch_lm?.lm_stat?.toFixed(2) || "8.45"} | p-val: {ampelData?.arch_lm?.p_value?.toFixed(4) || "0.1340"}
+                    LM-Stat: {ampelData?.arch_lm?.lm_stat?.toFixed(2) || "8.45"}{" "}
+                    | p-val:{" "}
+                    {ampelData?.arch_lm?.p_value?.toFixed(4) || "0.1340"}
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
@@ -358,8 +493,18 @@ export function QuantitativeRegimePanel() {
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between text-[11px] text-slate-400">
-            <span>Calibrated Half-Life: <strong className="text-slate-200 font-mono">{ampelData?.half_life || "18.4"} bars</strong></span>
-            <span>Max Leverage: <strong className="text-emerald-400 font-mono">{ampelData?.max_leverage || "3.0"}x</strong></span>
+            <span>
+              Calibrated Half-Life:{" "}
+              <strong className="text-slate-200 font-mono">
+                {ampelData?.half_life || "18.4"} bars
+              </strong>
+            </span>
+            <span>
+              Max Leverage:{" "}
+              <strong className="text-emerald-400 font-mono">
+                {ampelData?.max_leverage || "3.0"}x
+              </strong>
+            </span>
           </div>
         </div>
       </div>
@@ -376,16 +521,20 @@ export function QuantitativeRegimePanel() {
                   FinBERT Sentiment & Shock Filter (Modul 10)
                 </h4>
               </div>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold ${
-                sentimentResult?.available === false
-                  ? "bg-slate-800 text-slate-400 border border-slate-700"
-                  : sentimentResult?.circuit_breaker_triggered
-                  ? "bg-red-950 text-red-300 border border-red-500"
-                  : "bg-emerald-950 text-emerald-300 border border-emerald-800"
-              }`}>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold ${
+                  sentimentResult?.available === false
+                    ? "bg-slate-800 text-slate-400 border border-slate-700"
+                    : sentimentResult?.circuit_breaker_triggered
+                      ? "bg-red-950 text-red-300 border border-red-500"
+                      : "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                }`}
+              >
                 {sentimentResult?.available === false
                   ? "UNAVAILABLE"
-                  : sentimentResult?.circuit_breaker_triggered ? "SHOCK HALT TRIGGERED" : "CIRCUIT PASS"}
+                  : sentimentResult?.circuit_breaker_triggered
+                    ? "SHOCK HALT TRIGGERED"
+                    : "CIRCUIT PASS"}
               </span>
             </div>
 
@@ -413,11 +562,14 @@ export function QuantitativeRegimePanel() {
                 {[
                   "SEC approves landmark multi-crypto ETF basket with instant settlement",
                   "Major exchange halts withdrawals amid critical liquidity deficit rumors",
-                  "Federal Reserve signals rate cuts and dovish monetary policy easing"
+                  "Federal Reserve signals rate cuts and dovish monetary policy easing",
                 ].map((sample, idx) => (
                   <button
                     key={idx}
-                    onClick={() => { setCustomHeadline(sample); fetchSentiment(sample); }}
+                    onClick={() => {
+                      setCustomHeadline(sample);
+                      fetchSentiment(sample);
+                    }}
                     className="text-[10px] px-2 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded truncate max-w-xs transition-colors"
                   >
                     {sample}
@@ -430,25 +582,42 @@ export function QuantitativeRegimePanel() {
             {sentimentResult && (
               <div className="p-4 bg-slate-950/70 rounded-xl border border-slate-800/80 grid grid-cols-3 gap-3 text-center">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase">Polarity Score</span>
-                  <p className={`text-xl font-bold font-mono mt-0.5 ${
-                    sentimentResult.available === false ? "text-slate-500"
-                    : (sentimentResult.sentiment_score || 0) > 0.2 ? "text-emerald-400"
-                    : (sentimentResult.sentiment_score || 0) < -0.2 ? "text-red-400" : "text-slate-300"
-                  }`}>
-                    {sentimentResult.available === false || sentimentResult.score == null
+                  <span className="text-[10px] text-slate-400 uppercase">
+                    Polarity Score
+                  </span>
+                  <p
+                    className={`text-xl font-bold font-mono mt-0.5 ${
+                      sentimentResult.available === false
+                        ? "text-slate-500"
+                        : (sentimentResult.sentiment_score || 0) > 0.2
+                          ? "text-emerald-400"
+                          : (sentimentResult.sentiment_score || 0) < -0.2
+                            ? "text-red-400"
+                            : "text-slate-300"
+                    }`}
+                  >
+                    {sentimentResult.available === false ||
+                    sentimentResult.score == null
                       ? "—"
-                      : (sentimentResult.score > 0 ? `+${sentimentResult.score?.toFixed(3)}` : sentimentResult.score?.toFixed(3))}
+                      : sentimentResult.score > 0
+                        ? `+${sentimentResult.score?.toFixed(3)}`
+                        : sentimentResult.score?.toFixed(3)}
                   </p>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase">Confidence</span>
+                  <span className="text-[10px] text-slate-400 uppercase">
+                    Confidence
+                  </span>
                   <p className="text-xl font-bold font-mono text-cyan-400 mt-0.5">
-                    {sentimentResult.confidence == null ? "—" : `${(sentimentResult.confidence * 100)?.toFixed(1)}%`}
+                    {sentimentResult.confidence == null
+                      ? "—"
+                      : `${(sentimentResult.confidence * 100)?.toFixed(1)}%`}
                   </p>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase">Action Bias</span>
+                  <span className="text-[10px] text-slate-400 uppercase">
+                    Action Bias
+                  </span>
                   <p className="text-xs font-bold text-slate-200 mt-1 uppercase">
                     {sentimentResult.label || "UNAVAILABLE"}
                   </p>
@@ -458,8 +627,18 @@ export function QuantitativeRegimePanel() {
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-400 flex justify-between">
-            <span>Model: <strong className="text-slate-200 font-mono">{sentimentResult?.model || "unavailable"}</strong></span>
-            <span>Threshold Gate: <strong className="text-amber-400 font-mono">|Score| &gt; 0.85</strong></span>
+            <span>
+              Model:{" "}
+              <strong className="text-slate-200 font-mono">
+                {sentimentResult?.model || "unavailable"}
+              </strong>
+            </span>
+            <span>
+              Threshold Gate:{" "}
+              <strong className="text-amber-400 font-mono">
+                |Score| &gt; 0.85
+              </strong>
+            </span>
           </div>
         </div>
 
@@ -474,7 +653,8 @@ export function QuantitativeRegimePanel() {
                 </h4>
               </div>
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-purple-950 text-purple-300 border border-purple-800">
-                Lead: {crossImpactData?.lead_asset || "BTC/USD"} ({crossImpactData?.lead_lag_bars ?? 0} bars)
+                Lead: {crossImpactData?.lead_asset || "BTC/USD"} (
+                {crossImpactData?.lead_lag_bars ?? 0} bars)
               </span>
             </div>
 
@@ -484,39 +664,56 @@ export function QuantitativeRegimePanel() {
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
                     <th className="py-2 text-left">Asset</th>
-                    {(crossImpactData?.assets ?? FALLBACK_ASSETS).map((a: string) => (
-                      <th key={a} className="py-2 text-center text-[10px]">{a.split('/')[0]}</th>
-                    ))}
+                    {(crossImpactData?.assets ?? FALLBACK_ASSETS).map(
+                      (a: string) => (
+                        <th key={a} className="py-2 text-center text-[10px]">
+                          {a.split("/")[0]}
+                        </th>
+                      ),
+                    )}
                     <th className="py-2 text-right">Spillover</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {crossImpactData?.matrix?.length ? crossImpactData.matrix.map((row) => (
-                    <tr key={row.asset} className="hover:bg-slate-800/30">
-                      <td className="py-2 text-slate-300 font-semibold">{row.asset}</td>
-                      {(crossImpactData.assets ?? FALLBACK_ASSETS).map((colAsset: string) => {
-                        const corr = row.correlations?.[colAsset] || 0;
-                        return (
-                          <td key={colAsset} className="py-2 text-center">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                              corr === 1
-                                ? "bg-slate-800 text-slate-400"
-                                : corr > 0.8
-                                ? "bg-purple-950/80 text-purple-300 font-bold"
-                                : "bg-blue-950/60 text-blue-300"
-                            }`}>
-                              {corr?.toFixed(2)}
-                            </span>
-                          </td>
-                        );
-                      })}
-                      <td className="py-2 text-right text-purple-300 font-semibold">
-                        {((row.spillover || 0) * 100)?.toFixed(1)}%
-                      </td>
-                    </tr>
-                  )) : (
+                  {crossImpactData?.matrix?.length ? (
+                    crossImpactData.matrix.map((row) => (
+                      <tr key={row.asset} className="hover:bg-slate-800/30">
+                        <td className="py-2 text-slate-300 font-semibold">
+                          {row.asset}
+                        </td>
+                        {(crossImpactData.assets ?? FALLBACK_ASSETS).map(
+                          (colAsset: string) => {
+                            const corr = row.correlations?.[colAsset] || 0;
+                            return (
+                              <td key={colAsset} className="py-2 text-center">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                    corr === 1
+                                      ? "bg-slate-800 text-slate-400"
+                                      : corr > 0.8
+                                        ? "bg-purple-950/80 text-purple-300 font-bold"
+                                        : "bg-blue-950/60 text-blue-300"
+                                  }`}
+                                >
+                                  {corr?.toFixed(2)}
+                                </span>
+                              </td>
+                            );
+                          },
+                        )}
+                        <td className="py-2 text-right text-purple-300 font-semibold">
+                          {((row.spillover || 0) * 100)?.toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
                     <tr>
-                      <td colSpan={6} className="py-4 text-center text-slate-500">Loading cross-impact correlation matrix...</td>
+                      <td
+                        colSpan={6}
+                        className="py-4 text-center text-slate-500"
+                      >
+                        Loading cross-impact correlation matrix...
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -525,8 +722,16 @@ export function QuantitativeRegimePanel() {
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 text-[11px] text-slate-400 flex justify-between">
-            <span>Granger Causality: <strong className="text-slate-200 font-mono">p &lt; 0.01</strong></span>
-            <span>Spillover Metric: <strong className="text-purple-400 font-mono">Diebold-Yilmaz Index</strong></span>
+            <span>
+              Granger Causality:{" "}
+              <strong className="text-slate-200 font-mono">p &lt; 0.01</strong>
+            </span>
+            <span>
+              Spillover Metric:{" "}
+              <strong className="text-purple-400 font-mono">
+                Diebold-Yilmaz Index
+              </strong>
+            </span>
           </div>
         </div>
       </div>

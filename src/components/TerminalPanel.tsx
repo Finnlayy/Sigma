@@ -1,5 +1,14 @@
 import { useState, useRef, useEffect, KeyboardEvent } from "react";
-import { Terminal, Shield, ChevronRight, Play, Square, RefreshCw, Trash2, Filter } from "lucide-react";
+import {
+  Terminal,
+  Shield,
+  ChevronRight,
+  Play,
+  Square,
+  RefreshCw,
+  Trash2,
+  Filter,
+} from "lucide-react";
 import { ExecutionLog } from "../types";
 
 interface TerminalPanelProps {
@@ -9,16 +18,21 @@ interface TerminalPanelProps {
   onRefresh: () => void;
 }
 
-export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefresh }: TerminalPanelProps) {
+export default function TerminalPanel({
+  logs,
+  onSendCommand,
+  onClearLogs,
+  onRefresh,
+}: TerminalPanelProps) {
   const [inputValue, setInputValue] = useState("");
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [autoScroll, setAutoScroll] = useState(false);
-  const [viewLimit, setViewLimit] = useState<'3' | 'all'>('3');
+  const [viewLimit, setViewLimit] = useState<"3" | "all">("3");
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Slice logs according to limit setting (defaults to last 3 messages)
-  const displayedLogs = viewLimit === '3' ? logs.slice(-3) : logs;
+  const displayedLogs = viewLimit === "3" ? logs.slice(-3) : logs;
 
   // Auto Scroll within container only if autoScroll is active
   useEffect(() => {
@@ -31,7 +45,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
     if (!inputValue.trim()) return;
 
     const command = inputValue.trim();
-    setCommandHistory(prev => [command, ...prev]);
+    setCommandHistory((prev) => [command, ...prev]);
     setHistoryIndex(-1);
     setInputValue("");
 
@@ -39,16 +53,19 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       handleSubmit();
-    } else if (e.key === 'ArrowUp') {
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (commandHistory?.length > 0 && historyIndex < commandHistory?.length - 1) {
+      if (
+        commandHistory?.length > 0 &&
+        historyIndex < commandHistory?.length - 1
+      ) {
         const nextIdx = historyIndex + 1;
         setHistoryIndex(nextIdx);
         setInputValue(commandHistory[nextIdx]);
       }
-    } else if (e.key === 'ArrowDown') {
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       if (historyIndex > 0) {
         const nextIdx = historyIndex - 1;
@@ -63,14 +80,14 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
 
   const getLogColorClass = (level: string) => {
     switch (level) {
-      case 'trade':
-        return 'text-emerald-400 font-semibold';
-      case 'warn':
-        return 'text-amber-400 font-semibold';
-      case 'error':
-        return 'text-rose-400 font-bold';
+      case "trade":
+        return "text-emerald-400 font-semibold";
+      case "warn":
+        return "text-amber-400 font-semibold";
+      case "error":
+        return "text-rose-400 font-bold";
       default:
-        return 'text-zinc-300';
+        return "text-zinc-300";
     }
   };
 
@@ -80,7 +97,9 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
       <div className="bg-zinc-900 border-b border-zinc-800 px-4 py-2 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center space-x-2">
           <Terminal className="w-4 h-4 text-emerald-500" />
-          <span className="text-xs font-mono text-zinc-300 font-bold">kraken-cli@headless:~</span>
+          <span className="text-xs font-mono text-zinc-300 font-bold">
+            kraken-cli@headless:~
+          </span>
           <span className="flex h-2 w-2 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -92,14 +111,14 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
           <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded p-0.5 text-[11px] font-mono">
             <button
               id="terminal-filter-last-3"
-              onClick={() => setViewLimit('3')}
+              onClick={() => setViewLimit("3")}
               title="Only show the last 3 runner log messages"
               aria-label="Only show the last 3 runner log messages"
-              aria-pressed={viewLimit === '3'}
+              aria-pressed={viewLimit === "3"}
               className={`px-2 py-0.5 rounded transition-colors flex items-center space-x-1 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                viewLimit === '3'
-                  ? 'bg-emerald-950/80 text-emerald-400 font-bold border border-emerald-800/70 shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200'
+                viewLimit === "3"
+                  ? "bg-emerald-950/80 text-emerald-400 font-bold border border-emerald-800/70 shadow-sm"
+                  : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
               <Filter className="w-2.5 h-2.5" />
@@ -107,34 +126,34 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
             </button>
             <button
               id="terminal-filter-all"
-              onClick={() => setViewLimit('all')}
+              onClick={() => setViewLimit("all")}
               title="Show all recorded logs"
               aria-label="Show all recorded logs"
-              aria-pressed={viewLimit === 'all'}
+              aria-pressed={viewLimit === "all"}
               className={`px-2 py-0.5 rounded transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                viewLimit === 'all'
-                  ? 'bg-zinc-800 text-white font-bold border border-zinc-700 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                viewLimit === "all"
+                  ? "bg-zinc-800 text-white font-bold border border-zinc-700 shadow-sm"
+                  : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
               <span>All ({logs?.length})</span>
             </button>
           </div>
 
-          <button 
+          <button
             onClick={() => setAutoScroll(!autoScroll)}
             title="Toggle auto-scrolling terminal logs"
             aria-label="Toggle auto-scrolling terminal logs"
             aria-pressed={autoScroll}
             className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-              autoScroll 
-                ? 'bg-emerald-950/60 border-emerald-800/80 text-emerald-400' 
-                : 'bg-zinc-800/50 border-zinc-700/50 text-zinc-400 hover:text-zinc-200'
+              autoScroll
+                ? "bg-emerald-950/60 border-emerald-800/80 text-emerald-400"
+                : "bg-zinc-800/50 border-zinc-700/50 text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            Scroll: {autoScroll ? 'ON' : 'OFF'}
+            Scroll: {autoScroll ? "ON" : "OFF"}
           </button>
-          <button 
+          <button
             onClick={onRefresh}
             title="Force synchronization"
             aria-label="Force synchronization"
@@ -142,7 +161,7 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
-          <button 
+          <button
             onClick={onClearLogs}
             title="Flush buffer screen"
             aria-label="Flush buffer screen"
@@ -156,8 +175,13 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
       {/* Quick Help Header */}
       <div className="bg-zinc-950/70 border-b border-zinc-900 px-4 py-1.5 text-[11px] font-mono text-zinc-500 flex justify-between items-center">
         <span className="flex items-center space-x-2">
-          <span>Displaying {viewLimit === '3' ? 'latest 3 messages' : `all ${logs?.length} messages`}</span>
-          {viewLimit === '3' && logs?.length > 3 && (
+          <span>
+            Displaying{" "}
+            {viewLimit === "3"
+              ? "latest 3 messages"
+              : `all ${logs?.length} messages`}
+          </span>
+          {viewLimit === "3" && logs?.length > 3 && (
             <span className="text-[10px] text-zinc-500 bg-zinc-900 border border-zinc-800 px-1.5 py-0.2 rounded">
               +{logs?.length - 3} older buffered
             </span>
@@ -169,27 +193,49 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
       </div>
 
       {/* Log Output Buffer */}
-      <div ref={logContainerRef} className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-2 terminal-scroll bg-black/95">
+      <div
+        ref={logContainerRef}
+        className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-2 terminal-scroll bg-black/95"
+      >
         {!displayedLogs?.length ? (
           <div className="text-zinc-600 text-xs py-4 text-center select-none flex flex-col items-center justify-center space-y-1">
-            <span className="text-zinc-500 font-medium">Ready. Awaiting runner executions or manual CLI commands...</span>
-            <span className="text-[11px] text-zinc-600">Type <code className="text-zinc-400">help</code> or trigger a strategy to generate output.</span>
+            <span className="text-zinc-500 font-medium">
+              Ready. Awaiting runner executions or manual CLI commands...
+            </span>
+            <span className="text-[11px] text-zinc-600">
+              Type <code className="text-zinc-400">help</code> or trigger a
+              strategy to generate output.
+            </span>
           </div>
         ) : (
           displayedLogs.map((log, index) => {
             const timestamp = new Date(log.timestamp).toLocaleTimeString();
             return (
-              <div key={`${log.id || 'log'}-${log.timestamp || ''}-${index}`} className="leading-5 tracking-wide flex items-start space-x-2 p-1 rounded hover:bg-zinc-900/40 transition-colors">
-                <span className="text-zinc-600 select-none shrink-0 font-medium">[{timestamp}]</span>
-                <span className={`uppercase shrink-0 text-[10px] px-1.5 py-0.2 rounded border font-mono font-semibold ${
-                  log.level === 'trade' ? 'bg-emerald-950/70 border-emerald-800/60 text-emerald-400' :
-                  log.level === 'warn' ? 'bg-amber-950/70 border-amber-800/60 text-amber-400' :
-                  log.level === 'error' ? 'bg-rose-950/70 border-rose-800/60 text-rose-400' :
-                  'bg-zinc-900 border-zinc-800 text-zinc-400'
-                }`}>
+              <div
+                key={`${log.id || "log"}-${log.timestamp || ""}-${index}`}
+                className="leading-5 tracking-wide flex items-start space-x-2 p-1 rounded hover:bg-zinc-900/40 transition-colors"
+              >
+                <span className="text-zinc-600 select-none shrink-0 font-medium">
+                  [{timestamp}]
+                </span>
+                <span
+                  className={`uppercase shrink-0 text-[10px] px-1.5 py-0.2 rounded border font-mono font-semibold ${
+                    log.level === "trade"
+                      ? "bg-emerald-950/70 border-emerald-800/60 text-emerald-400"
+                      : log.level === "warn"
+                        ? "bg-amber-950/70 border-amber-800/60 text-amber-400"
+                        : log.level === "error"
+                          ? "bg-rose-950/70 border-rose-800/60 text-rose-400"
+                          : "bg-zinc-900 border-zinc-800 text-zinc-400"
+                  }`}
+                >
                   {log.level}
                 </span>
-                <span className={`flex-1 break-all ${getLogColorClass(log.level)}`}>{log.message}</span>
+                <span
+                  className={`flex-1 break-all ${getLogColorClass(log.level)}`}
+                >
+                  {log.message}
+                </span>
               </div>
             );
           })
@@ -199,7 +245,9 @@ export default function TerminalPanel({ logs, onSendCommand, onClearLogs, onRefr
       {/* Terminal Interactive Prompt Input */}
       <div className="bg-zinc-900 border-t border-zinc-800 p-3 flex items-center space-x-2 shrink-0">
         <ChevronRight className="w-4 h-4 text-emerald-400 animate-pulse shrink-0" />
-        <span className="text-zinc-500 font-mono text-xs select-none shrink-0">kraken-cli &gt;</span>
+        <span className="text-zinc-500 font-mono text-xs select-none shrink-0">
+          kraken-cli &gt;
+        </span>
         <input
           type="text"
           value={inputValue}

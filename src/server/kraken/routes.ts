@@ -7,9 +7,12 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { Router, type Request, type Response } from 'express';
-import type { KrakenAccountLedgers, KrakenAssetPairsResponse } from '../../types';
-import { ExchangeSymbolNormalizer } from '../../lib/symbolNormalizer';
+import { Router, type Request, type Response } from "express";
+import type {
+  KrakenAccountLedgers,
+  KrakenAssetPairsResponse,
+} from "../../types";
+import { ExchangeSymbolNormalizer } from "../../lib/symbolNormalizer";
 import {
   krakenAssetPairs,
   krakenTicker,
@@ -19,13 +22,19 @@ import {
   type KrakenErrorCode,
   type RawAssetPairs,
   type RawTicker,
-} from './client';
-import { mapAssetPair, mapAssetPairs, POPULAR_QUOTES } from './symbols';
-import { priceOf, proLedger, spotLedger, type PriceMap, type TickerPrice } from './ledger';
-import { loadLedger, touchSync } from './store';
+} from "./client";
+import { mapAssetPair, mapAssetPairs, POPULAR_QUOTES } from "./symbols";
+import {
+  priceOf,
+  proLedger,
+  spotLedger,
+  type PriceMap,
+  type TickerPrice,
+} from "./ledger";
+import { loadLedger, touchSync } from "./store";
 
 /** USD braucht keinen Ticker — der Kurs ist definitionsgemaess 1 (siehe ledger.USD_QUOTE_PRICE). */
-export const QUOTE_ASSET = 'USD';
+export const QUOTE_ASSET = "USD";
 
 /** Base-Asset -> echter Kraken-Pair-Key gegen USD, abgeleitet aus AssetPairs. */
 export type PairIndex = Record<string, string>;
@@ -36,15 +45,19 @@ export type PairIndex = Record<string, string>;
  */
 export function buildPairIndex(result: RawAssetPairs | null): PairIndex {
   const index: PairIndex = {};
-  if (!result || typeof result !== 'object') return index;
+  if (!result || typeof result !== "object") return index;
   for (const [pairKey, spec] of Object.entries(result)) {
-    if (!spec || typeof spec !== 'object') continue;
+    if (!spec || typeof spec !== "object") continue;
     const info = mapAssetPair(pairKey, spec);
     if (info.quote !== QUOTE_ASSET || !info.base) continue;
 
     // Alle Schreibweisen desselben Assets muessen denselben Pair-Key treffen:
     // kanonisch (BTC), Kraken-Anzeige (XBT) und Kraken-intern (XXBT).
-    const aliases = [info.base, info.symbol.split('/')[0].toUpperCase(), (spec.base ?? '').toUpperCase()];
+    const aliases = [
+      info.base,
+      info.symbol.split("/")[0].toUpperCase(),
+      (spec.base ?? "").toUpperCase(),
+    ];
     for (const alias of aliases) {
       if (alias && !index[alias]) index[alias] = pairKey;
     }
@@ -53,8 +66,11 @@ export function buildPairIndex(result: RawAssetPairs | null): PairIndex {
 }
 
 /** Asset -> Kraken-Pair-Key: AssetPairs-Index zuerst, dann die X/Z-Fallback-Konvention. */
-export function krakenPairForAsset(asset: string, index: PairIndex = {}): string {
-  const upper = (asset ?? '').trim().toUpperCase();
+export function krakenPairForAsset(
+  asset: string,
+  index: PairIndex = {},
+): string {
+  const upper = (asset ?? "").trim().toUpperCase();
   const fromIndex = index[upper];
   if (fromIndex) return fromIndex;
   const base = ExchangeSymbolNormalizer.KRAKEN_BASE_MAP[upper] ?? upper;
@@ -62,8 +78,11 @@ export function krakenPairForAsset(asset: string, index: PairIndex = {}): string
 }
 
 /** Kraken antwortet normalerweise mit dem angefragten Pair-Key; Fallback: Gross-/Kleinschreibung. */
-export function pickTickerEntry(raw: RawTicker, pairKey: string): RawTicker[string] | null {
-  if (!raw || typeof raw !== 'object') return null;
+export function pickTickerEntry(
+  raw: RawTicker,
+  pairKey: string,
+): RawTicker[string] | null {
+  if (!raw || typeof raw !== "object") return null;
   if (raw[pairKey]) return raw[pairKey];
   const lower = pairKey.toLowerCase();
   for (const [key, value] of Object.entries(raw)) {
@@ -73,11 +92,13 @@ export function pickTickerEntry(raw: RawTicker, pairKey: string): RawTicker[stri
 }
 
 /** `c[0]` = letzter Trade, `o[1]` = 24h-Open (`o` kann auch ein String sein). */
-export function toTickerPrice(entry: RawTicker[string] | null): TickerPrice | null {
+export function toTickerPrice(
+  entry: RawTicker[string] | null,
+): TickerPrice | null {
   if (!entry) return null;
-  const last = Number.parseFloat(Array.isArray(entry.c) ? entry.c[0] : '');
+  const last = Number.parseFloat(Array.isArray(entry.c) ? entry.c[0] : "");
   const openRaw = Array.isArray(entry.o) ? entry.o[1] : entry.o;
-  const open24h = Number.parseFloat(typeof openRaw === 'string' ? openRaw : '');
+  const open24h = Number.parseFloat(typeof openRaw === "string" ? openRaw : "");
   if (!Number.isFinite(last)) return null;
   return { last, open24h: Number.isFinite(open24h) ? open24h : last };
 }
@@ -101,7 +122,7 @@ export async function priceAssets(assets: string[]): Promise<PricedAssets> {
   // to avoid intermediate array allocations during ledger sync.
   const wantedSet = new Set<string>();
   for (const a of assets) {
-    const trimmed = (a ?? '').trim().toUpperCase();
+    const trimmed = (a ?? "").trim().toUpperCase();
     if (trimmed) {
       wantedSet.add(trimmed);
     }
@@ -124,18 +145,29 @@ export async function priceAssets(assets: string[]): Promise<PricedAssets> {
   const catalog = await krakenAssetPairs();
   const index = buildPairIndex(catalog.data);
 
-  const res = await krakenTicker(pairs.map((asset) => krakenPairForAsset(asset, index)));
+  const res = await krakenTicker(
+    pairs.map((asset) => krakenPairForAsset(asset, index)),
+  );
   if (!res.ok || !res.data) {
     for (const asset of pairs) {
       prices[asset] = { last: 0, open24h: 0 };
       unpriced.push(asset);
     }
     const error = res.error ?? catalog.error;
-    return { prices, ok: false, error, detail: res.detail ?? catalog.detail, priced, unpriced };
+    return {
+      prices,
+      ok: false,
+      error,
+      detail: res.detail ?? catalog.detail,
+      priced,
+      unpriced,
+    };
   }
 
   for (const asset of pairs) {
-    const price = toTickerPrice(pickTickerEntry(res.data, krakenPairForAsset(asset, index)));
+    const price = toTickerPrice(
+      pickTickerEntry(res.data, krakenPairForAsset(asset, index)),
+    );
     if (price) {
       prices[asset] = price;
       priced.push(asset);
@@ -145,7 +177,14 @@ export async function priceAssets(assets: string[]): Promise<PricedAssets> {
     }
   }
 
-  return { prices, ok: unpriced.length === 0, error: res.error, detail: res.detail, priced, unpriced };
+  return {
+    prices,
+    ok: unpriced.length === 0,
+    error: res.error,
+    detail: res.detail,
+    priced,
+    unpriced,
+  };
 }
 
 export const emptySymbolResponse = (): KrakenAssetPairsResponse => ({
@@ -156,7 +195,7 @@ export const emptySymbolResponse = (): KrakenAssetPairsResponse => ({
 });
 
 function ledgerPayload(
-  mode: 'paper' | 'live',
+  mode: "paper" | "live",
   spot: ReturnType<typeof spotLedger>,
   pro: ReturnType<typeof proLedger>,
   lastSync: string | null,
@@ -179,19 +218,22 @@ export function krakenRouter(): Router {
    * GET /api/kraken/status
    * SigmaTerminal liest `latencyMs`, legacyPanels liest `hasCredentials`/`paperTrading`.
    */
-  router.get('/status', async (_req: Request, res: Response) => {
+  router.get("/status", async (_req: Request, res: Response) => {
     const time = await krakenTime();
     const ledger = loadLedger();
     const serverTime = time.ok && time.data ? time.data.unixtime : null;
     res.json({
       ok: time.ok,
       available: time.ok,
-      mode: 'paper',
+      mode: "paper",
       paperTrading: true,
       hasCredentials: false,
       latencyMs: time.ok ? time.latencyMs : null,
       serverTime,
-      localTimeSkewS: serverTime !== null ? Number((Date.now() / 1000 - serverTime).toFixed(3)) : null,
+      localTimeSkewS:
+        serverTime !== null
+          ? Number((Date.now() / 1000 - serverTime).toFixed(3))
+          : null,
       lastSync: ledger.last_sync,
       reason: time.ok ? null : time.error,
       detail: time.ok ? null : time.detail,
@@ -199,7 +241,7 @@ export function krakenRouter(): Router {
   });
 
   /** GET /api/kraken/symbols — MarketPanel + StrategyEditor lesen `{ symbols }`. */
-  router.get('/symbols', async (_req: Request, res: Response) => {
+  router.get("/symbols", async (_req: Request, res: Response) => {
     const pairs = await krakenAssetPairs();
     if (!pairs.ok || !pairs.data) {
       res.json({
@@ -213,7 +255,7 @@ export function krakenRouter(): Router {
       return;
     }
     const mapped = mapAssetPairs(pairs.data);
-    const stale = readStale(krakenCacheKey('/0/public/AssetPairs'));
+    const stale = readStale(krakenCacheKey("/0/public/AssetPairs"));
     res.json({
       ...mapped,
       ok: true,
@@ -226,29 +268,41 @@ export function krakenRouter(): Router {
   });
 
   /** GET /api/kraken/ledgers — KrakenLedgersPanel erwartet KrakenAccountLedgers. */
-  router.get('/ledgers', async (_req: Request, res: Response) => {
+  router.get("/ledgers", async (_req: Request, res: Response) => {
     const ledger = loadLedger();
     const assets = ledger.balances.map((b) => b.asset);
     const priced = await priceAssets(assets);
-    const spot = spotLedger(ledger.balances, ledger.orders_locked, priced.prices);
+    const spot = spotLedger(
+      ledger.balances,
+      ledger.orders_locked,
+      priced.prices,
+    );
     const pro = proLedger(ledger.pro_positions, ledger.cash);
-    const reason = priced.ok ? null : priced.error ?? 'ERR_KRAKEN_PARTIAL_PRICING';
-    res.json(ledgerPayload('paper', spot, pro, ledger.last_sync, {
-      ok: priced.ok,
-      available: priced.ok,
-      reason,
-    }));
+    const reason = priced.ok
+      ? null
+      : (priced.error ?? "ERR_KRAKEN_PARTIAL_PRICING");
+    res.json(
+      ledgerPayload("paper", spot, pro, ledger.last_sync, {
+        ok: priced.ok,
+        available: priced.ok,
+        reason,
+      }),
+    );
   });
 
   /**
    * POST /api/kraken/ledgers/sync — Panel liest `{ timestamp, spot, pro }`.
    * Ohne Kurse wird **nicht** geschrieben (kein Stale-Write).
    */
-  router.post('/ledgers/sync', async (_req: Request, res: Response) => {
+  router.post("/ledgers/sync", async (_req: Request, res: Response) => {
     const ledger = loadLedger();
     const priced = await priceAssets(ledger.balances.map((b) => b.asset));
     if (!priced.ok) {
-      const spot = spotLedger(ledger.balances, ledger.orders_locked, priced.prices);
+      const spot = spotLedger(
+        ledger.balances,
+        ledger.orders_locked,
+        priced.prices,
+      );
       const pro = proLedger(ledger.pro_positions, ledger.cash);
       res.json({
         ok: false,
@@ -256,8 +310,8 @@ export function krakenRouter(): Router {
         timestamp: new Date().toISOString(),
         spot,
         pro,
-        error: priced.error ?? 'ERR_KRAKEN_PARTIAL_PRICING',
-        reason: priced.detail ?? 'Nicht alle Assets konnten bewertet werden.',
+        error: priced.error ?? "ERR_KRAKEN_PARTIAL_PRICING",
+        reason: priced.detail ?? "Nicht alle Assets konnten bewertet werden.",
       });
       return;
     }
@@ -275,15 +329,15 @@ export function krakenRouter(): Router {
   });
 
   /** GET /api/kraken/positions/pro — MetricsPanel liest Collateral/Margin/PnL + positions. */
-  router.get('/positions/pro', (_req: Request, res: Response) => {
+  router.get("/positions/pro", (_req: Request, res: Response) => {
     const ledger = loadLedger();
     const pro = proLedger(ledger.pro_positions, ledger.cash);
     res.json({
       ok: true,
       available: true,
-      mode: 'paper',
+      mode: "paper",
       ...pro,
-      reason: pro.positions.length === 0 ? 'NO_OPEN_PRO_POSITIONS' : null,
+      reason: pro.positions.length === 0 ? "NO_OPEN_PRO_POSITIONS" : null,
     });
   });
 
@@ -291,7 +345,7 @@ export function krakenRouter(): Router {
    * POST /api/kraken/sync-balance — MetricsPanel prueft `hasCredentials`.
    * Paper only: es gibt keine Live-Balances, und es werden keine erfunden.
    */
-  router.post('/sync-balance', (_req: Request, res: Response) => {
+  router.post("/sync-balance", (_req: Request, res: Response) => {
     const ledger = loadLedger();
     const paperBalances: Record<string, number> = {};
     for (const balance of ledger.balances) {
@@ -303,9 +357,9 @@ export function krakenRouter(): Router {
       hasCredentials: false,
       liveKrakenBalances: null,
       paperBalances,
-      mode: 'paper',
+      mode: "paper",
       lastSync: ledger.last_sync,
-      reason: 'PAPER_ONLY_NO_CREDENTIALS',
+      reason: "PAPER_ONLY_NO_CREDENTIALS",
     });
   });
 

@@ -1,18 +1,32 @@
 import { useState, useEffect } from "react";
 import { motion } from "motion/react";
-import { 
-  Activity, ShieldAlert, Cpu, HardDrive, Zap, Radio, RefreshCw, 
-  AlertTriangle, CheckCircle2, XCircle, Play, Pause, Flame, Server
+import {
+  Activity,
+  ShieldAlert,
+  Cpu,
+  HardDrive,
+  Zap,
+  Radio,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Play,
+  Pause,
+  Flame,
+  Server,
 } from "lucide-react";
 import { z } from "zod";
 
-const TelemetrySchema = z.object({
-  state_machine: z.any().optional(),
-  resource_guard: z.any().optional(),
-  storage_tiering: z.any().optional(),
-  watchdog: z.any().optional(),
-  recent_logs: z.any().optional()
-}).catchall(z.any());
+const TelemetrySchema = z
+  .object({
+    state_machine: z.any().optional(),
+    resource_guard: z.any().optional(),
+    storage_tiering: z.any().optional(),
+    watchdog: z.any().optional(),
+    recent_logs: z.any().optional(),
+  })
+  .catchall(z.any());
 
 interface SystemHealthPanelProps {
   onRefresh?: () => void;
@@ -63,7 +77,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
         if (isClosed) return;
 
         // Custom exponential backoff
-        const delay = Math.min(1000 * (2 ** retryCount), 30000);
+        const delay = Math.min(1000 * 2 ** retryCount, 30000);
         retryCount++;
 
         reconnectTimer = setTimeout(() => {
@@ -93,8 +107,11 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           state: newState,
-          reason: newState === "EMERGENCY_HALT" ? emergencyReason || "Manual Dashboard Emergency Directive" : undefined
-        })
+          reason:
+            newState === "EMERGENCY_HALT"
+              ? emergencyReason || "Manual Dashboard Emergency Directive"
+              : undefined,
+        }),
       });
       if (res.ok) {
         onRefresh?.();
@@ -111,7 +128,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
     circuit_breaker: "NORMAL",
     active_path: "FAST_PATH_RL",
     can_execute_orders: true,
-    last_trip_reason: null
+    last_trip_reason: null,
   };
 
   const resourceGuard = telemetry?.resource_guard || {
@@ -119,7 +136,7 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
     memory_percent: 38.2,
     load_shedding_level: "NORMAL",
     dropped_events: 0,
-    active_threads: 4
+    active_threads: 4,
   };
 
   const storageTiering = telemetry?.storage_tiering || {
@@ -129,23 +146,25 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
     l2_total_mb: 0,
     l3_rclone_sync_status: "DISABLED",
     ingestion_rate_events_per_sec: 0,
-    avg_latency_microseconds: 0
+    avg_latency_microseconds: 0,
   };
 
   const watchdog = telemetry?.watchdog || {
     watchdog_running: true,
     heartbeat_healthy: true,
     seconds_since_last_heartbeat: 0.25,
-    circuit_breaker: "NORMAL"
+    circuit_breaker: "NORMAL",
   };
 
-  const isEmergency = stateMachine.state === "EMERGENCY_HALT" || stateMachine.circuit_breaker !== "NORMAL";
+  const isEmergency =
+    stateMachine.state === "EMERGENCY_HALT" ||
+    stateMachine.circuit_breaker !== "NORMAL";
 
   return (
     <div className="space-y-6" id="quant-system-health-panel">
       {/* Top Banner Alert if Emergency Halt */}
       {isEmergency && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           className="p-4 rounded-xl border border-red-500/40 bg-red-950/40 backdrop-blur-md flex items-center justify-between shadow-lg shadow-red-950/20"
@@ -157,7 +176,8 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 System Circuit Breaker Tripped: {stateMachine.circuit_breaker}
               </h4>
               <p className="text-xs text-red-300/80 mt-0.5">
-                {stateMachine.last_trip_reason || "Critical safety threshold breached. Hot-path order execution suspended."}
+                {stateMachine.last_trip_reason ||
+                  "Critical safety threshold breached. Hot-path order execution suspended."}
               </p>
             </div>
           </div>
@@ -166,7 +186,9 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
             disabled={isChangingState}
             className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-semibold tracking-wider transition-colors shadow-md flex items-center gap-2"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isChangingState ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${isChangingState ? "animate-spin" : ""}`}
+            />
             RESET CIRCUIT BREAKER
           </button>
         </motion.div>
@@ -182,13 +204,15 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 <Radio className="w-3.5 h-3.5 text-blue-400" />
                 State Machine (M-00)
               </span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wide uppercase ${
-                stateMachine.state === "LIVE_APPROVED" 
-                  ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
-                  : stateMachine.state === "SHADOW_ACTIVE"
-                  ? "bg-blue-950/70 text-blue-300 border border-blue-500/30"
-                  : "bg-red-950/70 text-red-300 border border-red-500/30"
-              }`}>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold tracking-wide uppercase ${
+                  stateMachine.state === "LIVE_APPROVED"
+                    ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
+                    : stateMachine.state === "SHADOW_ACTIVE"
+                      ? "bg-blue-950/70 text-blue-300 border border-blue-500/30"
+                      : "bg-red-950/70 text-red-300 border border-red-500/30"
+                }`}
+              >
                 {stateMachine.state}
               </span>
             </div>
@@ -196,17 +220,23 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
             <div className="space-y-2 text-xs">
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">Execution Route:</span>
-                <span className="font-mono text-cyan-300">{stateMachine.active_path || "FAST_PATH"}</span>
+                <span className="font-mono text-cyan-300">
+                  {stateMachine.active_path || "FAST_PATH"}
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">Order Routing:</span>
-                <span className={`font-mono ${stateMachine.can_execute_orders ? "text-emerald-400" : "text-amber-400"}`}>
+                <span
+                  className={`font-mono ${stateMachine.can_execute_orders ? "text-emerald-400" : "text-amber-400"}`}
+                >
                   {stateMachine.can_execute_orders ? "ENABLED" : "LOCKED"}
                 </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">Circuit Breaker:</span>
-                <span className={`font-mono ${stateMachine.circuit_breaker === "NORMAL" ? "text-emerald-400" : "text-red-400"}`}>
+                <span
+                  className={`font-mono ${stateMachine.circuit_breaker === "NORMAL" ? "text-emerald-400" : "text-red-400"}`}
+                >
                   {stateMachine.circuit_breaker}
                 </span>
               </div>
@@ -216,14 +246,18 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
           <div className="mt-4 pt-3 border-t border-slate-800/80 flex gap-2">
             <button
               onClick={() => handleSetState("LIVE_APPROVED")}
-              disabled={isChangingState || stateMachine.state === "LIVE_APPROVED"}
+              disabled={
+                isChangingState || stateMachine.state === "LIVE_APPROVED"
+              }
               className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded text-[11px] font-medium transition-colors disabled:opacity-40"
             >
               LIVE APPROVE
             </button>
             <button
               onClick={() => handleSetState("EMERGENCY_HALT")}
-              disabled={isChangingState || stateMachine.state === "EMERGENCY_HALT"}
+              disabled={
+                isChangingState || stateMachine.state === "EMERGENCY_HALT"
+              }
               className="flex-1 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded text-[11px] font-medium transition-colors disabled:opacity-40"
             >
               HALT
@@ -249,31 +283,58 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="text-slate-400">L1 Ringbuffer (RAM):</span>
                   <span className="font-mono text-purple-300">
-                    {(storageTiering.l1_shm_ringbuffer_bytes / 1024 / 1024)?.toFixed(1)} / {(storageTiering.l1_capacity_bytes / 1024 / 1024)?.toFixed(0)} MB
+                    {(
+                      storageTiering.l1_shm_ringbuffer_bytes /
+                      1024 /
+                      1024
+                    )?.toFixed(1)}{" "}
+                    /{" "}
+                    {(storageTiering.l1_capacity_bytes / 1024 / 1024)?.toFixed(
+                      0,
+                    )}{" "}
+                    MB
                   </span>
                 </div>
                 <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="bg-purple-500 w-full h-full rounded-full transition-transform"
-                    style={{ transform: `scaleX(${Math.min(100, (storageTiering.l1_shm_ringbuffer_bytes / storageTiering.l1_capacity_bytes) * 100) / 100})`, transformOrigin: 'left' }}
+                    style={{
+                      transform: `scaleX(${Math.min(100, (storageTiering.l1_shm_ringbuffer_bytes / storageTiering.l1_capacity_bytes) * 100) / 100})`,
+                      transformOrigin: "left",
+                    }}
                   />
                 </div>
               </div>
 
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">L2 DuckDB Parquet:</span>
-                <span className="font-mono text-slate-200">{storageTiering.l2_duckdb_parquet_files || 0} files ({storageTiering.l2_total_mb || 0} MB)</span>
+                <span className="font-mono text-slate-200">
+                  {storageTiering.l2_duckdb_parquet_files || 0} files (
+                  {storageTiering.l2_total_mb || 0} MB)
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">L3 Remote Sync:</span>
-                <span className="font-mono text-zinc-400">{storageTiering.l3_rclone_sync_status || "DISABLED"}</span>
+                <span className="font-mono text-zinc-400">
+                  {storageTiering.l3_rclone_sync_status || "DISABLED"}
+                </span>
               </div>
             </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-between text-[11px] text-slate-400">
-            <span>Throughput: <strong className="text-slate-200 font-mono">{storageTiering.ingestion_rate_events_per_sec || 0} ev/s</strong></span>
-            <span>Latency: <strong className="text-slate-200 font-mono">{storageTiering.avg_latency_microseconds || 0} µs</strong></span>
+            <span>
+              Throughput:{" "}
+              <strong className="text-slate-200 font-mono">
+                {storageTiering.ingestion_rate_events_per_sec || 0} ev/s
+              </strong>
+            </span>
+            <span>
+              Latency:{" "}
+              <strong className="text-slate-200 font-mono">
+                {storageTiering.avg_latency_microseconds || 0} µs
+              </strong>
+            </span>
           </div>
         </div>
 
@@ -285,13 +346,15 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 <Cpu className="w-3.5 h-3.5 text-amber-400" />
                 Resource Guard (M-11)
               </span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                resourceGuard.load_shedding_level === "NORMAL" 
-                  ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
-                  : resourceGuard.load_shedding_level === "WARNING"
-                  ? "bg-amber-950/70 text-amber-300 border border-amber-500/30"
-                  : "bg-red-950/70 text-red-300 border border-red-500/30"
-              }`}>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                  resourceGuard.load_shedding_level === "NORMAL"
+                    ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
+                    : resourceGuard.load_shedding_level === "WARNING"
+                      ? "bg-amber-950/70 text-amber-300 border border-amber-500/30"
+                      : "bg-red-950/70 text-red-300 border border-red-500/30"
+                }`}
+              >
                 {resourceGuard.load_shedding_level}
               </span>
             </div>
@@ -300,12 +363,17 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
               <div>
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="text-slate-400">CPU Compute Load:</span>
-                  <span className="font-mono text-amber-300">{resourceGuard.cpu_percent || 24.5}%</span>
+                  <span className="font-mono text-amber-300">
+                    {resourceGuard.cpu_percent || 24.5}%
+                  </span>
                 </div>
                 <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="bg-amber-500 w-full h-full rounded-full transition-transform"
-                    style={{ transform: `scaleX(${Math.min(100, resourceGuard.cpu_percent || 24.5) / 100})`, transformOrigin: 'left' }}
+                    style={{
+                      transform: `scaleX(${Math.min(100, resourceGuard.cpu_percent || 24.5) / 100})`,
+                      transformOrigin: "left",
+                    }}
                   />
                 </div>
               </div>
@@ -313,26 +381,41 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
               <div>
                 <div className="flex justify-between text-slate-300 mb-1">
                   <span className="text-slate-400">Memory Utilization:</span>
-                  <span className="font-mono text-cyan-300">{resourceGuard.memory_percent || 38.2}%</span>
+                  <span className="font-mono text-cyan-300">
+                    {resourceGuard.memory_percent || 38.2}%
+                  </span>
                 </div>
                 <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="bg-cyan-500 w-full h-full rounded-full transition-transform"
-                    style={{ transform: `scaleX(${Math.min(100, resourceGuard.memory_percent || 38.2) / 100})`, transformOrigin: 'left' }}
+                    style={{
+                      transform: `scaleX(${Math.min(100, resourceGuard.memory_percent || 38.2) / 100})`,
+                      transformOrigin: "left",
+                    }}
                   />
                 </div>
               </div>
 
               <div className="flex justify-between text-slate-300 pt-1">
                 <span className="text-slate-400">Dropped Events:</span>
-                <span className="font-mono text-slate-200">{resourceGuard.dropped_events || 0}</span>
+                <span className="font-mono text-slate-200">
+                  {resourceGuard.dropped_events || 0}
+                </span>
               </div>
             </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-between text-[11px] text-slate-400">
-            <span>Workers: <strong className="text-slate-200 font-mono">{resourceGuard.active_threads || 4} threads</strong></span>
-            <span>Policy: <strong className="text-emerald-400 font-mono">Zero-Drop</strong></span>
+            <span>
+              Workers:{" "}
+              <strong className="text-slate-200 font-mono">
+                {resourceGuard.active_threads || 4} threads
+              </strong>
+            </span>
+            <span>
+              Policy:{" "}
+              <strong className="text-emerald-400 font-mono">Zero-Drop</strong>
+            </span>
           </div>
         </div>
 
@@ -344,12 +427,16 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
                 <Activity className="w-3.5 h-3.5 text-emerald-400" />
                 SSE Watchdog (M-17)
               </span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-mono flex items-center gap-1.5 ${
-                isConnected 
-                  ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
-                  : "bg-amber-950/70 text-amber-300 border border-amber-500/30"
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-400 animate-ping" : "bg-amber-400"}`} />
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono flex items-center gap-1.5 ${
+                  isConnected
+                    ? "bg-emerald-950/70 text-emerald-300 border border-emerald-500/30"
+                    : "bg-amber-950/70 text-amber-300 border border-amber-500/30"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-400 animate-ping" : "bg-amber-400"}`}
+                />
                 {isConnected ? "LIVE STREAM" : "RECONNECTING"}
               </span>
             </div>
@@ -364,18 +451,28 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">Heartbeat Latency:</span>
-                <span className="font-mono text-cyan-300">{watchdog.seconds_since_last_heartbeat?.toFixed(2) || "0.15"}s</span>
+                <span className="font-mono text-cyan-300">
+                  {watchdog.seconds_since_last_heartbeat?.toFixed(2) || "0.15"}s
+                </span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span className="text-slate-400">Event Buffer:</span>
-                <span className="font-mono text-slate-200">{telemetry?.recent_logs?.length || 25} queued</span>
+                <span className="font-mono text-slate-200">
+                  {telemetry?.recent_logs?.length || 25} queued
+                </span>
               </div>
             </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800/80 flex justify-between text-[11px] text-slate-400">
-            <span>Timeout Gate: <strong className="text-slate-200 font-mono">10.0s</strong></span>
-            <span>Pulsing: <strong className="text-emerald-400 font-mono">&lt; 150ms</strong></span>
+            <span>
+              Timeout Gate:{" "}
+              <strong className="text-slate-200 font-mono">10.0s</strong>
+            </span>
+            <span>
+              Pulsing:{" "}
+              <strong className="text-emerald-400 font-mono">&lt; 150ms</strong>
+            </span>
           </div>
         </div>
       </div>
@@ -397,18 +494,28 @@ export function SystemHealthPanel({ onRefresh }: SystemHealthPanelProps) {
         <div className="max-h-64 overflow-y-auto divide-y divide-slate-800/50 font-mono text-xs">
           {telemetry?.recent_logs && telemetry.recent_logs.length > 0 ? (
             telemetry.recent_logs.map((log: any, idx: number) => (
-              <div key={idx} className="px-4 py-2 hover:bg-slate-800/30 flex items-start justify-between gap-4 transition-colors">
+              <div
+                key={idx}
+                className="px-4 py-2 hover:bg-slate-800/30 flex items-start justify-between gap-4 transition-colors"
+              >
                 <div className="flex items-center gap-3">
                   <span className="text-slate-500 text-[10px] w-16">
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    {new Date(log.timestamp).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
                   </span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    log.category === "ERROR" || log.category === "CIRCUIT_BREAKER"
-                      ? "bg-red-950 text-red-300 border border-red-800"
-                      : log.category === "WARN" || log.category === "HEALTH"
-                      ? "bg-amber-950 text-amber-300 border border-amber-800"
-                      : "bg-blue-950 text-blue-300 border border-blue-800"
-                  }`}>
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                      log.category === "ERROR" ||
+                      log.category === "CIRCUIT_BREAKER"
+                        ? "bg-red-950 text-red-300 border border-red-800"
+                        : log.category === "WARN" || log.category === "HEALTH"
+                          ? "bg-amber-950 text-amber-300 border border-amber-800"
+                          : "bg-blue-950 text-blue-300 border border-blue-800"
+                    }`}
+                  >
                     {log.category || "SYSTEM"}
                   </span>
                   <span className="text-slate-200">{log.message}</span>

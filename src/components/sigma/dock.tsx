@@ -2,16 +2,20 @@
  * Sigma dock — FlexLayout semantics with shadcn Resizable + Tabs.
  * Nested rows stack vertically; a row of tabsets splits horizontally.
  */
-import { memo, useMemo, useState, type ReactNode } from 'react';
-import { Maximize2, Minimize2, X } from 'lucide-react';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { PANEL_REGISTRY, PANEL_TITLES } from './panels';
+import { memo, useMemo, useState, type ReactNode } from "react";
+import { Maximize2, Minimize2, X } from "lucide-react";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { PANEL_REGISTRY, PANEL_TITLES } from "./panels";
 
 export type DockLeaf = {
-  type: 'tabset';
+  type: "tabset";
   id: string;
   weight: number;
   panels: string[];
@@ -19,56 +23,68 @@ export type DockLeaf = {
 };
 
 export type DockSplit = {
-  type: 'split';
+  type: "split";
   id: string;
-  direction: 'horizontal' | 'vertical';
+  direction: "horizontal" | "vertical";
   weight: number;
   children: DockNode[];
 };
 
 export type DockNode = DockLeaf | DockSplit;
 
-type FlexChild = { type: string; weight?: number; children?: FlexChild[]; component?: string };
+type FlexChild = {
+  type: string;
+  weight?: number;
+  children?: FlexChild[];
+  component?: string;
+};
 
 let _seq = 0;
-const uid = (p = 'n') => {
-  const cryptoAPI = (typeof window !== 'undefined' && window.crypto) || (typeof globalThis !== 'undefined' && globalThis.crypto);
+const uid = (p = "n") => {
+  const cryptoAPI =
+    (typeof window !== "undefined" && window.crypto) ||
+    (typeof globalThis !== "undefined" && globalThis.crypto);
   if (cryptoAPI && cryptoAPI.getRandomValues) {
     const randomBytes = new Uint8Array(2);
     cryptoAPI.getRandomValues(randomBytes);
-    const randomStr = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const randomStr = Array.from(randomBytes)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
     return `${p}-${++_seq}-${randomStr}`;
   }
   return `${p}-${++_seq}-${Math.random().toString(36).slice(2, 6)}`;
 };
 
 export function fromFlexLayout(node: FlexChild, depth = 0): DockNode {
-  if (node.type === 'tabset') {
+  if (node.type === "tabset") {
     const panels = (node.children ?? []).reduce((acc: string[], c) => {
       if (c.component) acc.push(c.component);
       return acc;
     }, []);
     return {
-      type: 'tabset',
-      id: uid('ts'),
+      type: "tabset",
+      id: uid("ts"),
       weight: node.weight ?? 50,
       panels,
-      active: panels[0] ?? '',
+      active: panels[0] ?? "",
     };
   }
   const kids = (node.children ?? []).map((c) => fromFlexLayout(c, depth + 1));
-  const allSplits = kids.length > 0 && kids.every((k) => k.type === 'split');
+  const allSplits = kids.length > 0 && kids.every((k) => k.type === "split");
   return {
-    type: 'split',
-    id: uid('sp'),
-    direction: allSplits ? 'vertical' : 'horizontal',
+    type: "split",
+    id: uid("sp"),
+    direction: allSplits ? "vertical" : "horizontal",
     weight: node.weight ?? 50,
     children: kids,
   };
 }
 
-export function collectPanels(node: DockNode, out = new Set<string>()): Set<string> {
-  if (node.type === 'tabset') {
+export function collectPanels(
+  node: DockNode,
+  out = new Set<string>(),
+): Set<string> {
+  if (node.type === "tabset") {
     node.panels.forEach((p) => out.add(p));
   } else {
     node.children.forEach((c) => collectPanels(c, out));
@@ -76,17 +92,28 @@ export function collectPanels(node: DockNode, out = new Set<string>()): Set<stri
   return out;
 }
 
-export function addPanelToActive(node: DockNode, activeId: string, panel: string): DockNode {
-  if (node.type === 'tabset') {
+export function addPanelToActive(
+  node: DockNode,
+  activeId: string,
+  panel: string,
+): DockNode {
+  if (node.type === "tabset") {
     if (node.id !== activeId) return node;
     if (node.panels.includes(panel)) return { ...node, active: panel };
     return { ...node, panels: [...node.panels, panel], active: panel };
   }
-  return { ...node, children: node.children.map((c) => addPanelToActive(c, activeId, panel)) };
+  return {
+    ...node,
+    children: node.children.map((c) => addPanelToActive(c, activeId, panel)),
+  };
 }
 
-export function closePanel(node: DockNode, tabsetId: string, panel: string): DockNode | null {
-  if (node.type === 'tabset') {
+export function closePanel(
+  node: DockNode,
+  tabsetId: string,
+  panel: string,
+): DockNode | null {
+  if (node.type === "tabset") {
     if (node.id !== tabsetId) return node;
     const panels = node.panels.filter((p) => p !== panel);
     if (!panels.length) return null;
@@ -101,22 +128,31 @@ export function closePanel(node: DockNode, tabsetId: string, panel: string): Doc
   return { ...node, children };
 }
 
-export function setActivePanel(node: DockNode, tabsetId: string, panel: string): DockNode {
-  if (node.type === 'tabset') {
+export function setActivePanel(
+  node: DockNode,
+  tabsetId: string,
+  panel: string,
+): DockNode {
+  if (node.type === "tabset") {
     if (node.id !== tabsetId) return node;
     return { ...node, active: panel };
   }
-  return { ...node, children: node.children.map((c) => setActivePanel(c, tabsetId, panel)) };
+  return {
+    ...node,
+    children: node.children.map((c) => setActivePanel(c, tabsetId, panel)),
+  };
 }
 
 function firstTabsetId(node: DockNode): string {
-  if (node.type === 'tabset') return node.id;
+  if (node.type === "tabset") return node.id;
   return firstTabsetId(node.children[0]);
 }
 
 function normalizeSizes(children: DockNode[]): number[] {
   const total = children.reduce((s, c) => s + (c.weight || 1), 0) || 1;
-  return children.map((c) => Math.max(8, Math.round(((c.weight || 1) / total) * 100)));
+  return children.map((c) =>
+    Math.max(8, Math.round(((c.weight || 1) / total) * 100)),
+  );
 }
 
 function DockTabset({
@@ -134,7 +170,9 @@ function DockTabset({
   onClose: (tabsetId: string, panel: string) => void;
   onSelect: (tabsetId: string, panel: string) => void;
 }) {
-  const active = node.panels.includes(node.active) ? node.active : node.panels[0];
+  const active = node.panels.includes(node.active)
+    ? node.active
+    : node.panels[0];
   const isMax = maximized === node.id;
 
   return (
@@ -144,11 +182,17 @@ function DockTabset({
     >
       <Tabs
         value={active}
-        onValueChange={(v) => { onActivate(node.id); onSelect(node.id, v); }}
+        onValueChange={(v) => {
+          onActivate(node.id);
+          onSelect(node.id, v);
+        }}
         className="flex h-full min-h-0 flex-col gap-0"
       >
         <div className="flex items-center gap-1 border-b border-border bg-muted/40 px-1">
-          <TabsList variant="line" className="h-7 min-w-0 flex-1 justify-start overflow-x-auto rounded-none bg-transparent p-0">
+          <TabsList
+            variant="line"
+            className="h-7 min-w-0 flex-1 justify-start overflow-x-auto rounded-none bg-transparent p-0"
+          >
             {node.panels.map((p) => (
               <TabsTrigger
                 key={p}
@@ -161,7 +205,11 @@ function DockTabset({
                   aria-label={`Close ${PANEL_TITLES[p] ?? p}`}
                   title={`Close ${PANEL_TITLES[p] ?? p}`}
                   className="ml-1 rounded p-0.5 hover:bg-destructive/20 hover:text-destructive"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(node.id, p); }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onClose(node.id, p);
+                  }}
                   onPointerDown={(e) => e.stopPropagation()}
                 >
                   <X className="size-2.5" />
@@ -174,17 +222,29 @@ function DockTabset({
             size="icon-xs"
             className="text-muted-foreground"
             onClick={() => onMaximize(isMax ? null : node.id)}
-            title={isMax ? 'Restore' : 'Maximize'}
+            title={isMax ? "Restore" : "Maximize"}
           >
-            {isMax ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />}
+            {isMax ? (
+              <Minimize2 className="size-3" />
+            ) : (
+              <Maximize2 className="size-3" />
+            )}
           </Button>
         </div>
         {node.panels.map((p) => {
           const Panel = PANEL_REGISTRY[p];
           return (
-            <TabsContent key={p} value={p} className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
-              {Panel ? <Panel /> : (
-                <div className="p-3 text-xs text-muted-foreground">Unknown panel: {p}</div>
+            <TabsContent
+              key={p}
+              value={p}
+              className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden"
+            >
+              {Panel ? (
+                <Panel />
+              ) : (
+                <div className="p-3 text-xs text-muted-foreground">
+                  Unknown panel: {p}
+                </div>
               )}
             </TabsContent>
           );
@@ -209,7 +269,7 @@ function DockBranch({
   onClose: (tabsetId: string, panel: string) => void;
   onSelect: (tabsetId: string, panel: string) => void;
 }) {
-  if (node.type === 'tabset') {
+  if (node.type === "tabset") {
     return (
       <DockTabset
         node={node}
@@ -240,33 +300,42 @@ function DockBranch({
 
   const sizes = normalizeSizes(node.children);
   const items: ReactNode[] = [];
-        node.children.forEach((child, i) => {
-          if (i > 0) {
-            items.push(<ResizableHandle key={`h-${child.id}`} withHandle />);
-          }
-          items.push(
-            <ResizablePanel key={child.id} defaultSize={sizes[i]} minSize={10} className="min-h-0 min-w-0">
-              <DockBranch
-                node={child}
-                maximized={maximized}
-                onMaximize={onMaximize}
-                onActivate={onActivate}
-                onClose={onClose}
-                onSelect={onSelect}
-              />
-            </ResizablePanel>,
-          );
-        });
-        return (
-          <ResizablePanelGroup orientation={node.direction} className="h-full min-h-0">
-            {items}
-          </ResizablePanelGroup>
-        );
+  node.children.forEach((child, i) => {
+    if (i > 0) {
+      items.push(<ResizableHandle key={`h-${child.id}`} withHandle />);
+    }
+    items.push(
+      <ResizablePanel
+        key={child.id}
+        defaultSize={sizes[i]}
+        minSize={10}
+        className="min-h-0 min-w-0"
+      >
+        <DockBranch
+          node={child}
+          maximized={maximized}
+          onMaximize={onMaximize}
+          onActivate={onActivate}
+          onClose={onClose}
+          onSelect={onSelect}
+        />
+      </ResizablePanel>,
+    );
+  });
+  return (
+    <ResizablePanelGroup
+      orientation={node.direction}
+      className="h-full min-h-0"
+    >
+      {items}
+    </ResizablePanelGroup>
+  );
 }
 
 function containsId(node: DockNode, id: string): boolean {
   if (node.id === id) return true;
-  if (node.type === 'split') return node.children.some((c) => containsId(c, id));
+  if (node.type === "split")
+    return node.children.some((c) => containsId(c, id));
   return false;
 }
 
@@ -290,7 +359,7 @@ export const SigmaDock = memo(function SigmaDock({
   const active = activeTabsetId || fallbackActive;
 
   return (
-    <div className={cn('h-full min-h-0 w-full bg-background')}>
+    <div className={cn("h-full min-h-0 w-full bg-background")}>
       <DockBranch
         node={tree}
         maximized={maximized}

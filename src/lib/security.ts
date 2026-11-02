@@ -5,7 +5,9 @@
  * @param url The URL to sanitize.
  * @returns The sanitized URL or a safe fallback if it's potentially malicious.
  */
-export function sanitizeUrl(url: string | null | undefined): string | undefined {
+export function sanitizeUrl(
+  url: string | null | undefined,
+): string | undefined {
   if (!url) return undefined;
 
   try {
