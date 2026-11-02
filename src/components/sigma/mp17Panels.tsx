@@ -10,49 +10,84 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from "react";
 import {
-  Activity, BarChart3, Brain, Eye, EyeOff, FlaskConical,
-  Gauge, Layers, Lock, Radar, ShieldCheck, Sparkles, Target, Wand2,
-} from 'lucide-react';
+  Activity,
+  BarChart3,
+  Brain,
+  Eye,
+  EyeOff,
+  FlaskConical,
+  Gauge,
+  Layers,
+  Lock,
+  Radar,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Wand2,
+} from "lucide-react";
+import { PanelShell, Stat, FeedBadge, usePoll } from "./panels";
 import {
-  PanelShell, Stat, FeedBadge, usePoll,
-} from './panels';
+  sigmaResearchApi,
+  blindedSymbol,
+  type SigmaPanelBase,
+  type ResearchDashboard,
+} from "../../lib/sigmaApi";
+import { sanitizeUrl } from "../../lib/security";
+import { PasskeyWebAuthnClient } from "../../optimizer/PasskeyWebAuthnClient";
 import {
-  sigmaResearchApi, blindedSymbol, type SigmaPanelBase, type ResearchDashboard,
-} from '../../lib/sigmaApi';
-import { sanitizeUrl } from '../../lib/security';
-import { PasskeyWebAuthnClient } from '../../optimizer/PasskeyWebAuthnClient';
-import {
-  OperatorConfirmModal, requestFocusPanel,
-} from './OperatorConfirmModal';
+  OperatorConfirmModal,
+  requestFocusPanel,
+} from "./OperatorConfirmModal";
 
 /* ------------------------------------------------------- shared helpers */
 
-const OPERATOR_EMAIL = 'master@alpha.local';
-const BLOCKED_403 = '403 / Operator-Token fehlt — Schreibzugriff blockiert';
+const OPERATOR_EMAIL = "master@alpha.local";
+const BLOCKED_403 = "403 / Operator-Token fehlt — Schreibzugriff blockiert";
 
 async function acquireOperatorToken(): Promise<string | null> {
   return PasskeyWebAuthnClient.authenticatePasskeyForSettings(OPERATOR_EMAIL);
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="py-6 text-center text-[11px] text-zinc-500">{text}</div>;
+  return (
+    <div className="py-6 text-center text-[11px] text-zinc-500">{text}</div>
+  );
 }
 
-function Bar({ value, max = 1, tone = 'bg-emerald-500/70' }: { value: number; max?: number; tone?: string }) {
+function Bar({
+  value,
+  max = 1,
+  tone = "bg-emerald-500/70",
+}: {
+  value: number;
+  max?: number;
+  tone?: string;
+}) {
   const w = Math.max(0, Math.min(100, (Math.abs(value) / max) * 100));
   return (
     <div className="h-1.5 w-full overflow-hidden rounded bg-zinc-800">
-      <div className={`w-full h-full transition-transform ${tone}`} style={{ transform: `scaleX(${w / 100})`, transformOrigin: 'left' }} />
+      <div
+        className={`w-full h-full transition-transform ${tone}`}
+        style={{ transform: `scaleX(${w / 100})`, transformOrigin: "left" }}
+      />
     </div>
   );
 }
 
-function PanelHeader({ data, text }: { data?: SigmaPanelBase | null; text: string }) {
+function PanelHeader({
+  data,
+  text,
+}: {
+  data?: SigmaPanelBase | null;
+  text: string;
+}) {
   return (
     <div className="mb-2 flex items-center justify-between">
-      <span className="text-[10px] uppercase tracking-wide text-zinc-500">{text}</span>
+      <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+        {text}
+      </span>
       <FeedBadge feed={data?.feed ?? null} />
     </div>
   );
@@ -63,26 +98,72 @@ function PanelHeader({ data, text }: { data?: SigmaPanelBase | null; text: strin
 export function QuantumRegimePanel() {
   const [data, refresh] = usePoll(sigmaResearchApi.regime, 6000);
   return (
-    <PanelShell title="Quantum Regime" icon={<Radar size={13} />}
-      actions={<button onClick={refresh} className="text-[10px] text-zinc-500 hover:text-zinc-300">refresh</button>}>
+    <PanelShell
+      title="Quantum Regime"
+      icon={<Radar size={13} />}
+      actions={
+        <button
+          onClick={refresh}
+          className="text-[10px] text-zinc-500 hover:text-zinc-300"
+        >
+          refresh
+        </button>
+      }
+    >
       <PanelHeader data={data} text="MP-05/07/06/11 · closed 1h bar only" />
       {!data?.ok && !data?.available ? (
         <EmptyState text="waiting for closed 1h bar … kein Feed (fail-closed)" />
       ) : (
         <div className="grid grid-cols-2 gap-1.5">
-          <Stat label="Phase" value={data?.phase ?? '—'} tone={data?.phase === 'PRE_CLOSE_UNWIND' ? 'text-amber-400' : 'text-emerald-400'} />
-          <Stat label="Minute (UTC)" value={data?.minute ?? '—'} />
-          <Stat label="Wave" value={data?.wave_status ?? '—'} tone={data?.wave_status === 'INVALIDATED' ? 'text-red-400' : 'text-zinc-100'} />
-          <Stat label="Session" value={data?.session_window ?? '—'} tone={data?.session_quarantine ? 'text-red-400' : 'text-emerald-400'} />
-          <Stat label="Throttle" value={data?.throttle_state ? `${data.throttle_state} (${data.throttle_bots ?? 0})` : '—'} />
-          <Stat label="Hurst HTF" value={data?.hurst_htf?.toFixed(3) ?? '—'} />
-          <Stat label="Poly Bias" value={data?.poly_bias ?? '—'} />
-          <Stat label="ONNX" value={data?.onnx_action ?? '—'} tone={data?.onnx_model_available ? 'text-emerald-400' : 'text-zinc-400'} />
+          <Stat
+            label="Phase"
+            value={data?.phase ?? "—"}
+            tone={
+              data?.phase === "PRE_CLOSE_UNWIND"
+                ? "text-amber-400"
+                : "text-emerald-400"
+            }
+          />
+          <Stat label="Minute (UTC)" value={data?.minute ?? "—"} />
+          <Stat
+            label="Wave"
+            value={data?.wave_status ?? "—"}
+            tone={
+              data?.wave_status === "INVALIDATED"
+                ? "text-red-400"
+                : "text-zinc-100"
+            }
+          />
+          <Stat
+            label="Session"
+            value={data?.session_window ?? "—"}
+            tone={
+              data?.session_quarantine ? "text-red-400" : "text-emerald-400"
+            }
+          />
+          <Stat
+            label="Throttle"
+            value={
+              data?.throttle_state
+                ? `${data.throttle_state} (${data.throttle_bots ?? 0})`
+                : "—"
+            }
+          />
+          <Stat label="Hurst HTF" value={data?.hurst_htf?.toFixed(3) ?? "—"} />
+          <Stat label="Poly Bias" value={data?.poly_bias ?? "—"} />
+          <Stat
+            label="ONNX"
+            value={data?.onnx_action ?? "—"}
+            tone={
+              data?.onnx_model_available ? "text-emerald-400" : "text-zinc-400"
+            }
+          />
         </div>
       )}
       {data?.shadow_plan && (
         <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[10px] text-zinc-400">
-          Schattenplan (nicht bindend) · {String(data.shadow_plan.published_at_utc ?? '')}
+          Schattenplan (nicht bindend) ·{" "}
+          {String(data.shadow_plan.published_at_utc ?? "")}
         </div>
       )}
     </PanelShell>
@@ -94,31 +175,46 @@ export function QuantumRegimePanel() {
 export function MarketGeometryPanel() {
   const [data] = usePoll(sigmaResearchApi.zones, 8000);
   const showOverlays = () => {
-    if (typeof window === 'undefined') return;
-    window.dispatchEvent(new CustomEvent('sigma:chart-overlays', {
-      detail: { fvg: true, ce50: true, envelope: true, thrust: true },
-    }));
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("sigma:chart-overlays", {
+        detail: { fvg: true, ce50: true, envelope: true, thrust: true },
+      }),
+    );
   };
   return (
     <PanelShell title="Market Geometry" icon={<Layers size={13} />}>
-      <PanelHeader data={data} text={`MP-03 · ${data?.interval_min ?? 15}m / 1h`} />
+      <PanelHeader
+        data={data}
+        text={`MP-03 · ${data?.interval_min ?? 15}m / 1h`}
+      />
       {!data?.zones?.length ? (
         <EmptyState text="keine geschlossenen Bars / keine Zone — niemals gezeichnete Zonen ohne Feed" />
       ) : (
         <table className="w-full text-[10px]">
           <thead>
             <tr className="text-left text-zinc-500">
-              <th className="py-0.5">Symbol</th><th>Zone</th><th>CE50</th><th>Alter</th><th>Bias</th>
+              <th className="py-0.5">Symbol</th>
+              <th>Zone</th>
+              <th>CE50</th>
+              <th>Alter</th>
+              <th>Bias</th>
             </tr>
           </thead>
           <tbody>
             {data.zones.map((z, i) => (
               <tr key={i} className="border-t border-zinc-800/60 font-mono">
-                <td className="py-0.5">{String(z.symbol ?? '—')}</td>
+                <td className="py-0.5">{String(z.symbol ?? "—")}</td>
                 <td>{`${Number(z.low ?? 0)?.toFixed(4)}–${Number(z.high ?? 0)?.toFixed(4)}`}</td>
                 <td>{Number(z.ce50 ?? 0)?.toFixed(4)}</td>
-                <td>{String(z.age_bars ?? '—')}b</td>
-                <td className={z.bias === 'aligned' ? 'text-emerald-400' : 'text-amber-400'}>{String(z.bias ?? '—')}</td>
+                <td>{String(z.age_bars ?? "—")}b</td>
+                <td
+                  className={
+                    z.bias === "aligned" ? "text-emerald-400" : "text-amber-400"
+                  }
+                >
+                  {String(z.bias ?? "—")}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -126,7 +222,8 @@ export function MarketGeometryPanel() {
       )}
       {!!data?.envelope && (
         <div className="mt-2 font-mono text-[10px] text-zinc-400">
-          00:00-Envelope {String(Number(data.envelope.slope ?? 0) >= 0 ? '↑' : '↓')}
+          00:00-Envelope{" "}
+          {String(Number(data.envelope.slope ?? 0) >= 0 ? "↑" : "↓")}
         </div>
       )}
       <button
@@ -146,7 +243,7 @@ export function MarketGeometryPanel() {
 export function PowerPhysicsPanel() {
   const [data] = usePoll(sigmaResearchApi.power, 6000);
   const cos = data?.cos_phi ?? 0;
-  const cluster = data?.cluster ?? '—';
+  const cluster = data?.cluster ?? "—";
   return (
     <PanelShell title="Power Physics" icon={<Activity size={13} />}>
       <PanelHeader data={data} text="MP-04 · last closed candle" />
@@ -154,22 +251,38 @@ export function PowerPhysicsPanel() {
         <EmptyState text="keine geschlossene Kerze / kein Feed (fail-closed)" />
       ) : (
         <div className="space-y-2">
-          <Stat label="cos φ" value={cos?.toFixed(3)} tone={cos >= 0.85 ? 'text-emerald-400' : cos < 0.3 ? 'text-red-400' : 'text-zinc-100'} />
+          <Stat
+            label="cos φ"
+            value={cos?.toFixed(3)}
+            tone={
+              cos >= 0.85
+                ? "text-emerald-400"
+                : cos < 0.3
+                  ? "text-red-400"
+                  : "text-zinc-100"
+            }
+          />
           <Stat label="Cluster" value={cluster} />
           <div className="grid grid-cols-3 gap-1.5">
-            <Stat label="S_norm" value={data?.s_norm?.toFixed(3) ?? '—'} />
-            <Stat label="P_norm" value={data?.p_norm?.toFixed(3) ?? '—'} />
-            <Stat label="Q_norm" value={data?.q_norm?.toFixed(3) ?? '—'} />
+            <Stat label="S_norm" value={data?.s_norm?.toFixed(3) ?? "—"} />
+            <Stat label="P_norm" value={data?.p_norm?.toFixed(3) ?? "—"} />
+            <Stat label="Q_norm" value={data?.q_norm?.toFixed(3) ?? "—"} />
           </div>
           <div className="grid grid-cols-2 gap-1.5">
-            <Stat label="Q_upper" value={data?.q_upper?.toFixed(3) ?? '—'} />
-            <Stat label="Q_lower" value={data?.q_lower?.toFixed(3) ?? '—'} />
-            <Stat label="Q_bias" value={data?.q_bias?.toFixed(3) ?? '—'}
-              tone={(data?.q_bias ?? 0) > 0 ? 'text-emerald-400' : 'text-zinc-100'} />
-            <Stat label="Resonanz" value={data?.resonance_badge ?? '—'} />
+            <Stat label="Q_upper" value={data?.q_upper?.toFixed(3) ?? "—"} />
+            <Stat label="Q_lower" value={data?.q_lower?.toFixed(3) ?? "—"} />
+            <Stat
+              label="Q_bias"
+              value={data?.q_bias?.toFixed(3) ?? "—"}
+              tone={
+                (data?.q_bias ?? 0) > 0 ? "text-emerald-400" : "text-zinc-100"
+              }
+            />
+            <Stat label="Resonanz" value={data?.resonance_badge ?? "—"} />
           </div>
           <div className="text-[10px] text-zinc-500">
-            cos-φ-Pfad: {data?.cos_path?.length ?? 0} Werte · Schwellen ±0,40 Entry / ±0,15 Exit
+            cos-φ-Pfad: {data?.cos_path?.length ?? 0} Werte · Schwellen ±0,40
+            Entry / ±0,15 Exit
           </div>
         </div>
       )}
@@ -185,7 +298,7 @@ export function SymbolScoutPanel() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState("");
   const rows = [...(data?.long_rank ?? []), ...(data?.short_rank ?? [])];
   const phaseOk = !!data?.phase_ok;
 
@@ -205,41 +318,63 @@ export function SymbolScoutPanel() {
       return;
     }
     setConfirmOpen(false);
-    setStatus(out.ok ? `scan ok${out.job_id ? ` · ${out.job_id}` : ''}` : (out.reason || 'scan fail-closed'));
+    setStatus(
+      out.ok
+        ? `scan ok${out.job_id ? ` · ${out.job_id}` : ""}`
+        : out.reason || "scan fail-closed",
+    );
     refresh();
   };
 
   const provisionRow = (row: Record<string, unknown>) => {
-    const rec = String(row.recommendation ?? '');
-    const panelId = rec.startsWith('sniper') || rec.includes('fractal')
-      ? 'FractalTradePanel_'
-      : 'LadderArchitectPanel_';
+    const rec = String(row.recommendation ?? "");
+    const panelId =
+      rec.startsWith("sniper") || rec.includes("fractal")
+        ? "FractalTradePanel_"
+        : "LadderArchitectPanel_";
     requestFocusPanel({
       panelId,
-      symbol: String(row.symbol ?? ''),
+      symbol: String(row.symbol ?? ""),
       recommendation: rec,
-      side: String(row.side ?? ''),
+      side: String(row.side ?? ""),
     });
-    setStatus(`Provisionieren → ${panelId.replace(/Panel_$/, '')} (${String(row.symbol ?? '')})`);
+    setStatus(
+      `Provisionieren → ${panelId.replace(/Panel_$/, "")} (${String(row.symbol ?? "")})`,
+    );
   };
 
   return (
-    <PanelShell title="Symbol Scout" icon={<Sparkles size={13} />}
+    <PanelShell
+      title="Symbol Scout"
+      icon={<Sparkles size={13} />}
       actions={
-        <button onClick={() => setBlinded(!blinded)} title="Blinded-Modus (Ticker ausblenden)" aria-label="Blinded-Modus (Ticker ausblenden)"
-          className="rounded border border-zinc-700 p-1 text-zinc-400 hover:border-sky-500 hover:text-sky-400">
+        <button
+          onClick={() => setBlinded(!blinded)}
+          title="Blinded-Modus (Ticker ausblenden)"
+          aria-label="Blinded-Modus (Ticker ausblenden)"
+          className="rounded border border-zinc-700 p-1 text-zinc-400 hover:border-sky-500 hover:text-sky-400"
+        >
           {blinded ? <EyeOff size={11} /> : <Eye size={11} />}
         </button>
-      }>
-      <PanelHeader data={data} text="MP-05 · Stufe-2-Ranker · 1 Scan je geschlossener 1h-Bar" />
+      }
+    >
+      <PanelHeader
+        data={data}
+        text="MP-05 · Stufe-2-Ranker · 1 Scan je geschlossener 1h-Bar"
+      />
       {!data?.ok && !data?.available ? (
         <EmptyState text="Universe wird gescannt … (kein Screening-Feed)" />
       ) : (
         <>
           <div className="mb-1.5 flex items-center gap-2 text-[10px] text-zinc-500">
-            <span>last scan: {data?.last_scan_ts ? new Date((data.last_scan_ts ?? 0) * 1000).toISOString() : '—'}</span>
-            <span className={phaseOk ? 'text-emerald-400' : 'text-amber-400'}>
-              {phaseOk ? 'SCAN&DEPLOY' : 'Scan nur in Phase SCAN&DEPLOY'}
+            <span>
+              last scan:{" "}
+              {data?.last_scan_ts
+                ? new Date((data.last_scan_ts ?? 0) * 1000).toISOString()
+                : "—"}
+            </span>
+            <span className={phaseOk ? "text-emerald-400" : "text-amber-400"}>
+              {phaseOk ? "SCAN&DEPLOY" : "Scan nur in Phase SCAN&DEPLOY"}
             </span>
           </div>
           {!rows?.length ? (
@@ -248,24 +383,55 @@ export function SymbolScoutPanel() {
             <table className="w-full text-[10px]">
               <thead>
                 <tr className="text-left text-zinc-500">
-                  <th>Symbol</th><th>Side</th><th>β</th><th>r</th><th>RVOL</th><th>pos_EQ</th><th>Empfehlung</th><th />
+                  <th>Symbol</th>
+                  <th>Side</th>
+                  <th>β</th>
+                  <th>r</th>
+                  <th>RVOL</th>
+                  <th>pos_EQ</th>
+                  <th>Empfehlung</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, i) => {
-                  const rec = String(row.recommendation ?? '—');
-                  const isLong = String(row.side ?? '').toUpperCase() === 'LONG';
+                  const rec = String(row.recommendation ?? "—");
+                  const isLong =
+                    String(row.side ?? "").toUpperCase() === "LONG";
                   return (
-                    <tr key={i} className="border-t border-zinc-800/60 font-mono">
-                      <td className="py-0.5">{blindedSymbol(String(row.symbol ?? ''), blinded)}</td>
-                      <td className={isLong ? 'text-emerald-400' : 'text-red-400'}>{String(row.side ?? '—')}</td>
+                    <tr
+                      key={i}
+                      className="border-t border-zinc-800/60 font-mono"
+                    >
+                      <td className="py-0.5">
+                        {blindedSymbol(String(row.symbol ?? ""), blinded)}
+                      </td>
+                      <td
+                        className={isLong ? "text-emerald-400" : "text-red-400"}
+                      >
+                        {String(row.side ?? "—")}
+                      </td>
                       <td>{Number(row.beta ?? 0)?.toFixed(2)}</td>
                       <td>{Number(row.r ?? 0)?.toFixed(2)}</td>
                       <td>{Number(row.rvol ?? 0)?.toFixed(1)}</td>
-                      <td className={(Number(row.pos_eq ?? 0.5) >= 0.9) ? 'text-red-400' : 'text-emerald-400'}>
+                      <td
+                        className={
+                          Number(row.pos_eq ?? 0.5) >= 0.9
+                            ? "text-red-400"
+                            : "text-emerald-400"
+                        }
+                      >
                         {Number(row.pos_eq ?? 0.5)?.toFixed(2)}
                       </td>
-                      <td className={rec.startsWith('sniper') ? 'text-emerald-400' : 'text-zinc-300'}>{rec}</td>
+                      <td
+                        className={
+                          rec.startsWith("sniper")
+                            ? "text-emerald-400"
+                            : "text-zinc-300"
+                        }
+                      >
+                        {rec}
+                      </td>
                       <td>
                         <button
                           type="button"
@@ -286,16 +452,25 @@ export function SymbolScoutPanel() {
           <button
             type="button"
             disabled={!phaseOk}
-            onClick={() => { setBlocked(null); setConfirmOpen(true); }}
-            title={phaseOk
-              ? 'Scan-Trigger: Operator-Token + Bestätigungs-Modal'
-              : 'Scan nur in Phase SCAN&DEPLOY aktiv'}
+            onClick={() => {
+              setBlocked(null);
+              setConfirmOpen(true);
+            }}
+            title={
+              phaseOk
+                ? "Scan-Trigger: Operator-Token + Bestätigungs-Modal"
+                : "Scan nur in Phase SCAN&DEPLOY aktiv"
+            }
             aria-label="Scan anstoßen (Operator + Modal)"
             className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-500 hover:text-amber-300 disabled:cursor-not-allowed disabled:text-zinc-600"
           >
             Scan anstoßen (Operator + Modal)
           </button>
-          {status && <div className="mt-1 font-mono text-[10px] text-zinc-500">{status}</div>}
+          {status && (
+            <div className="mt-1 font-mono text-[10px] text-zinc-500">
+              {status}
+            </div>
+          )}
         </>
       )}
       <OperatorConfirmModal
@@ -304,8 +479,12 @@ export function SymbolScoutPanel() {
         detail="1 Scan je geschlossener 1h-Bar · kraken_paper only · kein Auto-Deploy aus der Tabelle"
         busy={busy}
         blockedReason={blocked}
-        onCancel={() => { if (!busy) setConfirmOpen(false); }}
-        onConfirm={() => { void runScan(); }}
+        onCancel={() => {
+          if (!busy) setConfirmOpen(false);
+        }}
+        onConfirm={() => {
+          void runScan();
+        }}
       />
     </PanelShell>
   );
@@ -321,16 +500,33 @@ export function PolymarketPanel() {
       {!data?.available ? (
         <div className="rounded border border-zinc-800 bg-zinc-900/40 px-3 py-4 text-center text-[11px] text-zinc-500">
           Polymarket feed unavailable — gate inaktiv
-          <div className="mt-1 text-[10px] text-zinc-600">niemals geratene Wahrscheinlichkeiten</div>
+          <div className="mt-1 text-[10px] text-zinc-600">
+            niemals geratene Wahrscheinlichkeiten
+          </div>
         </div>
       ) : (
         <div className="space-y-1.5">
-          <Stat label="μ (Erwartungswert)" value={data?.mu?.toFixed(4) ?? '—'} />
-          <Stat label="Bias" value={data?.bias ?? '—'} />
-          <Stat label="P_cal vs Gate 0,60–0,65" value={data?.p_cal?.toFixed(3) ?? '—'}
-            tone={(data?.gate_open ?? false) ? 'text-emerald-400' : 'text-red-400'} />
-          <Stat label="Brier" value={data?.brier?.toFixed(4) ?? '—'} />
-          <Stat label="Platt" value={data?.platt_a != null && data?.platt_b != null ? `a=${data.platt_a?.toFixed(3)} b=${data.platt_b?.toFixed(3)}` : '—'} />
+          <Stat
+            label="μ (Erwartungswert)"
+            value={data?.mu?.toFixed(4) ?? "—"}
+          />
+          <Stat label="Bias" value={data?.bias ?? "—"} />
+          <Stat
+            label="P_cal vs Gate 0,60–0,65"
+            value={data?.p_cal?.toFixed(3) ?? "—"}
+            tone={
+              (data?.gate_open ?? false) ? "text-emerald-400" : "text-red-400"
+            }
+          />
+          <Stat label="Brier" value={data?.brier?.toFixed(4) ?? "—"} />
+          <Stat
+            label="Platt"
+            value={
+              data?.platt_a != null && data?.platt_b != null
+                ? `a=${data.platt_a?.toFixed(3)} b=${data.platt_b?.toFixed(3)}`
+                : "—"
+            }
+          />
         </div>
       )}
     </PanelShell>
@@ -349,22 +545,39 @@ export function LadderArchitectPanel() {
       ) : (
         <>
           {data.rungs.map((r, i) => (
-            <div key={i} className="mb-1 flex items-center justify-between font-mono text-[10px]">
-              <span className="text-zinc-400">Stufe {String(r.step ?? i + 1)}</span>
+            <div
+              key={i}
+              className="mb-1 flex items-center justify-between font-mono text-[10px]"
+            >
+              <span className="text-zinc-400">
+                Stufe {String(r.step ?? i + 1)}
+              </span>
               <span>{Number(r.price ?? 0)?.toFixed(4)}</span>
-              <span className="text-zinc-500">{(Number(r.margin_pct ?? 0) * 100)?.toFixed(1)}%</span>
+              <span className="text-zinc-500">
+                {(Number(r.margin_pct ?? 0) * 100)?.toFixed(1)}%
+              </span>
             </div>
           ))}
           <div className="mt-2 space-y-1">
             {data.guards.map((g) => (
-              <div key={g.id} className={`flex items-center gap-1.5 text-[10px] font-mono ${g.ok ? 'text-emerald-400' : 'text-red-400'}`}>
-                {g.ok ? '✓' : '✗'} {g.id}
-                {!g.ok && <span className="text-zinc-500">{g.reason ?? ''}</span>}
+              <div
+                key={g.id}
+                className={`flex items-center gap-1.5 text-[10px] font-mono ${g.ok ? "text-emerald-400" : "text-red-400"}`}
+              >
+                {g.ok ? "✓" : "✗"} {g.id}
+                {!g.ok && (
+                  <span className="text-zinc-500">{g.reason ?? ""}</span>
+                )}
               </div>
             ))}
           </div>
-          <div className={`mt-2 text-[10px] ${data.deploy_allowed ? 'text-emerald-400' : 'text-red-400'}`}>
-            Deploy {data.deploy_allowed ? 'freigegeben (Modal + Operator)' : 'gesperrt — Guard rot / kein Backend'}
+          <div
+            className={`mt-2 text-[10px] ${data.deploy_allowed ? "text-emerald-400" : "text-red-400"}`}
+          >
+            Deploy{" "}
+            {data.deploy_allowed
+              ? "freigegeben (Modal + Operator)"
+              : "gesperrt — Guard rot / kein Backend"}
           </div>
         </>
       )}
@@ -379,13 +592,24 @@ export function FractalTradePanel() {
   const [hint, setHint] = useState<string | null>(null);
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem('sigma:provision-hint');
+      const raw = sessionStorage.getItem("sigma:provision-hint");
       if (!raw) return;
-      const parsed = JSON.parse(raw) as { symbol?: string; recommendation?: string; panelId?: string };
-      if (parsed.panelId?.includes('Fractal') || parsed.recommendation?.includes('sniper')) {
-        setHint(`${parsed.symbol ?? ''} · ${parsed.recommendation ?? ''} · kraken_paper`);
+      const parsed = JSON.parse(raw) as {
+        symbol?: string;
+        recommendation?: string;
+        panelId?: string;
+      };
+      if (
+        parsed.panelId?.includes("Fractal") ||
+        parsed.recommendation?.includes("sniper")
+      ) {
+        setHint(
+          `${parsed.symbol ?? ""} · ${parsed.recommendation ?? ""} · kraken_paper`,
+        );
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
   const ks = data?.kill_switch ?? {};
   const triggered = ks.exhausted || ks.swept || Number(ks.minute ?? 0) >= 55;
@@ -402,23 +626,37 @@ export function FractalTradePanel() {
       ) : (
         <>
           <div className="grid grid-cols-3 gap-1.5">
-            <Stat label="Side" value={data?.side ?? '—'} tone={data?.side === 'long' ? 'text-emerald-400' : 'text-red-400'} />
-            <Stat label="Hebel" value={data?.leverage ?? '—'} />
-            <Stat label="Entry" value={data?.entry?.toFixed(4) ?? '—'} />
+            <Stat
+              label="Side"
+              value={data?.side ?? "—"}
+              tone={data?.side === "long" ? "text-emerald-400" : "text-red-400"}
+            />
+            <Stat label="Hebel" value={data?.leverage ?? "—"} />
+            <Stat label="Entry" value={data?.entry?.toFixed(4) ?? "—"} />
           </div>
           {data.tranches.map((t, i) => (
-            <div key={i} className="mt-1 flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 font-mono text-[10px]">
+            <div
+              key={i}
+              className="mt-1 flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 font-mono text-[10px]"
+            >
               <span>{String(t.label ?? `TP${i + 1}`)}</span>
-              <span>{(Number(t.qty_pct ?? 0) * 100)?.toFixed(0)}% @ {Number(t.price ?? 0)?.toFixed(4)}</span>
-              <span className={t.filled ? 'text-emerald-400' : 'text-zinc-500'}>{t.filled ? 'gefüllt' : 'offen'}</span>
+              <span>
+                {(Number(t.qty_pct ?? 0) * 100)?.toFixed(0)}% @{" "}
+                {Number(t.price ?? 0)?.toFixed(4)}
+              </span>
+              <span className={t.filled ? "text-emerald-400" : "text-zinc-500"}>
+                {t.filled ? "gefüllt" : "offen"}
+              </span>
             </div>
           ))}
           <div className="mt-1.5 text-[10px] font-mono text-zinc-400">
-            Initial-SL {data?.initial_sl?.toFixed(4) ?? '—'} ({data?.sl_basis ?? '—'})
+            Initial-SL {data?.initial_sl?.toFixed(4) ?? "—"} (
+            {data?.sl_basis ?? "—"})
           </div>
           {data?.fee_covered_be != null && (
             <div className="mt-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-400">
-              +0,05 % fee-covered Break-Even nach TP1 — Pflicht-Auto-Move (nicht abschaltbar) @ {data.fee_covered_be?.toFixed(4)}
+              +0,05 % fee-covered Break-Even nach TP1 — Pflicht-Auto-Move (nicht
+              abschaltbar) @ {data.fee_covered_be?.toFixed(4)}
             </div>
           )}
           {triggered && (
@@ -438,11 +676,14 @@ export function ProvisionerPanel() {
   const [data, refresh] = usePoll(sigmaResearchApi.provisions, 8000);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [hardenOpen, setHardenOpen] = useState(false);
-  const [pineCode, setPineCode] = useState('');
+  const [pineCode, setPineCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const [status, setStatus] = useState('');
-  const [hardenResult, setHardenResult] = useState<Record<string, unknown> | null>(null);
+  const [status, setStatus] = useState("");
+  const [hardenResult, setHardenResult] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   const runHarden = async () => {
     setBusy(true);
@@ -455,16 +696,25 @@ export function ProvisionerPanel() {
     }
     const out = await sigmaResearchApi.hardenPine(token, {
       code: pineCode,
-      execution_mode: 'kraken_paper',
+      execution_mode: "kraken_paper",
     });
     setBusy(false);
     if (!out) {
       setBlocked(BLOCKED_403);
       return;
     }
-    setHardenResult((out.detail as Record<string, unknown>) ?? { reason: out.reason, ok: out.ok });
+    setHardenResult(
+      (out.detail as Record<string, unknown>) ?? {
+        reason: out.reason,
+        ok: out.ok,
+      },
+    );
     setConfirmOpen(false);
-    setStatus(out.ok ? 'harden ok — Provisionieren nur über Modal' : (out.reason || 'harden fail-closed'));
+    setStatus(
+      out.ok
+        ? "harden ok — Provisionieren nur über Modal"
+        : out.reason || "harden fail-closed",
+    );
     refresh();
   };
 
@@ -478,51 +728,66 @@ export function ProvisionerPanel() {
           <table className="w-full text-[10px]">
             <thead>
               <tr className="text-left text-zinc-500">
-                <th>strategy_id</th><th>Symbol</th><th>Status</th><th>TTL</th>
+                <th>strategy_id</th>
+                <th>Symbol</th>
+                <th>Status</th>
+                <th>TTL</th>
               </tr>
             </thead>
             <tbody>
               {data.provisions.map((p, i) => (
                 <tr key={i} className="border-t border-zinc-800/60 font-mono">
-                  <td className="py-0.5">{String(p.strategy_id ?? '—')}</td>
-                  <td>{String(p.symbol ?? '—')}</td>
-                  <td>{String(p.status ?? '—')}</td>
-                  <td>{String(p.ttl_s ?? '—')}s</td>
+                  <td className="py-0.5">{String(p.strategy_id ?? "—")}</td>
+                  <td>{String(p.symbol ?? "—")}</td>
+                  <td>{String(p.status ?? "—")}</td>
+                  <td>{String(p.ttl_s ?? "—")}s</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="mt-2 text-[10px] text-zinc-500">
-            Wächter: lookahead_off · bar-close-Alert · Schema-A-Payload · initial_capital=10000 ·
-            pyramiding=1 · 0,04 % · calc_on_every_tick=false · idempotency_key je Alert
+            Wächter: lookahead_off · bar-close-Alert · Schema-A-Payload ·
+            initial_capital=10000 · pyramiding=1 · 0,04 % ·
+            calc_on_every_tick=false · idempotency_key je Alert
           </div>
         </>
       )}
       <button
         type="button"
-        onClick={() => { setHardenOpen(true); setBlocked(null); setHardenResult(null); }}
+        onClick={() => {
+          setHardenOpen(true);
+          setBlocked(null);
+          setHardenResult(null);
+        }}
         title="Externes Pine härten: Operator-Token + Bestätigungs-Modal"
         aria-label="Externes Pine härten (Operator + Modal)"
         className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-500 hover:text-amber-300"
       >
         Externes Pine härten (Operator + Modal)
       </button>
-      {status && <div className="mt-1 font-mono text-[10px] text-zinc-500">{status}</div>}
+      {status && (
+        <div className="mt-1 font-mono text-[10px] text-zinc-500">{status}</div>
+      )}
       {hardenResult && (
         <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[10px] text-zinc-400">
-          hardening_ok={String(hardenResult.hardening_ok ?? hardenResult.ok ?? '—')}
+          hardening_ok=
+          {String(hardenResult.hardening_ok ?? hardenResult.ok ?? "—")}
           {Array.isArray(hardenResult.transformations) && (
             <ul className="mt-1 list-inside list-disc text-zinc-500">
-              {(hardenResult.transformations as string[]).slice(0, 6).map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
+              {(hardenResult.transformations as string[])
+                .slice(0, 6)
+                .map((t, i) => (
+                  <li key={i}>{t}</li>
+                ))}
             </ul>
           )}
         </div>
       )}
       {hardenOpen && (
         <div className="mt-2 space-y-1 rounded border border-zinc-800 bg-zinc-950/60 p-2">
-          <div className="text-[10px] uppercase text-zinc-500">Fremd-Pine einfügen</div>
+          <div className="text-[10px] uppercase text-zinc-500">
+            Fremd-Pine einfügen
+          </div>
           <textarea
             value={pineCode}
             onChange={(e) => setPineCode(e.target.value)}
@@ -541,7 +806,10 @@ export function ProvisionerPanel() {
             </button>
             <button
               type="button"
-              onClick={() => { setBlocked(null); setConfirmOpen(true); }}
+              onClick={() => {
+                setBlocked(null);
+                setConfirmOpen(true);
+              }}
               className="rounded border border-amber-600/50 px-2 py-1 text-[10px] text-amber-300"
             >
               Härten bestätigen…
@@ -555,8 +823,12 @@ export function ProvisionerPanel() {
         detail="harden_pine_code · kraken_paper · kein Direkt-Upload — Deploy nur über Provisionieren-Modal"
         busy={busy}
         blockedReason={blocked}
-        onCancel={() => { if (!busy) setConfirmOpen(false); }}
-        onConfirm={() => { void runHarden(); }}
+        onCancel={() => {
+          if (!busy) setConfirmOpen(false);
+        }}
+        onConfirm={() => {
+          void runHarden();
+        }}
       />
     </PanelShell>
   );
@@ -568,7 +840,10 @@ export function OnnxBrainPanel() {
   const [data] = usePoll(sigmaResearchApi.onnx, 6000);
   return (
     <PanelShell title="ONNX Brain" icon={<Brain size={13} />}>
-      <PanelHeader data={data} text="MP-11 · BTC-Makro only (Stufe 2 = Scout)" />
+      <PanelHeader
+        data={data}
+        text="MP-11 · BTC-Makro only (Stufe 2 = Scout)"
+      />
       {!data?.ok && !data?.available ? (
         <EmptyState text="kein Tensor ohne Backend — fallback policy aktiv" />
       ) : (
@@ -584,26 +859,59 @@ export function OnnxBrainPanel() {
           )}
           <div className="mt-2 space-y-1">
             {data.tensor.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 text-[10px] font-mono" title={`${f.name} in [-1,1]/[0,1]; fehlende Quelle = 0 (fail-closed)`}>
+              <div
+                key={i}
+                className="flex items-center gap-2 text-[10px] font-mono"
+                title={`${f.name} in [-1,1]/[0,1]; fehlende Quelle = 0 (fail-closed)`}
+              >
                 <span className="w-24 text-zinc-500">{f.name}</span>
-                <div className="flex-1"><Bar value={f.value} tone={f.value >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'} /></div>
-                <span className="w-10 text-right text-zinc-300">{f.value?.toFixed(2)}</span>
+                <div className="flex-1">
+                  <Bar
+                    value={f.value}
+                    tone={f.value >= 0 ? "bg-emerald-500/70" : "bg-red-500/70"}
+                  />
+                </div>
+                <span className="w-10 text-right text-zinc-300">
+                  {f.value?.toFixed(2)}
+                </span>
               </div>
             ))}
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
-            <Stat label="LONG" value={`${((data.action_probs?.long ?? 0) * 100)?.toFixed(0)}%`} tone="text-emerald-400" />
-            <Stat label="FLAT" value={`${((data.action_probs?.flat ?? 0) * 100)?.toFixed(0)}%`} />
-            <Stat label="SHORT" value={`${((data.action_probs?.short ?? 0) * 100)?.toFixed(0)}%`} tone="text-red-400" />
+            <Stat
+              label="LONG"
+              value={`${((data.action_probs?.long ?? 0) * 100)?.toFixed(0)}%`}
+              tone="text-emerald-400"
+            />
+            <Stat
+              label="FLAT"
+              value={`${((data.action_probs?.flat ?? 0) * 100)?.toFixed(0)}%`}
+            />
+            <Stat
+              label="SHORT"
+              value={`${((data.action_probs?.short ?? 0) * 100)?.toFixed(0)}%`}
+              tone="text-red-400"
+            />
           </div>
           <div className="mt-1.5 flex items-center gap-2 text-[10px] font-mono text-zinc-400">
-            <span>Hebel {data?.leverage ?? '—'}x</span>
-            <span>Entropie {data?.entropy?.toFixed(3) ?? '—'}</span>
-            <span className={data?.bar_lock === 'BLOCKED_BY_BAR_LOCK' ? 'text-red-400' : ''}>{data?.bar_lock ?? '—'}</span>
-            <span>{data?.latency_ms != null ? `${data.latency_ms?.toFixed(2)}ms` : ''}</span>
+            <span>Hebel {data?.leverage ?? "—"}x</span>
+            <span>Entropie {data?.entropy?.toFixed(3) ?? "—"}</span>
+            <span
+              className={
+                data?.bar_lock === "BLOCKED_BY_BAR_LOCK" ? "text-red-400" : ""
+              }
+            >
+              {data?.bar_lock ?? "—"}
+            </span>
+            <span>
+              {data?.latency_ms != null
+                ? `${data.latency_ms?.toFixed(2)}ms`
+                : ""}
+            </span>
           </div>
           <div className="mt-1.5 text-[10px] text-zinc-600">
-            Tensor klassifiziert nur das BTC-Makro — Symbolwahl erfolgt im Scout (Stufe 2)
+            Tensor klassifiziert nur das BTC-Makro — Symbolwahl erfolgt im Scout
+            (Stufe 2)
           </div>
         </>
       )}
@@ -622,28 +930,50 @@ export function RiskGuardPanel() {
         <EmptyState text="keine Positionen / kein Feed (fail-closed)" />
       ) : (
         <>
-          {!data.positions?.length && <EmptyState text="keine aktiven Positionen" />}
+          {!data.positions?.length && (
+            <EmptyState text="keine aktiven Positionen" />
+          )}
           {data.positions.map((p, i) => (
-            <div key={i} className="mb-1.5 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 font-mono text-[10px]">
+            <div
+              key={i}
+              className="mb-1.5 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 font-mono text-[10px]"
+            >
               <div className="flex justify-between">
-                <span>{String(p.symbol ?? '—')}</span>
-                <span className={p.liq_distance_pct != null && Number(p.liq_distance_pct) < 0.05 ? 'text-red-400' : 'text-zinc-300'}>
-                  Liq {p.liq_distance_pct != null ? `${(Number(p.liq_distance_pct) * 100)?.toFixed(1)}%` : '—'}
+                <span>{String(p.symbol ?? "—")}</span>
+                <span
+                  className={
+                    p.liq_distance_pct != null &&
+                    Number(p.liq_distance_pct) < 0.05
+                      ? "text-red-400"
+                      : "text-zinc-300"
+                  }
+                >
+                  Liq{" "}
+                  {p.liq_distance_pct != null
+                    ? `${(Number(p.liq_distance_pct) * 100)?.toFixed(1)}%`
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between text-zinc-500">
                 <span>Hard-Stop {Number(p.hard_stop ?? 0)?.toFixed(4)}</span>
-                <span>Fee-BE {p.fee_covered ? 'ja' : 'nein'}</span>
-                <span>Cooldown {String(p.cooldown_s ?? '—')}s</span>
+                <span>Fee-BE {p.fee_covered ? "ja" : "nein"}</span>
+                <span>Cooldown {String(p.cooldown_s ?? "—")}s</span>
               </div>
             </div>
           ))}
           <div className="mt-2 space-y-1">
             {data.rules.map((r) => (
-              <div key={r.id} className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+              <div
+                key={r.id}
+                className="flex items-center gap-1.5 text-[10px] text-zinc-400"
+              >
                 <Lock size={10} className="text-amber-400" />
                 <span>{r.label}</span>
-                {r.enabled && <span className="text-[9px] text-zinc-600">(fix aktiv, nicht abschaltbar)</span>}
+                {r.enabled && (
+                  <span className="text-[9px] text-zinc-600">
+                    (fix aktiv, nicht abschaltbar)
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -660,23 +990,49 @@ export function UnwindPanel() {
   const score = data?.score ?? 0;
   return (
     <PanelShell title="Unwind" icon={<Gauge size={13} />}>
-      <PanelHeader data={data} text="MP-08 · Exhaustion + geordnetes Glattstellen" />
+      <PanelHeader
+        data={data}
+        text="MP-08 · Exhaustion + geordnetes Glattstellen"
+      />
       {!data?.ok && !data?.available ? (
         <EmptyState text="kein Exhaustion-Score ohne Backend (fail-closed)" />
       ) : (
         <>
           <div className="mb-1 flex items-center justify-between text-[10px] font-mono">
-            <span>Score</span><span className={data?.exhausted ? 'text-red-400' : 'text-zinc-300'}>{score?.toFixed(2)}</span>
+            <span>Score</span>
+            <span
+              className={data?.exhausted ? "text-red-400" : "text-zinc-300"}
+            >
+              {score?.toFixed(2)}
+            </span>
           </div>
-          <Bar value={score} max={1} tone={data?.exhausted ? 'bg-red-500/70' : 'bg-emerald-500/70'} />
+          <Bar
+            value={score}
+            max={1}
+            tone={data?.exhausted ? "bg-red-500/70" : "bg-emerald-500/70"}
+          />
           <div className="mt-2 space-y-0.5 text-[10px] font-mono">
-            {['bbw', 'oi', 'cvd'].map((k) => {
-              const c = (data?.components?.[k] ?? {}) as Record<string, unknown>;
+            {["bbw", "oi", "cvd"].map((k) => {
+              const c = (data?.components?.[k] ?? {}) as Record<
+                string,
+                unknown
+              >;
               return (
-                <div key={k} className="flex items-center gap-1.5 text-zinc-400">
-                  {c.available ? <span className="text-emerald-400">✓</span> : <span className="text-zinc-600">✗</span>}
+                <div
+                  key={k}
+                  className="flex items-center gap-1.5 text-zinc-400"
+                >
+                  {c.available ? (
+                    <span className="text-emerald-400">✓</span>
+                  ) : (
+                    <span className="text-zinc-600">✗</span>
+                  )}
                   <span className="uppercase">{k}</span>
-                  {c.available ? <span>{Number(c.value ?? 0)?.toFixed(2)}</span> : <span className="text-zinc-600">kein Feed</span>}
+                  {c.available ? (
+                    <span>{Number(c.value ?? 0)?.toFixed(2)}</span>
+                  ) : (
+                    <span className="text-zinc-600">kein Feed</span>
+                  )}
                 </div>
               );
             })}
@@ -685,11 +1041,20 @@ export function UnwindPanel() {
             <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[10px]">
               {data.unwind.map((u, i) => (
                 <div key={i} className="flex justify-between font-mono">
-                  <span>{String(u.step ?? i + 1)}. {String(u.action ?? '')} {String(u.side ?? '')}</span>
-                  <span className={u.forced ? 'text-red-400' : 'text-zinc-500'}>{u.forced ? 'forced close' : String(u.wait_condition ?? '')}</span>
+                  <span>
+                    {String(u.step ?? i + 1)}. {String(u.action ?? "")}{" "}
+                    {String(u.side ?? "")}
+                  </span>
+                  <span className={u.forced ? "text-red-400" : "text-zinc-500"}>
+                    {u.forced ? "forced close" : String(u.wait_condition ?? "")}
+                  </span>
                 </div>
               ))}
-              {data.forced && <div className="mt-1 text-[10px] text-red-400">Net-PnL-Guard: Verlust &gt; 50 % des Gewinns → forced close</div>}
+              {data.forced && (
+                <div className="mt-1 text-[10px] text-red-400">
+                  Net-PnL-Guard: Verlust &gt; 50 % des Gewinns → forced close
+                </div>
+              )}
             </div>
           )}
         </>
@@ -722,8 +1087,10 @@ function ResearchPaneSvg({
   }
   // ⚡ Bolt: Prevent Call Stack Limit & Memory Bloat
   // Replaced `.map()` and `Math.min/max(...arrays)` with a single O(N) iteration
-  let minX = Infinity, maxX = -Infinity;
-  let minY = Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    maxX = -Infinity;
+  let minY = Infinity,
+    maxY = -Infinity;
 
   for (const p of points) {
     if (p.x < minX) minX = p.x;
@@ -744,18 +1111,33 @@ function ResearchPaneSvg({
     .map((p, i) => {
       const x = ((p.x - minX) / dx) * (w - 8) + 4;
       const y = h - 4 - ((p.y - minY) / dy) * (h - 8);
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
     })
-    .join(' ');
+    .join(" ");
   return (
     <div className="rounded border border-zinc-800 bg-zinc-950/50 px-1 py-1">
-      <div className="mb-0.5 px-1 text-[9px] uppercase tracking-wide text-zinc-500">{title}</div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-16 w-full" role="img" aria-label={title}>
+      <div className="mb-0.5 px-1 text-[9px] uppercase tracking-wide text-zinc-500">
+        {title}
+      </div>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="h-16 w-full"
+        role="img"
+        aria-label={title}
+      >
         {yLines?.map((l) => {
           const y = h - 4 - ((l.y - minY) / dy) * (h - 8);
           return (
             <g key={l.label}>
-              <line x1={0} x2={w} y1={y} y2={y} stroke={l.color} strokeDasharray="3 3" strokeWidth={1} />
+              <line
+                x1={0}
+                x2={w}
+                y1={y}
+                y2={y}
+                stroke={l.color}
+                strokeDasharray="3 3"
+                strokeWidth={1}
+              />
             </g>
           );
         })}
@@ -768,27 +1150,37 @@ function ResearchPaneSvg({
 export function ResearchLabPanel() {
   const [data, refresh] = usePoll(sigmaResearchApi.researchDashboard, 10000);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [hypothesis, setHypothesis] = useState('H1');
+  const [hypothesis, setHypothesis] = useState("H1");
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState<string | null>(null);
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState("");
 
   const dash = data as ResearchDashboard | null;
   const cosPts = useMemo(() => {
     const raw = dash?.cos_phi ?? [];
-    return raw.map((p) => ({ x: Number(p.time ?? 0), y: Number(p.value ?? 0) }));
+    return raw.map((p) => ({
+      x: Number(p.time ?? 0),
+      y: Number(p.value ?? 0),
+    }));
   }, [dash]);
   const eqPts = useMemo(() => {
     const raw = dash?.equity ?? [];
-    return raw.map((p) => ({ x: Number(p.time ?? 0), y: Number(p.value ?? 0) }));
+    return raw.map((p) => ({
+      x: Number(p.time ?? 0),
+      y: Number(p.value ?? 0),
+    }));
   }, [dash]);
   const candlePts = useMemo(() => {
     const raw = dash?.candles ?? [];
-    return raw.map((c) => ({ x: Number(c.time ?? 0), y: Number(c.close ?? 0) }));
+    return raw.map((c) => ({
+      x: Number(c.time ?? 0),
+      y: Number(c.close ?? 0),
+    }));
   }, [dash]);
   const entry = Number(dash?.thresholds?.long ?? 0.4);
   const exit = Number(dash?.thresholds?.exit ?? 0.15);
-  const hasPanes = candlePts.length > 0 || cosPts.length > 0 || eqPts.length > 0;
+  const hasPanes =
+    candlePts.length > 0 || cosPts.length > 0 || eqPts.length > 0;
 
   const runHypothesis = async () => {
     setBusy(true);
@@ -806,23 +1198,35 @@ export function ResearchLabPanel() {
       return;
     }
     setConfirmOpen(false);
-    setStatus(out.ok ? `run ${hypothesis}${out.job_id ? ` · ${out.job_id}` : ''}` : (out.reason || 'run fail-closed'));
+    setStatus(
+      out.ok
+        ? `run ${hypothesis}${out.job_id ? ` · ${out.job_id}` : ""}`
+        : out.reason || "run fail-closed",
+    );
     refresh();
   };
 
   return (
     <PanelShell title="Research Lab" icon={<FlaskConical size={13} />}>
-      <PanelHeader data={data} text="MP-12/16 · Hypothesen H1–H7 (Walk-Forward)" />
+      <PanelHeader
+        data={data}
+        text="MP-12/16 · Hypothesen H1–H7 (Walk-Forward)"
+      />
       {!data?.ok && !data?.available ? (
         <EmptyState text="keine Hypothesen-Jobs ohne Backend (fail-closed)" />
       ) : (
         <>
           {data.hypotheses.map((h, i) => (
-            <div key={i} className="mb-1 flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[10px]">
-              <span className="font-mono">{String(h.id ?? '—')}</span>
-              <span className="text-zinc-400">{String(h.status ?? '—')}</span>
+            <div
+              key={i}
+              className="mb-1 flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[10px]"
+            >
+              <span className="font-mono">{String(h.id ?? "—")}</span>
+              <span className="text-zinc-400">{String(h.status ?? "—")}</span>
               <span className="font-mono text-zinc-500">
-                {h.effect_size != null ? `ES ${Number(h.effect_size)?.toFixed(3)} · n=${String(h.trades ?? '—')}` : ''}
+                {h.effect_size != null
+                  ? `ES ${Number(h.effect_size)?.toFixed(3)} · n=${String(h.trades ?? "—")}`
+                  : ""}
               </span>
             </div>
           ))}
@@ -834,19 +1238,27 @@ export function ResearchLabPanel() {
               <EmptyState text="keine Research-Pane-Daten — fail-closed (kein Feed / kein Export)" />
             ) : (
               <>
-                <ResearchPaneSvg title="Candles + Marker" points={candlePts} emptyText="keine Kerzen" />
+                <ResearchPaneSvg
+                  title="Candles + Marker"
+                  points={candlePts}
+                  emptyText="keine Kerzen"
+                />
                 <ResearchPaneSvg
                   title="cos φ"
                   points={cosPts}
                   yLines={[
-                    { y: entry, color: '#34d399', label: '+0.40' },
-                    { y: -entry, color: '#f87171', label: '-0.40' },
-                    { y: exit, color: '#a1a1aa', label: '+0.15' },
-                    { y: -exit, color: '#a1a1aa', label: '-0.15' },
+                    { y: entry, color: "#34d399", label: "+0.40" },
+                    { y: -entry, color: "#f87171", label: "-0.40" },
+                    { y: exit, color: "#a1a1aa", label: "+0.15" },
+                    { y: -exit, color: "#a1a1aa", label: "-0.15" },
                   ]}
                   emptyText="kein cos-φ-Pfad"
                 />
-                <ResearchPaneSvg title="Equity vs Benchmark" points={eqPts} emptyText="keine Equity-Kurve" />
+                <ResearchPaneSvg
+                  title="Equity vs Benchmark"
+                  points={eqPts}
+                  emptyText="keine Equity-Kurve"
+                />
               </>
             )}
           </div>
@@ -855,15 +1267,28 @@ export function ResearchLabPanel() {
             const dd = Number(s.max_dd ?? 1);
             const flag = sharpe > 3 || dd < 0.05;
             return (
-              <div key={i} className="mb-1 flex items-center justify-between font-mono text-[10px]">
-                <span>{String(s.name ?? '—')}</span>
-                <span className="text-zinc-400">R {Number(s.return_pct ?? 0)?.toFixed(1)}% · DD {dd?.toFixed(1)}%</span>
-                {flag && <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[9px] text-amber-400">Overfitting-Flag</span>}
+              <div
+                key={i}
+                className="mb-1 flex items-center justify-between font-mono text-[10px]"
+              >
+                <span>{String(s.name ?? "—")}</span>
+                <span className="text-zinc-400">
+                  R {Number(s.return_pct ?? 0)?.toFixed(1)}% · DD{" "}
+                  {dd?.toFixed(1)}%
+                </span>
+                {flag && (
+                  <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[9px] text-amber-400">
+                    Overfitting-Flag
+                  </span>
+                )}
               </div>
             );
           })}
           {data.export_html_path && (
-            <a href={sanitizeUrl(data.export_html_path)} className="mt-2 block text-[10px] text-sky-400 hover:underline">
+            <a
+              href={sanitizeUrl(data.export_html_path)}
+              className="mt-2 block text-[10px] text-sky-400 hover:underline"
+            >
               HTML-Dashboard exportieren (MP-16)
             </a>
           )}
@@ -874,13 +1299,18 @@ export function ResearchLabPanel() {
               className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 font-mono text-[10px]"
               aria-label="Hypothese"
             >
-              {['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7'].map((h) => (
-                <option key={h} value={h}>{h}</option>
+              {["H1", "H2", "H3", "H4", "H5", "H6", "H7"].map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
               ))}
             </select>
             <button
               type="button"
-              onClick={() => { setBlocked(null); setConfirmOpen(true); }}
+              onClick={() => {
+                setBlocked(null);
+                setConfirmOpen(true);
+              }}
               title="Hypothesen-Run: Operator-Token + Bestätigungs-Modal"
               aria-label="Run (Operator + Modal)"
               className="flex-1 rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 hover:border-amber-500 hover:text-amber-300"
@@ -888,7 +1318,11 @@ export function ResearchLabPanel() {
               Run (Operator + Modal)
             </button>
           </div>
-          {status && <div className="mt-1 font-mono text-[10px] text-zinc-500">{status}</div>}
+          {status && (
+            <div className="mt-1 font-mono text-[10px] text-zinc-500">
+              {status}
+            </div>
+          )}
         </>
       )}
       <OperatorConfirmModal
@@ -897,8 +1331,12 @@ export function ResearchLabPanel() {
         detail={`Async-Job wie TV-Jobs · Walk-Forward · paper only · Hypothese ${hypothesis}`}
         busy={busy}
         blockedReason={blocked}
-        onCancel={() => { if (!busy) setConfirmOpen(false); }}
-        onConfirm={() => { void runHypothesis(); }}
+        onCancel={() => {
+          if (!busy) setConfirmOpen(false);
+        }}
+        onConfirm={() => {
+          void runHypothesis();
+        }}
       />
     </PanelShell>
   );

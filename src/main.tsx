@@ -1,9 +1,9 @@
-import React, { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App.tsx';
-import ProcessLogView from './pages/ProcessLogView';   // §37
-import { TooltipProvider } from '@/components/ui/tooltip';
-import './index.css';
+import React, { StrictMode, Component, ErrorInfo, ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App.tsx";
+import ProcessLogView from "./pages/ProcessLogView"; // §37
+import { TooltipProvider } from "@/components/ui/tooltip";
+import "./index.css";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -40,7 +40,8 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               </h1>
             </div>
             <p className="text-xs text-zinc-400">
-              The front-end client encountered an unexpected view error. You can reload the interface or clear transient state below.
+              The front-end client encountered an unexpected view error. You can
+              reload the interface or clear transient state below.
             </p>
             {this.state.error?.message && (
               <div className="bg-black/60 border border-zinc-800 p-3 rounded text-[11px] text-red-300 overflow-x-auto">
@@ -78,14 +79,16 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 }
 
 // §37.4 — dedizierte Route /logs neben dem Terminal
-const isLogsRoute = window.location.pathname.replace(/\/$/, '') === '/logs';
+const isLogsRoute = window.location.pathname.replace(/\/$/, "") === "/logs";
 
-createRoot(document.getElementById('root')!).render(
+createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
       <TooltipProvider>
         {isLogsRoute ? (
-          <div className="h-screen w-screen bg-background"><ProcessLogView /></div>
+          <div className="h-screen w-screen bg-background">
+            <ProcessLogView />
+          </div>
         ) : (
           <App />
         )}

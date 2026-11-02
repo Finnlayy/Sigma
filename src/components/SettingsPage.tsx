@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KeyRound, Lock, RefreshCw, Save, Shield } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 type SettingRow = {
   key: string;
@@ -18,7 +22,12 @@ type SettingRow = {
 };
 
 type SaveTone = "ok" | "err" | "bad";
-type SaveFlash = { tone: SaveTone; hint: string; format?: string; allowed?: string[] };
+type SaveFlash = {
+  tone: SaveTone;
+  hint: string;
+  format?: string;
+  allowed?: string[];
+};
 
 const GROUP_COPY: Record<string, { title: string; hint: string }> = {
   secrets: {
@@ -37,11 +46,18 @@ const GROUP_COPY: Record<string, { title: string; hint: string }> = {
 
 const FLASH_MS = 5000;
 
-function unwrapDetail(data: any): { code?: string; detail: string; hint?: string; format?: string; allowed?: string[] } {
+function unwrapDetail(data: any): {
+  code?: string;
+  detail: string;
+  hint?: string;
+  format?: string;
+  allowed?: string[];
+} {
   const raw = data?.detail ?? data;
   if (typeof raw === "string") return { detail: raw };
   if (raw && typeof raw === "object") {
-    const detail = typeof raw.detail === "string" ? raw.detail : JSON.stringify(raw);
+    const detail =
+      typeof raw.detail === "string" ? raw.detail : JSON.stringify(raw);
     return {
       code: raw.code,
       detail,
@@ -59,7 +75,8 @@ function validateDraft(value: string, row: SettingRow): string | null {
   if (!raw) return `Feld ist leer. ${hint}`;
   const allowed = row.allowed ?? [];
   if (row.kind === "enum" && allowed.length) {
-    if (!allowed.some((a) => a.toLowerCase() === raw.toLowerCase())) return hint;
+    if (!allowed.some((a) => a.toLowerCase() === raw.toLowerCase()))
+      return hint;
   }
   if (row.kind === "flag" && raw !== "0" && raw !== "1") return hint;
   if (row.kind === "int") {
@@ -101,13 +118,20 @@ function flashClass(tone?: SaveTone): string {
 }
 
 function iconClass(tone?: SaveTone): string {
-  if (tone === "ok") return "text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.95)]";
-  if (tone === "err") return "text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.95)]";
-  if (tone === "bad") return "text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]";
+  if (tone === "ok")
+    return "text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.95)]";
+  if (tone === "err")
+    return "text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.95)]";
+  if (tone === "bad")
+    return "text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.95)]";
   return "";
 }
 
-export default function SettingsPage({ onCredentialsChanged }: { onCredentialsChanged?: () => void }) {
+export default function SettingsPage({
+  onCredentialsChanged,
+}: {
+  onCredentialsChanged?: () => void;
+}) {
   const [rows, setRows] = useState<SettingRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -129,11 +153,16 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-  useEffect(() => () => {
-    Object.values(timers.current).forEach((id) => window.clearTimeout(id));
-  }, []);
+  useEffect(
+    () => () => {
+      Object.values(timers.current).forEach((id) => window.clearTimeout(id));
+    },
+    [],
+  );
 
   const grouped = useMemo(() => {
     const order = ["secrets", "runtime", "risk"];
@@ -205,15 +234,30 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
         return;
       }
       if (data.applied === false) {
-        pulse(key, { tone: "err", hint: "System hat den Wert abgelehnt.", format: row.format, allowed: row.allowed });
+        pulse(key, {
+          tone: "err",
+          hint: "System hat den Wert abgelehnt.",
+          format: row.format,
+          allowed: row.allowed,
+        });
         return;
       }
       setDrafts((d) => ({ ...d, [key]: "" }));
-      pulse(key, { tone: "ok", hint: `${key} übernommen.`, format: row.format, allowed: row.allowed });
+      pulse(key, {
+        tone: "ok",
+        hint: `${key} übernommen.`,
+        format: row.format,
+        allowed: row.allowed,
+      });
       await load();
       onCredentialsChanged?.();
     } catch {
-      pulse(key, { tone: "err", hint: "Save failed — Core offline?", format: row.format, allowed: row.allowed });
+      pulse(key, {
+        tone: "err",
+        hint: "Save failed — Core offline?",
+        format: row.format,
+        allowed: row.allowed,
+      });
       setNotice("Save failed — Core offline?");
     } finally {
       setBusy(null);
@@ -235,7 +279,8 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
               </span>
             </h2>
             <p className="text-xs text-zinc-400">
-              Lokal, ohne Passkey. Die LLM-Konsole kann nur Risk-Zahlen, keine API-Keys.
+              Lokal, ohne Passkey. Die LLM-Konsole kann nur Risk-Zahlen, keine
+              API-Keys.
             </p>
           </div>
         </div>
@@ -244,7 +289,9 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
           disabled={loading}
           className="p-1.5 bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-300 rounded-lg text-xs font-mono flex items-center space-x-1.5"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-emerald-400" : ""}`} />
+          <RefreshCw
+            className={`w-3.5 h-3.5 ${loading ? "animate-spin text-emerald-400" : ""}`}
+          />
           <span>Refresh</span>
         </button>
       </div>
@@ -256,13 +303,20 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
       )}
 
       {grouped.map(([group, items]) => (
-        <section key={group} className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 space-y-3">
+        <section
+          key={group}
+          className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 space-y-3"
+        >
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300 flex items-center gap-2">
-              {group === "secrets" && <Shield className="w-3.5 h-3.5 text-rose-400" />}
+              {group === "secrets" && (
+                <Shield className="w-3.5 h-3.5 text-rose-400" />
+              )}
               {GROUP_COPY[group]?.title ?? group}
             </h3>
-            <p className="text-[11px] text-zinc-500 mt-1">{GROUP_COPY[group]?.hint}</p>
+            <p className="text-[11px] text-zinc-500 mt-1">
+              {GROUP_COPY[group]?.hint}
+            </p>
           </div>
           <div className="space-y-2">
             {items.map((row) => {
@@ -281,17 +335,30 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
                 </button>
               );
               return (
-                <div key={row.key} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-end">
+                <div
+                  key={row.key}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-end"
+                >
                   <label className="block min-w-0">
                     <div className="flex items-baseline justify-between gap-2 mb-1">
-                      <span className="text-[11px] text-zinc-300">{row.label}</span>
-                      <span className="text-[10px] font-mono text-zinc-600 truncate">{row.key}</span>
+                      <span className="text-[11px] text-zinc-300">
+                        {row.label}
+                      </span>
+                      <span className="text-[10px] font-mono text-zinc-600 truncate">
+                        {row.key}
+                      </span>
                     </div>
                     <input
                       type={secret ? "password" : "text"}
                       autoComplete="off"
                       spellCheck={false}
-                      placeholder={row.setInEnv ? (secret ? "gesetzt — neu einfügen zum Überschreiben" : row.value) : ""}
+                      placeholder={
+                        row.setInEnv
+                          ? secret
+                            ? "gesetzt — neu einfügen zum Überschreiben"
+                            : row.value
+                          : ""
+                      }
                       value={drafts[row.key] ?? ""}
                       onChange={(e) => {
                         const v = e.target.value;
@@ -318,7 +385,9 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
                         <div className="space-y-1 text-left">
                           <p>{state.hint}</p>
                           {state.format && (
-                            <p className="font-mono text-[10px] text-amber-200/90">Format: {state.format}</p>
+                            <p className="font-mono text-[10px] text-amber-200/90">
+                              Format: {state.format}
+                            </p>
                           )}
                           {state.allowed && state.allowed.length > 0 && (
                             <p className="font-mono text-[10px] text-amber-200/90">
@@ -346,26 +415,55 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
             Sigma Parameter (§3.13 KB-Defaults)
           </h3>
           <p className="text-[11px] text-zinc-500 mt-1">
-            Verstellbare Gruppen aus der Wissensdatenbank. Hard-Stop / Grid-Tiefe ≥ 6 % /
-            Fee-Covered-BE sind sichtbar, aber nicht abschaltbar.
+            Verstellbare Gruppen aus der Wissensdatenbank. Hard-Stop /
+            Grid-Tiefe ≥ 6 % / Fee-Covered-BE sind sichtbar, aber nicht
+            abschaltbar.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {[
-            { g: "Screening-Phasen", d: "00–05 SCAN&DEPLOY · 05–48 ACTIVE · 48–55 PRE-CLOSE · 55–60 IDLE" },
-            { g: "Ranker-Schwellen", d: "r ≥ 0,75 · β ≥ 1,5 · RVOL ≥ 1,5 · Spread-Cap aktiv" },
-            { g: "Polymarket-Gate", d: "P_cal Gate 0,60–0,65 · Platt-Kalibrierung" },
-            { g: "Throttle-ATR", d: "<0,70 SLEEP · 0,70–1,40 NORMAL(3) · >1,40 AGGRESSIVE(8)" },
-            { g: "Ladder-Defaults", d: "Step 0,2 % · Vol-Faktor 1,15 · Tiefe ≥ 6 % · TTL 2 h" },
-            { g: "Fraktal-TP / Fee", d: "40/30/20/10 · fee_covered_be_offset 0,0005" },
+            {
+              g: "Screening-Phasen",
+              d: "00–05 SCAN&DEPLOY · 05–48 ACTIVE · 48–55 PRE-CLOSE · 55–60 IDLE",
+            },
+            {
+              g: "Ranker-Schwellen",
+              d: "r ≥ 0,75 · β ≥ 1,5 · RVOL ≥ 1,5 · Spread-Cap aktiv",
+            },
+            {
+              g: "Polymarket-Gate",
+              d: "P_cal Gate 0,60–0,65 · Platt-Kalibrierung",
+            },
+            {
+              g: "Throttle-ATR",
+              d: "<0,70 SLEEP · 0,70–1,40 NORMAL(3) · >1,40 AGGRESSIVE(8)",
+            },
+            {
+              g: "Ladder-Defaults",
+              d: "Step 0,2 % · Vol-Faktor 1,15 · Tiefe ≥ 6 % · TTL 2 h",
+            },
+            {
+              g: "Fraktal-TP / Fee",
+              d: "40/30/20/10 · fee_covered_be_offset 0,0005",
+            },
             { g: "Cooldown", d: "30 min Post-Trade-Pause (1800 s)" },
-            { g: "ONNX-Fallback", d: "TTL_norm < 0,15 / 21:00 → FLAT · Entropie > 0,65 → FLAT" },
+            {
+              g: "ONNX-Fallback",
+              d: "TTL_norm < 0,15 / 21:00 → FLAT · Entropie > 0,65 → FLAT",
+            },
             { g: "Blinded-Modus", d: "Ticker → ASSET_### (Ranker/Tensor)" },
             { g: "Weekend / Paper", d: "reduzierte Größe · kraken_paper only" },
           ].map((row) => (
-            <div key={row.g} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-              <div className="text-[11px] font-medium text-zinc-300">{row.g}</div>
-              <div className="mt-0.5 font-mono text-[10px] text-zinc-500">{row.d}</div>
+            <div
+              key={row.g}
+              className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2"
+            >
+              <div className="text-[11px] font-medium text-zinc-300">
+                {row.g}
+              </div>
+              <div className="mt-0.5 font-mono text-[10px] text-zinc-500">
+                {row.d}
+              </div>
             </div>
           ))}
         </div>
@@ -374,11 +472,17 @@ export default function SettingsPage({ onCredentialsChanged }: { onCredentialsCh
             Sicherheitsregeln (locked — nicht abschaltbar)
           </div>
           {[
-            { id: "hard_stop", label: "Hard-Stop-Pflicht aktiv (0,5 % über Liq)" },
+            {
+              id: "hard_stop",
+              label: "Hard-Stop-Pflicht aktiv (0,5 % über Liq)",
+            },
             { id: "grid_depth", label: "Grid-Tiefe ≥ 6 % erzwungen" },
             { id: "fee_be", label: "Fee-Covered Break-Even nach TP1 (0,0005)" },
           ].map((rule) => (
-            <label key={rule.id} className="flex items-center justify-between gap-2 text-[11px] text-zinc-300">
+            <label
+              key={rule.id}
+              className="flex items-center justify-between gap-2 text-[11px] text-zinc-300"
+            >
               <span className="flex items-center gap-1.5">
                 <Lock className="w-3 h-3 text-amber-400" />
                 {rule.label}

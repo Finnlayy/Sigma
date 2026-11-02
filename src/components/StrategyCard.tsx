@@ -1,7 +1,13 @@
 import { memo, useRef } from "react";
 import { motion } from "motion/react";
 import {
-  Zap, Pause, Ban, Skull, ArrowUpCircle, Wallet, Activity,
+  Zap,
+  Pause,
+  Ban,
+  Skull,
+  ArrowUpCircle,
+  Wallet,
+  Activity,
 } from "lucide-react";
 
 export interface M8InstanceState {
@@ -25,7 +31,10 @@ export interface StrategyCardProps {
   onQuarantine?: (id: string) => void;
 }
 
-const STATUS_META: Record<string, { label: string; cls: string; icon: any; desc: string }> = {
+const STATUS_META: Record<
+  string,
+  { label: string; cls: string; icon: any; desc: string }
+> = {
   ACTIVE: {
     label: "ACTIVE",
     cls: "bg-emerald-950/70 text-emerald-300 border-emerald-500/40",
@@ -57,149 +66,192 @@ const STATUS_META: Record<string, { label: string; cls: string; icon: any; desc:
  * Zeigt Live-Status, Budget-HWM-Fortschritt & State-Transitions-Steuerung.
  */
 // Bolt Optimization: Added React.memo() to prevent unnecessary re-renders of list items in strategy lists
-export const StrategyCard = memo(function StrategyCard({ state, name, symbol, onPromote, onQuarantine }: StrategyCardProps) {
-  const meta = STATUS_META[state.status] || STATUS_META.ACTIVE;
-  const Icon = meta.icon;
-  const pct = Math.min(100, Math.max(0, (state.current_budget_usd / Math.max(1e-9, state.base_budget_usd)) * 100));
-  const barColor =
-    state.status === "ACTIVE" ? "bg-emerald-500" :
-    state.status === "THROTTLED" ? "bg-amber-500" : "bg-red-500";
+export const StrategyCard = memo(
+  function StrategyCard({
+    state,
+    name,
+    symbol,
+    onPromote,
+    onQuarantine,
+  }: StrategyCardProps) {
+    const meta = STATUS_META[state.status] || STATUS_META.ACTIVE;
+    const Icon = meta.icon;
+    const pct = Math.min(
+      100,
+      Math.max(
+        0,
+        (state.current_budget_usd / Math.max(1e-9, state.base_budget_usd)) *
+          100,
+      ),
+    );
+    const barColor =
+      state.status === "ACTIVE"
+        ? "bg-emerald-500"
+        : state.status === "THROTTLED"
+          ? "bg-amber-500"
+          : "bg-red-500";
 
-  const prevPctRef = useRef(pct);
-  let willChangeStyle = "auto";
-  if (prevPctRef.current !== pct) {
-    willChangeStyle = "transform";
-    prevPctRef.current = pct;
-  }
+    const prevPctRef = useRef(pct);
+    let willChangeStyle = "auto";
+    if (prevPctRef.current !== pct) {
+      willChangeStyle = "transform";
+      prevPctRef.current = pct;
+    }
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={`bg-[#0a0a0c]/80 backdrop-blur-md shadow-2xl border border-white/10 rounded-xl p-3.5 space-y-2.5 ${
-        state.status === "QUARANTINED" ? "border-red-800/70" : ""
-      }`}
-      style={{ contain: "layout paint" }}
-
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-bold text-slate-100 truncate max-w-[170px]">
-              {name || state.strategy_id.split("__")[0]}
-            </span>
-            <span className="text-[10px] font-mono text-slate-500">{symbol}</span>
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`bg-[#0a0a0c]/80 backdrop-blur-md shadow-2xl border border-white/10 rounded-xl p-3.5 space-y-2.5 ${
+          state.status === "QUARANTINED" ? "border-red-800/70" : ""
+        }`}
+        style={{ contain: "layout paint" }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-bold text-slate-100 truncate max-w-[170px]">
+                {name || state.strategy_id.split("__")[0]}
+              </span>
+              <span className="text-[10px] font-mono text-slate-500">
+                {symbol}
+              </span>
+            </div>
+            <div className="text-[10px] font-mono text-slate-500 truncate max-w-[220px]">
+              {state.strategy_id}
+            </div>
           </div>
-          <div className="text-[10px] font-mono text-slate-500 truncate max-w-[220px]">
-            {state.strategy_id}
-          </div>
-        </div>
-        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border flex items-center gap-1 shrink-0 ${meta.cls}`}>
-          <Icon className="w-3 h-3" />
-          {meta.label}
-        </span>
-      </div>
-
-      {/* Budget vs. Base (High-Water-Mark) */}
-      <div>
-        <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1 tabular-nums">
-          <span className="flex items-center gap-1">
-            <Wallet className="w-3 h-3" />
-            Budget
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border flex items-center gap-1 shrink-0 ${meta.cls}`}
+          >
+            <Icon className="w-3 h-3" />
+            {meta.label}
           </span>
-          <span>
-            <span className="text-slate-100 font-bold tabular-nums">${state.current_budget_usd?.toFixed(2)}</span>
-            <span className="text-slate-500 tabular-nums"> / ${state.base_budget_usd?.toFixed(2)} Base</span>
-            <span className={`ml-1.5 tabular-nums ${state.budget_multiplier >= 1 ? "text-emerald-400" : state.budget_multiplier > 0 ? "text-amber-400" : "text-red-400"}`}>
-              ×{state.budget_multiplier}
+        </div>
+
+        {/* Budget vs. Base (High-Water-Mark) */}
+        <div>
+          <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1 tabular-nums">
+            <span className="flex items-center gap-1">
+              <Wallet className="w-3 h-3" />
+              Budget
             </span>
-          </span>
-        </div>
-        <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
-          <div
-            className={`h-full w-full rounded-full ${barColor} transition-transform`}
-            style={{
-              transform: `scaleX(${pct / 100})`,
-              transformOrigin: "left",
-              willChange: willChangeStyle,
-              transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
-            }}
-            onTransitionEnd={(e) => {
-              (e.currentTarget as HTMLElement).style.willChange = 'auto';
-            }}
-          />
-        </div>
-        <div className="flex justify-between mt-1 text-[9px] font-mono text-slate-500">
-          <span>50% THROTTLE-Gate</span>
-          <span>100% Base</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-1.5 text-center">
-        <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
-          <div className="text-[9px] font-mono text-slate-500 uppercase">Losses</div>
-          <div className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_losses >= 3 ? "text-red-400" : "text-slate-200"}`}>
-            {state.consecutive_losses}
+            <span>
+              <span className="text-slate-100 font-bold tabular-nums">
+                ${state.current_budget_usd?.toFixed(2)}
+              </span>
+              <span className="text-slate-500 tabular-nums">
+                {" "}
+                / ${state.base_budget_usd?.toFixed(2)} Base
+              </span>
+              <span
+                className={`ml-1.5 tabular-nums ${state.budget_multiplier >= 1 ? "text-emerald-400" : state.budget_multiplier > 0 ? "text-amber-400" : "text-red-400"}`}
+              >
+                ×{state.budget_multiplier}
+              </span>
+            </span>
+          </div>
+          <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+            <div
+              className={`h-full w-full rounded-full ${barColor} transition-transform`}
+              style={{
+                transform: `scaleX(${pct / 100})`,
+                transformOrigin: "left",
+                willChange: willChangeStyle,
+                transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+              onTransitionEnd={(e) => {
+                (e.currentTarget as HTMLElement).style.willChange = "auto";
+              }}
+            />
+          </div>
+          <div className="flex justify-between mt-1 text-[9px] font-mono text-slate-500">
+            <span>50% THROTTLE-Gate</span>
+            <span>100% Base</span>
           </div>
         </div>
-        <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
-          <div className="text-[9px] font-mono text-slate-500 uppercase">Low-PF EOD</div>
-          <div className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_low_pf_days >= 3 ? "text-amber-400" : "text-slate-200"}`}>
-            {state.consecutive_low_pf_days}/7
-          </div>
-        </div>
-        <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
-          <div className="text-[9px] font-mono text-slate-500 uppercase">Shadow W/T</div>
-          <div className="text-[11px] font-mono font-bold text-slate-200 tabular-nums">
-            {state.shadow_wins}/{state.shadow_trades_count}
-          </div>
-        </div>
-      </div>
 
-      {meta.desc && (
-        <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-500">
-          <Activity className="w-3 h-3" />
-          {meta.desc}
-        </div>
-      )}
-
-      {(onPromote || onQuarantine) && state.status !== "RETIRED" && (
-        <div className="flex gap-1.5 pt-1 border-t border-slate-800/70">
-          {onPromote && (
-            <button
-              onClick={() => onPromote(state.strategy_id)}
-              title="Re-promote strategy"
-              aria-label="Re-promote strategy"
-              className="flex-1 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-colors"
+        <div className="grid grid-cols-3 gap-1.5 text-center">
+          <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
+            <div className="text-[9px] font-mono text-slate-500 uppercase">
+              Losses
+            </div>
+            <div
+              className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_losses >= 3 ? "text-red-400" : "text-slate-200"}`}
             >
-              <ArrowUpCircle className="w-3 h-3" /> RE-PROMOTE
-            </button>
-          )}
-          {onQuarantine && (
-            <button
-              onClick={() => onQuarantine(state.strategy_id)}
-              title="Quarantine strategy"
-              aria-label="Quarantine strategy"
-              className="flex-1 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-colors"
+              {state.consecutive_losses}
+            </div>
+          </div>
+          <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
+            <div className="text-[9px] font-mono text-slate-500 uppercase">
+              Low-PF EOD
+            </div>
+            <div
+              className={`text-[11px] font-mono font-bold tabular-nums ${state.consecutive_low_pf_days >= 3 ? "text-amber-400" : "text-slate-200"}`}
             >
-              <Ban className="w-3 h-3" /> QUARANTINE
-            </button>
-          )}
+              {state.consecutive_low_pf_days}/7
+            </div>
+          </div>
+          <div className="bg-[#0a0a0c]/50 rounded border border-white/5 py-1">
+            <div className="text-[9px] font-mono text-slate-500 uppercase">
+              Shadow W/T
+            </div>
+            <div className="text-[11px] font-mono font-bold text-slate-200 tabular-nums">
+              {state.shadow_wins}/{state.shadow_trades_count}
+            </div>
+          </div>
         </div>
-      )}
-    </motion.div>
-  );
-}, (prevProps, nextProps) => {
-  return (
-    prevProps.name === nextProps.name &&
-    prevProps.symbol === nextProps.symbol &&
-    prevProps.state.status === nextProps.state.status &&
-    prevProps.state.current_budget_usd === nextProps.state.current_budget_usd &&
-    prevProps.state.base_budget_usd === nextProps.state.base_budget_usd &&
-    prevProps.state.budget_multiplier === nextProps.state.budget_multiplier &&
-    prevProps.state.consecutive_losses === nextProps.state.consecutive_losses &&
-    prevProps.state.consecutive_low_pf_days === nextProps.state.consecutive_low_pf_days &&
-    prevProps.state.shadow_trades_count === nextProps.state.shadow_trades_count &&
-    prevProps.state.shadow_wins === nextProps.state.shadow_wins
-  );
-});
+
+        {meta.desc && (
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-500">
+            <Activity className="w-3 h-3" />
+            {meta.desc}
+          </div>
+        )}
+
+        {(onPromote || onQuarantine) && state.status !== "RETIRED" && (
+          <div className="flex gap-1.5 pt-1 border-t border-slate-800/70">
+            {onPromote && (
+              <button
+                onClick={() => onPromote(state.strategy_id)}
+                title="Re-promote strategy"
+                aria-label="Re-promote strategy"
+                className="flex-1 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-colors"
+              >
+                <ArrowUpCircle className="w-3 h-3" /> RE-PROMOTE
+              </button>
+            )}
+            {onQuarantine && (
+              <button
+                onClick={() => onQuarantine(state.strategy_id)}
+                title="Quarantine strategy"
+                aria-label="Quarantine strategy"
+                className="flex-1 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-colors"
+              >
+                <Ban className="w-3 h-3" /> QUARANTINE
+              </button>
+            )}
+          </div>
+        )}
+      </motion.div>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.name === nextProps.name &&
+      prevProps.symbol === nextProps.symbol &&
+      prevProps.state.status === nextProps.state.status &&
+      prevProps.state.current_budget_usd ===
+        nextProps.state.current_budget_usd &&
+      prevProps.state.base_budget_usd === nextProps.state.base_budget_usd &&
+      prevProps.state.budget_multiplier === nextProps.state.budget_multiplier &&
+      prevProps.state.consecutive_losses ===
+        nextProps.state.consecutive_losses &&
+      prevProps.state.consecutive_low_pf_days ===
+        nextProps.state.consecutive_low_pf_days &&
+      prevProps.state.shadow_trades_count ===
+        nextProps.state.shadow_trades_count &&
+      prevProps.state.shadow_wins === nextProps.state.shadow_wins
+    );
+  },
+);

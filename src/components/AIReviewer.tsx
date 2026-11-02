@@ -1,8 +1,22 @@
 import { useState, useEffect } from "react";
-import { 
-  Sparkles, Bot, AlertTriangle, Lightbulb, Check, ChevronRight, 
-  RefreshCw, Wrench, BookOpen, Layers, ArrowRight, ShieldAlert,
-  Sliders, FileCode, CheckCircle2, ShieldCheck, Zap
+import {
+  Sparkles,
+  Bot,
+  AlertTriangle,
+  Lightbulb,
+  Check,
+  ChevronRight,
+  RefreshCw,
+  Wrench,
+  BookOpen,
+  Layers,
+  ArrowRight,
+  ShieldAlert,
+  Sliders,
+  FileCode,
+  CheckCircle2,
+  ShieldCheck,
+  Zap,
 } from "lucide-react";
 import { TradingStrategy, AuditReport, TweakedStrategyResult } from "../types";
 
@@ -14,12 +28,12 @@ interface AIReviewerProps {
   onReloadStrategies?: () => Promise<void>;
 }
 
-export default function AIReviewer({ 
-  currentStrategy, 
+export default function AIReviewer({
+  currentStrategy,
   strategies = [],
   onInsertGeneratedStrategy,
   onUpdateStrategy,
-  onReloadStrategies
+  onReloadStrategies,
 }: AIReviewerProps) {
   const currentCode = currentStrategy?.code || null;
   const currentName = currentStrategy?.name || null;
@@ -29,13 +43,16 @@ export default function AIReviewer({
   const [isDebugging, setIsDebugging] = useState(false);
   const [isTweaking, setIsTweaking] = useState(false);
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
-  
+
   const [aiResult, setAiResult] = useState<any>(null);
   const [debugResult, setDebugResult] = useState<AuditReport | null>(null);
-  const [tweakedResult, setTweakedResult] = useState<TweakedStrategyResult | null>(null);
+  const [tweakedResult, setTweakedResult] =
+    useState<TweakedStrategyResult | null>(null);
   const [manifestInsights, setManifestInsights] = useState<any>(null);
-  
-  const [activeTab, setActiveTab] = useState<'generate' | 'audit' | 'manifest'>('generate');
+
+  const [activeTab, setActiveTab] = useState<"generate" | "audit" | "manifest">(
+    "generate",
+  );
   const [customTweakNote, setCustomTweakNote] = useState("");
   const [applySuccessMsg, setApplySuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -43,7 +60,7 @@ export default function AIReviewer({
   const suggestions = [
     "Hybrid MACD Momentum + RSI oversold filter",
     "Volatility breakout with trailing stop-loss",
-    "Dynamic spread scalper on high SOL volume"
+    "Dynamic spread scalper on high SOL volume",
   ];
 
   // Fetch Manifest Learned Knowledge Insights
@@ -76,7 +93,7 @@ export default function AIReviewer({
       const res = await fetch("/api/ai/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: textToQuery })
+        body: JSON.stringify({ prompt: textToQuery }),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -109,7 +126,7 @@ export default function AIReviewer({
       const res = await fetch("/api/ai/debug", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: currentCode, name: currentName })
+        body: JSON.stringify({ code: currentCode, name: currentName }),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -144,8 +161,8 @@ export default function AIReviewer({
         body: JSON.stringify({
           strategy: currentStrategy,
           auditReport: debugResult,
-          customInstruction: customTweakNote.trim() || undefined
-        })
+          customInstruction: customTweakNote.trim() || undefined,
+        }),
       });
 
       if (!res.ok) {
@@ -175,7 +192,7 @@ export default function AIReviewer({
         assetPair: tweakedResult.assetPair || currentStrategy.assetPair,
         interval: tweakedResult.interval || currentStrategy.interval,
         parameters: tweakedResult.parameters || currentStrategy.parameters,
-        code: tweakedResult.code || currentStrategy.code
+        code: tweakedResult.code || currentStrategy.code,
       });
 
       setApplySuccessMsg("✅ Tweaks successfully applied to current strategy!");
@@ -195,7 +212,7 @@ export default function AIReviewer({
       assetPair: tweakedResult.assetPair,
       interval: tweakedResult.interval,
       parameters: tweakedResult.parameters,
-      code: tweakedResult.code
+      code: tweakedResult.code,
     });
     setApplySuccessMsg("✅ Tweaked version saved as a new strategy!");
     setTimeout(() => setApplySuccessMsg(null), 3500);
@@ -207,23 +224,29 @@ export default function AIReviewer({
       <div className="bg-zinc-900/80 border-b border-zinc-800 px-3.5 py-2.5 flex justify-between items-center flex-wrap gap-2">
         <div className="flex items-center space-x-2 text-emerald-400">
           <Sparkles className="w-4 h-4 fill-emerald-500/10" />
-          <span className="text-xs font-mono font-bold uppercase tracking-wider">Gemini Quant Copilot</span>
+          <span className="text-xs font-mono font-bold uppercase tracking-wider">
+            Gemini Quant Copilot
+          </span>
         </div>
 
         <div className="flex space-x-1">
           <button
-            onClick={() => setActiveTab('generate')}
+            onClick={() => setActiveTab("generate")}
             className={`px-2.5 py-1 text-[11px] font-mono rounded transition-colors flex items-center space-x-1 ${
-              activeTab === 'generate' ? 'bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold' : 'text-zinc-400 hover:text-white'
+              activeTab === "generate"
+                ? "bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold"
+                : "text-zinc-400 hover:text-white"
             }`}
           >
             <span>Generate</span>
           </button>
-          
+
           <button
-            onClick={() => setActiveTab('audit')}
+            onClick={() => setActiveTab("audit")}
             className={`px-2.5 py-1 text-[11px] font-mono rounded transition-colors flex items-center space-x-1 ${
-              activeTab === 'audit' ? 'bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold' : 'text-zinc-400 hover:text-white'
+              activeTab === "audit"
+                ? "bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold"
+                : "text-zinc-400 hover:text-white"
             }`}
           >
             <span>Audit & Tweak</span>
@@ -231,11 +254,13 @@ export default function AIReviewer({
 
           <button
             onClick={() => {
-              setActiveTab('manifest');
+              setActiveTab("manifest");
               if (!manifestInsights) fetchManifestInsights();
             }}
             className={`px-2.5 py-1 text-[11px] font-mono rounded transition-colors flex items-center space-x-1 ${
-              activeTab === 'manifest' ? 'bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold' : 'text-zinc-400 hover:text-white'
+              activeTab === "manifest"
+                ? "bg-emerald-950/70 border border-emerald-900/60 text-emerald-400 font-semibold"
+                : "text-zinc-400 hover:text-white"
             }`}
           >
             <BookOpen className="w-3 h-3 text-emerald-400" />
@@ -249,7 +274,9 @@ export default function AIReviewer({
         <div className="flex items-center space-x-1.5 text-zinc-400">
           <Layers className="w-3 h-3 text-emerald-400" />
           <span>Manifest Knowledge Base:</span>
-          <span className="text-emerald-400 font-semibold">{strategies?.length} active scripts ingested</span>
+          <span className="text-emerald-400 font-semibold">
+            {strategies?.length} active scripts ingested
+          </span>
         </div>
         <span className="text-zinc-500">Gemini 3.7-Flash</span>
       </div>
@@ -268,7 +295,7 @@ export default function AIReviewer({
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{errorMsg}</span>
             </div>
-            <button 
+            <button
               onClick={() => setErrorMsg(null)}
               className="text-rose-400 hover:text-rose-200 text-[10px] uppercase font-bold ml-2 underline"
             >
@@ -278,7 +305,7 @@ export default function AIReviewer({
         )}
 
         {/* TAB 1: GENERATE STRATEGY (MANIFEST GROUNDED) */}
-        {activeTab === 'generate' && (
+        {activeTab === "generate" && (
           <div className="space-y-4">
             {/* Generation form */}
             <div className="space-y-2">
@@ -292,14 +319,18 @@ export default function AIReviewer({
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="e.g. Volume-weighted MACD with ATR trailing stop..."
                   className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs font-mono text-white focus:border-emerald-700 focus:outline-none"
-                  onKeyDown={(e) => e.key === 'Enter' && handleGenerate("")}
+                  onKeyDown={(e) => e.key === "Enter" && handleGenerate("")}
                 />
                 <button
                   onClick={() => handleGenerate("")}
                   disabled={isGenerating}
                   className="bg-emerald-500 hover:bg-emerald-400 text-black px-3.5 rounded text-xs font-mono font-semibold flex items-center space-x-1 transition-colors disabled:bg-emerald-950"
                 >
-                  {isGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Build</span>}
+                  {isGenerating ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <span>Build</span>
+                  )}
                 </button>
               </div>
             </div>
@@ -307,7 +338,9 @@ export default function AIReviewer({
             {/* Suggestions cards */}
             {!aiResult && !isGenerating && (
               <div className="space-y-2">
-                <span className="block text-[10px] font-mono text-zinc-500 uppercase">Quant Ideation Patterns:</span>
+                <span className="block text-[10px] font-mono text-zinc-500 uppercase">
+                  Quant Ideation Patterns:
+                </span>
                 <div className="space-y-2">
                   {suggestions.map((sug, idx) => (
                     <button
@@ -331,9 +364,12 @@ export default function AIReviewer({
               <div className="p-6 border border-zinc-800 rounded bg-zinc-950/40 text-center space-y-3">
                 <Bot className="w-8 h-8 text-emerald-500 mx-auto animate-bounce" />
                 <div className="space-y-1">
-                  <p className="text-xs font-mono text-white font-medium">Gemini is synthesizing algorithmic code...</p>
+                  <p className="text-xs font-mono text-white font-medium">
+                    Gemini is synthesizing algorithmic code...
+                  </p>
                   <p className="text-[10px] font-mono text-zinc-500">
-                    Applying paradigms learned from {strategies?.length} manifest scripts
+                    Applying paradigms learned from {strategies?.length}{" "}
+                    manifest scripts
                   </p>
                 </div>
               </div>
@@ -344,24 +380,35 @@ export default function AIReviewer({
               <div className="border border-zinc-800 rounded bg-zinc-950 p-4 space-y-3.5">
                 <div className="flex justify-between items-start border-b border-zinc-800/80 pb-2.5">
                   <div>
-                    <h5 className="text-xs font-mono font-bold text-white uppercase">{aiResult.name}</h5>
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase">Pair: {aiResult.assetPair} | Interval: {aiResult.interval}s</span>
+                    <h5 className="text-xs font-mono font-bold text-white uppercase">
+                      {aiResult.name}
+                    </h5>
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase">
+                      Pair: {aiResult.assetPair} | Interval: {aiResult.interval}
+                      s
+                    </span>
                   </div>
                   <span className="bg-emerald-950 text-emerald-400 border border-emerald-900 px-2 py-0.5 rounded text-[9px] font-mono font-bold">
                     MANIFEST-INFORMED
                   </span>
                 </div>
 
-                <p className="text-xs font-mono text-zinc-400 leading-relaxed">{aiResult.description}</p>
+                <p className="text-xs font-mono text-zinc-400 leading-relaxed">
+                  {aiResult.description}
+                </p>
 
                 {/* Parameters list */}
                 <div className="bg-zinc-900 border border-zinc-850 p-2.5 rounded">
-                  <span className="block text-[9px] font-mono text-zinc-500 uppercase mb-1.5">Parameters Configured</span>
+                  <span className="block text-[9px] font-mono text-zinc-500 uppercase mb-1.5">
+                    Parameters Configured
+                  </span>
                   <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
                     {Object.keys(aiResult.parameters || {}).map((p) => (
                       <div key={p} className="flex justify-between">
                         <span className="text-zinc-500">{p}:</span>
-                        <span className="text-emerald-400 font-semibold">{String(aiResult.parameters[p])}</span>
+                        <span className="text-emerald-400 font-semibold">
+                          {String(aiResult.parameters[p])}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -384,7 +431,7 @@ export default function AIReviewer({
         )}
 
         {/* TAB 2: AUDIT & TWEAK STRATEGY */}
-        {activeTab === 'audit' && (
+        {activeTab === "audit" && (
           <div className="space-y-4">
             {/* Audit Trigger Card */}
             <div className="space-y-2">
@@ -397,15 +444,24 @@ export default function AIReviewer({
                 </span>
               </div>
               <p className="text-[11px] font-mono text-zinc-400">
-                Audits syntax, unhandled edge cases, liquidation exposure, and compares with high-performing manifest algorithms.
+                Audits syntax, unhandled edge cases, liquidation exposure, and
+                compares with high-performing manifest algorithms.
               </p>
               <button
                 onClick={handleDebugCode}
                 disabled={isDebugging || !currentCode}
                 className="w-full bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 disabled:bg-zinc-950/20 disabled:text-zinc-700 py-2.5 rounded text-xs font-mono font-medium text-white transition-colors flex items-center justify-center space-x-1.5"
               >
-                {isDebugging ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5 text-emerald-400" />}
-                <span>{isDebugging ? "Scanning & Auditing Script..." : "Audit Active Strategy"}</span>
+                {isDebugging ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Bot className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+                <span>
+                  {isDebugging
+                    ? "Scanning & Auditing Script..."
+                    : "Audit Active Strategy"}
+                </span>
               </button>
             </div>
 
@@ -414,25 +470,40 @@ export default function AIReviewer({
               <div className="border border-zinc-800 rounded bg-zinc-950 p-4 space-y-3.5">
                 <div className="flex justify-between items-center border-b border-zinc-800/80 pb-2">
                   <div className="flex items-center space-x-2">
-                    <span className="text-xs font-mono font-bold text-white uppercase">Audit Report</span>
+                    <span className="text-xs font-mono font-bold text-white uppercase">
+                      Audit Report
+                    </span>
                     {debugResult.riskScore !== undefined && (
                       <span className="bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-300">
-                        Risk Score: <strong className={debugResult.riskScore > 50 ? 'text-amber-400' : 'text-emerald-400'}>{debugResult.riskScore}/100</strong>
+                        Risk Score:{" "}
+                        <strong
+                          className={
+                            debugResult.riskScore > 50
+                              ? "text-amber-400"
+                              : "text-emerald-400"
+                          }
+                        >
+                          {debugResult.riskScore}/100
+                        </strong>
                       </span>
                     )}
                   </div>
-                  <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold border uppercase ${
-                    debugResult.status === 'clean' 
-                      ? 'bg-emerald-950 text-emerald-400 border-emerald-900/50' 
-                      : debugResult.status === 'error'
-                      ? 'bg-rose-950 text-rose-400 border-rose-900/50'
-                      : 'bg-amber-950 text-amber-400 border-amber-900/50'
-                  }`}>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold border uppercase ${
+                      debugResult.status === "clean"
+                        ? "bg-emerald-950 text-emerald-400 border-emerald-900/50"
+                        : debugResult.status === "error"
+                          ? "bg-rose-950 text-rose-400 border-rose-900/50"
+                          : "bg-amber-950 text-amber-400 border-amber-900/50"
+                    }`}
+                  >
                     {debugResult.status}
                   </span>
                 </div>
 
-                <p className="text-xs font-mono text-zinc-400 leading-relaxed">{debugResult.summary}</p>
+                <p className="text-xs font-mono text-zinc-400 leading-relaxed">
+                  {debugResult.summary}
+                </p>
 
                 {/* Identified Issues */}
                 {debugResult.issues && debugResult.issues?.length > 0 && (
@@ -477,7 +548,9 @@ export default function AIReviewer({
                       <Wrench className="w-3 h-3 text-emerald-400" />
                       <span>Gemini Auto-Tweaker</span>
                     </span>
-                    <span className="text-[9px] text-zinc-500 font-mono">Applies all audit fixes</span>
+                    <span className="text-[9px] text-zinc-500 font-mono">
+                      Applies all audit fixes
+                    </span>
                   </div>
 
                   <input
@@ -516,7 +589,9 @@ export default function AIReviewer({
                   <div>
                     <div className="flex items-center space-x-1.5">
                       <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <h5 className="text-xs font-mono font-bold text-white uppercase">{tweakedResult.name}</h5>
+                      <h5 className="text-xs font-mono font-bold text-white uppercase">
+                        {tweakedResult.name}
+                      </h5>
                     </div>
                     <span className="text-[10px] font-mono text-emerald-400">
                       Optimized Code & Parameter Calibrations
@@ -534,7 +609,9 @@ export default function AIReviewer({
                   </span>
                   <ul className="space-y-1 text-[11px] font-mono text-zinc-200 list-disc pl-4">
                     {tweakedResult.tweaksApplied.map((tweak, i) => (
-                      <li key={i} className="text-emerald-300/90">{tweak}</li>
+                      <li key={i} className="text-emerald-300/90">
+                        {tweak}
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -542,12 +619,18 @@ export default function AIReviewer({
                 {/* Reasoning & Anticipated Improvements */}
                 <div className="bg-zinc-900/90 border border-zinc-800 p-2.5 rounded space-y-1.5 text-[11px] font-mono">
                   <div>
-                    <span className="text-zinc-500 block text-[9px] uppercase">Reasoning:</span>
+                    <span className="text-zinc-500 block text-[9px] uppercase">
+                      Reasoning:
+                    </span>
                     <p className="text-zinc-300">{tweakedResult.reasoning}</p>
                   </div>
                   <div>
-                    <span className="text-zinc-500 block text-[9px] uppercase">Expected Yield/Safety Impact:</span>
-                    <p className="text-emerald-400">{tweakedResult.expectedImprovement}</p>
+                    <span className="text-zinc-500 block text-[9px] uppercase">
+                      Expected Yield/Safety Impact:
+                    </span>
+                    <p className="text-emerald-400">
+                      {tweakedResult.expectedImprovement}
+                    </p>
                   </div>
                 </div>
 
@@ -560,7 +643,9 @@ export default function AIReviewer({
                     {Object.keys(tweakedResult.parameters || {}).map((p) => (
                       <div key={p} className="flex justify-between">
                         <span className="text-zinc-500">{p}:</span>
-                        <span className="text-emerald-400 font-semibold">{String(tweakedResult.parameters[p])}</span>
+                        <span className="text-emerald-400 font-semibold">
+                          {String(tweakedResult.parameters[p])}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -602,7 +687,7 @@ export default function AIReviewer({
         )}
 
         {/* TAB 3: MANIFEST KNOWLEDGE BASE & SYNERGIES */}
-        {activeTab === 'manifest' && (
+        {activeTab === "manifest" && (
           <div className="space-y-4 text-xs font-mono">
             <div className="flex items-center justify-between">
               <div>
@@ -610,7 +695,8 @@ export default function AIReviewer({
                   Manifest Knowledge Base
                 </span>
                 <span className="text-[10px] text-zinc-500">
-                  Learned from {strategies?.length} persistent algorithms & live P&L data
+                  Learned from {strategies?.length} persistent algorithms & live
+                  P&L data
                 </span>
               </div>
               <button
@@ -618,7 +704,9 @@ export default function AIReviewer({
                 disabled={isLoadingInsights}
                 className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-750 text-zinc-300 px-2.5 py-1 rounded text-[11px] font-mono flex items-center space-x-1"
               >
-                <RefreshCw className={`w-3 h-3 ${isLoadingInsights ? 'animate-spin' : ''}`} />
+                <RefreshCw
+                  className={`w-3 h-3 ${isLoadingInsights ? "animate-spin" : ""}`}
+                />
                 <span>Refresh Insights</span>
               </button>
             </div>
@@ -626,7 +714,9 @@ export default function AIReviewer({
             {isLoadingInsights ? (
               <div className="p-8 border border-zinc-800 rounded bg-zinc-950/40 text-center space-y-2">
                 <Bot className="w-6 h-6 text-emerald-400 mx-auto animate-spin" />
-                <p className="text-xs text-zinc-300">Gemini is synthesizing cross-strategy manifest insights...</p>
+                <p className="text-xs text-zinc-300">
+                  Gemini is synthesizing cross-strategy manifest insights...
+                </p>
               </div>
             ) : manifestInsights ? (
               <div className="space-y-3">
@@ -636,12 +726,17 @@ export default function AIReviewer({
                     Core Learned Algorithmic Patterns
                   </span>
                   <div className="space-y-1.5">
-                    {(manifestInsights.learnedPatterns || []).map((pat: string, idx: number) => (
-                      <div key={idx} className="flex items-start space-x-2 text-[11px] text-zinc-300">
-                        <span className="text-emerald-400 font-bold">•</span>
-                        <span>{pat}</span>
-                      </div>
-                    ))}
+                    {(manifestInsights.learnedPatterns || []).map(
+                      (pat: string, idx: number) => (
+                        <div
+                          key={idx}
+                          className="flex items-start space-x-2 text-[11px] text-zinc-300"
+                        >
+                          <span className="text-emerald-400 font-bold">•</span>
+                          <span>{pat}</span>
+                        </div>
+                      ),
+                    )}
                   </div>
                 </div>
 
@@ -673,16 +768,19 @@ export default function AIReviewer({
                       Suggested Manifest Upgrades
                     </span>
                     <ul className="space-y-1 list-disc pl-4 text-zinc-300 text-[11px]">
-                      {manifestInsights.suggestedImprovements.map((imp: string, idx: number) => (
-                        <li key={idx}>{imp}</li>
-                      ))}
+                      {manifestInsights.suggestedImprovements.map(
+                        (imp: string, idx: number) => (
+                          <li key={idx}>{imp}</li>
+                        ),
+                      )}
                     </ul>
                   </div>
                 )}
               </div>
             ) : (
               <div className="p-4 bg-zinc-950 border border-zinc-800 rounded text-center text-zinc-500 text-xs">
-                Click "Refresh Insights" to evaluate all {strategies?.length} manifest algorithms with Gemini.
+                Click "Refresh Insights" to evaluate all {strategies?.length}{" "}
+                manifest algorithms with Gemini.
               </div>
             )}
           </div>

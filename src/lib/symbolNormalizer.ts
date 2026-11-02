@@ -57,8 +57,22 @@ export class ExchangeSymbolNormalizer {
   };
 
   public static readonly KNOWN_QUOTES = new Set([
-    "USD", "USDT", "USDC", "EUR", "GBP", "CAD", "JPY",
-    "CHF", "AUD", "DAI", "KRW", "SGD", "BUSD", "TUSD", "BTC", "ETH"
+    "USD",
+    "USDT",
+    "USDC",
+    "EUR",
+    "GBP",
+    "CAD",
+    "JPY",
+    "CHF",
+    "AUD",
+    "DAI",
+    "KRW",
+    "SGD",
+    "BUSD",
+    "TUSD",
+    "BTC",
+    "ETH",
   ]);
 
   public static parse(rawInput: string): [string, string] {
@@ -67,12 +81,21 @@ export class ExchangeSymbolNormalizer {
     }
 
     let clean = rawInput.trim().toUpperCase();
-    clean = clean.replace(/^(KRAKEN|KRAKENPRO|KRAKEN_PRO|EXCHANGE|SPOT|FUTURES|PERP)[:_/\s]+/i, "").trim();
+    clean = clean
+      .replace(
+        /^(KRAKEN|KRAKENPRO|KRAKEN_PRO|EXCHANGE|SPOT|FUTURES|PERP)[:_/\s]+/i,
+        "",
+      )
+      .trim();
 
-    if (clean.startsWith("XXBT") && clean.endsWith("ZUSD")) return ["BTC", "USD"];
-    if (clean.startsWith("XXBT") && clean.endsWith("ZEUR")) return ["BTC", "EUR"];
-    if (clean.startsWith("XETH") && clean.endsWith("ZUSD")) return ["ETH", "USD"];
-    if (clean.startsWith("XETH") && clean.endsWith("ZEUR")) return ["ETH", "EUR"];
+    if (clean.startsWith("XXBT") && clean.endsWith("ZUSD"))
+      return ["BTC", "USD"];
+    if (clean.startsWith("XXBT") && clean.endsWith("ZEUR"))
+      return ["BTC", "EUR"];
+    if (clean.startsWith("XETH") && clean.endsWith("ZUSD"))
+      return ["ETH", "USD"];
+    if (clean.startsWith("XETH") && clean.endsWith("ZEUR"))
+      return ["ETH", "EUR"];
 
     clean = clean.replace(/[\s\-_\.:|]+/g, "/");
 
@@ -81,7 +104,10 @@ export class ExchangeSymbolNormalizer {
       if (parts.length >= 2) {
         const base = parts[0];
         const quote = parts[1];
-        const resolvedBase = (base === "XBT" || base === "XXBT") ? "BTC" : (this.REVERSE_KRAKEN_BASE_MAP[base] || base);
+        const resolvedBase =
+          base === "XBT" || base === "XXBT"
+            ? "BTC"
+            : this.REVERSE_KRAKEN_BASE_MAP[base] || base;
         const resolvedQuote = this.REVERSE_KRAKEN_BASE_MAP[quote] || quote;
         return [resolvedBase, resolvedQuote];
       } else if (parts.length === 1) {
@@ -89,16 +115,24 @@ export class ExchangeSymbolNormalizer {
       }
     }
 
-    const sortedQuotes = Array.from(this.KNOWN_QUOTES).sort((a, b) => b.length - a.length);
+    const sortedQuotes = Array.from(this.KNOWN_QUOTES).sort(
+      (a, b) => b.length - a.length,
+    );
     for (const quote of sortedQuotes) {
       if (clean.endsWith(quote) && clean.length > quote.length) {
         const base = clean.slice(0, -quote.length);
-        const resolvedBase = (base === "XBT" || base === "XXBT") ? "BTC" : (this.REVERSE_KRAKEN_BASE_MAP[base] || base);
+        const resolvedBase =
+          base === "XBT" || base === "XXBT"
+            ? "BTC"
+            : this.REVERSE_KRAKEN_BASE_MAP[base] || base;
         return [resolvedBase, quote];
       }
     }
 
-    const resolvedBase = (clean === "XBT" || clean === "XXBT") ? "BTC" : (this.REVERSE_KRAKEN_BASE_MAP[clean] || clean);
+    const resolvedBase =
+      clean === "XBT" || clean === "XXBT"
+        ? "BTC"
+        : this.REVERSE_KRAKEN_BASE_MAP[clean] || clean;
     return [resolvedBase, "USD"];
   }
 
@@ -121,7 +155,7 @@ export class ExchangeSymbolNormalizer {
 
   public static toKrakenProFutures(rawInput: string): string {
     const [base, quote] = this.parse(rawInput);
-    const fBase = (base === "BTC" || base === "XXBT") ? "XBT" : base;
+    const fBase = base === "BTC" || base === "XXBT" ? "XBT" : base;
     return `PF_${fBase}${quote}`;
   }
 
@@ -146,7 +180,12 @@ export function getCurrencySymbol(raw: string): string {
   if (!raw) return "$";
   const clean = raw.trim().toUpperCase();
   let quote = clean;
-  if (clean.includes("/") || clean.includes("_") || clean.includes("-") || clean.includes(":")) {
+  if (
+    clean.includes("/") ||
+    clean.includes("_") ||
+    clean.includes("-") ||
+    clean.includes(":")
+  ) {
     const parsed = ExchangeSymbolNormalizer.parse(clean);
     quote = parsed[1];
   } else if (ExchangeSymbolNormalizer.KNOWN_QUOTES.has(clean)) {
@@ -177,8 +216,15 @@ export function getCurrencySymbol(raw: string): string {
 /**
  * Extracts normalized base, quote, currency symbol, and pair for ledger alignment.
  */
-export function getLedgerCurrency(rawPairOrQuote?: string): { base: string; quote: string; symbol: string; pair: string } {
-  const [base, quote] = ExchangeSymbolNormalizer.parse(rawPairOrQuote || "BTC/USD");
+export function getLedgerCurrency(rawPairOrQuote?: string): {
+  base: string;
+  quote: string;
+  symbol: string;
+  pair: string;
+} {
+  const [base, quote] = ExchangeSymbolNormalizer.parse(
+    rawPairOrQuote || "BTC/USD",
+  );
   const symbol = getCurrencySymbol(quote);
   return {
     base,
@@ -187,4 +233,3 @@ export function getLedgerCurrency(rawPairOrQuote?: string): { base: string; quot
     pair: `${base}/${quote}`,
   };
 }
-

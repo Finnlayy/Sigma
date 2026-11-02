@@ -1,14 +1,41 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  Calendar as CalendarIcon, TrendingUp, TrendingDown, Target, 
-  Activity, RefreshCw, Layers, Zap, Info, ChevronRight, CheckCircle2,
-  XCircle, MinusCircle, DollarSign, ChevronLeft, ChevronRight as ChevronRightIcon,
-  ChevronDown, Filter, Check, SlidersHorizontal, Eye
+import {
+  Calendar as CalendarIcon,
+  TrendingUp,
+  TrendingDown,
+  Target,
+  Activity,
+  RefreshCw,
+  Layers,
+  Zap,
+  Info,
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
+  MinusCircle,
+  DollarSign,
+  ChevronLeft,
+  ChevronRight as ChevronRightIcon,
+  ChevronDown,
+  Filter,
+  Check,
+  SlidersHorizontal,
+  Eye,
 } from "lucide-react";
-import { DailyPnLDay, DailyPnLHeatmapData, TradingStrategy, StrategyPnL } from "../types";
+import {
+  DailyPnLDay,
+  DailyPnLHeatmapData,
+  TradingStrategy,
+  StrategyPnL,
+} from "../types";
 
-export type ViewScopeType = 'single' | 'combined_all' | 'combined_live' | 'combined_paper' | 'custom_multi';
+export type ViewScopeType =
+  | "single"
+  | "combined_all"
+  | "combined_live"
+  | "combined_paper"
+  | "custom_multi";
 
 interface CalendarHeatmapProps {
   selectedStrategy: TradingStrategy | null;
@@ -31,7 +58,7 @@ const MONTHS_LIST = [
   { index: 9, short: "Sep", full: "September" },
   { index: 10, short: "Oct", full: "October" },
   { index: 11, short: "Nov", full: "November" },
-  { index: 12, short: "Dec", full: "December" }
+  { index: 12, short: "Dec", full: "December" },
 ];
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -41,7 +68,7 @@ export default function CalendarHeatmap({
   strategies = [],
   strategyPnL = [],
   onSelectStrategy,
-  onSelectDate
+  onSelectDate,
 }: CalendarHeatmapProps) {
   const now = useMemo(() => new Date(), []);
   const [selectedYear, setSelectedYear] = useState<number>(() => {
@@ -53,12 +80,14 @@ export default function CalendarHeatmap({
   });
 
   // Dropdown View Scope State: 'single' | 'combined_all' | 'combined_live' | 'combined_paper' | 'custom_multi'
-  const [viewScope, setViewScope] = useState<ViewScopeType>('single');
+  const [viewScope, setViewScope] = useState<ViewScopeType>("single");
   const [selectedMultiIds, setSelectedMultiIds] = useState<string[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const [heatmapData, setHeatmapData] = useState<DailyPnLHeatmapData | null>(null);
+  const [heatmapData, setHeatmapData] = useState<DailyPnLHeatmapData | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedDay, setSelectedDay] = useState<DailyPnLDay | null>(null);
   const [hoveredDay, setHoveredDay] = useState<DailyPnLDay | null>(null);
@@ -66,7 +95,10 @@ export default function CalendarHeatmap({
   // Close dropdown on click outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsDropdownOpen(false);
       }
     }
@@ -80,14 +112,14 @@ export default function CalendarHeatmap({
       if (selectedStrategy) {
         setSelectedMultiIds([selectedStrategy.id]);
       } else {
-        setSelectedMultiIds(strategies.slice(0, 2).map(s => s.id));
+        setSelectedMultiIds(strategies.slice(0, 2).map((s) => s.id));
       }
     }
   }, [strategies, selectedStrategy]);
 
   // Keep single view synchronized if external selectedStrategy changes
   useEffect(() => {
-    if (viewScope === 'single' && selectedStrategy) {
+    if (viewScope === "single" && selectedStrategy) {
       if (!selectedMultiIds.includes(selectedStrategy.id)) {
         setSelectedMultiIds([selectedStrategy.id]);
       }
@@ -95,17 +127,22 @@ export default function CalendarHeatmap({
   }, [selectedStrategy?.id]);
 
   // ⚡ Bolt Optimization: Memoize the Set for O(1) lookups to prevent reallocation on every render
-  const multiIdsSet = useMemo(() => new Set(selectedMultiIds), [selectedMultiIds]);
+  const multiIdsSet = useMemo(
+    () => new Set(selectedMultiIds),
+    [selectedMultiIds],
+  );
 
   // Target strategies currently active in this heatmap view
   const activeStrategies = useMemo(() => {
-    if (viewScope === 'combined_all') return strategies;
-    if (viewScope === 'combined_live') return strategies.filter(s => s.executionMode === 'live');
-    if (viewScope === 'combined_paper') return strategies.filter(s => (s.executionMode || 'paper') === 'paper');
-    if (viewScope === 'custom_multi') {
+    if (viewScope === "combined_all") return strategies;
+    if (viewScope === "combined_live")
+      return strategies.filter((s) => s.executionMode === "live");
+    if (viewScope === "combined_paper")
+      return strategies.filter((s) => (s.executionMode || "paper") === "paper");
+    if (viewScope === "custom_multi") {
       // Bolt Optimization: O(1) Set .has() lookups instead of O(N) Array .includes(),
       // using the memoized `multiIdsSet` above so the Set is not re-allocated on every render.
-      const filtered = strategies.filter(s => multiIdsSet.has(s.id));
+      const filtered = strategies.filter((s) => multiIdsSet.has(s.id));
       return filtered.length > 0 ? filtered : strategies.slice(0, 1);
     }
     // Single mode:
@@ -115,28 +152,31 @@ export default function CalendarHeatmap({
 
   // Live aggregate session PnL for active scope
   const aggregateActivePnL = useMemo(() => {
-    const targetIds = new Set(activeStrategies.map(s => s.id));
-    const matched = strategyPnL.filter(p => targetIds.has(p.strategyId));
+    const targetIds = new Set(activeStrategies.map((s) => s.id));
+    const matched = strategyPnL.filter((p) => targetIds.has(p.strategyId));
 
     // Bolt Optimization: Condensed 7 consecutive reduce passes into a single O(N) traversal.
-    return matched.reduce((acc, p) => {
-      acc.totalPnL += (p.totalPnL || 0);
-      acc.realizedPnL += (p.realizedPnL || 0);
-      acc.unrealizedPnL += (p.unrealizedPnL || 0);
-      acc.totalTrades += (p.totalTrades || 0);
-      acc.wins += (p.winningTrades || 0);
-      acc.losses += (p.losingTrades || 0);
-      acc.volumeUSD += (p.volumeTradedUSD || 0);
-      return acc;
-    }, {
-      totalPnL: 0,
-      realizedPnL: 0,
-      unrealizedPnL: 0,
-      totalTrades: 0,
-      wins: 0,
-      losses: 0,
-      volumeUSD: 0
-    });
+    return matched.reduce(
+      (acc, p) => {
+        acc.totalPnL += p.totalPnL || 0;
+        acc.realizedPnL += p.realizedPnL || 0;
+        acc.unrealizedPnL += p.unrealizedPnL || 0;
+        acc.totalTrades += p.totalTrades || 0;
+        acc.wins += p.winningTrades || 0;
+        acc.losses += p.losingTrades || 0;
+        acc.volumeUSD += p.volumeTradedUSD || 0;
+        return acc;
+      },
+      {
+        totalPnL: 0,
+        realizedPnL: 0,
+        unrealizedPnL: 0,
+        totalTrades: 0,
+        wins: 0,
+        losses: 0,
+        volumeUSD: 0,
+      },
+    );
   }, [activeStrategies, strategyPnL]);
 
   // Fetch or compute monthly daily P&L heatmap data for selected scope, year and month
@@ -151,28 +191,32 @@ export default function CalendarHeatmap({
     let targetEndpointId = "combined_all";
     let queryParams = `year=${selectedYear}&month=${selectedMonth}`;
 
-    if (viewScope === 'single') {
+    if (viewScope === "single") {
       targetEndpointId = activeStrategies[0].id;
-    } else if (viewScope === 'combined_all') {
+    } else if (viewScope === "combined_all") {
       targetEndpointId = "combined_all";
-    } else if (viewScope === 'combined_live') {
+    } else if (viewScope === "combined_live") {
       targetEndpointId = "combined_live";
-    } else if (viewScope === 'combined_paper') {
+    } else if (viewScope === "combined_paper") {
       targetEndpointId = "combined_paper";
-    } else if (viewScope === 'custom_multi') {
+    } else if (viewScope === "custom_multi") {
       targetEndpointId = "custom_multi";
-      queryParams += `&strategies=${activeStrategies.map(s => s.id).join(',')}`;
+      queryParams += `&strategies=${activeStrategies.map((s) => s.id).join(",")}`;
     }
 
     try {
-      const res = await fetch(`/api/pnl/daily/${targetEndpointId}?${queryParams}`);
+      const res = await fetch(
+        `/api/pnl/daily/${targetEndpointId}?${queryParams}`,
+      );
       if (res.ok) {
         const json = await res.json();
         setHeatmapData(json);
-        
+
         if (json.days && json.days.length > 0) {
           const todayItem = json.days.find((d: DailyPnLDay) => d.isToday);
-          const firstActive = json.days.find((d: DailyPnLDay) => d.tradesCount > 0 || d.pnl !== 0);
+          const firstActive = json.days.find(
+            (d: DailyPnLDay) => d.tradesCount > 0 || d.pnl !== 0,
+          );
           setSelectedDay(todayItem || firstActive || json.days[0]);
         }
         setIsLoading(false);
@@ -184,13 +228,15 @@ export default function CalendarHeatmap({
 
     // Client-side fallback generator
     const localYear = now.getFullYear();
-    const localMonth = String(now.getMonth() + 1).padStart(2, '0');
-    const localDay = String(now.getDate()).padStart(2, '0');
+    const localMonth = String(now.getMonth() + 1).padStart(2, "0");
+    const localDay = String(now.getDate()).padStart(2, "0");
     const todayStr = `${localYear}-${localMonth}-${localDay}`;
     const todayUtcStr = now.toISOString().split("T")[0];
 
     const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-    const monthObj = MONTHS_LIST.find(m => m.index === selectedMonth) || MONTHS_LIST[selectedMonth - 1];
+    const monthObj =
+      MONTHS_LIST.find((m) => m.index === selectedMonth) ||
+      MONTHS_LIST[selectedMonth - 1];
     const monthLabel = monthObj.short;
 
     const days: DailyPnLDay[] = [];
@@ -205,28 +251,35 @@ export default function CalendarHeatmap({
     const activeWorkersCount = useMemo(() => {
       let count = 0;
       for (const s of strategies) {
-        if (s.status === 'active') count++;
+        if (s.status === "active") count++;
       }
       return count;
     }, [strategies]);
-    const hasLiveStrategy = activeStrategies.some(s => s.executionMode === 'live');
+    const hasLiveStrategy = activeStrategies.some(
+      (s) => s.executionMode === "live",
+    );
 
     for (let dNum = 1; dNum <= daysInMonth; dNum++) {
       const d = new Date(selectedYear, selectedMonth - 1, dNum);
-      const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`;
+      const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${String(dNum).padStart(2, "0")}`;
       const isToday = dateStr === todayStr || dateStr === todayUtcStr;
       const isFuture = d.getTime() > now.getTime() && !isToday;
       const dayOfWeek = d.getDay();
-      const formattedDate = `${monthLabel} ${String(dNum).padStart(2, '0')}, ${selectedYear}`;
+      const formattedDate = `${monthLabel} ${String(dNum).padStart(2, "0")}, ${selectedYear}`;
 
       const pnl = isToday ? Number(todayPnL?.toFixed(2)) : 0;
-      const realizedPnL = isToday ? Number(aggregateActivePnL.realizedPnL?.toFixed(2)) : 0;
-      const unrealizedPnL = isToday ? Number(aggregateActivePnL.unrealizedPnL?.toFixed(2)) : 0;
+      const realizedPnL = isToday
+        ? Number(aggregateActivePnL.realizedPnL?.toFixed(2))
+        : 0;
+      const unrealizedPnL = isToday
+        ? Number(aggregateActivePnL.unrealizedPnL?.toFixed(2))
+        : 0;
       const tradesCount = isToday ? todayTrades : 0;
       const wins = isToday ? todayWins : 0;
       const losses = isToday ? todayLosses : 0;
       const volumeUSD = isToday ? Number(todayVolume?.toFixed(2)) : 0;
-      const winRate = tradesCount > 0 ? Number(((wins / tradesCount) * 100)?.toFixed(1)) : 0;
+      const winRate =
+        tradesCount > 0 ? Number(((wins / tradesCount) * 100)?.toFixed(1)) : 0;
 
       days.push({
         date: dateStr,
@@ -247,11 +300,11 @@ export default function CalendarHeatmap({
         isFuture,
         machineState: {
           automationLevel: hasLiveStrategy ? 4 : 2,
-          executionMode: hasLiveStrategy ? 'live' : 'paper',
-          engineStatus: activeWorkersCount > 0 ? 'active' : 'idle',
+          executionMode: hasLiveStrategy ? "live" : "paper",
+          engineStatus: activeWorkersCount > 0 ? "active" : "idle",
           activeWorkersCount,
-          daemonHealth: 'CL-ACTIVE (Daemon Live)'
-        }
+          daemonHealth: "CL-ACTIVE (Daemon Live)",
+        },
       });
     }
 
@@ -276,31 +329,43 @@ export default function CalendarHeatmap({
 
     const candidateDays = activeDays.length > 0 ? activeDays : [days[0]];
 
-    let bestDay = { date: candidateDays[0].date, formattedDate: candidateDays[0].formattedDate, pnl: candidateDays[0].pnl };
-    let worstDay = { date: candidateDays[0].date, formattedDate: candidateDays[0].formattedDate, pnl: candidateDays[0].pnl };
+    let bestDay = {
+      date: candidateDays[0].date,
+      formattedDate: candidateDays[0].formattedDate,
+      pnl: candidateDays[0].pnl,
+    };
+    let worstDay = {
+      date: candidateDays[0].date,
+      formattedDate: candidateDays[0].formattedDate,
+      pnl: candidateDays[0].pnl,
+    };
     for (const d of candidateDays) {
-      if (d.pnl > bestDay.pnl) bestDay = { date: d.date, formattedDate: d.formattedDate, pnl: d.pnl };
-      if (d.pnl < worstDay.pnl) worstDay = { date: d.date, formattedDate: d.formattedDate, pnl: d.pnl };
+      if (d.pnl > bestDay.pnl)
+        bestDay = { date: d.date, formattedDate: d.formattedDate, pnl: d.pnl };
+      if (d.pnl < worstDay.pnl)
+        worstDay = { date: d.date, formattedDate: d.formattedDate, pnl: d.pnl };
     }
 
     const activeDayCount = greenDays + redDays;
-    const displayName = viewScope === 'single'
-      ? activeStrategies[0]?.name || "Strategy"
-      : viewScope === 'combined_all'
-      ? "All Strategies (Combined Portfolio)"
-      : viewScope === 'combined_live'
-      ? "All Live Strategies (L4 Combined)"
-      : viewScope === 'combined_paper'
-      ? "All Paper Strategies (L2 Combined)"
-      : `Combined (${activeStrategies.length} Strategies)`;
+    const displayName =
+      viewScope === "single"
+        ? activeStrategies[0]?.name || "Strategy"
+        : viewScope === "combined_all"
+          ? "All Strategies (Combined Portfolio)"
+          : viewScope === "combined_live"
+            ? "All Live Strategies (L4 Combined)"
+            : viewScope === "combined_paper"
+              ? "All Paper Strategies (L2 Combined)"
+              : `Combined (${activeStrategies.length} Strategies)`;
 
-    const displayPair = viewScope === 'single'
-      ? activeStrategies[0]?.assetPair || "ASSET"
-      : viewScope === 'combined_live'
-      ? "LIVE Q"
-      : viewScope === 'combined_paper'
-      ? "PAPER Q"
-      : "PORTFOLIO";
+    const displayPair =
+      viewScope === "single"
+        ? activeStrategies[0]?.assetPair || "ASSET"
+        : viewScope === "combined_live"
+          ? "LIVE Q"
+          : viewScope === "combined_paper"
+            ? "PAPER Q"
+            : "PORTFOLIO";
 
     const mockData: DailyPnLHeatmapData = {
       strategyId: targetEndpointId,
@@ -317,14 +382,19 @@ export default function CalendarHeatmap({
       flatDays,
       bestDay,
       worstDay,
-      winRatePercent: activeDayCount > 0 ? Number(((greenDays / activeDayCount) * 100)?.toFixed(1)) : 0,
-      avgDailyPnL: Number((total30DPnL / Math.max(1, activeDayCount || 1))?.toFixed(2)),
-      profitFactor: todayPnL >= 0 ? 99.0 : 0.0
+      winRatePercent:
+        activeDayCount > 0
+          ? Number(((greenDays / activeDayCount) * 100)?.toFixed(1))
+          : 0,
+      avgDailyPnL: Number(
+        (total30DPnL / Math.max(1, activeDayCount || 1))?.toFixed(2),
+      ),
+      profitFactor: todayPnL >= 0 ? 99.0 : 0.0,
     };
 
     setHeatmapData(mockData);
     if (days.length > 0) {
-      const todayItem = days.find(d => d.isToday);
+      const todayItem = days.find((d) => d.isToday);
       setSelectedDay(todayItem || days[0]);
     }
     setIsLoading(false);
@@ -332,37 +402,57 @@ export default function CalendarHeatmap({
 
   useEffect(() => {
     loadDailyHeatmap();
-  }, [viewScope, selectedStrategy?.id, selectedMultiIds, selectedYear, selectedMonth]);
+  }, [
+    viewScope,
+    selectedStrategy?.id,
+    selectedMultiIds,
+    selectedYear,
+    selectedMonth,
+  ]);
 
   // Sync today's live session in real-time
   useEffect(() => {
     if (heatmapData && heatmapData.days.length > 0) {
-      setHeatmapData(prev => {
+      setHeatmapData((prev) => {
         if (!prev) return prev;
-        const todayIdx = prev.days.findIndex(d => d.isToday);
+        const todayIdx = prev.days.findIndex((d) => d.isToday);
         if (todayIdx === -1) return prev;
 
         const updatedDays = [...prev.days];
         const today = updatedDays[todayIdx];
-        const newPnL = Number((today.realizedPnL + aggregateActivePnL.unrealizedPnL)?.toFixed(2));
+        const newPnL = Number(
+          (today.realizedPnL + aggregateActivePnL.unrealizedPnL)?.toFixed(2),
+        );
         updatedDays[todayIdx] = {
           ...today,
           pnl: newPnL,
           unrealizedPnL: aggregateActivePnL.unrealizedPnL,
-          tradesCount: aggregateActivePnL.totalTrades > 0 ? aggregateActivePnL.totalTrades : today.tradesCount,
-          wins: aggregateActivePnL.wins > 0 ? aggregateActivePnL.wins : today.wins,
-          losses: aggregateActivePnL.losses > 0 ? aggregateActivePnL.losses : today.losses,
-          volumeUSD: aggregateActivePnL.volumeUSD > 0 ? aggregateActivePnL.volumeUSD : today.volumeUSD
+          tradesCount:
+            aggregateActivePnL.totalTrades > 0
+              ? aggregateActivePnL.totalTrades
+              : today.tradesCount,
+          wins:
+            aggregateActivePnL.wins > 0 ? aggregateActivePnL.wins : today.wins,
+          losses:
+            aggregateActivePnL.losses > 0
+              ? aggregateActivePnL.losses
+              : today.losses,
+          volumeUSD:
+            aggregateActivePnL.volumeUSD > 0
+              ? aggregateActivePnL.volumeUSD
+              : today.volumeUSD,
         };
 
         // Bolt Optimization: Calculate total PnL once instead of doing two identical O(N) array traversals
-        const totalPnL = Number(updatedDays.reduce((acc, d) => acc + d.pnl, 0)?.toFixed(2));
+        const totalPnL = Number(
+          updatedDays.reduce((acc, d) => acc + d.pnl, 0)?.toFixed(2),
+        );
 
         return {
           ...prev,
           days: updatedDays,
           total30DPnL: totalPnL,
-          totalMonthPnL: totalPnL
+          totalMonthPnL: totalPnL,
         };
       });
     }
@@ -377,50 +467,65 @@ export default function CalendarHeatmap({
     if (day.isFuture) {
       bgClasses = "bg-zinc-950/40 border-zinc-900/60 text-zinc-700 opacity-60";
     } else if (val >= 75) {
-      bgClasses = "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold border-emerald-400";
+      bgClasses =
+        "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold border-emerald-400";
       glow = "shadow-[0_0_10px_rgba(16,185,129,0.35)]";
     } else if (val >= 30) {
-      bgClasses = "bg-emerald-600 hover:bg-emerald-500 text-white font-semibold border-emerald-500";
+      bgClasses =
+        "bg-emerald-600 hover:bg-emerald-500 text-white font-semibold border-emerald-500";
       glow = "shadow-[0_0_6px_rgba(16,185,129,0.2)]";
     } else if (val >= 10) {
-      bgClasses = "bg-emerald-700/90 hover:bg-emerald-600 text-emerald-100 border-emerald-600";
+      bgClasses =
+        "bg-emerald-700/90 hover:bg-emerald-600 text-emerald-100 border-emerald-600";
     } else if (val > 0) {
-      bgClasses = "bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border-emerald-800/80";
+      bgClasses =
+        "bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border-emerald-800/80";
     } else if (val === 0) {
       if (day.isToday) {
-        bgClasses = "bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border-zinc-700";
+        bgClasses =
+          "bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 border-zinc-700";
       } else {
-        bgClasses = "bg-zinc-950/60 hover:bg-zinc-900/80 text-zinc-600 border-zinc-850/50";
+        bgClasses =
+          "bg-zinc-950/60 hover:bg-zinc-900/80 text-zinc-600 border-zinc-850/50";
       }
     } else if (val > -15) {
-      bgClasses = "bg-rose-950/70 hover:bg-rose-900 text-rose-300 border-rose-900/60";
+      bgClasses =
+        "bg-rose-950/70 hover:bg-rose-900 text-rose-300 border-rose-900/60";
     } else if (val > -50) {
-      bgClasses = "bg-rose-800/90 hover:bg-rose-700 text-rose-100 font-semibold border-rose-700";
+      bgClasses =
+        "bg-rose-800/90 hover:bg-rose-700 text-rose-100 font-semibold border-rose-700";
     } else {
-      bgClasses = "bg-rose-600 hover:bg-rose-500 text-white font-bold border-rose-400";
+      bgClasses =
+        "bg-rose-600 hover:bg-rose-500 text-white font-bold border-rose-400";
       glow = "shadow-[0_0_10px_rgba(244,63,94,0.35)]";
     }
 
-    const selectionRing = isSelected ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-zinc-950 scale-105 z-10 font-bold" : "";
-    const todayIndicator = day.isToday ? "outline outline-1 outline-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]" : "";
+    const selectionRing = isSelected
+      ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-zinc-950 scale-105 z-10 font-bold"
+      : "";
+    const todayIndicator = day.isToday
+      ? "outline outline-1 outline-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+      : "";
 
     return `${bgClasses} ${glow} ${selectionRing} ${todayIndicator}`;
   };
 
   const activeDay = hoveredDay || selectedDay;
-  const currentMonthName = MONTHS_LIST.find(m => m.index === selectedMonth)?.full || "August";
+  const currentMonthName =
+    MONTHS_LIST.find((m) => m.index === selectedMonth)?.full || "August";
 
   const firstDayOfMonthOffset = useMemo(() => {
-    if (!heatmapData || !heatmapData.days || heatmapData.days.length === 0) return 0;
+    if (!heatmapData || !heatmapData.days || heatmapData.days.length === 0)
+      return 0;
     return heatmapData.days[0].dayOfWeek;
   }, [heatmapData]);
 
   // Handle Strategy Multi-Select Toggle
   const handleToggleMultiStrategy = (stratId: string) => {
-    setSelectedMultiIds(prev => {
+    setSelectedMultiIds((prev) => {
       if (prev.includes(stratId)) {
         if (prev.length === 1) return prev; // Keep at least one
-        return prev.filter(id => id !== stratId);
+        return prev.filter((id) => id !== stratId);
       } else {
         return [...prev, stratId];
       }
@@ -429,15 +534,23 @@ export default function CalendarHeatmap({
 
   // Label for the active dropdown selector button
   const dropdownButtonLabel = useMemo(() => {
-    if (viewScope === 'combined_all') return "Combined (All Strategies)";
-    if (viewScope === 'combined_live') return "Combined (All Live L4 Strategies)";
-    if (viewScope === 'combined_paper') return "Combined (All Paper L2 Strategies)";
-    if (viewScope === 'custom_multi') return `Multi-Select (${selectedMultiIds.length} Strategies)`;
-    return selectedStrategy ? selectedStrategy.name : (activeStrategies[0]?.name || "Select Strategy");
+    if (viewScope === "combined_all") return "Combined (All Strategies)";
+    if (viewScope === "combined_live")
+      return "Combined (All Live L4 Strategies)";
+    if (viewScope === "combined_paper")
+      return "Combined (All Paper L2 Strategies)";
+    if (viewScope === "custom_multi")
+      return `Multi-Select (${selectedMultiIds.length} Strategies)`;
+    return selectedStrategy
+      ? selectedStrategy.name
+      : activeStrategies[0]?.name || "Select Strategy";
   }, [viewScope, selectedStrategy, activeStrategies, selectedMultiIds]);
 
   return (
-    <div id="calendar-heatmap-card" className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg shadow-md space-y-3 font-mono">
+    <div
+      id="calendar-heatmap-card"
+      className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg shadow-md space-y-3 font-mono"
+    >
       {/* Header with Title & Strategy Performance Dropdown Selector */}
       <div className="flex items-center justify-between border-b border-zinc-800 pb-3 flex-wrap gap-2">
         <div className="space-y-1.5 flex-1 min-w-[280px]">
@@ -451,21 +564,34 @@ export default function CalendarHeatmap({
           {/* Interactive Strategy & Combined Performance Dropdown Menu */}
           <div className="relative inline-block text-left" ref={dropdownRef}>
             <div className="text-[10px] text-zinc-400 flex items-center space-x-1.5">
-              <span id="target-strategy-label" className="text-zinc-500 font-medium">Target View:</span>
-              
+              <span
+                id="target-strategy-label"
+                className="text-zinc-500 font-medium"
+              >
+                Target View:
+              </span>
+
               <button
                 type="button"
                 id="heatmap-scope-dropdown-button"
-                onClick={() => setIsDropdownOpen(prev => !prev)}
+                onClick={() => setIsDropdownOpen((prev) => !prev)}
                 className="bg-zinc-950 hover:bg-zinc-850 border border-zinc-750 hover:border-emerald-500/70 px-2.5 py-1 rounded text-[11px] font-semibold text-emerald-300 flex items-center space-x-2 transition-colors shadow-sm cursor-pointer"
               >
-                <span id="heatmap-target-strategy-name" className="truncate max-w-[200px] sm:max-w-[240px]">
+                <span
+                  id="heatmap-target-strategy-name"
+                  className="truncate max-w-[200px] sm:max-w-[240px]"
+                >
                   {dropdownButtonLabel}
                 </span>
-                <span id="heatmap-target-asset-pair" className="bg-zinc-900 border border-zinc-800 px-1 py-0.2 rounded text-[9px] text-zinc-300 uppercase">
+                <span
+                  id="heatmap-target-asset-pair"
+                  className="bg-zinc-900 border border-zinc-800 px-1 py-0.2 rounded text-[9px] text-zinc-300 uppercase"
+                >
                   {heatmapData?.assetPair || "PORTFOLIO"}
                 </span>
-                <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${isDropdownOpen ? 'rotate-180 text-emerald-400' : ''}`} />
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${isDropdownOpen ? "rotate-180 text-emerald-400" : ""}`}
+                />
               </button>
             </div>
 
@@ -489,58 +615,64 @@ export default function CalendarHeatmap({
                     <button
                       type="button"
                       onClick={() => {
-                        setViewScope('combined_all');
+                        setViewScope("combined_all");
                         setIsDropdownOpen(false);
                       }}
                       className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] flex items-center justify-between transition-colors cursor-pointer ${
-                        viewScope === 'combined_all'
-                          ? 'bg-emerald-950/80 border border-emerald-700/80 text-emerald-200 font-bold'
-                          : 'hover:bg-zinc-900 text-zinc-300'
+                        viewScope === "combined_all"
+                          ? "bg-emerald-950/80 border border-emerald-700/80 text-emerald-200 font-bold"
+                          : "hover:bg-zinc-900 text-zinc-300"
                       }`}
                     >
                       <div className="flex items-center space-x-2">
                         <div className="w-2 h-2 rounded-full bg-emerald-400" />
                         <span>All Strategies Combined</span>
                       </div>
-                      <span className="text-[9px] text-zinc-500 font-mono">Portfolio</span>
+                      <span className="text-[9px] text-zinc-500 font-mono">
+                        Portfolio
+                      </span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => {
-                        setViewScope('combined_live');
+                        setViewScope("combined_live");
                         setIsDropdownOpen(false);
                       }}
                       className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] flex items-center justify-between transition-colors cursor-pointer ${
-                        viewScope === 'combined_live'
-                          ? 'bg-rose-950/80 border border-rose-700/80 text-rose-200 font-bold'
-                          : 'hover:bg-zinc-900 text-zinc-300'
+                        viewScope === "combined_live"
+                          ? "bg-rose-950/80 border border-rose-700/80 text-rose-200 font-bold"
+                          : "hover:bg-zinc-900 text-zinc-300"
                       }`}
                     >
                       <div className="flex items-center space-x-2">
                         <div className="w-2 h-2 rounded-full bg-rose-400" />
                         <span>All Live (L4) Strategies Combined</span>
                       </div>
-                      <span className="text-[9px] text-rose-400/80 font-mono">Live Q</span>
+                      <span className="text-[9px] text-rose-400/80 font-mono">
+                        Live Q
+                      </span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => {
-                        setViewScope('combined_paper');
+                        setViewScope("combined_paper");
                         setIsDropdownOpen(false);
                       }}
                       className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] flex items-center justify-between transition-colors cursor-pointer ${
-                        viewScope === 'combined_paper'
-                          ? 'bg-amber-950/80 border border-amber-700/80 text-amber-200 font-bold'
-                          : 'hover:bg-zinc-900 text-zinc-300'
+                        viewScope === "combined_paper"
+                          ? "bg-amber-950/80 border border-amber-700/80 text-amber-200 font-bold"
+                          : "hover:bg-zinc-900 text-zinc-300"
                       }`}
                     >
                       <div className="flex items-center space-x-2">
                         <div className="w-2 h-2 rounded-full bg-amber-400" />
                         <span>All Paper (L2) Strategies Combined</span>
                       </div>
-                      <span className="text-[9px] text-amber-400/80 font-mono">Paper Q</span>
+                      <span className="text-[9px] text-amber-400/80 font-mono">
+                        Paper Q
+                      </span>
                     </button>
                   </div>
 
@@ -554,20 +686,22 @@ export default function CalendarHeatmap({
                     <div className="max-h-36 overflow-y-auto terminal-scroll space-y-1 pr-1">
                       {strategies.map((strat) => {
                         const isChecked = selectedMultiIds.includes(strat.id);
-                        const isSingleActive = viewScope === 'single' && selectedStrategy?.id === strat.id;
+                        const isSingleActive =
+                          viewScope === "single" &&
+                          selectedStrategy?.id === strat.id;
 
                         return (
-                          <div 
+                          <div
                             key={strat.id}
                             className="flex items-center justify-between px-2 py-1 rounded bg-zinc-900/60 hover:bg-zinc-900 text-[11px]"
                           >
                             {/* Checkbox for custom multi-compare */}
                             <label className="flex items-center space-x-2 cursor-pointer flex-1 min-w-0">
-                              <input 
+                              <input
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => {
-                                  setViewScope('custom_multi');
+                                  setViewScope("custom_multi");
                                   handleToggleMultiStrategy(strat.id);
                                 }}
                                 className="w-3.5 h-3.5 rounded bg-zinc-950 border-zinc-700 text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500"
@@ -577,7 +711,10 @@ export default function CalendarHeatmap({
                                   {strat.name}
                                 </span>
                                 <span className="text-[9px] text-zinc-500 font-mono">
-                                  {strat.assetPair} • {strat.executionMode === 'live' ? 'Live Q' : 'Paper Q'}
+                                  {strat.assetPair} •{" "}
+                                  {strat.executionMode === "live"
+                                    ? "Live Q"
+                                    : "Paper Q"}
                                 </span>
                               </div>
                             </label>
@@ -586,16 +723,17 @@ export default function CalendarHeatmap({
                             <button
                               type="button"
                               onClick={() => {
-                                setViewScope('single');
+                                setViewScope("single");
                                 setSelectedMultiIds([strat.id]);
-                                if (onSelectStrategy) onSelectStrategy(strat.id);
+                                if (onSelectStrategy)
+                                  onSelectStrategy(strat.id);
                                 setIsDropdownOpen(false);
                               }}
                               title="View single strategy stats"
                               className={`ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold border transition-colors cursor-pointer ${
                                 isSingleActive
-                                  ? 'bg-emerald-950 text-emerald-300 border-emerald-600'
-                                  : 'bg-zinc-950 text-zinc-400 hover:text-white border-zinc-800'
+                                  ? "bg-emerald-950 text-emerald-300 border-emerald-600"
+                                  : "bg-zinc-950 text-zinc-400 hover:text-white border-zinc-800"
                               }`}
                             >
                               Solo
@@ -607,7 +745,7 @@ export default function CalendarHeatmap({
                   </div>
 
                   {/* Multi Mode Apply Button */}
-                  {viewScope === 'custom_multi' && (
+                  {viewScope === "custom_multi" && (
                     <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
                       <span className="text-[9px] text-zinc-400">
                         {selectedMultiIds.length} strategies selected
@@ -634,10 +772,13 @@ export default function CalendarHeatmap({
           <button
             onClick={loadDailyHeatmap}
             disabled={isLoading || activeStrategies.length === 0}
-            title="Refresh heatmap for selected month/year" aria-label="Refresh heatmap for selected month/year"
+            title="Refresh heatmap for selected month/year"
+            aria-label="Refresh heatmap for selected month/year"
             className="p-1 rounded bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
           >
-            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-emerald-400' : ''}`} />
+            <RefreshCw
+              className={`w-3 h-3 ${isLoading ? "animate-spin text-emerald-400" : ""}`}
+            />
           </button>
         </div>
       </div>
@@ -648,75 +789,113 @@ export default function CalendarHeatmap({
           <div className="flex items-center justify-between text-[10px] text-zinc-400 bg-zinc-950/60 px-2.5 py-1 rounded border border-zinc-850 flex-wrap gap-1">
             <div className="flex items-center space-x-1.5">
               <span className="text-zinc-500">Active Aggregate:</span>
-              <span className="text-emerald-300 font-bold">{heatmapData.strategyName}</span>
+              <span className="text-emerald-300 font-bold">
+                {heatmapData.strategyName}
+              </span>
             </div>
             <div className="flex items-center space-x-2 text-zinc-500 font-mono text-[9px]">
-              <span>Strategies: <strong className="text-zinc-300">{activeStrategies.length}</strong></span>
+              <span>
+                Strategies:{" "}
+                <strong className="text-zinc-300">
+                  {activeStrategies.length}
+                </strong>
+              </span>
               <span>•</span>
-              <span>Live Unrealized: <strong className={aggregateActivePnL.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                {aggregateActivePnL.unrealizedPnL >= 0 ? '+' : ''}${aggregateActivePnL.unrealizedPnL?.toFixed(2)}
-              </strong></span>
+              <span>
+                Live Unrealized:{" "}
+                <strong
+                  className={
+                    aggregateActivePnL.unrealizedPnL >= 0
+                      ? "text-emerald-400"
+                      : "text-rose-400"
+                  }
+                >
+                  {aggregateActivePnL.unrealizedPnL >= 0 ? "+" : ""}$
+                  {aggregateActivePnL.unrealizedPnL?.toFixed(2)}
+                </strong>
+              </span>
             </div>
           </div>
 
           {/* Top Performance Summary Bar for Selected Month */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             <div className="bg-zinc-950/80 border border-zinc-850 p-2.5 rounded">
-              <span className="text-[9px] text-zinc-500 block uppercase font-medium">Month Net P&amp;L</span>
+              <span className="text-[9px] text-zinc-500 block uppercase font-medium">
+                Month Net P&amp;L
+              </span>
               <div className="flex items-baseline space-x-1 mt-0.5">
-                <span className={`text-sm font-bold ${heatmapData.total30DPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {heatmapData.total30DPnL >= 0 ? '+' : ''}${heatmapData.total30DPnL?.toFixed(2)}
+                <span
+                  className={`text-sm font-bold ${heatmapData.total30DPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}
+                >
+                  {heatmapData.total30DPnL >= 0 ? "+" : ""}$
+                  {heatmapData.total30DPnL?.toFixed(2)}
                 </span>
                 <span className="text-[9px] text-zinc-500">USD</span>
               </div>
-              <span className="text-[9px] text-zinc-400">Avg: ${heatmapData.avgDailyPnL?.toFixed(2)}/active d</span>
+              <span className="text-[9px] text-zinc-400">
+                Avg: ${heatmapData.avgDailyPnL?.toFixed(2)}/active d
+              </span>
             </div>
 
             <div className="bg-zinc-950/80 border border-zinc-850 p-2.5 rounded">
-              <span className="text-[9px] text-zinc-500 block uppercase font-medium">Win Ratio (Days)</span>
+              <span className="text-[9px] text-zinc-500 block uppercase font-medium">
+                Win Ratio (Days)
+              </span>
               <div className="flex items-baseline space-x-1 mt-0.5">
                 <span className="text-sm font-bold text-white">
                   {heatmapData.winRatePercent}%
                 </span>
-                <span className="text-[9px] text-emerald-400 font-semibold">Green</span>
+                <span className="text-[9px] text-emerald-400 font-semibold">
+                  Green
+                </span>
               </div>
               <span className="text-[9px] text-zinc-400">
-                {heatmapData.greenDays}W / {heatmapData.redDays}L / {heatmapData.flatDays}F
+                {heatmapData.greenDays}W / {heatmapData.redDays}L /{" "}
+                {heatmapData.flatDays}F
               </span>
             </div>
 
             <div className="bg-zinc-950/80 border border-zinc-850 p-2.5 rounded">
-              <span className="text-[9px] text-zinc-500 block uppercase font-medium">Best Day</span>
+              <span className="text-[9px] text-zinc-500 block uppercase font-medium">
+                Best Day
+              </span>
               <div className="flex items-baseline space-x-1 mt-0.5">
                 <span className="text-sm font-bold text-emerald-400">
-                  {heatmapData.bestDay.pnl > 0 ? '+' : ''}${heatmapData.bestDay.pnl?.toFixed(2)}
+                  {heatmapData.bestDay.pnl > 0 ? "+" : ""}$
+                  {heatmapData.bestDay.pnl?.toFixed(2)}
                 </span>
               </div>
               <span className="text-[9px] text-zinc-400 truncate block">
-                {heatmapData.bestDay.formattedDate.split(',')[0]}
+                {heatmapData.bestDay.formattedDate.split(",")[0]}
               </span>
             </div>
 
             <div className="bg-zinc-950/80 border border-zinc-850 p-2.5 rounded">
-              <span className="text-[9px] text-zinc-500 block uppercase font-medium">Worst Day</span>
+              <span className="text-[9px] text-zinc-500 block uppercase font-medium">
+                Worst Day
+              </span>
               <div className="flex items-baseline space-x-1 mt-0.5">
-                <span className={`text-sm font-bold ${heatmapData.worstDay.pnl < 0 ? 'text-rose-400' : 'text-zinc-300'}`}>
-                  {heatmapData.worstDay.pnl >= 0 ? '+' : ''}${heatmapData.worstDay.pnl?.toFixed(2)}
+                <span
+                  className={`text-sm font-bold ${heatmapData.worstDay.pnl < 0 ? "text-rose-400" : "text-zinc-300"}`}
+                >
+                  {heatmapData.worstDay.pnl >= 0 ? "+" : ""}$
+                  {heatmapData.worstDay.pnl?.toFixed(2)}
                 </span>
               </div>
               <span className="text-[9px] text-zinc-400 truncate block">
-                {heatmapData.worstDay.formattedDate.split(',')[0]}
+                {heatmapData.worstDay.formattedDate.split(",")[0]}
               </span>
             </div>
           </div>
 
           {/* CALENDAR HEATMAP MATRIX & DATE SELECTORS */}
           <div className="bg-zinc-950/90 border border-zinc-800/80 p-3 rounded-lg space-y-3">
-            
             {/* ROW 1: YEAR SELECTION (2025, 2026, 2027, 2028) */}
             <div className="flex items-center justify-between border-b border-zinc-850 pb-2.5 flex-wrap gap-2">
               <div className="flex items-center space-x-2">
-                <span className="text-[10px] text-zinc-400 uppercase font-semibold tracking-wider">Year:</span>
+                <span className="text-[10px] text-zinc-400 uppercase font-semibold tracking-wider">
+                  Year:
+                </span>
                 <div className="inline-flex rounded-md p-0.5 bg-zinc-900 border border-zinc-800 space-x-1">
                   {AVAILABLE_YEARS.map((year) => {
                     const isSelected = selectedYear === year;
@@ -726,8 +905,8 @@ export default function CalendarHeatmap({
                         onClick={() => setSelectedYear(year)}
                         className={`px-2.5 py-0.5 text-xs font-semibold rounded transition-colors cursor-pointer ${
                           isSelected
-                            ? 'bg-emerald-500 text-zinc-950 shadow-sm font-bold'
-                            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80'
+                            ? "bg-emerald-500 text-zinc-950 shadow-sm font-bold"
+                            : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80"
                         }`}
                       >
                         {year}
@@ -739,15 +918,21 @@ export default function CalendarHeatmap({
 
               <div className="text-[10px] text-zinc-500 hidden sm:flex items-center space-x-1">
                 <span>Selected:</span>
-                <span className="text-zinc-300 font-bold">{currentMonthName} {selectedYear}</span>
+                <span className="text-zinc-300 font-bold">
+                  {currentMonthName} {selectedYear}
+                </span>
               </div>
             </div>
 
             {/* ROW 2: MONTH SELECTION (LEFT TO RIGHT: JAN - DEC) */}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] text-zinc-400">
-                <span className="uppercase font-semibold tracking-wider text-zinc-400">Month:</span>
-                <span className="text-[9px] text-zinc-500">Select month to view daily P&amp;L</span>
+                <span className="uppercase font-semibold tracking-wider text-zinc-400">
+                  Month:
+                </span>
+                <span className="text-[9px] text-zinc-500">
+                  Select month to view daily P&amp;L
+                </span>
               </div>
               <div className="grid grid-cols-6 sm:grid-cols-12 gap-1 overflow-x-auto pb-0.5">
                 {MONTHS_LIST.map((m) => {
@@ -758,8 +943,8 @@ export default function CalendarHeatmap({
                       onClick={() => setSelectedMonth(m.index)}
                       className={`px-1.5 py-1 text-[11px] font-semibold rounded border text-center transition-colors cursor-pointer ${
                         isSelected
-                          ? 'bg-emerald-950 text-emerald-300 border-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.25)] font-bold'
-                          : 'bg-zinc-900/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 border-zinc-800'
+                          ? "bg-emerald-950 text-emerald-300 border-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.25)] font-bold"
+                          : "bg-zinc-900/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 border-zinc-800"
                       }`}
                     >
                       {m.short}
@@ -784,9 +969,9 @@ export default function CalendarHeatmap({
               <div className="grid grid-cols-7 gap-1.5">
                 {/* Empty placeholder cells for days before the 1st of month */}
                 {Array.from({ length: firstDayOfMonthOffset }).map((_, idx) => (
-                  <div 
-                    key={`empty-${idx}`} 
-                    className="h-12 rounded-md bg-zinc-950/20 border border-transparent opacity-20 pointer-events-none" 
+                  <div
+                    key={`empty-${idx}`}
+                    className="h-12 rounded-md bg-zinc-950/20 border border-transparent opacity-20 pointer-events-none"
                   />
                 ))}
 
@@ -808,7 +993,9 @@ export default function CalendarHeatmap({
                       className={`h-12 p-1 rounded-md border flex flex-col justify-between items-center transition-colors cursor-pointer text-center relative ${cellClasses}`}
                     >
                       <div className="w-full flex justify-between items-center text-[9px] leading-none px-0.5">
-                        <span className="opacity-70 font-mono text-[8px]">{day.dayLabel}</span>
+                        <span className="opacity-70 font-mono text-[8px]">
+                          {day.dayLabel}
+                        </span>
                         <span className="font-bold">{day.dayOfMonth}</span>
                       </div>
 
@@ -816,19 +1003,30 @@ export default function CalendarHeatmap({
                         {day.isFuture ? (
                           <span className="opacity-30">—</span>
                         ) : day.pnl === 0 ? (
-                          <span className="opacity-40">{day.isToday || day.tradesCount > 0 ? "$0" : "—"}</span>
+                          <span className="opacity-40">
+                            {day.isToday || day.tradesCount > 0 ? "$0" : "—"}
+                          </span>
                         ) : (
                           <span>
-                            {day.pnl > 0 ? '+' : ''}${Math.abs(day.pnl) >= 100 ? day.pnl?.toFixed(0) : day.pnl?.toFixed(0)}
+                            {day.pnl > 0 ? "+" : ""}$
+                            {Math.abs(day.pnl) >= 100
+                              ? day.pnl?.toFixed(0)
+                              : day.pnl?.toFixed(0)}
                           </span>
                         )}
                       </div>
 
                       {/* Machine state indicator dot on stone */}
                       {day.isToday ? (
-                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full absolute -top-0.5 -right-0.5 ring-1 ring-zinc-950 shadow-[0_0_6px_rgba(251,191,36,0.8)]" title="Today (Machine Active Live Session)" />
+                        <span
+                          className="w-1.5 h-1.5 bg-amber-400 rounded-full absolute -top-0.5 -right-0.5 ring-1 ring-zinc-950 shadow-[0_0_6px_rgba(251,191,36,0.8)]"
+                          title="Today (Machine Active Live Session)"
+                        />
                       ) : day.tradesCount > 0 ? (
-                        <span className="w-1 h-1 bg-emerald-400 rounded-full absolute -top-0.5 -right-0.5 opacity-80" title="Machine Trades Recorded" />
+                        <span
+                          className="w-1 h-1 bg-emerald-400 rounded-full absolute -top-0.5 -right-0.5 opacity-80"
+                          title="Machine Trades Recorded"
+                        />
                       ) : null}
                     </button>
                   );
@@ -838,18 +1036,46 @@ export default function CalendarHeatmap({
 
             {/* INTENSITY SCALE LEGEND */}
             <div className="flex items-center justify-between text-[9px] text-zinc-500 pt-2 border-t border-zinc-850 flex-wrap gap-2">
-              <span className="uppercase tracking-wider font-semibold">P&amp;L Scale:</span>
+              <span className="uppercase tracking-wider font-semibold">
+                P&amp;L Scale:
+              </span>
               <div className="flex items-center space-x-1">
                 <span className="text-[8px] text-rose-400 mr-1">&lt; -$50</span>
-                <span className="w-3 h-3 rounded-xs bg-rose-600 border border-rose-400" title="Heavy Loss (< -$50)" />
-                <span className="w-3 h-3 rounded-xs bg-rose-800 border border-rose-700" title="Moderate Loss (-$50 to -$15)" />
-                <span className="w-3 h-3 rounded-xs bg-rose-950 border border-rose-900" title="Mild Loss (-$15 to -$0.01)" />
-                <span className="w-3 h-3 rounded-xs bg-zinc-950 border border-zinc-800" title="Flat / Untraded ($0.00)" />
-                <span className="w-3 h-3 rounded-xs bg-emerald-950 border border-emerald-800" title="Mild Profit (+$0.01 to +$10)" />
-                <span className="w-3 h-3 rounded-xs bg-emerald-700 border border-emerald-600" title="Moderate Profit (+$10 to +$30)" />
-                <span className="w-3 h-3 rounded-xs bg-emerald-600 border border-emerald-500" title="Strong Profit (+$30 to +$75)" />
-                <span className="w-3 h-3 rounded-xs bg-emerald-500 border border-emerald-400" title="Top Profit (> +$75)" />
-                <span className="text-[8px] text-emerald-400 ml-1">&gt; +$75</span>
+                <span
+                  className="w-3 h-3 rounded-xs bg-rose-600 border border-rose-400"
+                  title="Heavy Loss (< -$50)"
+                />
+                <span
+                  className="w-3 h-3 rounded-xs bg-rose-800 border border-rose-700"
+                  title="Moderate Loss (-$50 to -$15)"
+                />
+                <span
+                  className="w-3 h-3 rounded-xs bg-rose-950 border border-rose-900"
+                  title="Mild Loss (-$15 to -$0.01)"
+                />
+                <span
+                  className="w-3 h-3 rounded-xs bg-zinc-950 border border-zinc-800"
+                  title="Flat / Untraded ($0.00)"
+                />
+                <span
+                  className="w-3 h-3 rounded-xs bg-emerald-950 border border-emerald-800"
+                  title="Mild Profit (+$0.01 to +$10)"
+                />
+                <span
+                  className="w-3 h-3 rounded-xs bg-emerald-700 border border-emerald-600"
+                  title="Moderate Profit (+$10 to +$30)"
+                />
+                <span
+                  className="w-3 h-3 rounded-xs bg-emerald-600 border border-emerald-500"
+                  title="Strong Profit (+$30 to +$75)"
+                />
+                <span
+                  className="w-3 h-3 rounded-xs bg-emerald-500 border border-emerald-400"
+                  title="Top Profit (> +$75)"
+                />
+                <span className="text-[8px] text-emerald-400 ml-1">
+                  &gt; +$75
+                </span>
               </div>
             </div>
           </div>
@@ -881,14 +1107,17 @@ export default function CalendarHeatmap({
 
                 <div className="flex items-center space-x-1">
                   <span className="text-[10px] text-zinc-500">Day Return:</span>
-                  <span className={`font-bold px-2 py-0.5 rounded border text-xs ${
-                    activeDay.pnl > 0
-                      ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400'
-                      : activeDay.pnl < 0
-                      ? 'bg-rose-950/60 border-rose-800/60 text-rose-400'
-                      : 'bg-zinc-900 border-zinc-800 text-zinc-400'
-                  }`}>
-                    {activeDay.pnl > 0 ? '+' : ''}${activeDay.pnl?.toFixed(2)} USD
+                  <span
+                    className={`font-bold px-2 py-0.5 rounded border text-xs ${
+                      activeDay.pnl > 0
+                        ? "bg-emerald-950/60 border-emerald-800/60 text-emerald-400"
+                        : activeDay.pnl < 0
+                          ? "bg-rose-950/60 border-rose-800/60 text-rose-400"
+                          : "bg-zinc-900 border-zinc-800 text-zinc-400"
+                    }`}
+                  >
+                    {activeDay.pnl > 0 ? "+" : ""}${activeDay.pnl?.toFixed(2)}{" "}
+                    USD
                   </span>
                 </div>
               </div>
@@ -896,45 +1125,73 @@ export default function CalendarHeatmap({
               {/* Machine State Presence Bar for Selected Date */}
               <div className="bg-zinc-900/90 border border-zinc-800 p-2 rounded flex items-center justify-between flex-wrap gap-2 text-[10px] font-mono">
                 <div className="flex items-center space-x-2">
-                  <span className="text-zinc-500 uppercase font-semibold">Machine State:</span>
-                  <span className={`px-1.5 py-0.5 rounded font-bold uppercase ${
-                    (activeDay.machineState?.executionMode || 'paper') === 'live'
-                      ? 'bg-rose-950 text-rose-300 border border-rose-700'
-                      : 'bg-amber-950 text-amber-300 border border-amber-700'
-                  }`}>
-                    {(activeDay.machineState?.executionMode || 'paper') === 'live' ? 'Level 4 Live Autonomous' : 'Level 2 Paper Guarded'}
+                  <span className="text-zinc-500 uppercase font-semibold">
+                    Machine State:
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded font-bold uppercase ${
+                      (activeDay.machineState?.executionMode || "paper") ===
+                      "live"
+                        ? "bg-rose-950 text-rose-300 border border-rose-700"
+                        : "bg-amber-950 text-amber-300 border border-amber-700"
+                    }`}
+                  >
+                    {(activeDay.machineState?.executionMode || "paper") ===
+                    "live"
+                      ? "Level 4 Live Autonomous"
+                      : "Level 2 Paper Guarded"}
                   </span>
                 </div>
 
                 <div className="flex items-center space-x-3 text-zinc-400">
                   <span className="flex items-center space-x-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>{activeDay.machineState?.daemonHealth || 'CL-ACTIVE (Daemon Live)'}</span>
+                    <span>
+                      {activeDay.machineState?.daemonHealth ||
+                        "CL-ACTIVE (Daemon Live)"}
+                    </span>
                   </span>
                   <span>•</span>
-                  <span>Engine: <strong className="text-white">{activeDay.machineState?.engineStatus === 'active' ? 'Active Workers' : 'Cluster Standby'}</strong></span>
+                  <span>
+                    Engine:{" "}
+                    <strong className="text-white">
+                      {activeDay.machineState?.engineStatus === "active"
+                        ? "Active Workers"
+                        : "Cluster Standby"}
+                    </strong>
+                  </span>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-0.5">
                 <div className="flex justify-between border-r border-zinc-850/60 pr-2">
                   <span className="text-zinc-500">Closed Trades:</span>
-                  <span className="font-semibold text-zinc-200">{activeDay.tradesCount}</span>
+                  <span className="font-semibold text-zinc-200">
+                    {activeDay.tradesCount}
+                  </span>
                 </div>
                 <div className="flex justify-between border-r border-zinc-850/60 pr-2">
                   <span className="text-zinc-500">Win Rate:</span>
-                  <span className={`font-semibold ${activeDay.winRate >= 50 ? 'text-emerald-400' : 'text-zinc-300'}`}>
-                    {activeDay.winRate}% ({activeDay.wins}W / {activeDay.losses}L)
+                  <span
+                    className={`font-semibold ${activeDay.winRate >= 50 ? "text-emerald-400" : "text-zinc-300"}`}
+                  >
+                    {activeDay.winRate}% ({activeDay.wins}W / {activeDay.losses}
+                    L)
                   </span>
                 </div>
                 <div className="flex justify-between border-r border-zinc-850/60 pr-2">
                   <span className="text-zinc-500">Volume Traded:</span>
-                  <span className="font-semibold text-zinc-200">${activeDay.volumeUSD?.toLocaleString()}</span>
+                  <span className="font-semibold text-zinc-200">
+                    ${activeDay.volumeUSD?.toLocaleString()}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Realized P&amp;L:</span>
-                  <span className={`font-semibold ${activeDay.realizedPnL > 0 ? 'text-emerald-400' : activeDay.realizedPnL < 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
-                    {activeDay.realizedPnL > 0 ? '+' : ''}${activeDay.realizedPnL?.toFixed(2)}
+                  <span
+                    className={`font-semibold ${activeDay.realizedPnL > 0 ? "text-emerald-400" : activeDay.realizedPnL < 0 ? "text-rose-400" : "text-zinc-400"}`}
+                  >
+                    {activeDay.realizedPnL > 0 ? "+" : ""}$
+                    {activeDay.realizedPnL?.toFixed(2)}
                   </span>
                 </div>
               </div>

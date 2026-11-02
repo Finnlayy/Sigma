@@ -36,32 +36,41 @@ export class CadenceFitnessModule {
         cadenceScore: 0.0,
         isWithinTargetRange: false,
         rhythmCv: 0.0,
-        rejectionReason: "Keine Trades oder ungültiger Auswertungszeitraum."
+        rejectionReason: "Keine Trades oder ungültiger Auswertungszeitraum.",
       };
     }
 
     const tradesPerDay = metrics.totalTrades / metrics.evaluationDays;
-    
+
     // Gauß'sche Kadenz-Penalty um idealTargetRate (4.5)
     const sigma = 1.25;
     const diff = tradesPerDay - this.idealTargetRate;
-    const cadenceScore = Math.exp(- (diff * diff) / (2 * sigma * sigma));
+    const cadenceScore = Math.exp(-(diff * diff) / (2 * sigma * sigma));
 
     // Inter-Arrival Time Variationskoeffizient CV_delta_t
     let rhythmCv = 1.0;
     if (metrics.tradeTimestamps.length >= 3) {
       const intervals: number[] = [];
       for (let i = 1; i < metrics.tradeTimestamps.length; i++) {
-        intervals.push((metrics.tradeTimestamps[i] - metrics.tradeTimestamps[i - 1]) / 1000.0);
+        intervals.push(
+          (metrics.tradeTimestamps[i] - metrics.tradeTimestamps[i - 1]) /
+            1000.0,
+        );
       }
-      
-      const meanInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-      const variance = intervals.reduce((sum, val) => sum + Math.pow(val - meanInterval, 2), 0) / intervals.length;
+
+      const meanInterval =
+        intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const variance =
+        intervals.reduce(
+          (sum, val) => sum + Math.pow(val - meanInterval, 2),
+          0,
+        ) / intervals.length;
       const stdDev = Math.sqrt(variance);
       rhythmCv = meanInterval > 0 ? stdDev / meanInterval : 1.0;
     }
 
-    const isWithinRange = tradesPerDay >= this.minTargetRate && tradesPerDay <= this.maxTargetRate;
+    const isWithinRange =
+      tradesPerDay >= this.minTargetRate && tradesPerDay <= this.maxTargetRate;
     let reason: string | undefined = undefined;
 
     if (tradesPerDay < this.minTargetRate) {
@@ -75,7 +84,7 @@ export class CadenceFitnessModule {
       cadenceScore: Number(cadenceScore.toFixed(4)),
       isWithinTargetRange: isWithinRange,
       rhythmCv: Number(rhythmCv.toFixed(2)),
-      rejectionReason: reason
+      rejectionReason: reason,
     };
   }
 }

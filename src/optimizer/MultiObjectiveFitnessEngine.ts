@@ -29,7 +29,11 @@ export class MultiObjectiveFitnessEngine {
   private readonly minTradesTarget: number;
   private readonly maxAllowedRules: number;
 
-  constructor(minTradesAbsolute: number = 30, minTradesTarget: number = 80, maxAllowedRules: number = 6) {
+  constructor(
+    minTradesAbsolute: number = 30,
+    minTradesTarget: number = 80,
+    maxAllowedRules: number = 6,
+  ) {
     this.minTradesAbsolute = minTradesAbsolute;
     this.minTradesTarget = minTradesTarget;
     this.maxAllowedRules = maxAllowedRules;
@@ -43,7 +47,7 @@ export class MultiObjectiveFitnessEngine {
         isValidCandidate: false,
         rejectionReason: `🚨 [TRADE STARVATION] Nur ${metrics.totalTrades} Trades in ${metrics.evaluationDays} Tagen. Mindestens ${this.minTradesAbsolute} erforderlich!`,
         samplePenalty: 0.0,
-        complexityPenalty: 1.0
+        complexityPenalty: 1.0,
       };
     }
 
@@ -54,7 +58,7 @@ export class MultiObjectiveFitnessEngine {
         isValidCandidate: false,
         rejectionReason: `💸 [FEE DRAG DEATH] Netto-P&L ist negativ ($${metrics.netPnlUsd.toFixed(2)} USD nach $${metrics.totalFeesUsd.toFixed(2)} USD Gebühren).`,
         samplePenalty: 1.0,
-        complexityPenalty: 1.0
+        complexityPenalty: 1.0,
       };
     }
 
@@ -74,8 +78,14 @@ export class MultiObjectiveFitnessEngine {
     }
 
     // 5. Multi-Objective Score = DSR_net * ln(1 + Annual_Net_Return) * P_sample * P_complexity
-    const netReturnFactor = Math.log(1 + Math.max(0, metrics.annualizedNetReturnPct));
-    const rawFitness = metrics.deflatedSharpeRatioNet * netReturnFactor * samplePenalty * complexityPenalty;
+    const netReturnFactor = Math.log(
+      1 + Math.max(0, metrics.annualizedNetReturnPct),
+    );
+    const rawFitness =
+      metrics.deflatedSharpeRatioNet *
+      netReturnFactor *
+      samplePenalty *
+      complexityPenalty;
 
     const finalScore = Math.max(0.0, rawFitness);
     const isValid = finalScore > 0.35 && metrics.deflatedSharpeRatioNet >= 0.95;
@@ -85,7 +95,9 @@ export class MultiObjectiveFitnessEngine {
       isValidCandidate: isValid,
       samplePenalty: Number(samplePenalty.toFixed(4)),
       complexityPenalty: Number(complexityPenalty.toFixed(4)),
-      rejectionReason: isValid ? undefined : `⚠️ Fitness-Score (${finalScore.toFixed(4)}) oder DSR (${metrics.deflatedSharpeRatioNet.toFixed(2)}) unter Schwellenwert.`
+      rejectionReason: isValid
+        ? undefined
+        : `⚠️ Fitness-Score (${finalScore.toFixed(4)}) oder DSR (${metrics.deflatedSharpeRatioNet.toFixed(2)}) unter Schwellenwert.`,
     };
   }
 }

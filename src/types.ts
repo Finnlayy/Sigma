@@ -3,10 +3,10 @@ export interface TradingStrategy {
   name: string;
   description: string;
   code: string;
-  status: 'active' | 'inactive' | 'archived' | 'error';
+  status: "active" | "inactive" | "archived" | "error";
   assetPair: string;
   interval: number; // in minutes (Kraken OHLC timeframe: 1, 5, 15, 30, 60, 240, 1440, etc.)
-  executionMode?: 'paper' | 'live'; // Strategy-specific independent execution queue
+  executionMode?: "paper" | "live"; // Strategy-specific independent execution queue
   parameters: Record<string, number | string | boolean>;
   tv_script_id?: string;
   hardStopEnabled?: boolean;
@@ -53,7 +53,7 @@ export interface MarketTicker {
 export interface ExecutionLog {
   id: string;
   timestamp: string;
-  level: 'info' | 'warn' | 'error' | 'trade';
+  level: "info" | "warn" | "error" | "trade";
   message: string;
   strategyId?: string;
 }
@@ -63,13 +63,13 @@ export interface TradeOrder {
   strategyId: string;
   strategyName: string;
   timestamp: string;
-  type: 'buy' | 'sell';
+  type: "buy" | "sell";
   price: number;
   amount: number;
   total: number;
   pair: string;
-  status: 'filled' | 'pending';
-  executionMode?: 'paper' | 'live';
+  status: "filled" | "pending";
+  executionMode?: "paper" | "live";
   pnl?: number;
 }
 
@@ -84,7 +84,7 @@ export interface StrategyPnL {
   losingTrades: number;
   winRate: number;
   volumeTradedUSD: number;
-  executionMode?: 'paper' | 'live';
+  executionMode?: "paper" | "live";
 }
 
 export interface DailyPnLDay {
@@ -106,8 +106,8 @@ export interface DailyPnLDay {
   isFuture?: boolean;
   machineState?: {
     automationLevel: number;
-    executionMode: 'paper' | 'live';
-    engineStatus: 'active' | 'idle' | 'halted' | 'standby';
+    executionMode: "paper" | "live";
+    engineStatus: "active" | "idle" | "halted" | "standby";
     activeWorkersCount: number;
     daemonHealth: string;
   };
@@ -137,9 +137,9 @@ export interface StrategyQueueMatrix {
   strategyId: string;
   strategyName: string;
   assetPair: string;
-  status: 'active' | 'inactive' | 'error';
+  status: "active" | "inactive" | "error";
   interval: number;
-  executionMode: 'paper' | 'live';
+  executionMode: "paper" | "live";
   parameters?: Record<string, any>;
   realizedPnL: number;
   unrealizedPnL: number;
@@ -158,7 +158,7 @@ export interface StrategyQueueMatrix {
 }
 
 export interface QueueMatrixData {
-  queue: 'paper' | 'live';
+  queue: "paper" | "live";
   queueLabel: string;
   automationLevel: number;
   totalRealizedPnL: number;
@@ -187,7 +187,7 @@ export interface QueueMatrixData {
     tradePnL: number;
     cumPnL: number;
     pair: string;
-    type: 'buy' | 'sell';
+    type: "buy" | "sell";
     strategyName: string;
   }>;
   assetBreakdown: Array<{
@@ -209,14 +209,14 @@ export interface KrakenSpotPosition {
   totalValueUSD: number;
   portfolioPercentage: number;
   change24h: number;
-  type: 'fiat' | 'crypto' | 'stablecoin';
+  type: "fiat" | "crypto" | "stablecoin";
 }
 
 export interface KrakenProPosition {
   id: string;
   pair: string;
-  type: 'long' | 'short';
-  contractType: 'perpetual' | 'margin' | 'futures';
+  type: "long" | "short";
+  contractType: "perpetual" | "margin" | "futures";
   size: number;
   notionalValueUSD: number;
   leverage: number;
@@ -228,11 +228,11 @@ export interface KrakenProPosition {
   unrealizedPnLUSD: number;
   unrealizedPnLPercent: number;
   fundingRate?: number;
-  status: 'open' | 'closed';
+  status: "open" | "closed";
 }
 
 export interface KrakenAccountLedgers {
-  mode: 'paper' | 'live';
+  mode: "paper" | "live";
   hasCredentials: boolean;
   lastSync: string;
   spot: {
@@ -271,7 +271,7 @@ export interface RunnerMetrics {
   initialPaperBalanceUSD?: number;
   automationLevel?: 2 | 4;
   automationLevelLabel?: string;
-  activeLedgerMode?: 'paper' | 'live';
+  activeLedgerMode?: "paper" | "live";
   paperBalances?: Record<string, number>;
   liveKrakenBalances?: Record<string, number>;
   hasCredentials?: boolean;
@@ -290,7 +290,7 @@ export interface StrategyManifest {
 }
 
 export interface AuditReport {
-  status: 'clean' | 'warning' | 'error';
+  status: "clean" | "warning" | "error";
   summary: string;
   issues: string[];
   recommendations: string;
@@ -351,7 +351,7 @@ export interface BacktestConfig {
 
 export interface BacktestTrade {
   id: string;
-  type: 'buy' | 'sell';
+  type: "buy" | "sell";
   entryTime: string;
   exitTime?: string;
   entryPrice: number;
@@ -362,7 +362,7 @@ export interface BacktestTrade {
   pnl: number;
   pnlPercent: number;
   reason: string;
-  status: 'closed' | 'open';
+  status: "closed" | "open";
 }
 
 export interface BacktestEquityPoint {
@@ -374,7 +374,7 @@ export interface BacktestEquityPoint {
   drawdown: number;
   cash: number;
   assetHoldings: number;
-  action?: 'buy' | 'sell' | 'stop-loss';
+  action?: "buy" | "sell" | "stop-loss";
   tradePrice?: number;
 }
 
@@ -403,7 +403,7 @@ export interface BacktestSummary {
 
 export interface BacktestAIAnalysis {
   score: number;
-  verdict: 'Exceptional' | 'Viable' | 'Needs Optimization' | 'High Risk';
+  verdict: "Exceptional" | "Viable" | "Needs Optimization" | "High Risk";
   executiveSummary: string;
   regimePerformance: {
     trendingUp: string;

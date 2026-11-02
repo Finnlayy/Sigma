@@ -1,7 +1,18 @@
 import React, { useState, useMemo } from "react";
-import { 
-  Search, X, Check, Filter, Layers, Zap, ArrowUpDown, 
-  ExternalLink, Globe, Sparkles, RefreshCw, BarChart2, ArrowRight
+import {
+  Search,
+  X,
+  Check,
+  Filter,
+  Layers,
+  Zap,
+  ArrowUpDown,
+  ExternalLink,
+  Globe,
+  Sparkles,
+  RefreshCw,
+  BarChart2,
+  ArrowRight,
 } from "lucide-react";
 import { KrakenSymbolInfo } from "../types";
 import { ExchangeSymbolNormalizer } from "../lib/symbolNormalizer";
@@ -23,60 +34,83 @@ export default function KrakenSymbolModal({
   currentSymbol,
   symbols,
   isLoading = false,
-  onRefreshSymbols
+  onRefreshSymbols,
 }: KrakenSymbolModalProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedQuote, setSelectedQuote] = useState("ALL");
   const [leverageOnly, setLeverageOnly] = useState(false);
-  const [sortBy, setSortBy] = useState<'symbol' | 'base' | 'quote'>('symbol');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [sortBy, setSortBy] = useState<"symbol" | "base" | "quote">("symbol");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
   const quotes = useMemo(() => {
     const set = new Set<string>();
-    symbols.forEach(s => {
+    symbols.forEach((s) => {
       if (s.quote) set.add(s.quote);
     });
-    const mainQuotes = ["ALL", "USD", "EUR", "USDT", "USDC", "BTC", "ETH", "GBP", "CAD", "AUD"];
+    const mainQuotes = [
+      "ALL",
+      "USD",
+      "EUR",
+      "USDT",
+      "USDC",
+      "BTC",
+      "ETH",
+      "GBP",
+      "CAD",
+      "AUD",
+    ];
     // ⚡ Bolt Optimization: Use Set for O(1) lookups instead of O(N) array includes
     const mainQuotesSet = new Set(mainQuotes);
-    const otherQuotes = Array.from(set).filter(q => !mainQuotesSet.has(q)).sort();
-    return [...mainQuotes.filter(q => q === "ALL" || set.has(q)), ...otherQuotes];
+    const otherQuotes = Array.from(set)
+      .filter((q) => !mainQuotesSet.has(q))
+      .sort();
+    return [
+      ...mainQuotes.filter((q) => q === "ALL" || set.has(q)),
+      ...otherQuotes,
+    ];
   }, [symbols]);
 
   const filteredSymbols = useMemo(() => {
     let list = symbols;
 
     if (selectedQuote !== "ALL") {
-      list = list.filter(s => s.quote.toUpperCase() === selectedQuote.toUpperCase() || s.symbol.endsWith(`/${selectedQuote}`));
+      list = list.filter(
+        (s) =>
+          s.quote.toUpperCase() === selectedQuote.toUpperCase() ||
+          s.symbol.endsWith(`/${selectedQuote}`),
+      );
     }
 
     if (leverageOnly) {
-      list = list.filter(s => s.hasLeverage);
+      list = list.filter((s) => s.hasLeverage);
     }
 
     if (searchQuery.trim()) {
       // Bolt Optimization: Use case-insensitive RegExp test to prevent O(N) redundant .toUpperCase() and .includes() string allocations on every symbol property inside the filter loop.
       // Must escape regex characters from user input to prevent SyntaxError on special characters like `+`, `?`, etc.
-      const escapedQuery = searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const searchRegex = new RegExp(escapedQuery, 'i');
-      list = list.filter(s => 
-        searchRegex.test(s.symbol) ||
-        searchRegex.test(s.altname) ||
-        searchRegex.test(s.base) ||
-        searchRegex.test(s.wsname)
+      const escapedQuery = searchQuery
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const searchRegex = new RegExp(escapedQuery, "i");
+      list = list.filter(
+        (s) =>
+          searchRegex.test(s.symbol) ||
+          searchRegex.test(s.altname) ||
+          searchRegex.test(s.base) ||
+          searchRegex.test(s.wsname),
       );
     }
 
     return [...list].sort((a, b) => {
       let cmp = 0;
-      if (sortBy === 'symbol') {
+      if (sortBy === "symbol") {
         cmp = a.symbol.localeCompare(b.symbol);
-      } else if (sortBy === 'base') {
+      } else if (sortBy === "base") {
         cmp = a.base.localeCompare(b.base);
-      } else if (sortBy === 'quote') {
+      } else if (sortBy === "quote") {
         cmp = a.quote.localeCompare(b.quote);
       }
-      return sortOrder === 'asc' ? cmp : -cmp;
+      return sortOrder === "asc" ? cmp : -cmp;
     });
   }, [symbols, selectedQuote, leverageOnly, searchQuery, sortBy, sortOrder]);
 
@@ -97,7 +131,9 @@ export default function KrakenSymbolModal({
                   Kraken & Kraken Pro Symbol Directory
                 </span>
                 <span className="bg-emerald-950 border border-emerald-800 text-emerald-400 text-[10px] font-mono px-2 py-0.5 rounded font-semibold">
-                  {symbols.length > 0 ? `${symbols.length?.toLocaleString()} Pairs` : 'Live API'}
+                  {symbols.length > 0
+                    ? `${symbols.length?.toLocaleString()} Pairs`
+                    : "Live API"}
                 </span>
               </div>
               <span className="text-[11px] font-mono text-zinc-400">
@@ -112,9 +148,12 @@ export default function KrakenSymbolModal({
                 onClick={onRefreshSymbols}
                 disabled={isLoading}
                 className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 px-2.5 py-1.5 rounded text-xs font-mono transition-colors flex items-center space-x-1 disabled:opacity-50"
-                title="Refresh symbol catalog from Kraken API" aria-label="Refresh symbol catalog from Kraken API"
+                title="Refresh symbol catalog from Kraken API"
+                aria-label="Refresh symbol catalog from Kraken API"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-emerald-400' : 'text-zinc-400'}`} />
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${isLoading ? "animate-spin text-emerald-400" : "text-zinc-400"}`}
+                />
                 <span className="hidden sm:inline">Sync</span>
               </button>
             )}
@@ -159,12 +198,14 @@ export default function KrakenSymbolModal({
               onClick={() => setLeverageOnly(!leverageOnly)}
               aria-pressed={leverageOnly}
               className={`px-3 py-2 rounded-md text-xs font-mono border transition-colors flex items-center space-x-1.5 shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
-                leverageOnly 
-                  ? 'bg-amber-950/80 border-amber-700 text-amber-300' 
-                  : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                leverageOnly
+                  ? "bg-amber-950/80 border-amber-700 text-amber-300"
+                  : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
               }`}
             >
-              <Zap className={`w-3.5 h-3.5 ${leverageOnly ? 'text-amber-400 fill-amber-400' : 'text-zinc-500'}`} />
+              <Zap
+                className={`w-3.5 h-3.5 ${leverageOnly ? "text-amber-400 fill-amber-400" : "text-zinc-500"}`}
+              />
               <span>Margin Pairs</span>
             </button>
           </div>
@@ -180,8 +221,8 @@ export default function KrakenSymbolModal({
                 onClick={() => setSelectedQuote(q)}
                 className={`px-2.5 py-1 rounded text-[11px] font-mono transition-colors shrink-0 font-medium ${
                   selectedQuote === q
-                    ? 'bg-emerald-600 text-white font-bold shadow-xs'
-                    : 'bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800'
+                    ? "bg-emerald-600 text-white font-bold shadow-xs"
+                    : "bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800"
                 }`}
               >
                 {q}
@@ -190,56 +231,79 @@ export default function KrakenSymbolModal({
           </div>
 
           {/* Live Universal Symbol Parser & Auto-Mapping Preview */}
-          {searchQuery.trim().length > 0 && (() => {
-            const resolved = ExchangeSymbolNormalizer.resolveAll(searchQuery);
-            return (
-              <div className="bg-emerald-950/40 border border-emerald-800/80 rounded-md p-3 text-xs font-mono space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Sparkles className="w-4 h-4 text-emerald-400" />
-                    <span className="font-bold text-emerald-300">Universal Symbol Normalizer & Auto-Mapping</span>
+          {searchQuery.trim().length > 0 &&
+            (() => {
+              const resolved = ExchangeSymbolNormalizer.resolveAll(searchQuery);
+              return (
+                <div className="bg-emerald-950/40 border border-emerald-800/80 rounded-md p-3 text-xs font-mono space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Sparkles className="w-4 h-4 text-emerald-400" />
+                      <span className="font-bold text-emerald-300">
+                        Universal Symbol Normalizer & Auto-Mapping
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        onSelectSymbol(resolved.canonical);
+                        onClose();
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded text-[11px] font-semibold flex items-center space-x-1 shadow-xs transition-colors"
+                    >
+                      <span>Apply {resolved.canonical}</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => {
-                      onSelectSymbol(resolved.canonical);
-                      onClose();
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded text-[11px] font-semibold flex items-center space-x-1 shadow-xs transition-colors"
-                  >
-                    <span>Apply {resolved.canonical}</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
+                      <div className="text-[10px] text-zinc-500 uppercase">
+                        Canonical UI
+                      </div>
+                      <div className="font-bold text-white text-xs">
+                        {resolved.canonical}
+                      </div>
+                    </div>
+                    <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
+                      <div className="text-[10px] text-zinc-500 uppercase">
+                        Lake Partition
+                      </div>
+                      <div className="font-bold text-cyan-400 text-xs">
+                        {resolved.lakePartition}
+                      </div>
+                    </div>
+                    <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
+                      <div className="text-[10px] text-zinc-500 uppercase">
+                        Kraken Spot
+                      </div>
+                      <div className="font-bold text-amber-400 text-xs">
+                        {resolved.krakenSpot}
+                      </div>
+                    </div>
+                    <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
+                      <div className="text-[10px] text-zinc-500 uppercase">
+                        Kraken Pro Futures
+                      </div>
+                      <div className="font-bold text-purple-400 text-xs">
+                        {resolved.krakenProFutures}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                  <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
-                    <div className="text-[10px] text-zinc-500 uppercase">Canonical UI</div>
-                    <div className="font-bold text-white text-xs">{resolved.canonical}</div>
-                  </div>
-                  <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
-                    <div className="text-[10px] text-zinc-500 uppercase">Lake Partition</div>
-                    <div className="font-bold text-cyan-400 text-xs">{resolved.lakePartition}</div>
-                  </div>
-                  <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
-                    <div className="text-[10px] text-zinc-500 uppercase">Kraken Spot</div>
-                    <div className="font-bold text-amber-400 text-xs">{resolved.krakenSpot}</div>
-                  </div>
-                  <div className="bg-zinc-950/80 border border-zinc-800 p-2 rounded">
-                    <div className="text-[10px] text-zinc-500 uppercase">Kraken Pro Futures</div>
-                    <div className="font-bold text-purple-400 text-xs">{resolved.krakenProFutures}</div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
         </div>
 
         {/* Symbols Count & Active Filter Indicator */}
         <div className="bg-zinc-950 px-5 py-2 border-b border-zinc-800/80 flex items-center justify-between text-[11px] font-mono text-zinc-400">
           <div>
             <span>Showing </span>
-            <span className="text-emerald-400 font-bold">{filteredSymbols.length?.toLocaleString()}</span>
+            <span className="text-emerald-400 font-bold">
+              {filteredSymbols.length?.toLocaleString()}
+            </span>
             <span> of </span>
-            <span className="text-zinc-300 font-semibold">{symbols.length?.toLocaleString()}</span>
+            <span className="text-zinc-300 font-semibold">
+              {symbols.length?.toLocaleString()}
+            </span>
             <span> Kraken & Kraken Pro market symbols</span>
           </div>
 
@@ -253,15 +317,27 @@ export default function KrakenSymbolModal({
           {isLoading && symbols.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-12 text-center space-y-3">
               <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin" />
-              <p className="text-xs font-mono text-zinc-400">Fetching live Kraken & Kraken Pro symbols catalog from exchange...</p>
+              <p className="text-xs font-mono text-zinc-400">
+                Fetching live Kraken & Kraken Pro symbols catalog from
+                exchange...
+              </p>
             </div>
           ) : filteredSymbols.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-12 text-center space-y-2">
               <Layers className="w-8 h-8 text-zinc-600 mb-1" />
-              <p className="text-xs font-mono text-zinc-300 font-semibold">No Kraken symbols found matching "{searchQuery}"</p>
-              <p className="text-[11px] font-mono text-zinc-500">Try clearing filters or searching for alternative base coins like BTC, ETH, SOL, or EUR.</p>
+              <p className="text-xs font-mono text-zinc-300 font-semibold">
+                No Kraken symbols found matching "{searchQuery}"
+              </p>
+              <p className="text-[11px] font-mono text-zinc-500">
+                Try clearing filters or searching for alternative base coins
+                like BTC, ETH, SOL, or EUR.
+              </p>
               <button
-                onClick={() => { setSearchQuery(""); setSelectedQuote("ALL"); setLeverageOnly(false); }}
+                onClick={() => {
+                  setSearchQuery("");
+                  setSelectedQuote("ALL");
+                  setLeverageOnly(false);
+                }}
                 className="mt-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded text-xs font-mono"
               >
                 Reset Search Filters
@@ -272,25 +348,34 @@ export default function KrakenSymbolModal({
               <thead className="bg-zinc-900/90 sticky top-0 z-10 border-b border-zinc-800 text-[10px] text-zinc-500 uppercase tracking-wider">
                 <tr>
                   <th className="py-2.5 px-4 font-medium">Standard Symbol</th>
-                  <th className="py-2.5 px-4 font-medium hidden sm:table-cell">Kraken Pro Ticker</th>
-                  <th className="py-2.5 px-4 font-medium hidden md:table-cell">Internal Altname</th>
-                  <th className="py-2.5 px-4 font-medium hidden sm:table-cell">Decimals (Pair / Lot)</th>
+                  <th className="py-2.5 px-4 font-medium hidden sm:table-cell">
+                    Kraken Pro Ticker
+                  </th>
+                  <th className="py-2.5 px-4 font-medium hidden md:table-cell">
+                    Internal Altname
+                  </th>
+                  <th className="py-2.5 px-4 font-medium hidden sm:table-cell">
+                    Decimals (Pair / Lot)
+                  </th>
                   <th className="py-2.5 px-4 font-medium">Features</th>
                   <th className="py-2.5 px-4 font-medium text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-900 text-zinc-300">
                 {filteredSymbols.map((item) => {
-                  const isSelected = currentSymbol === item.symbol || currentSymbol === item.altname || currentSymbol === item.wsname;
+                  const isSelected =
+                    currentSymbol === item.symbol ||
+                    currentSymbol === item.altname ||
+                    currentSymbol === item.wsname;
                   return (
-                    <tr 
+                    <tr
                       key={item.altname + item.symbol}
                       onClick={() => {
                         onSelectSymbol(item.symbol);
                         onClose();
                       }}
                       className={`hover:bg-zinc-900/70 transition-colors cursor-pointer group ${
-                        isSelected ? 'bg-emerald-950/30' : ''
+                        isSelected ? "bg-emerald-950/30" : ""
                       }`}
                     >
                       {/* Standard Symbol */}
@@ -321,7 +406,9 @@ export default function KrakenSymbolModal({
 
                       {/* Decimals */}
                       <td className="py-2.5 px-4 text-zinc-400 text-[11px] hidden sm:table-cell font-mono">
-                        <span>{item.pairDecimals}p / {item.lotDecimals}l</span>
+                        <span>
+                          {item.pairDecimals}p / {item.lotDecimals}l
+                        </span>
                       </td>
 
                       {/* Features / Badges */}
@@ -329,14 +416,15 @@ export default function KrakenSymbolModal({
                         <div className="flex items-center space-x-1.5 flex-wrap gap-1">
                           {item.hasLeverage ? (
                             <span className="bg-amber-950/80 border border-amber-800 text-amber-400 text-[9px] px-1.5 py-0.5 rounded flex items-center font-bold">
-                              <Zap className="w-2.5 h-2.5 mr-0.5 fill-amber-400" /> Margin
+                              <Zap className="w-2.5 h-2.5 mr-0.5 fill-amber-400" />{" "}
+                              Margin
                             </span>
                           ) : (
                             <span className="bg-zinc-900 text-zinc-500 text-[9px] px-1.5 py-0.5 rounded">
                               Spot
                             </span>
                           )}
-                          {item.status === 'online' && (
+                          {item.status === "online" && (
                             <span className="bg-emerald-950/60 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded border border-emerald-900/40">
                               Active
                             </span>
@@ -355,11 +443,11 @@ export default function KrakenSymbolModal({
                           }}
                           className={`px-3 py-1 rounded text-xs font-mono font-semibold transition-colors ${
                             isSelected
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-zinc-800 hover:bg-emerald-600 hover:text-white text-zinc-300'
+                              ? "bg-emerald-600 text-white"
+                              : "bg-zinc-800 hover:bg-emerald-600 hover:text-white text-zinc-300"
                           }`}
                         >
-                          {isSelected ? 'Selected' : 'Use Pair'}
+                          {isSelected ? "Selected" : "Use Pair"}
                         </button>
                       </td>
                     </tr>
@@ -373,7 +461,10 @@ export default function KrakenSymbolModal({
         {/* Modal Footer */}
         <div className="bg-zinc-900 px-5 py-3 border-t border-zinc-800 flex items-center justify-between text-xs font-mono">
           <div className="text-zinc-500 text-[11px] flex items-center space-x-2">
-            <span>Powered by official Kraken Public REST API <code>/0/public/AssetPairs</code></span>
+            <span>
+              Powered by official Kraken Public REST API{" "}
+              <code>/0/public/AssetPairs</code>
+            </span>
           </div>
 
           <div className="flex items-center space-x-2">

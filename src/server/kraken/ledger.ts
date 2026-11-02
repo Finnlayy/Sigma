@@ -7,7 +7,7 @@
  * System:     Manas: Ciel Core Matrix — Projekt:Sigma
  * =========================================================
  */
-import type { KrakenProPosition, KrakenSpotPosition } from '../../types';
+import type { KrakenProPosition, KrakenSpotPosition } from "../../types";
 
 /** Startguthaben des Paper-Kontos. Konfiguration, **kein** Marktpreis. */
 export const PAPER_INITIAL_CASH_USD = 10_000;
@@ -18,38 +18,65 @@ export const MAINTENANCE_MARGIN_FRACTION = 0.005;
 /** USD ist die Ledger-Referenzwaehrung — der Kurs ist definitionsgemaess 1. */
 export const USD_QUOTE_PRICE = 1;
 
-export const FIAT_ASSETS = new Set(['USD', 'EUR', 'GBP', 'CAD', 'JPY', 'CHF', 'AUD', 'KRW', 'SGD', 'SEK', 'NOK', 'DKK', 'PLN', 'AED']);
-export const STABLECOIN_ASSETS = new Set(['USDT', 'USDC', 'DAI', 'TUSD', 'BUSD', 'FDUSD', 'PYUSD', 'EURT', 'USDK', 'USDP', 'GUSD']);
+export const FIAT_ASSETS = new Set([
+  "USD",
+  "EUR",
+  "GBP",
+  "CAD",
+  "JPY",
+  "CHF",
+  "AUD",
+  "KRW",
+  "SGD",
+  "SEK",
+  "NOK",
+  "DKK",
+  "PLN",
+  "AED",
+]);
+export const STABLECOIN_ASSETS = new Set([
+  "USDT",
+  "USDC",
+  "DAI",
+  "TUSD",
+  "BUSD",
+  "FDUSD",
+  "PYUSD",
+  "EURT",
+  "USDK",
+  "USDP",
+  "GUSD",
+]);
 
 const ASSET_NAMES: Record<string, string> = {
-  USD: 'US Dollar',
-  EUR: 'Euro',
-  GBP: 'Pound Sterling',
-  BTC: 'Bitcoin',
-  XBT: 'Bitcoin',
-  ETH: 'Ethereum',
-  SOL: 'Solana',
-  XRP: 'Ripple',
-  USDT: 'Tether',
-  USDC: 'USD Coin',
-  DOGE: 'Dogecoin',
-  ADA: 'Cardano',
-  AVAX: 'Avalanche',
-  LINK: 'Chainlink',
-  DOT: 'Polkadot',
+  USD: "US Dollar",
+  EUR: "Euro",
+  GBP: "Pound Sterling",
+  BTC: "Bitcoin",
+  XBT: "Bitcoin",
+  ETH: "Ethereum",
+  SOL: "Solana",
+  XRP: "Ripple",
+  USDT: "Tether",
+  USDC: "USD Coin",
+  DOGE: "Dogecoin",
+  ADA: "Cardano",
+  AVAX: "Avalanche",
+  LINK: "Chainlink",
+  DOT: "Polkadot",
 };
 
-export type AssetType = 'fiat' | 'crypto' | 'stablecoin';
+export type AssetType = "fiat" | "crypto" | "stablecoin";
 
 export function assetType(asset: string): AssetType {
-  const upper = (asset ?? '').trim().toUpperCase();
-  if (FIAT_ASSETS.has(upper)) return 'fiat';
-  if (STABLECOIN_ASSETS.has(upper)) return 'stablecoin';
-  return 'crypto';
+  const upper = (asset ?? "").trim().toUpperCase();
+  if (FIAT_ASSETS.has(upper)) return "fiat";
+  if (STABLECOIN_ASSETS.has(upper)) return "stablecoin";
+  return "crypto";
 }
 
 export function assetName(asset: string): string {
-  const upper = (asset ?? '').trim().toUpperCase();
+  const upper = (asset ?? "").trim().toUpperCase();
   return ASSET_NAMES[upper] ?? upper;
 }
 
@@ -69,10 +96,11 @@ export type PriceMap = Record<string, TickerPrice>;
 
 /** USD -> 1 per Definition; fehlende Kurse bleiben 0 (fail-closed, keine erfundenen Preise). */
 export function priceOf(asset: string, prices: PriceMap): TickerPrice {
-  const upper = (asset ?? '').trim().toUpperCase();
+  const upper = (asset ?? "").trim().toUpperCase();
   const hit = prices[upper];
   if (hit) return hit;
-  if (upper === 'USD') return { last: USD_QUOTE_PRICE, open24h: USD_QUOTE_PRICE };
+  if (upper === "USD")
+    return { last: USD_QUOTE_PRICE, open24h: USD_QUOTE_PRICE };
   return { last: 0, open24h: 0 };
 }
 
@@ -107,18 +135,20 @@ export function spotLedger(
   let change24hUSD = 0;
 
   for (const balance of balances ?? []) {
-    const asset = (balance.asset ?? '').trim().toUpperCase();
+    const asset = (balance.asset ?? "").trim().toUpperCase();
     if (!asset) continue;
     const amount = Number.isFinite(balance.amount) ? balance.amount : 0;
     const { last, open24h } = priceOf(asset, prices);
-    const inOrders = Number.isFinite(lockedByAsset?.[asset]) ? lockedByAsset[asset] : 0;
+    const inOrders = Number.isFinite(lockedByAsset?.[asset])
+      ? lockedByAsset[asset]
+      : 0;
     const value = amount * last;
     const change = amount * (last - open24h);
     const type = assetType(asset);
 
     totalValueUSD += value;
     change24hUSD += change;
-    if (type === 'crypto') cryptoValueUSD += value;
+    if (type === "crypto") cryptoValueUSD += value;
     else freeCashUSD += value;
 
     rows.push({
@@ -136,7 +166,8 @@ export function spotLedger(
   }
 
   for (const row of rows) {
-    row.portfolioPercentage = totalValueUSD > 0 ? (row.totalValueUSD / totalValueUSD) * 100 : 0;
+    row.portfolioPercentage =
+      totalValueUSD > 0 ? (row.totalValueUSD / totalValueUSD) * 100 : 0;
   }
 
   const valueAtOpen = totalValueUSD - change24hUSD;
@@ -160,14 +191,15 @@ export function spotLedger(
 export function liquidationPrice(
   entryPrice: number,
   leverage: number,
-  side: KrakenProPosition['type'],
+  side: KrakenProPosition["type"],
 ): number {
   if (!Number.isFinite(entryPrice) || entryPrice <= 0) return 0;
   if (!Number.isFinite(leverage) || leverage <= 0) return 0;
   const inverse = 1 / leverage;
-  const raw = side === 'long'
-    ? entryPrice * (1 - inverse + MAINTENANCE_MARGIN_FRACTION)
-    : entryPrice * (1 + inverse - MAINTENANCE_MARGIN_FRACTION);
+  const raw =
+    side === "long"
+      ? entryPrice * (1 - inverse + MAINTENANCE_MARGIN_FRACTION)
+      : entryPrice * (1 + inverse - MAINTENANCE_MARGIN_FRACTION);
   return Math.max(0, raw);
 }
 
@@ -176,17 +208,28 @@ export function liquidationPrice(
  *  unrealizedPnLPercent = unrealizedPnLUSD / collateralUSD * 100
  *  liquidationPrice     = Formel oben, wenn die Position keinen mitbringt
  */
-export function enrichProPosition(position: KrakenProPosition): KrakenProPosition {
-  const collateral = Number.isFinite(position.collateralUSD) ? position.collateralUSD : 0;
-  const unrealized = Number.isFinite(position.unrealizedPnLUSD) ? position.unrealizedPnLUSD : 0;
+export function enrichProPosition(
+  position: KrakenProPosition,
+): KrakenProPosition {
+  const collateral = Number.isFinite(position.collateralUSD)
+    ? position.collateralUSD
+    : 0;
+  const unrealized = Number.isFinite(position.unrealizedPnLUSD)
+    ? position.unrealizedPnLUSD
+    : 0;
   return {
     ...position,
     collateralUSD: collateral,
     unrealizedPnLUSD: unrealized,
     unrealizedPnLPercent: collateral > 0 ? (unrealized / collateral) * 100 : 0,
-    liquidationPrice: position.liquidationPrice > 0
-      ? position.liquidationPrice
-      : liquidationPrice(position.entryPrice, position.leverage, position.type),
+    liquidationPrice:
+      position.liquidationPrice > 0
+        ? position.liquidationPrice
+        : liquidationPrice(
+            position.entryPrice,
+            position.leverage,
+            position.type,
+          ),
   };
 }
 
@@ -211,7 +254,10 @@ export interface ProLedger {
  *
  * `cash` ist das freie Paper-Cash; ohne offene Positionen ist die ganze Summe frei.
  */
-export function proLedger(rawPositions: KrakenProPosition[], cash: number): ProLedger {
+export function proLedger(
+  rawPositions: KrakenProPosition[],
+  cash: number,
+): ProLedger {
   const positions = (rawPositions ?? []).map(enrichProPosition);
 
   let totalCollateralUSD = 0;
@@ -220,7 +266,9 @@ export function proLedger(rawPositions: KrakenProPosition[], cash: number): ProL
 
   for (const p of positions) {
     totalCollateralUSD += p.collateralUSD;
-    totalNotionalUSD += Number.isFinite(p.notionalValueUSD) ? p.notionalValueUSD : 0;
+    totalNotionalUSD += Number.isFinite(p.notionalValueUSD)
+      ? p.notionalValueUSD
+      : 0;
     totalUnrealizedPnL += p.unrealizedPnLUSD;
   }
 
@@ -233,9 +281,11 @@ export function proLedger(rawPositions: KrakenProPosition[], cash: number): ProL
     totalCollateralUSD: accountEquity,
     freeMarginUSD: accountEquity - usedMarginUSD,
     usedMarginUSD,
-    marginLevelPercent: usedMarginUSD > 0 ? (accountEquity / usedMarginUSD) * 100 : 0,
+    marginLevelPercent:
+      usedMarginUSD > 0 ? (accountEquity / usedMarginUSD) * 100 : 0,
     totalUnrealizedPnL,
-    unrealizedPnLPercent: accountEquity > 0 ? (totalUnrealizedPnL / accountEquity) * 100 : 0,
+    unrealizedPnLPercent:
+      accountEquity > 0 ? (totalUnrealizedPnL / accountEquity) * 100 : 0,
     effectiveLeverage: accountEquity > 0 ? totalNotionalUSD / accountEquity : 0,
     positions,
   };

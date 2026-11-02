@@ -7,7 +7,7 @@
  * resize observer, clear-on-seriesKey change. Visualization only — no client-side
  * execution math.
  */
-import { useEffect, useRef, memo } from 'react';
+import { useEffect, useRef, memo } from "react";
 import {
   createChart,
   ColorType,
@@ -21,14 +21,14 @@ import {
   type IPriceLine,
   type ISeriesMarkersPluginApi,
   type Time,
-} from 'lightweight-charts';
-import type { Candle } from '../lib/sigmaApi';
+} from "lightweight-charts";
+import type { Candle } from "../lib/sigmaApi";
 
 export interface ChartMarker {
   time: number;
-  position: 'aboveBar' | 'belowBar' | 'inBar';
+  position: "aboveBar" | "belowBar" | "inBar";
   color: string;
-  shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square';
+  shape: "arrowUp" | "arrowDown" | "circle" | "square";
   text: string;
 }
 
@@ -51,7 +51,7 @@ interface Props {
   seriesKey?: string;
   height?: number;
   /** Guide dark terminal theme; default keeps Sigma zinc terminal look. */
-  theme?: 'sigma' | 'terminal';
+  theme?: "sigma" | "terminal";
 }
 
 function toCandlePoint(c: Candle) {
@@ -67,41 +67,55 @@ export default memo(function TvLightweightChart({
   equityCurve,
   markers,
   priceLines,
-  seriesKey = 'default',
+  seriesKey = "default",
   height = 260,
-  theme = 'sigma',
+  theme = "sigma",
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const equitySeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const equitySeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLineRefs = useRef<Map<string, IPriceLine>>(new Map());
-  const lastBarRef = useRef<{ time: number; o: number; h: number; l: number; c: number } | null>(null);
+  const lastBarRef = useRef<{
+    time: number;
+    o: number;
+    h: number;
+    l: number;
+    c: number;
+  } | null>(null);
   const lastSeriesKeyRef = useRef(seriesKey);
 
   useEffect(() => {
     if (!ref.current) return;
-    const terminal = theme === 'terminal';
+    const terminal = theme === "terminal";
     const chart = createChart(ref.current, {
       height,
       layout: {
         background: {
           type: ColorType.Solid,
-          color: terminal ? '#131722' : 'transparent',
+          color: terminal ? "#131722" : "transparent",
         },
-        textColor: terminal ? '#d1d4dc' : '#a1a1aa',
+        textColor: terminal ? "#d1d4dc" : "#a1a1aa",
         fontSize: 10,
       },
       grid: {
-        vertLines: { color: terminal ? 'rgba(42, 46, 57, 0.5)' : 'rgba(63,63,70,0.25)' },
-        horzLines: { color: terminal ? 'rgba(42, 46, 57, 0.5)' : 'rgba(63,63,70,0.25)' },
+        vertLines: {
+          color: terminal ? "rgba(42, 46, 57, 0.5)" : "rgba(63,63,70,0.25)",
+        },
+        horzLines: {
+          color: terminal ? "rgba(42, 46, 57, 0.5)" : "rgba(63,63,70,0.25)",
+        },
       },
       rightPriceScale: {
-        borderColor: terminal ? 'rgba(197, 203, 206, 0.3)' : 'rgba(63,63,70,0.5)',
+        borderColor: terminal
+          ? "rgba(197, 203, 206, 0.3)"
+          : "rgba(63,63,70,0.5)",
       },
       timeScale: {
-        borderColor: terminal ? 'rgba(197, 203, 206, 0.3)' : 'rgba(63,63,70,0.5)',
+        borderColor: terminal
+          ? "rgba(197, 203, 206, 0.3)"
+          : "rgba(63,63,70,0.5)",
         timeVisible: true,
         secondsVisible: false,
       },
@@ -110,15 +124,15 @@ export default memo(function TvLightweightChart({
     chartRef.current = chart;
 
     candleSeriesRef.current = chart.addSeries(CandlestickSeries, {
-      upColor: terminal ? '#26a69a' : '#10b981',
-      downColor: terminal ? '#ef5350' : '#ef4444',
-      wickUpColor: terminal ? '#26a69a' : '#10b981',
-      wickDownColor: terminal ? '#ef5350' : '#ef4444',
+      upColor: terminal ? "#26a69a" : "#10b981",
+      downColor: terminal ? "#ef5350" : "#ef4444",
+      wickUpColor: terminal ? "#26a69a" : "#10b981",
+      wickDownColor: terminal ? "#ef5350" : "#ef4444",
       borderVisible: false,
     });
 
     equitySeriesRef.current = chart.addSeries(LineSeries, {
-      color: '#38bdf8',
+      color: "#38bdf8",
       lineWidth: 2,
     });
 
@@ -175,7 +189,10 @@ export default memo(function TvLightweightChart({
       // Guide §4: update() when the open bar ticks or a new bar appends;
       // full setData on history reload / series switch.
       const sameOpenBar =
-        !seriesKeyChanged && prev !== null && last.ts === prev.time && sorted.length >= 1;
+        !seriesKeyChanged &&
+        prev !== null &&
+        last.ts === prev.time &&
+        sorted.length >= 1;
       const appendedBar =
         !seriesKeyChanged &&
         prev !== null &&
@@ -187,7 +204,13 @@ export default memo(function TvLightweightChart({
       } else {
         series.setData(sorted.map(toCandlePoint));
       }
-      lastBarRef.current = { time: last.ts, o: last.o, h: last.h, l: last.l, c: last.c };
+      lastBarRef.current = {
+        time: last.ts,
+        o: last.o,
+        h: last.h,
+        l: last.l,
+        c: last.c,
+      };
     }
 
     if (equitySeriesRef.current) {
