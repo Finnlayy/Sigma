@@ -80,10 +80,16 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          log = Path('build/desktop-build.log')
-          if log.exists():
-              tail = '\n'.join(log.read_text(errors='replace').splitlines()[-70:])[-12000:]
-              print('::error title=Desktop build diagnostic::' + tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
+          logs = [Path('build/desktop-build.log')]
+          logs += sorted(Path('test-results').rglob('renderer-state.txt'))
+          logs += sorted(Path('test-results').rglob('*.log'))
+          for log in logs[:12]:
+              if not log.exists():
+                  continue
+              lines = log.read_text(errors='replace').splitlines()[-50:]
+              tail = '\n'.join(line[:1000] for line in lines)[-11000:]
+              title = str(log).replace('%', '%25').replace(':', '_')
+              print('::notice title=Desktop diagnostic ' + title + '::' + tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
           PY
       - uses: actions/upload-artifact@v4
         if: failure()

@@ -1,6 +1,6 @@
 /** Genuine renderer-to-Core workflows. No HTTP route interception or fake servers. */
 import { test, expect, _electron as electron } from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, cp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -18,15 +18,18 @@ test('existing navigation, CSV results, Settings, persistence and paper-only gua
       SIGMA_SCRAPER_OFFLINE: '1', SIGMA_TV_MCP_URL: '', SIGMA_DESKTOP_SMOKE: '0' },
     timeout: 200_000,
   });
+  const window = await application.firstWindow();
+  const errors: string[] = [];
+  const pageErrors: string[] = [];
+  window.on('pageerror', error => { pageErrors.push(error.message); errors.push(error.stack || error.message); });
+  window.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   try {
-    const window = await application.firstWindow();
     await expect(window.getByRole('radio', { name: 'BOT COCKPIT', exact: true })).toBeVisible({ timeout: 200_000 });
-    const errors: string[] = [];
-    window.on('pageerror', error => errors.push(error.message));
     for (const preset of presets) {
       const toggle = window.getByRole('radio', { name: preset, exact: true });
       await toggle.click();
       await expect(toggle).toHaveAttribute('data-state', 'on');
+      await expect(window.getByText('Projekt:Sigma — Interface Interruption', { exact: true })).toHaveCount(0);
     }
     await window.getByRole('radio', { name: 'CONFIG', exact: true }).click();
     await window.getByRole('tab', { name: /^Desktop Services/ }).click();
@@ -59,8 +62,19 @@ test('existing navigation, CSV results, Settings, persistence and paper-only gua
     // An offline run must report an error, not turn imported history into a live backtest.
     await window.getByRole('button', { name: 'RUN TV BACKTEST', exact: true }).click();
     await expect(window.getByText(/TV MCP error:/)).toBeVisible();
-    expect(errors).toEqual([]);
+    expect(pageErrors).toEqual([]);
+    // HTTP/CSP console diagnostics are retained below; uncaught page errors remain a gate.
+    const interruption = window.getByText('Projekt:Sigma — Interface Interruption', { exact: true });
+    await expect(interruption).toHaveCount(0);
+  } catch (error) {
+    const body = await window.locator('body').innerText({ timeout: 5000 }).catch(() => 'Renderer unavailable');
+    await writeFile(test.info().outputPath('renderer-state.txt'), body + '\n\nRenderer errors:\n' + errors.join('\n'));
+    await window.screenshot({ path: test.info().outputPath('renderer.png'), timeout: 5000 }).catch(() => {});
+    throw error;
   } finally {
+    if (test.info().status !== test.info().expectedStatus) {
+      await cp(path.join(workspace, 'data/logs'), test.info().outputPath('runtime-logs'), { recursive: true }).catch(() => {});
+    }
     // Application.close can otherwise behave like hide-to-tray; explicitly use app.quit.
     await application.evaluate(({ app }) => app.quit()).catch(() => {});
     await application.close().catch(() => {});
