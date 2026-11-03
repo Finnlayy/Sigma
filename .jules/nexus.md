@@ -33,3 +33,6 @@
 ## 2024-10-28 - [IPC/API Integration Insight]
 **Learning:** The LLM stream WebSocket handler was falling back to rendering raw string payloads when JSON parsing or schema validation failed, violating the fail-closed philosophy and risking UI corruption.
 **Action:** Removed the raw string fallback from the `catch` block in `src/components/sigma/panels.tsx`. Always explicitly drop malformed payloads and only log the error to `console.error`.
+## 2026-10-31 - [IPC/API Integration Insight]
+**Learning:** When initializing the Redis client in the Python backend (`app.core.redis_client.get_redis`), failing to pass the required configuration parameter `config` (e.g., via `load_config()`) causes silent `TypeError` exceptions inside wide `except Exception:` blocks, breaking real-time pubsub integrations (like the market feed WebSocket).
+**Action:** Always provide the `config` parameter explicitly when calling `get_redis(cfg)`, and explicitly log initialization errors instead of swallowing them silently using `logging.error(f"Failed to initialize pubsub: {exc}")` to preserve an audit trail.
