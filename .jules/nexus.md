@@ -33,3 +33,6 @@
 ## 2024-10-28 - [IPC/API Integration Insight]
 **Learning:** The LLM stream WebSocket handler was falling back to rendering raw string payloads when JSON parsing or schema validation failed, violating the fail-closed philosophy and risking UI corruption.
 **Action:** Removed the raw string fallback from the `catch` block in `src/components/sigma/panels.tsx`. Always explicitly drop malformed payloads and only log the error to `console.error`.
+## 2026-10-30 - [IPC/API Integration Insight]
+**Learning:** Calling `get_redis()` without passing the required `config` parameter in websocket endpoints (like `routes_sigma.py`) caused a `TypeError` that was silently caught, breaking the real-time pubsub stream.
+**Action:** Always ensure `get_redis(config)` receives the application config (e.g. by using `load_config()`) to prevent broken streams.
