@@ -14,7 +14,7 @@ from app.core import blueprint as bp
 
 
 @pytest.fixture(scope="function")
-def client(tmp_path_factory):
+def client(tmp_path_factory, monkeypatch):
     import os
 
     tmp = tmp_path_factory.mktemp("sigma_api")
@@ -49,6 +49,11 @@ def client(tmp_path_factory):
                 pass
     except Exception:
         pass
+    # API contracts must not depend on the build host's memory pressure.
+    monkeypatch.setattr("app.core.memory_watchdog.read_memory_snapshot", lambda: {
+        "percent": 20.0, "source": "test", "rss_bytes": 0,
+        "budget_bytes": 4294967296, "cgroup": None, "host_percent": 20.0, "rss_percent": 20.0,
+    })
     original_snapshot = MacroContagionFeed.snapshot
     MacroContagionFeed.snapshot = lambda self: ContagionInputs()
     try:
@@ -788,3 +793,41 @@ def test_queue_matrices_groups_trades_by_strategy_and_mode(client):
     assert "qm_paper" not in {s["strategyId"] for s in body["live"]["strategies"]}
     assert "qm_open" not in {t["id"] for t in prow["trades"]}
     assert body["paper"]["activeWorkers"] >= 1
+
+
+def test_import_tv_result_csv_without_a_live_mcp_adapter(client, monkeypatch):
+    import app.server.main as main
+    monkeypatch.setattr(main.state, 'tv_backtest', None)
+    csv = ('Trade #,Type,Date/Time,Signal,Price USD,Position size (qty),Net P&L USD\n'
+           '1,Entry long,2024-06-01 10:00,long,100,1,0\n'
+           '1,Exit long,2024-06-01 14:00,long,110,1,9.8\n')
+    response = client.post('/api/backtest/run', json={'resultCsv': csv, 'initialBalance': 10000})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['source'] == 'tradingview-csv'
+    assert result['summary']['totalTrades'] == 1
+    assert result['summary']['totalReturnUSD'] == pytest.approx(9.8)
+    assert client.post('/api/backtest/run', json={}).status_code == 503
+
+
+def test_alert_driver_contract_is_real_status_and_mutations_are_gated(client):
+    status = client.get('/api/v1/alerts/driver')
+    assert status.status_code == 200
+    assert status.json()['connection_verified'] is False
+    assert client.post('/api/v1/alerts/driver/attach').status_code == 403
+    assert client.post('/api/v1/alerts/sync-m8').status_code == 403
+
+
+def test_calendar_month_contract_matches_real_selected_month(client):
+    result = client.get('/api/pnl/daily/combined_all?year=2024&month=2')
+    assert result.status_code == 200
+    data = result.json()
+    assert len(data['days']) == 29
+    assert data['days'][0]['date'] == '2024-02-01'
+    assert data['days'][0]['dayOfWeek'] == 4  # Sunday-zero UI grid
+    assert data['days'][-1]['date'] == '2024-02-29'
+    assert data['year'] == 2024 and data['month'] == 2
+    assert all(not day['isFuture'] for day in data['days'])
+    assert client.get('/api/pnl/daily/combined_all?year=2024&month=13').status_code == 422
+    assert client.get('/api/pnl/daily/combined_all?year=2024').status_code == 422
+    assert client.get('/api/pnl/daily/combined_all?days=0').status_code == 422

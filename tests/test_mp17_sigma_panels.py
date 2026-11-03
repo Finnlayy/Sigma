@@ -16,6 +16,7 @@ Knoten:     Jaune (Test)
 """
 from __future__ import annotations
 
+import re
 import os
 
 from app.core import blueprint as bp
@@ -46,7 +47,7 @@ def test_panel_registry_contains_twelve_mp17_ids():
     for panel in MP17_PANEL_IDS:
         assert f"  {panel}_,\n" in registry, f"{panel} fehlt in Registry"
         assert f"  {panel}_: " in titles, f"{panel} fehlt in Titeln"
-    assert "from './mp17Panels'" in panels
+    assert re.search(r"from [\"']\./mp17Panels[\"']", panels)
 
 
 def test_mp17_panels_render_fail_closed_empty_states():

@@ -70,7 +70,6 @@ export default function CalendarHeatmap({
   onSelectStrategy,
   onSelectDate,
 }: CalendarHeatmapProps) {
-  const now = useMemo(() => new Date(), []);
   const [selectedYear, setSelectedYear] = useState<number>(() => {
     const currentY = new Date().getFullYear();
     return AVAILABLE_YEARS.includes(currentY) ? currentY : 2026;
@@ -89,6 +88,7 @@ export default function CalendarHeatmap({
     null,
   );
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<DailyPnLDay | null>(null);
   const [hoveredDay, setHoveredDay] = useState<DailyPnLDay | null>(null);
 
@@ -188,6 +188,7 @@ export default function CalendarHeatmap({
     }
 
     setIsLoading(true);
+    setLoadError(null);
     let targetEndpointId = "combined_all";
     let queryParams = `year=${selectedYear}&month=${selectedMonth}`;
 
@@ -223,180 +224,12 @@ export default function CalendarHeatmap({
         return;
       }
     } catch {
-      // Fallback
+      // Report unavailable below; never invent historical performance or daemon health.
     }
 
-    // Client-side fallback generator
-    const localYear = now.getFullYear();
-    const localMonth = String(now.getMonth() + 1).padStart(2, "0");
-    const localDay = String(now.getDate()).padStart(2, "0");
-    const todayStr = `${localYear}-${localMonth}-${localDay}`;
-    const todayUtcStr = now.toISOString().split("T")[0];
-
-    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-    const monthObj =
-      MONTHS_LIST.find((m) => m.index === selectedMonth) ||
-      MONTHS_LIST[selectedMonth - 1];
-    const monthLabel = monthObj.short;
-
-    const days: DailyPnLDay[] = [];
-    const todayPnL = aggregateActivePnL.totalPnL;
-    const todayTrades = aggregateActivePnL.totalTrades;
-    const todayWins = aggregateActivePnL.wins;
-    const todayLosses = aggregateActivePnL.losses;
-    const todayVolume = aggregateActivePnL.volumeUSD;
-
-    // Bolt Optimization: Calculate active workers count using a memoized O(N) loop
-    // rather than calling .filter().length inline, preventing O(N) penalties on every render.
-    const activeWorkersCount = useMemo(() => {
-      let count = 0;
-      for (const s of strategies) {
-        if (s.status === "active") count++;
-      }
-      return count;
-    }, [strategies]);
-    const hasLiveStrategy = activeStrategies.some(
-      (s) => s.executionMode === "live",
-    );
-
-    for (let dNum = 1; dNum <= daysInMonth; dNum++) {
-      const d = new Date(selectedYear, selectedMonth - 1, dNum);
-      const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${String(dNum).padStart(2, "0")}`;
-      const isToday = dateStr === todayStr || dateStr === todayUtcStr;
-      const isFuture = d.getTime() > now.getTime() && !isToday;
-      const dayOfWeek = d.getDay();
-      const formattedDate = `${monthLabel} ${String(dNum).padStart(2, "0")}, ${selectedYear}`;
-
-      const pnl = isToday ? Number(todayPnL?.toFixed(2)) : 0;
-      const realizedPnL = isToday
-        ? Number(aggregateActivePnL.realizedPnL?.toFixed(2))
-        : 0;
-      const unrealizedPnL = isToday
-        ? Number(aggregateActivePnL.unrealizedPnL?.toFixed(2))
-        : 0;
-      const tradesCount = isToday ? todayTrades : 0;
-      const wins = isToday ? todayWins : 0;
-      const losses = isToday ? todayLosses : 0;
-      const volumeUSD = isToday ? Number(todayVolume?.toFixed(2)) : 0;
-      const winRate =
-        tradesCount > 0 ? Number(((wins / tradesCount) * 100)?.toFixed(1)) : 0;
-
-      days.push({
-        date: dateStr,
-        formattedDate,
-        dayOfWeek,
-        dayLabel: WEEKDAYS[dayOfWeek],
-        dayOfMonth: dNum,
-        monthLabel,
-        pnl,
-        realizedPnL,
-        unrealizedPnL,
-        tradesCount,
-        wins,
-        losses,
-        winRate,
-        volumeUSD,
-        isToday,
-        isFuture,
-        machineState: {
-          automationLevel: hasLiveStrategy ? 4 : 2,
-          executionMode: hasLiveStrategy ? "live" : "paper",
-          engineStatus: activeWorkersCount > 0 ? "active" : "idle",
-          activeWorkersCount,
-          daemonHealth: "CL-ACTIVE (Daemon Live)",
-        },
-      });
-    }
-
-    // Bolt Optimization: Condense 5 consecutive O(N) array passes (.reduce and 4x .filter) into a single O(N) loop
-    let total30DPnL = 0;
-    let greenDays = 0;
-    let redDays = 0;
-    let flatDays = 0;
-    const activeDays: DailyPnLDay[] = [];
-
-    for (const d of days) {
-      total30DPnL += d.pnl;
-      if (d.pnl > 0) greenDays++;
-      else if (d.pnl < 0) redDays++;
-      else flatDays++;
-
-      if (d.tradesCount > 0 || d.pnl !== 0 || d.isToday) {
-        activeDays.push(d);
-      }
-    }
-    total30DPnL = Number(total30DPnL.toFixed(2));
-
-    const candidateDays = activeDays.length > 0 ? activeDays : [days[0]];
-
-    let bestDay = {
-      date: candidateDays[0].date,
-      formattedDate: candidateDays[0].formattedDate,
-      pnl: candidateDays[0].pnl,
-    };
-    let worstDay = {
-      date: candidateDays[0].date,
-      formattedDate: candidateDays[0].formattedDate,
-      pnl: candidateDays[0].pnl,
-    };
-    for (const d of candidateDays) {
-      if (d.pnl > bestDay.pnl)
-        bestDay = { date: d.date, formattedDate: d.formattedDate, pnl: d.pnl };
-      if (d.pnl < worstDay.pnl)
-        worstDay = { date: d.date, formattedDate: d.formattedDate, pnl: d.pnl };
-    }
-
-    const activeDayCount = greenDays + redDays;
-    const displayName =
-      viewScope === "single"
-        ? activeStrategies[0]?.name || "Strategy"
-        : viewScope === "combined_all"
-          ? "All Strategies (Combined Portfolio)"
-          : viewScope === "combined_live"
-            ? "All Live Strategies (L4 Combined)"
-            : viewScope === "combined_paper"
-              ? "All Paper Strategies (L2 Combined)"
-              : `Combined (${activeStrategies.length} Strategies)`;
-
-    const displayPair =
-      viewScope === "single"
-        ? activeStrategies[0]?.assetPair || "ASSET"
-        : viewScope === "combined_live"
-          ? "LIVE Q"
-          : viewScope === "combined_paper"
-            ? "PAPER Q"
-            : "PORTFOLIO";
-
-    const mockData: DailyPnLHeatmapData = {
-      strategyId: targetEndpointId,
-      strategyName: displayName,
-      assetPair: displayPair,
-      year: selectedYear,
-      month: selectedMonth,
-      monthLabel,
-      days,
-      total30DPnL,
-      totalMonthPnL: total30DPnL,
-      greenDays,
-      redDays,
-      flatDays,
-      bestDay,
-      worstDay,
-      winRatePercent:
-        activeDayCount > 0
-          ? Number(((greenDays / activeDayCount) * 100)?.toFixed(1))
-          : 0,
-      avgDailyPnL: Number(
-        (total30DPnL / Math.max(1, activeDayCount || 1))?.toFixed(2),
-      ),
-      profitFactor: todayPnL >= 0 ? 99.0 : 0.0,
-    };
-
-    setHeatmapData(mockData);
-    if (days.length > 0) {
-      const todayItem = days.find((d) => d.isToday);
-      setSelectedDay(todayItem || days[0]);
-    }
+    setHeatmapData(null);
+    setSelectedDay(null);
+    setLoadError("Historical P&L unavailable — the ledger API request failed. No generated history is shown.");
     setIsLoading(false);
   };
 
@@ -1148,7 +981,7 @@ export default function CalendarHeatmap({
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                     <span>
                       {activeDay.machineState?.daemonHealth ||
-                        "CL-ACTIVE (Daemon Live)"}
+                        "Unknown (not verified)"}
                     </span>
                   </span>
                   <span>•</span>
@@ -1201,7 +1034,7 @@ export default function CalendarHeatmap({
       ) : (
         <div className="p-6 bg-zinc-950/40 border border-dashed border-zinc-800 rounded text-center text-zinc-500 text-xs font-mono space-y-1">
           <CalendarIcon className="w-6 h-6 mx-auto text-zinc-600 mb-1" />
-          <p>No strategies configured to display in heatmap.</p>
+          <p role={loadError ? "alert" : undefined}>{loadError || (isLoading ? "Loading ledger history…" : "No strategies configured to display in heatmap.")}</p>
         </div>
       )}
     </div>

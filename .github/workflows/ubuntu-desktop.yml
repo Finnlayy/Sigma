@@ -1,0 +1,102 @@
+name: Ubuntu desktop installers
+on:
+  push:
+    branches: [main, arena/205890b2-sigma]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ubuntu-desktop-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-desktop.lock
+      - name: Native build and desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libfuse2 libgtk-3-0 libnss3 libgbm1 libasound2 libxss1 libxtst6 libsecret-1-0 libnotify4 xvfb
+      - name: Install locked dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-desktop.lock
+          npm ci
+          .venv/bin/python -m playwright install-deps chromium
+      - name: Existing and desktop regression tests
+        run: |
+          .venv/bin/python -m pytest tests/ -q
+          npm run lint
+          npm run test:desktop
+      - name: Build bundled backend, browser, Redis, deb and AppImage
+        run: |
+          mkdir -p build
+          set -o pipefail
+          scripts/build-desktop.sh 2>&1 | tee build/desktop-build.log
+      - name: Real packaged Electron launch
+        env:
+          SIGMA_DESKTOP_SMOKE: '1'
+          SIGMA_SCRAPER_OFFLINE: '1'
+          SIGMA_TV_MCP_URL: ''
+        run: |
+          # Ubuntu runner has a real graphical session under Xvfb; never disable the Electron sandbox.
+          timeout 240s xvfb-run -a release/linux-unpacked/sigma
+      - name: Existing UI end-to-end workflows against packaged services
+        env:
+          SIGMA_E2E_EXECUTABLE: ${{ github.workspace }}/release/linux-unpacked/sigma
+        run: timeout 300s xvfb-run -a npm run test:e2e
+      - name: Installer metadata and offline desktop smoke
+        run: |
+          dpkg-deb --info release/*.deb
+          dpkg-deb --contents release/*.deb | grep 'applications/.*desktop'
+          chmod +x release/*.AppImage
+          # AppImage extraction tests the actual installer payload without requiring FUSE.
+          cd release
+          ./*.AppImage --appimage-extract >/dev/null
+          cd squashfs-root
+          SIGMA_DESKTOP_SMOKE=1 SIGMA_SCRAPER_OFFLINE=1 SIGMA_TV_MCP_URL='' timeout 240s xvfb-run -a ./AppRun
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: SIGMA-Ubuntu-x64
+          path: |
+            release/*.deb
+            release/*.AppImage
+            release/SHA256SUMS
+          retention-days: 30
+      - name: Expose actionable failure details in check annotations
+        if: failure()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          logs = [Path('build/desktop-build.log')]
+          logs += sorted(Path('test-results').rglob('renderer-state.txt'))
+          logs += sorted(Path('test-results').rglob('*.log'))
+          for log in logs[:12]:
+              if not log.exists():
+                  continue
+              lines = log.read_text(errors='replace').splitlines()[-50:]
+              tail = '\n'.join(line[:1000] for line in lines)[-11000:]
+              title = str(log).replace('%', '%25').replace(':', '_')
+              print('::notice title=Desktop diagnostic ' + title + '::' + tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: desktop-build-diagnostics
+          path: |
+            build/desktop-build.log
+            build/pyinstaller/**/warn-*.txt
+            ~/.config/SIGMA/runtime/data/logs/
+            test-results/

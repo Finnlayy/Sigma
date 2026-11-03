@@ -137,6 +137,38 @@ export default function QueueMatrixPanel({
     document.body.removeChild(link);
   };
 
+  // Hooks must run once per component render, including loading and dual views.
+  const filterTrades = (matrix: QueueMatrixData | null) => {
+    const escapedQuery = tradeSearch
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const searchRegex = new RegExp(escapedQuery, "i");
+    return (matrix?.allTimeTrades ?? []).filter((t) => {
+      const matchesSearch =
+        tradeSearch === "" ||
+        searchRegex.test(t.pair) ||
+        searchRegex.test(t.strategyName) ||
+        searchRegex.test(t.id);
+
+      if (!matchesSearch) return false;
+
+      if (tradeTypeFilter === "buy") return t.type === "buy";
+      if (tradeTypeFilter === "sell") return t.type === "sell";
+      if (tradeTypeFilter === "wins") return t.pnl !== undefined && t.pnl > 0;
+      if (tradeTypeFilter === "losses")
+        return t.pnl !== undefined && t.pnl <= 0;
+      return true;
+    });
+  };
+  const filteredPaperTrades = useMemo(
+    () => filterTrades(effectivePaperMatrix),
+    [effectivePaperMatrix?.allTimeTrades, tradeSearch, tradeTypeFilter],
+  );
+  const filteredLiveTrades = useMemo(
+    () => filterTrades(effectiveLiveMatrix),
+    [effectiveLiveMatrix?.allTimeTrades, tradeSearch, tradeTypeFilter],
+  );
+
   const renderQueueMatrixContent = (
     matrix: QueueMatrixData | null,
     queueType: "paper" | "live",
@@ -153,31 +185,7 @@ export default function QueueMatrixPanel({
     const isProfit = matrix.totalPnL >= 0;
     const isPaper = queueType === "paper";
 
-    // Filter all time trades
-    // Bolt Optimization: Use case-insensitive RegExp test to prevent O(N) redundant .toLowerCase() and .includes() string allocations on every property inside the filter loop.
-    // Also, escape regex characters from user input to prevent SyntaxError on special characters.
-    const filteredTrades = useMemo(() => {
-      const escapedQuery = tradeSearch
-        .trim()
-        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const searchRegex = new RegExp(escapedQuery, "i");
-      return matrix.allTimeTrades.filter((t) => {
-        const matchesSearch =
-          tradeSearch === "" ||
-          searchRegex.test(t.pair) ||
-          searchRegex.test(t.strategyName) ||
-          searchRegex.test(t.id);
-
-        if (!matchesSearch) return false;
-
-        if (tradeTypeFilter === "buy") return t.type === "buy";
-        if (tradeTypeFilter === "sell") return t.type === "sell";
-        if (tradeTypeFilter === "wins") return t.pnl !== undefined && t.pnl > 0;
-        if (tradeTypeFilter === "losses")
-          return t.pnl !== undefined && t.pnl <= 0;
-        return true;
-      });
-    }, [matrix.allTimeTrades, tradeSearch, tradeTypeFilter]);
+    const filteredTrades = queueType === "paper" ? filteredPaperTrades : filteredLiveTrades;
 
     const PIE_COLORS = [
       "bg-emerald-500",

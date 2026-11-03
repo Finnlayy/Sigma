@@ -132,6 +132,10 @@ class TvChromeLauncher:
             except queue.Empty:
                 self._persist_state()
                 continue
+            if cmd == "stop":
+                self._persist_state()
+                self._close_playwright()
+                return
             if cmd == "open":
                 try:
                     self._ensure_open(url)
@@ -297,3 +301,10 @@ def open_tradingview_login(
         out["live_trading"] = False
         return out
     return get_tv_chrome_launcher(config).open(url)
+
+
+def close_tv_chrome() -> None:
+    """Close the login browser on its owning thread before desktop shutdown."""
+    if _launcher is not None and _launcher._thread is not None:
+        _launcher._q.put(("stop", ""))
+        _launcher._thread.join(timeout=5.0)

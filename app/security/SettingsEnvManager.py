@@ -10,6 +10,8 @@ Loopback (127.0.0.1) darf ohne Token schreiben — lokaler Operator.
 """
 from __future__ import annotations
 
+import json
+import tempfile
 import logging
 import os
 import re
@@ -98,7 +100,7 @@ SETTING_SPECS: Dict[str, Dict[str, Any]] = {
         "hint": "Fee-Hurdle-Multiplikator, z. B. 2.5. Bereich: 0–50.",
     },
     "ALPHA_MARKET_SOURCE": {
-        "kind": "enum", "allowed": ["synthetic", "ccxt_ws"],
+        "kind": "enum", "allowed": ["synthetic", "ccxt_ws", "tv_scraper"],
         "format": "synthetic | ccxt_ws",
         "hint": "Nur diese Werte: synthetic (Sandbox-Feed) oder ccxt_ws (Live-Stream).",
     },
@@ -118,7 +120,7 @@ SETTING_SPECS: Dict[str, Dict[str, Any]] = {
         "hint": "0 = Paper, 1 = Live. Keine anderen Werte (nicht true/yes).",
     },
     "SIGMA_MARKET_SOURCE": {
-        "kind": "enum", "allowed": ["synthetic", "ccxt_ws"],
+        "kind": "enum", "allowed": ["synthetic", "ccxt_ws", "tv_scraper"],
         "format": "synthetic | ccxt_ws",
         "hint": "Nur diese Werte: synthetic oder ccxt_ws.",
     },
@@ -203,6 +205,8 @@ def _as_public_spec(key: str) -> Dict[str, Any]:
 
 
 def validate_setting(key: str, value: str) -> None:
+    if any(char in str(value) for char in ("\n", "\r", "\0")):
+        raise SettingValidationError("Settings must be a single line")
     raw = "" if value is None else str(value).strip()
     spec = spec_for(key)
     hint = spec.get("hint") or f"Ungültiger Wert für {key}."
@@ -370,10 +374,17 @@ class SettingsEnvManager:
     def update(self, key: str, value: str) -> Dict[str, Any]:
         if key not in WRITABLE:
             raise ValueError(f"Key '{key}' ist nicht für die UI freigegeben.")
+        if os.environ.get("SIGMA_DESKTOP") == "1":
+            if key == "SIGMA_LIVE_TRADING" and str(value).strip() != "0":
+                raise ValueError("Desktop build is paper-only")
+            if key in ("SIGMA_MARKET_SOURCE", "ALPHA_MARKET_SOURCE") and value != "tv_scraper":
+                raise ValueError("Desktop requires tv_scraper; synthetic/unfinished feeds are disabled")
+            if key == "SIGMA_TV_MCP_URL" and value.strip().lower() in ("fake", "mock", "test://fake"):
+                raise ValueError("Desktop requires a real TradingView MCP URL")
         validate_setting(key, value)
         value = _canonicalize(key, value)
-        os.environ[key] = str(value)
         self._write_env_file(key, str(value))
+        os.environ[key] = str(value)
         self.config.reload_from_env()
         if _is_sensitive(key):
             logger.info("Hot-Reload: %s → [redacted]", key)
@@ -384,13 +395,16 @@ class SettingsEnvManager:
     def delete(self, key: str) -> Dict[str, Any]:
         if key not in WRITABLE:
             raise ValueError(f"Key '{key}' ist nicht für die UI freigegeben.")
-        os.environ.pop(key, None)
         self._write_env_file(key, None)
+        os.environ.pop(key, None)
         self.config.reload_from_env()
         return {"key": key, "applied": True, "hotReloaded": True}
 
     def _write_env_file(self, key: str, value: Optional[str]) -> None:
         try:
+            encoded = value
+            if value is not None and not re.fullmatch(r"[A-Za-z0-9._:/@+\-=]*", value):
+                encoded = json.dumps(value, ensure_ascii=False)
             lines: List[str] = []
             if os.path.exists(self.env_file):
                 with open(self.env_file, "r", encoding="utf-8") as f:
@@ -398,12 +412,25 @@ class SettingsEnvManager:
             found = False
             for i, line in enumerate(lines):
                 if line.strip().startswith(f"{key}="):
-                    lines[i] = f"{key}={value}" if value is not None else f"# {key}=<deleted>"
+                    lines[i] = f"{key}={encoded}" if value is not None else f"# {key}=<deleted>"
                     found = True
                     break
             if not found:
-                lines.append(f"{key}={value}" if value is not None else f"# {key}=<deleted>")
-            with open(self.env_file, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
-        except Exception as exc:
+                lines.append(f"{key}={encoded}" if value is not None else f"# {key}=<deleted>")
+            directory = os.path.dirname(os.path.abspath(self.env_file))
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                                 prefix=".sigma-env-", delete=False) as f:
+                    temporary = f.name
+                    os.chmod(temporary, 0o600)
+                    f.write("\n".join(lines) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temporary, self.env_file)
+            finally:
+                if temporary is not None and os.path.exists(temporary):
+                    os.unlink(temporary)
+        except OSError as exc:
             logger.warning("env file write failed: %s", exc)
+            raise ValueError("Configuration could not be saved; no runtime change was applied") from exc

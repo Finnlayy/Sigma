@@ -54,6 +54,9 @@ class TvMcpBacktest:
         client = TradingViewMCPClient.from_env(url, timeout_s=timeout)
         return cls(client, concurrency=concurrency)
 
+    def close(self) -> None:
+        self._pool.shutdown(wait=False, cancel_futures=True)
+
     def status(self) -> Dict[str, Any]:
         return {
             "engine": "tradingview-mcp-csv",

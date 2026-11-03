@@ -106,6 +106,9 @@ class TradingViewMCPClient:
     @classmethod
     def from_env(cls, url: str, timeout_s: float = 120.0) -> "TradingViewMCPClient":
         if url.strip().lower() in ("fake", "mock", "test://fake"):
+            import os
+            if os.environ.get("SIGMA_DESKTOP") == "1":
+                raise TvMcpError("Desktop requires a real TradingView MCP URL; simulation is disabled")
             return cls(FakeTvMcpTransport())
         return cls(HttpJsonRpcTransport(url, timeout_s=timeout_s))
 

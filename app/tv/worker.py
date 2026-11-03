@@ -158,8 +158,9 @@ class TvJobQueue:
         job.progress = 0.05
         self._persist(job)
         own_driver = driver is None
-        drv = driver or self._driver_factory()
+        drv = driver
         try:
+            drv = driver or self._driver_factory()
             if job.kind == JOB_KIND_PULL_PARAMS:
                 job.result = self._do_pull_params(drv, job)
             elif job.kind == JOB_KIND_BACKTEST:

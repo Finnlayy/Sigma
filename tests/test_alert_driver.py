@@ -131,3 +131,25 @@ def test_worker_alert_sync_runs_driver(tmp_path):
 def test_alert_driver_from_tester_prefers_existing_upsert():
     fake = FakeStrategyTesterDriver()
     assert alert_driver_from_tester(fake) is fake
+
+
+def test_serialized_alert_driver_preserves_playwright_thread_ownership():
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from app.tv.alert_driver import SerializedAlertDriver
+    owners = []
+
+    class Driver:
+        def enable_alert(self, alert_id):
+            owners.append(threading.get_ident())
+            return {'ok': True, 'tv_alert_id': alert_id}
+
+    driver = SerializedAlertDriver(factory=Driver)
+    try:
+        with ThreadPoolExecutor(max_workers=3) as callers:
+            results = list(callers.map(driver.enable_alert, ['one', 'two', 'three']))
+        assert all(result['ok'] for result in results)
+        assert len(set(owners)) == 1
+        assert owners[0] != threading.get_ident()
+    finally:
+        driver.close()

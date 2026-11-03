@@ -124,8 +124,8 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
     selectedStrategy ||
     strategies[0];
 
-  // Run Backtest Simulation
-  const handleRunBacktest = async () => {
+  // Existing TradingView MCP / CSV seam
+  const handleRunBacktest = async (resultCsv?: string) => {
     if (!currentStrategy) return;
     setIsLoading(true);
     setAiReport(null);
@@ -150,6 +150,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
           customParameters: currentStrategy.parameters || {},
           customCode: currentStrategy.code || "",
           pineStrategyId: currentStrategy.id,
+          resultCsv,
         }),
       });
 
@@ -348,9 +349,19 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
               </button>
             )}
 
+            <label className="cursor-pointer rounded border border-zinc-700 px-3 py-2 text-xs font-mono">
+              IMPORT TV RESULT CSV
+              <input aria-label="Import TradingView result CSV" className="sr-only" type="file" accept=".csv,text/csv" disabled={isLoading} onChange={async event => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                if (file.size > 10 * 1024 * 1024) { setErrorMsg("CSV must be 10 MB or smaller"); return; }
+                await handleRunBacktest(await file.text());
+                event.target.value = "";
+              }} />
+            </label>
             <button
               id="run-backtest-btn"
-              onClick={handleRunBacktest}
+              onClick={() => void handleRunBacktest()}
               disabled={isLoading}
               className={`px-4 py-2 rounded font-mono font-bold text-xs flex items-center space-x-2 transition-colors shadow-md ${
                 isLoading
@@ -579,7 +590,7 @@ export const BacktestingPanel: React.FC<BacktestingPanelProps> = ({
             </p>
           </div>
           <button
-            onClick={handleRunBacktest}
+            onClick={() => void handleRunBacktest()}
             disabled={isLoading}
             className="inline-flex items-center space-x-2 px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-zinc-950 font-mono font-bold text-xs transition-colors shadow"
           >

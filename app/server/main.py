@@ -20,7 +20,7 @@ import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -268,6 +268,7 @@ class AppState:
         self.live_kraken_sync_ts: Optional[float] = None
         self.live_kraken_sync_error: Optional[str] = None
         self._tasks: List[asyncio.Task] = []
+        self._signal_tasks: set[asyncio.Task] = set()
         self._scheduler_work: Optional[asyncio.Task] = None
         self._last_eod_day: Optional[str] = None
 
@@ -329,6 +330,10 @@ class AppState:
         except Exception as exc:
             logger.error("initial contagion refresh failed; entries stay blocked: %s", exc)
 
+        if os.environ.get("SIGMA_DESKTOP") == "1":
+            from app.tv.worker import get_tv_queue
+            get_tv_queue(cfg).start()
+
         self._seed_strategies()
         await self._register_m8_instances()
         self.m8.store = self.store
@@ -356,6 +361,25 @@ class AppState:
             self.tv_backtest = None
 
     async def shutdown(self) -> None:
+        if self.ingestor:
+            await self.ingestor.stop()
+        import os
+        if os.environ.get("SIGMA_DESKTOP") == "1":
+            from app.tv.worker import get_tv_queue
+            from app.tv.chrome_login import close_tv_chrome
+            await asyncio.to_thread(get_tv_queue(self.config).stop, 10.0)
+            await asyncio.to_thread(close_tv_chrome)
+            from app.tv.alert_provisioner import get_alert_provisioner
+            driver = get_alert_provisioner().driver
+            if callable(getattr(driver, "close", None)):
+                await asyncio.to_thread(driver.close)
+            if self.tv_backtest:
+                self.tv_backtest.close()
+                set_adapter(None)
+        for task in list(self._signal_tasks):
+            task.cancel()
+        if self._signal_tasks:
+            await asyncio.gather(*self._signal_tasks, return_exceptions=True)
         for t in self._tasks:
             try:
                 if not t.done():
@@ -415,6 +439,7 @@ class AppState:
             except Exception:
                 pass
             self.store = None
+        self._tasks.clear()
 
     def _compose_l4_runtime(self) -> None:
         """Single composition root shared by API routes, scheduler and Loop A."""
@@ -457,7 +482,11 @@ class AppState:
         session_path = cfg.tv_storage_state_path or bp.PATH_TV_STORAGE_STATE
         alert_driver = None
         if os.path.exists(session_path) and not os.environ.get("PYTEST_CURRENT_TEST"):
-            alert_driver = PlaywrightAlertDriver()
+            if os.environ.get("SIGMA_DESKTOP") == "1":
+                from app.tv.alert_driver import SerializedAlertDriver
+                alert_driver = SerializedAlertDriver()
+            else:
+                alert_driver = PlaywrightAlertDriver()
         get_alert_provisioner(driver=alert_driver)
         self.safety = SafetyGuard(cfg, redis_client=self.redis, store=self.store)
         set_safety_guard(self.safety)
@@ -726,7 +755,9 @@ class AppState:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self._evaluate_symbol(symbol, candle))
+        task = loop.create_task(self._evaluate_symbol(symbol, candle))
+        self._signal_tasks.add(task)
+        task.add_done_callback(self._signal_tasks.discard)
 
     async def _evaluate_symbol(self, symbol: str, candle: Dict[str, Any]) -> None:
         cfg = self.config
@@ -1046,9 +1077,11 @@ def _portfolio_value(state: AppState, balances: Dict[str, float]) -> float:
 async def _lifespan(_app: FastAPI):
     await state.startup()
     _app.state.sigma = state
-    yield
-    await state.shutdown()
-    _app.state.sigma = None
+    try:
+        yield
+    finally:
+        await state.shutdown()
+        _app.state.sigma = None
 
 
 app = FastAPI(title="Projekt:Sigma — M8 Execution API",
@@ -1073,7 +1106,8 @@ async def sigma_health():
 
     kill = _os.path.exists(state.config.kill_switch_file)
     paused = _os.path.exists(state.config.pause_signal_file)
-    tv_worker_ok = _os.path.exists(state.config.tv_jobs_dir)
+    from app.tv.worker import get_tv_queue
+    tv_worker_ok = get_tv_queue(state.config).snapshot()["running"]
 
     # Loop C: echter Ping gegen das Sidecar (:8001), Ergebnis 5 s gecacht.
     scraper: dict = {"ok": False, "degraded": True}
@@ -1178,6 +1212,8 @@ class ToggleModeBody(BaseModel):
 
 @app.post("/api/kraken/toggle-mode")
 async def kraken_toggle_mode(body: ToggleModeBody):
+    if os.environ.get("SIGMA_DESKTOP") == "1" and not body.paperTrading:
+        raise HTTPException(403, "Desktop build is paper-only")
     state.is_paper_trading = bool(body.paperTrading)
     state.bus.log("info",
                   f"Modus → {'PAPER (L2)' if state.is_paper_trading else 'LIVE (L4)'}",
@@ -1802,7 +1838,9 @@ async def pnl_history(strategy_id: str):
 
 
 @app.get("/api/pnl/daily/{endpoint_id}")
-async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
+async def pnl_daily(endpoint_id: str, days: int = Query(90, ge=1, le=3660), strategies: str = "",
+                    year: Optional[int] = Query(None, ge=1970, le=2100),
+                    month: Optional[int] = Query(None, ge=1, le=12)):
     """DailyPnLHeatmapData — pro Strategie oder combined_all/paper/live/custom_multi."""
     st = state
     strategies_all = st.store.list_strategies()
@@ -1845,18 +1883,27 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
         d["losses"] += 1 if pnl <= 0 else 0
         d["vol"] += float(t.get("notional_usd") or 0.0)
 
-    today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+    if (year is None) != (month is None):
+        raise HTTPException(422, "year and month must be supplied together")
+    today_date = _dt.datetime.now(_dt.timezone.utc).date()
+    today = today_date.isoformat()
+    if year is not None:
+        import calendar
+        first = _dt.date(year, month, 1)
+        dates = [first + _dt.timedelta(days=i) for i in range(calendar.monthrange(year, month)[1])]
+    else:
+        dates = [today_date - _dt.timedelta(days=i) for i in range(days - 1, -1, -1)]
+    tasks_healthy = bool(st._tasks) and all(not task.done() for task in st._tasks)
     days_out = []
-    for i in range(int(days) - 1, -1, -1):
-        d = (today and _dt.datetime.strptime(today, "%Y-%m-%d")
-             - _dt.timedelta(days=int(days) - 1 - i)).strftime("%Y-%m-%d")
+    for date in dates:
+        d = date.isoformat()
         rec = by_day.get(d, {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0,
                              "vol": 0.0, "realized": 0.0})
         dt = _dt.datetime.strptime(d, "%Y-%m-%d")
         days_out.append({
             "date": d,
             "formattedDate": dt.strftime("%b %d, %Y"),
-            "dayOfWeek": dt.weekday(),
+            "dayOfWeek": (dt.weekday() + 1) % 7,
             "dayLabel": dt.strftime("%a"),
             "dayOfMonth": dt.day,
             "monthLabel": dt.strftime("%b"),
@@ -1869,18 +1916,19 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
             "winRate": round(rec["wins"] / rec["trades"] * 100.0, 1) if rec["trades"] else 0.0,
             "volumeUSD": round(rec["vol"], 2),
             "isToday": d == today,
+            "isFuture": date > today_date,
             "machineState": {
                 "automationLevel": autonomy.get("automationLevel"),
                 "executionMode": autonomy.get("activeLedgerMode"),
                 "engineStatus": "active" if st.telemetry.system.can_execute_orders else "halted",
                 "activeWorkersCount": sum(1 for s in strategies_all if s["status"] == "active"),
-                "daemonHealth": "HEALTHY",
+                "daemonHealth": "HEALTHY" if tasks_healthy else "DEGRADED (Core task unavailable)",
             },
         })
     active_days = [d for d in days_out if d["tradesCount"] > 0 or d["pnl"] != 0]
     green = sum(1 for d in active_days if d["pnl"] > 0)
     red = sum(1 for d in active_days if d["pnl"] < 0)
-    total30 = sum(d["pnl"] for d in days_out[-30:])
+    total30 = sum(d["pnl"] for d in (days_out if year is not None else days_out[-30:]))
     wins_pnl = sum(d["pnl"] for d in days_out if d["pnl"] > 0)
     loss_pnl = abs(sum(d["pnl"] for d in days_out if d["pnl"] < 0))
     return {
@@ -1889,6 +1937,10 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
         "assetPair": pair,
         "days": days_out,
         "total30DPnL": round(total30, 2),
+        "totalMonthPnL": round(sum(d["pnl"] for d in days_out), 2),
+        "year": year or today_date.year,
+        "month": month or today_date.month,
+        "monthLabel": dates[0].strftime("%b"),
         "greenDays": green,
         "redDays": red,
         "flatDays": max(0, len(active_days) - green - red),
@@ -2388,7 +2440,7 @@ class BacktestRunBody(BaseModel):
 async def backtest_run(body: BacktestRunBody):
     """Run backtest via TradingView MCP CSV seam (or import result CSV directly)."""
     adapter = state.tv_backtest
-    if adapter is None:
+    if adapter is None and not (body.resultCsv or body.resultCsvPath):
         raise HTTPException(503, "TradingView MCP adapter unavailable (set SIGMA_TV_MCP_URL)")
     pair = body.assetPair or "BTC/USD"
     s = state.store.get_strategy(body.strategyId or "") if body.strategyId else None
@@ -2412,6 +2464,13 @@ async def backtest_run(body: BacktestRunBody):
         "resultCsvPath": body.resultCsvPath,
         "performanceCsv": body.performanceCsv,
     }
+    if body.resultCsv or body.resultCsvPath:
+        from app.backtest.tv_csv import result_csv_to_backtest_result
+        try:
+            return await asyncio.to_thread(result_csv_to_backtest_result,
+                body.resultCsv or body.resultCsvPath, config=cfg, performance_csv=body.performanceCsv)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(400, str(exc))
     # Window candles only for metadata / GA compatibility (not local evaluation)
     count = int(body.candleCount or 500)
     candles = state.store.ohlcv(pair, 60, limit=max(count * (body.interval or 15) + 120, 300))

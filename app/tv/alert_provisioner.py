@@ -180,6 +180,10 @@ class AlertProvisioner:
             except Exception as exc:
                 logger.error("TV alert upsert failed for %s: %s", strategy_id, exc)
                 rec.last_reason = f"upsert_failed: {exc}"
+                if os.environ.get("SIGMA_DESKTOP") == "1":
+                    rec.enabled = False
+                    self._save()
+                    raise
         if enable:
             return self.enable(strategy_id, reason="upsert")
         self._save()
@@ -187,10 +191,13 @@ class AlertProvisioner:
 
     def enable(self, strategy_id: str, reason: str = "ui_start") -> Dict[str, Any]:
         rec = self._require(strategy_id)
+        if os.environ.get("SIGMA_DESKTOP") == "1":
+            self._drive("enable_alert", rec)
         rec.enabled = True
         rec.last_reason = reason
         rec.updated_at = time.time()
-        self._drive("enable_alert", rec)
+        if os.environ.get("SIGMA_DESKTOP") != "1":
+            self._drive("enable_alert", rec)
         self._save()
         logger.info("alert %s ENABLED (%s)", rec.name, reason)
         return rec.to_dict()
@@ -259,12 +266,17 @@ class AlertProvisioner:
 
     def _drive(self, method: str, rec: AlertRecord) -> None:
         if self.driver is None or not hasattr(self.driver, method):
+            if os.environ.get("SIGMA_DESKTOP") == "1":
+                from app.tv.strategy_tester_driver import DriverError
+                raise DriverError("TradingView alert driver unavailable; sign in and restart services", "TV_SESSION_MISSING")
             return
         try:
             getattr(self.driver, method)(rec.tv_alert_id or rec.name)
         except Exception as exc:
             logger.error("TV %s failed for %s: %s", method, rec.name, exc)
             rec.last_reason = f"{method}_failed: {exc}"
+            if os.environ.get("SIGMA_DESKTOP") == "1":
+                raise
 
     def snapshot(self) -> Dict[str, Any]:
         return {

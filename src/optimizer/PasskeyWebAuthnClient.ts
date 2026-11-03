@@ -9,6 +9,17 @@ export class PasskeyWebAuthnClient {
     userEmail: string,
   ): Promise<string | null> {
     try {
+      const desktop = await fetch("/api/desktop/status", { signal: AbortSignal.timeout(3000) });
+      if (desktop.ok && (await desktop.json()).desktop === true) {
+        if (!window.confirm("Authorize this SIGMA paper-operator action using your private local desktop session? This is not passkey or biometric verification.")) return null;
+        const authorized = await fetch("/api/desktop/operator/authorize", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmation: "AUTHORIZE PAPER OPERATOR" }),
+        });
+        if (!authorized.ok) return null;
+        const result = await authorized.json();
+        return result.mode === "desktop-session" ? result.settingsToken : null;
+      }
       // 1. Challenge vom Backend abrufen
       const res = await fetch(
         `/api/v1/auth/passkey/challenge?email=${encodeURIComponent(userEmail)}`,

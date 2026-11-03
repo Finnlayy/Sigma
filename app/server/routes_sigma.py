@@ -686,6 +686,51 @@ async def switch_alert(strategy_id: str, action: str):
     raise HTTPException(400, "action must be enable|disable")
 
 
+@router.get("/api/v1/alerts/driver")
+async def alert_driver_status():
+    cfg = load_config()
+    driver = get_alert_provisioner().driver
+    return {"session_present": os.path.exists(cfg.tv_storage_state_path),
+            "driver_attached": driver is not None,
+            "driver": type(driver).__name__ if driver is not None else None,
+            "connection_verified": False,
+            "verification": "Remote alert operations are verified per operation, not by session-file presence"}
+
+
+@router.post("/api/v1/alerts/driver/attach")
+async def attach_alert_driver(request: Request, x_sigma_settings_token: Optional[str] = Header(None)):
+    _require_operator(request, x_sigma_settings_token)
+    if not os.path.exists(load_config().tv_storage_state_path):
+        raise HTTPException(503, {"code": "TV_SESSION_MISSING", "reason": "Sign in to TradingView first"})
+    from app.tv.alert_driver import SerializedAlertDriver
+    provisioner = get_alert_provisioner()
+    previous = provisioner.driver
+    if callable(getattr(previous, "close", None)):
+        await asyncio.to_thread(previous.close)
+    provisioner.driver = SerializedAlertDriver()
+    return await alert_driver_status()
+
+
+@router.post("/api/v1/alerts/sync-m8")
+async def sync_alert_m8(request: Request, x_sigma_settings_token: Optional[str] = Header(None)):
+    _require_operator(request, x_sigma_settings_token)
+    from app.server.main import state
+    provisioner = get_alert_provisioner()
+    if provisioner.driver is None:
+        raise HTTPException(503, {"code": "TV_DRIVER_UNAVAILABLE"})
+    results = []
+    try:
+        snapshots = await state.m8.scan_states()
+        for record in provisioner.list():
+            strategy_id = record["strategy_id"]
+            snapshot = snapshots.get(strategy_id)
+            name = snapshot.get("status", "QUARANTINED") if snapshot else "QUARANTINED"
+            results.append(await asyncio.to_thread(provisioner.sync_with_m8, strategy_id, name))
+    except Exception as exc:
+        raise HTTPException(502, {"code": "TV_ALERT_SYNC_FAILED", "reason": str(exc)}) from exc
+    return {"ok": True, "alerts": results}
+
+
 @router.get("/api/v1/alerts")
 async def alerts_overview():
     return get_alert_provisioner().snapshot()
@@ -1074,6 +1119,7 @@ async def llm_pine_patch(body: Dict[str, Any]):
 
 
 @router.websocket(bp.MARKET_FEED_WS_ROUTE)
+@router.websocket("/ws/market-feed/{symbol:path}")
 async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
     """LWC guide visualization plane - streams candles + live executions.
 
@@ -1091,7 +1137,7 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
     candle_channel = f"market:candles:{symbol}"
     exec_channel = "alpha:executions:live"
     try:
-        candles, meta = client.fetch_ohlc_with_meta(symbol, interval, 300)
+        candles, meta = await asyncio.to_thread(client.fetch_ohlc_with_meta, symbol, interval, 300)
         await websocket.send_text(_json.dumps({
             "type": "init",
             "symbol": symbol,
@@ -1107,10 +1153,19 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
             "channels": [candle_channel, exec_channel],
         }))
 
+    disconnected = asyncio.Event()
+    async def watch_disconnect():
+        try:
+            while True:
+                if (await websocket.receive())["type"] == "websocket.disconnect":
+                    return
+        finally:
+            disconnected.set()
+    watcher = asyncio.create_task(watch_disconnect())
     pubsub = None
     try:
         from app.core.redis_client import get_redis
-        redis = await get_redis()
+        redis = await get_redis(load_config())
         if redis is not None:
             pubsub = redis.pubsub()
             await pubsub.subscribe(candle_channel, exec_channel)
@@ -1118,7 +1173,7 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
         pubsub = None
 
     try:
-        while True:
+        while not disconnected.is_set():
             if pubsub is not None:
                 try:
                     msg = await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0), timeout=2.0)
@@ -1147,7 +1202,7 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
             else:
                 await asyncio.sleep(5.0)
                 try:
-                    candles, meta = client.fetch_ohlc_with_meta(symbol, interval, 100)
+                    candles, meta = await asyncio.to_thread(client.fetch_ohlc_with_meta, symbol, interval, 100)
                     await websocket.send_text(_json.dumps({
                         "type": "candles",
                         "symbol": symbol,
@@ -1164,6 +1219,8 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
         except Exception:
             pass
     finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
         if pubsub is not None:
             try:
                 await pubsub.unsubscribe(candle_channel, exec_channel)

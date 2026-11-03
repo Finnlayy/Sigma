@@ -79,7 +79,7 @@ export async function safeMutation<T>(
     if (contentType && contentType.includes("application/json")) {
       const parsed = await res.json();
       if (!res.ok) {
-        return { ok: false, error: parsed.error || `HTTP ${res.status}` };
+        return { ok: false, error: parsed.error || (typeof parsed.detail === "string" ? parsed.detail : parsed.detail?.detail) || `HTTP ${res.status}` };
       }
       return { ok: true, data: parsed as T };
     }

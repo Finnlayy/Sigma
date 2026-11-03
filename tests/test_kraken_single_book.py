@@ -531,6 +531,11 @@ def test_api_positions_pro(monkeypatch):
         lambda *a, **k: type("S", (), {"ok": False, "funding_rate": None})(),
     )
 
+    # Exercise positions, not the host-memory emergency guard.
+    monkeypatch.setattr("app.core.memory_watchdog.read_memory_snapshot", lambda: {
+        "percent": 20.0, "source": "test", "rss_bytes": 0,
+        "budget_bytes": 4294967296, "cgroup": None, "host_percent": 20.0, "rss_percent": 20.0,
+    })
     with TestClient(app) as client:
         res = client.get("/api/kraken/positions/pro")
         assert res.status_code == 200
