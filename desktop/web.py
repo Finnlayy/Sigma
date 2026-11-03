@@ -26,8 +26,10 @@ class DesktopSession:
     async def __call__(self, scope, receive, send):
         if scope["type"] in ("http", "websocket"):
             headers = dict(scope.get("headers", []))
-            supplied = headers.get(b"x-sigma-desktop", b"").decode("utf-8", errors="replace")
-            if not hmac.compare_digest(supplied, self.token):
+            supplied = headers.get(b"x-sigma-desktop", b"")
+            origin = headers.get(b"origin")
+            expected_origin = b"http://" + headers.get(b"host", b"")
+            if not hmac.compare_digest(supplied, self.token.encode()) or (origin is not None and origin != expected_origin):
                 if scope["type"] == "websocket":
                     await send({"type": "websocket.close", "code": 1008})
                 else:
@@ -35,7 +37,17 @@ class DesktopSession:
                                 "headers": [(b"content-type", b"application/json")]})
                     await send({"type": "http.response.body", "body": b'{"detail":"Desktop session required"}'})
                 return
-        await self.app(scope, receive, send)
+        async def secured_send(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend([
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"referrer-policy", b"no-referrer"),
+                    (b"content-security-policy", b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:*; frame-src http://127.0.0.1:* http://localhost:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"),
+                ])
+                message = {**message, "headers": headers}
+            await send(message)
+        await self.app(scope, receive, secured_send)
 
 
 def configure_desktop(app, assets: Path) -> None:

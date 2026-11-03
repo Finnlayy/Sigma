@@ -26,7 +26,7 @@ All existing strategy/math/backtest/paper/risk/orchestration modules remain in p
 
 ## Install and launch
 
-Download `SIGMA-1.0.0-amd64.deb` (the filename may use `x64`, depending on builder architecture naming) from the **Ubuntu desktop installers** workflow's `SIGMA-Ubuntu-x64` artifact. Check `SHA256SUMS` before installation.
+Download `SIGMA-1.0.0-x64.deb` from the **Ubuntu desktop installers** workflow’s `SIGMA-Ubuntu-x64` artifact. Both this `.deb` and the matching AppImage have been built and launched by [the first successful native run](https://github.com/Finnlayy/Sigma/actions/runs/41637364967). For the latest revision, open the successful installer check on [PR #228](https://github.com/Finnlayy/Sigma/pull/228), then download its artifact (GitHub sign-in may be required). Extract the artifact ZIP and check `SHA256SUMS` before installation.
 
 ```sh
 sudo apt install ./SIGMA-1.0.0-*.deb
@@ -40,7 +40,7 @@ chmod +x SIGMA-1.0.0-*.AppImage
 ./SIGMA-1.0.0-*.AppImage
 ```
 
-Ubuntu 22.04+ x86-64 with a graphical desktop is the build baseline. On installations without FUSE, use `--appimage-extract-and-run`. AppImage does not replace the distribution's GTK/NSS/audio/graphics libraries. The `.deb` declares runtime dependencies.
+Ubuntu 22.04 x86-64 with a graphical desktop is the tested build baseline. Newer Ubuntu releases may require a local AppArmor policy permitting Chromium user namespaces; do not disable the Electron sandbox. On installations without FUSE, use `--appimage-extract-and-run`. AppImage does not replace the distribution's GTK/NSS/audio/graphics libraries. The `.deb` declares runtime dependencies.
 
 The SIGMA menu and tray provide show/hide, logs, configuration, **Start at login** (opt-in XDG autostart), restart services and **Quit SIGMA (stop all services)**. On GNOME, tray icons may require the Ubuntu AppIndicator extension. If a tray cannot be created, closing the window quits instead of hiding an inaccessible window.
 
@@ -83,7 +83,7 @@ Build dependencies: shared-library Python 3.11, Node 22, gcc/make, desktop libra
 
 ## Known external blockers / verification boundary
 
-- This Arena sandbox blocks GitHub release-asset redirects and browser downloads, and its system Python lacks `libpython3.11.so`. Thus **native installer creation and graphical packaged launch cannot be claimed from this sandbox**. The real GitHub Actions job is the delivery path; consult its result rather than assuming a queued build succeeded.
+- This Arena sandbox blocks GitHub release-asset redirects and graphical Electron downloads. Frozen service smoke passed locally after building a compatible shared CPython library; **native installers and graphical packaged workflows were verified on the actual Ubuntu CI runner**, not locally. See the successful run and audit above for evidence.
 - This environment cannot reach Kraken, TradingView, Telegram or download an Ollama model. No user TV session/MCP service was supplied. Authenticated end-to-end TV backtests, external webhooks, exchange fills, Telegram sends and LLM responses require those real services; unit tests are not evidence of live connectivity.
 - External TradingView webhooks require a configured public ingress. The default private desktop API accepts only the Electron session, so blindly pointing a tunnel at it is **not** an enabled webhook connection. Do not expose unrelated settings/control APIs.
 - Existing optional research modules and missing model/regime artifacts fail closed; packaging does not fabricate model weights or promise economic performance.

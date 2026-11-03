@@ -80,6 +80,7 @@ class Supervisor extends EventEmitter {
       SIGMA_DESKTOP: '1', SIGMA_DESKTOP_TOKEN: this.token,
       SIGMA_REDIS_URL: `redis://:${this.token}@127.0.0.1:${redisPort}/0`,
       SIGMA_REDIS_PASSWORD: this.token,
+      SIGMA_SCRAPER_PORT: String(scraperPort),
       SIGMA_TV_SCRAPER_URL: `http://127.0.0.1:${scraperPort}`,
       PATH: `${path.join(this.resources, 'kraken')}${path.delimiter}${process.env.PATH || ''}`,
       PLAYWRIGHT_BROWSERS_PATH: path.join(this.resources, 'browsers'),

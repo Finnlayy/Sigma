@@ -214,7 +214,8 @@ class OmniStreamIngestor:
             except ScraperUnavailable as exc:
                 logger.warning("scraper seed failed for %s: %s", symbol, exc)
                 return 0
-            if meta.get("source") == "synthetic":
+            if meta.get("source") == "synthetic" or (not self.config.allow_synthetic and
+                    (meta.get("source") != "tv_scraper" or meta.get("degraded"))):
                 logger.warning("scraper delivered synthetic data for %s — treated as unavailable",
                                symbol)
                 return 0
@@ -245,7 +246,8 @@ class OmniStreamIngestor:
             from app.tv.scraper_client import ScraperUnavailable, get_scraper_client
 
             candles, meta = get_scraper_client().fetch_ohlc_with_meta(symbol, 1, 2)
-            if candles and meta.get("source") != "synthetic":
+            if candles and meta.get("source") != "synthetic" and (self.config.allow_synthetic or
+                    (meta.get("source") == "tv_scraper" and not meta.get("degraded"))):
                 self.feed_source_effective = "tv_scraper"
                 self._scraper_fail_logged = False
                 last = candles[-1]
@@ -256,9 +258,11 @@ class OmniStreamIngestor:
                 return {"price": last["c"], "ts": now, "volume": last["v"]}
         except Exception as exc:  # noqa: BLE001 - feed must never kill the loop
             if not self._scraper_fail_logged:
-                logger.warning("scraper tick failed (%s) — synthetic fallback active", exc)
+                logger.warning("scraper tick failed (%s); synthetic fallback allowed=%s", exc, self.config.allow_synthetic)
                 self._scraper_fail_logged = True
         self.feed_source_effective = "synthetic" if self.config.allow_synthetic else "unavailable"
+        if not self.config.allow_synthetic:
+            self.prices.pop(symbol, None)
         return self._synthetic_tick(symbol) if self.config.allow_synthetic else None
 
     def _synthetic_tick(self, symbol: str) -> Dict[str, Any]:

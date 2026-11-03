@@ -102,6 +102,11 @@ def main() -> None:
     if args.service == "scraper":
         from app.scraper.main import app
     else:
+        import logging
+        worker_logger = logging.getLogger("app.tv.worker")
+        handler = logging.FileHandler(Path.cwd() / "data/logs/tv_worker.log")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        worker_logger.addHandler(handler)
         from app.server.main import app
         from desktop.web import configure_desktop
         configure_desktop(app, resource_root() / "dist")

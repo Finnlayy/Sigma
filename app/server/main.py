@@ -268,6 +268,7 @@ class AppState:
         self.live_kraken_sync_ts: Optional[float] = None
         self.live_kraken_sync_error: Optional[str] = None
         self._tasks: List[asyncio.Task] = []
+        self._signal_tasks: set[asyncio.Task] = set()
         self._scheduler_work: Optional[asyncio.Task] = None
         self._last_eod_day: Optional[str] = None
 
@@ -360,15 +361,25 @@ class AppState:
             self.tv_backtest = None
 
     async def shutdown(self) -> None:
+        if self.ingestor:
+            await self.ingestor.stop()
         import os
         if os.environ.get("SIGMA_DESKTOP") == "1":
             from app.tv.worker import get_tv_queue
             from app.tv.chrome_login import close_tv_chrome
             await asyncio.to_thread(get_tv_queue(self.config).stop, 10.0)
             await asyncio.to_thread(close_tv_chrome)
+            from app.tv.alert_provisioner import get_alert_provisioner
+            driver = get_alert_provisioner().driver
+            if callable(getattr(driver, "close", None)):
+                await asyncio.to_thread(driver.close)
             if self.tv_backtest:
                 self.tv_backtest.close()
                 set_adapter(None)
+        for task in list(self._signal_tasks):
+            task.cancel()
+        if self._signal_tasks:
+            await asyncio.gather(*self._signal_tasks, return_exceptions=True)
         for t in self._tasks:
             try:
                 if not t.done():
@@ -428,6 +439,7 @@ class AppState:
             except Exception:
                 pass
             self.store = None
+        self._tasks.clear()
 
     def _compose_l4_runtime(self) -> None:
         """Single composition root shared by API routes, scheduler and Loop A."""
@@ -470,7 +482,11 @@ class AppState:
         session_path = cfg.tv_storage_state_path or bp.PATH_TV_STORAGE_STATE
         alert_driver = None
         if os.path.exists(session_path) and not os.environ.get("PYTEST_CURRENT_TEST"):
-            alert_driver = PlaywrightAlertDriver()
+            if os.environ.get("SIGMA_DESKTOP") == "1":
+                from app.tv.alert_driver import SerializedAlertDriver
+                alert_driver = SerializedAlertDriver()
+            else:
+                alert_driver = PlaywrightAlertDriver()
         get_alert_provisioner(driver=alert_driver)
         self.safety = SafetyGuard(cfg, redis_client=self.redis, store=self.store)
         set_safety_guard(self.safety)
@@ -739,7 +755,9 @@ class AppState:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self._evaluate_symbol(symbol, candle))
+        task = loop.create_task(self._evaluate_symbol(symbol, candle))
+        self._signal_tasks.add(task)
+        task.add_done_callback(self._signal_tasks.discard)
 
     async def _evaluate_symbol(self, symbol: str, candle: Dict[str, Any]) -> None:
         cfg = self.config

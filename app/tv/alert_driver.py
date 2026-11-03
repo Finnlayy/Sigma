@@ -134,6 +134,9 @@ class PlaywrightAlertDriver:
         if self.tester is None:
             from app.tv.strategy_tester_driver import PlaywrightStrategyTesterDriver
             self.tester = PlaywrightStrategyTesterDriver()
+        start = getattr(self.tester, "start", None)
+        if callable(start):
+            start()
         return self.tester
 
     def _click(self, category: str, name: str) -> Any:
@@ -174,3 +177,43 @@ def alert_driver_from_tester(tester) -> Any:
     if tester is not None and hasattr(tester, "upsert_alert"):
         return tester
     return PlaywrightAlertDriver(tester=tester)
+
+
+class SerializedAlertDriver:
+    """Keep the existing Playwright driver on one owning thread across API/scheduler calls."""
+
+    def __init__(self, factory=None):
+        from concurrent.futures import ThreadPoolExecutor
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tv-alerts")
+        self._factory = factory or PlaywrightAlertDriver
+        self._driver = None
+
+    def _call(self, method: str, *args, **kwargs):
+        def invoke():
+            if self._driver is None:
+                self._driver = self._factory()
+            return getattr(self._driver, method)(*args, **kwargs)
+        return self._executor.submit(invoke).result()
+
+    def upsert_alert(self, **kwargs):
+        return self._call("upsert_alert", **kwargs)
+
+    def enable_alert(self, alert_id: str):
+        return self._call("enable_alert", alert_id)
+
+    def disable_alert(self, alert_id: str):
+        return self._call("disable_alert", alert_id)
+
+    def delete_alert(self, alert_id: str):
+        return self._call("delete_alert", alert_id)
+
+    def list_alerts(self):
+        return self._call("list_alerts")
+
+    def close(self):
+        def shutdown():
+            tester = getattr(self._driver, "tester", None)
+            if tester is not None:
+                tester.close()
+        self._executor.submit(shutdown).result()
+        self._executor.shutdown(wait=True, cancel_futures=True)

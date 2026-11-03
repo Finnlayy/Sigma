@@ -37,6 +37,8 @@ def test_static_hosting_auth_api_404_and_spa(tmp_path, monkeypatch):
         assert client.get('/').status_code == 403
         headers = {'X-Sigma-Desktop': TOKEN}
         assert client.get('/', headers=headers).text == '<h1>SIGMA</h1>'
+        assert "script-src 'self'" in client.get('/', headers=headers).headers['content-security-policy']
+        assert client.get('/', headers={**headers, 'Origin': 'https://untrusted.example'}).status_code == 403
         assert client.get('/logs', headers=headers).status_code == 200
         assert client.get('/api/real', headers=headers).json() == {'ok': True}
         assert client.get('/api/missing', headers=headers).status_code == 404
@@ -130,3 +132,32 @@ def test_desktop_does_not_claim_remote_alert_enable_without_driver(monkeypatch, 
     with pytest.raises(DriverError, match='unavailable'):
         provisioner.enable('no-session')
     assert provisioner.get('no-session').enabled is False
+
+
+def test_strict_feed_rejects_stale_cache_instead_of_relabeling_it_live(monkeypatch):
+    from app.tv.scraper_client import get_scraper_client
+    cfg = SigmaConfig(allow_synthetic=False, market_source='tv_scraper')
+    ingestor = OmniStreamIngestor(cfg)
+    ingestor.prices['BTC/USD'] = 100
+    candle = {'ts': 1700000000, 'o': 100, 'h': 101, 'l': 99, 'c': 100, 'v': 10}
+    monkeypatch.setattr(get_scraper_client(), 'fetch_ohlc_with_meta',
+                        lambda *_: ([candle], {'source': 'cache_stale', 'degraded': True}))
+    assert ingestor._next_tick('BTC/USD') is None
+    assert ingestor.last_price('BTC/USD') == 0
+    assert ingestor.feed_source_effective == 'unavailable'
+
+
+def test_all_literal_frontend_api_references_have_real_routes():
+    import re
+    from app.server.main import app
+    root = Path(__file__).resolve().parents[1]
+    paths = set(app.openapi()['paths']) | {'/api/desktop/status', '/api/desktop/paper/initialize'}
+    references = set()
+    for file in (root / 'src').rglob('*.ts*'):
+        for match in re.finditer(r'["\x27`](/api/[^"\x27`\s]*)', file.read_text()):
+            path = match.group(1).split('?')[0]
+            if '${' not in path and not path.endswith('/'):
+                references.add(path)
+    missing = [path for path in references if not any(
+        re.fullmatch(re.sub(r'\{[^}]+\}', r'[^/]+', route), path) for route in paths)]
+    assert missing == []

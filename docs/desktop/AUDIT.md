@@ -16,9 +16,11 @@ Fetched all remote heads without switching branches. [Branch inventory](branch-i
 | Separate manual development services | Bundled dependencies, dependency-ordered readiness/supervision/exit |
 | API and TV worker in separate Python queues | Start the existing queue consumer inside Core, where jobs are submitted |
 | Vite only proxies `/api`, market WebSocket is `/ws/...` | Proxy both namespaces; production UI shares the Core origin |
-| Market WebSocket calls `get_redis()` without required config | Pass actual config; HTTP feed operations run off event loop |
+| Market WebSocket uses missing Redis config and rejects encoded `BTC/USD` | Pass actual config; slash-compatible route alias; off-loop HTTP; disconnect cleanup |
+| Unused frontend alert-driver API declarations have no server routes | Wire status/attach/M8 sync to existing provisioner; auth-gated, explicit unverified connection status |
+| Playwright alert calls can move between scheduler/API threads | Serialize the existing real driver on one owning thread; close it during shutdown |
 | Legacy Node preview returns mocked success | Remove mock endpoints, use existing real Vite proxy; don't mount a second ledger |
-| Synthetic data between real scraper polls / when offline | Strict desktop mode emits no fabricated ticks or history |
+| Synthetic or stale-cache data can be relabelled as fresh polls | Strict desktop rejects synthetic/degraded/stale-cache ticks/history and removes unavailable prices |
 | Fake MCP/TV driver default without a session | Reject fake MCP and use real TV driver that fails on missing session |
 | TV driver factory error can kill the queue thread before try/except | Persist a failed job, retain worker liveness |
 | Health treats a jobs directory as a running worker | Report actual queue thread state |
@@ -31,9 +33,11 @@ Fetched all remote heads without switching branches. [Branch inventory](branch-i
 ## Verification so far
 
 - Baseline: 912 passed, 1 skipped, 1 failed (quote-style assertion). Existing TypeScript check and production Vite build pass.
-- Integration: 922 passed, 1 skipped; 4 Node supervisor tests pass; TypeScript and production Vite build pass.
+- Final local regression: 927 passed, 1 skipped; 4 Node supervisor tests pass; TypeScript and production Vite build pass.
 - Real local service smoke: compiled actual Redis, launched actual scraper/Core/queue, checked authenticated API + UI assets, unknown-route 404, live-mode denial, persistent Settings across complete restart, no orphan processes on shutdown. External upstreams intentionally offline, no fabricated connection success.
-- Native local freeze attempt: blocked by missing shared libpython. Electron download attempt: blocked at GitHub asset redirect. CI must supply native verification; no installer is asserted to exist until its artifact is uploaded.
+- Actual frozen local service smoke passed after source-building a CPython shared library matching this sandbox’s static extension layout. Local graphical Electron download remains blocked at GitHub asset redirects.
+- Native Ubuntu CI [41637364967](https://github.com/Finnlayy/Sigma/actions/runs/41637364967) **passed**, producing `.deb`, AppImage and SHA256SUMS in artifact `SIGMA-Ubuntu-x64` (id `13232755343`). That first fully verified build is commit `ec94c93`. Frozen services, real official CLI paper-book initialization, sandboxed packaged Electron, genuine renderer workflows, `.deb` metadata and extracted AppImage launch all passed. Subsequent hardening goes through the same required pipeline; use the latest PR check/artifact for the final revision.
+- Literal frontend route audit: 126 API references, all matched to actual routes (199 bare-Core HTTP paths plus 2 desktop routes). A regression test enforces this static subset; it is not a claim that credential-dependent external workflows have been verified.
 
 The original suite skips the live CLI comparison unless `SIGMA_CLI_LIVE_SMOKE=1`; it is not silently treated as verified. The original suite has one existing skipped test and a Starlette/httpx deprecation warning. Vite retains its original large-bundle warning; code splitting is not required to package existing functionality. `npm audit fix` applied compatible fixes (including the original critical proxy-addr finding). Remaining major-version-only/tooling advisories are not a license to redesign dependencies. Renderer code is compiled; npm runtime dependencies are excluded from the native package.
 
@@ -50,6 +54,7 @@ No installer artifact was published by that failed run.
 The first frozen smoke launcher used the distribution directory rather than its
 executable (EACCES). The source/build-tree override is now explicit; installed
 resources retain the normal `backend/sigma-backend` layout. A local shared-library
-build of CPython enabled further freeze analysis, but its built-in extension layout
-differs from the sandbox Python; Ubuntu's setup-python distribution remains the
-supported native build environment.
+build of CPython initially had a different built-in extension layout. Rebuilding it
+to match this sandbox allowed the **actual frozen service smoke to pass**. Ubuntu's
+setup-python distribution is the supported native build environment and has now
+produced and verified both installers.

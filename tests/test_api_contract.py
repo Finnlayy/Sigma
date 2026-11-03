@@ -808,3 +808,11 @@ def test_import_tv_result_csv_without_a_live_mcp_adapter(client, monkeypatch):
     assert result['summary']['totalTrades'] == 1
     assert result['summary']['totalReturnUSD'] == pytest.approx(9.8)
     assert client.post('/api/backtest/run', json={}).status_code == 503
+
+
+def test_alert_driver_contract_is_real_status_and_mutations_are_gated(client):
+    status = client.get('/api/v1/alerts/driver')
+    assert status.status_code == 200
+    assert status.json()['connection_verified'] is False
+    assert client.post('/api/v1/alerts/driver/attach').status_code == 403
+    assert client.post('/api/v1/alerts/sync-m8').status_code == 403
