@@ -120,3 +120,13 @@ def test_workspace_is_private_persistent_and_does_not_copy_user_data(tmp_path, m
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_desktop_does_not_claim_remote_alert_enable_without_driver(monkeypatch, tmp_path):
+    from app.tv.alert_provisioner import AlertProvisioner
+    monkeypatch.setenv('SIGMA_DESKTOP', '1')
+    provisioner = AlertProvisioner(SigmaConfig(), store_path=str(tmp_path / 'alerts.json'))
+    provisioner.upsert('no-session', 'BTC/USD')
+    with pytest.raises(DriverError, match='unavailable'):
+        provisioner.enable('no-session')
+    assert provisioner.get('no-session').enabled is False

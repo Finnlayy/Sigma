@@ -31,10 +31,18 @@ Fetched all remote heads without switching branches. [Branch inventory](branch-i
 ## Verification so far
 
 - Baseline: 912 passed, 1 skipped, 1 failed (quote-style assertion). Existing TypeScript check and production Vite build pass.
-- Integration: 918 passed, 1 skipped; 4 Node supervisor tests pass; TypeScript and production Vite build pass.
+- Integration: 922 passed, 1 skipped; 4 Node supervisor tests pass; TypeScript and production Vite build pass.
 - Real local service smoke: compiled actual Redis, launched actual scraper/Core/queue, checked authenticated API + UI assets, unknown-route 404, live-mode denial, persistent Settings across complete restart, no orphan processes on shutdown. External upstreams intentionally offline, no fabricated connection success.
 - Native local freeze attempt: blocked by missing shared libpython. Electron download attempt: blocked at GitHub asset redirect. CI must supply native verification; no installer is asserted to exist until its artifact is uploaded.
 
-The original suite has one existing skipped test and a Starlette/httpx deprecation warning. Vite retains its original large-bundle warning; code splitting is not required to package existing functionality. `npm audit fix` applied compatible fixes (including the original critical proxy-addr finding). Remaining major-version-only/tooling advisories are not a license to redesign dependencies. Renderer code is compiled; npm runtime dependencies are excluded from the native package.
+The original suite skips the live CLI comparison unless `SIGMA_CLI_LIVE_SMOKE=1`; it is not silently treated as verified. The original suite has one existing skipped test and a Starlette/httpx deprecation warning. Vite retains its original large-bundle warning; code splitting is not required to package existing functionality. `npm audit fix` applied compatible fixes (including the original critical proxy-addr finding). Remaining major-version-only/tooling advisories are not a license to redesign dependencies. Renderer code is compiled; npm runtime dependencies are excluded from the native package.
 
 See [desktop guide](README.md) for external connectivity prerequisites and honest verification limits.
+
+## Native CI iteration
+
+The first native Ubuntu run completed installation and all existing regression tests,
+then failed during the combined freeze/package step. Sandbox outbound policy also
+blocks the Actions log-storage redirects; diagnostic tail annotations are now emitted
+through the GitHub Checks API so native build defects can be investigated honestly.
+No installer artifact was published by that failed run.

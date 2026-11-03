@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { safeFetchJson } from "@/lib/api";
+import { safeFetchJson, safeMutation } from "@/lib/api";
 
 type DesktopStatus = {
   mode: string; redis: string; market_source: string; backtest_available: boolean;
@@ -10,6 +10,20 @@ type DesktopStatus = {
 /** Desktop integration diagnostics, not a replacement for the existing health/risk panels. */
 export default function DesktopServicesPanel() {
   const [status, setStatus] = useState<DesktopStatus | null>(null);
+  const [book, setBook] = useState<"spot" | "futures">("spot");
+  const [balance, setBalance] = useState("10000");
+  const [receipt, setReceipt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const initialize = async () => {
+    if (!window.confirm(`Initialize a ${book} PAPER book with ${balance} virtual USD? This does not fund a real account and will not reset an existing book.`)) return;
+    setBusy(true);
+    const result = await safeMutation<{ receipt: string }>("/api/desktop/paper/initialize", "POST", {
+      book, balance: Number(balance), confirmation: "INITIALIZE PAPER BOOK",
+    }, 60000);
+    setReceipt(result.ok ? result.data?.receipt || "Paper book initialized" : result.error || "Initialization failed");
+    setBusy(false);
+    void refresh();
+  };
   const refresh = useCallback(async () => {
     const result = await safeFetchJson<DesktopStatus>("/api/desktop/status");
     setStatus(result);
@@ -28,6 +42,14 @@ export default function DesktopServicesPanel() {
     </dl>
     <p className="text-zinc-400">Paper orders are simulated by the existing paper engine, never live exchange orders. Missing market data, sessions and MCP services remain unavailable; no synthetic feed is substituted.</p>
     <p className="text-zinc-400">Use Pine Studio → TradingView Login for a real session. Configure MCP and Telegram in Settings. After changing connection settings or signing in, use the SIGMA menu → Restart services. Ollama requires a separately installed local model service.</p>
+    <fieldset className="space-y-2 rounded border border-white/10 p-3">
+      <legend>Initialize an empty paper book</legend>
+      <p className="text-xs text-zinc-400">Uses the bundled official Kraken CLI. Virtual funds only; existing books are never reset by this action.</p>
+      <label className="block">Book <select aria-label="Paper book" value={book} onChange={e => setBook(e.target.value as "spot" | "futures")} className="bg-zinc-900 p-1"><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
+      <label className="block">Virtual USD <input aria-label="Initial paper USD" type="number" min="1" max="1000000000" value={balance} onChange={e => setBalance(e.target.value)} className="bg-zinc-900 p-1" /></label>
+      <button disabled={!status.kraken_cli_available || busy || !(Number(balance) > 0)} className="rounded border border-white/10 px-3 py-2 disabled:opacity-40" onClick={() => void initialize()}>{busy ? "Initializing…" : "Initialize PAPER book"}</button>
+      {receipt && <pre role="status" className="whitespace-pre-wrap break-all text-xs">{receipt}</pre>}
+    </fieldset>
     <p className="break-all font-mono text-xs">Persistent workspace: {status.workspace}</p>
     <p className="text-xs text-zinc-400">The SIGMA menu opens logs/configuration, manages login autostart, and quits all services. Closing the window hides it to the tray when available. On GNOME, tray visibility may require AppIndicator support.</p>
     <button className="rounded border border-white/10 px-3 py-2" onClick={() => void refresh()}>Refresh service status</button>

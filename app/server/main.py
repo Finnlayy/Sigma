@@ -2406,7 +2406,7 @@ class BacktestRunBody(BaseModel):
 async def backtest_run(body: BacktestRunBody):
     """Run backtest via TradingView MCP CSV seam (or import result CSV directly)."""
     adapter = state.tv_backtest
-    if adapter is None:
+    if adapter is None and not (body.resultCsv or body.resultCsvPath):
         raise HTTPException(503, "TradingView MCP adapter unavailable (set SIGMA_TV_MCP_URL)")
     pair = body.assetPair or "BTC/USD"
     s = state.store.get_strategy(body.strategyId or "") if body.strategyId else None
@@ -2430,6 +2430,13 @@ async def backtest_run(body: BacktestRunBody):
         "resultCsvPath": body.resultCsvPath,
         "performanceCsv": body.performanceCsv,
     }
+    if body.resultCsv or body.resultCsvPath:
+        from app.backtest.tv_csv import result_csv_to_backtest_result
+        try:
+            return await asyncio.to_thread(result_csv_to_backtest_result,
+                body.resultCsv or body.resultCsvPath, config=cfg, performance_csv=body.performanceCsv)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(400, str(exc))
     # Window candles only for metadata / GA compatibility (not local evaluation)
     count = int(body.candleCount or 500)
     candles = state.store.ohlcv(pair, 60, limit=max(count * (body.interval or 15) + 120, 300))

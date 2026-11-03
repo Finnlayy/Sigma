@@ -400,14 +400,14 @@ export default function SigmaTerminal() {
 
         <div className="ml-auto flex items-center gap-2 font-mono text-[10px]">
           <Badge variant={online ? "outline" : "destructive"} className="gap-1">
-            {online ? <Wifi size={11} /> : <WifiOff size={11} />} core:8000
+            {online ? <Wifi size={11} /> : <WifiOff size={11} />} core
           </Badge>
           <span
             className={
               health?.scraper_ok ? "text-emerald-400" : "text-muted-foreground"
             }
           >
-            scraper:8001
+            scraper
           </span>
           <span
             className={

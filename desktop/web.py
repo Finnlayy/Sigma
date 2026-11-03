@@ -1,12 +1,21 @@
 """Same-origin production UI hosting and local desktop session protection."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 from pathlib import Path
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from typing import Literal
+
+
+class PaperInitializeBody(BaseModel):
+    book: Literal["spot", "futures"]
+    balance: float = Field(gt=0, le=1_000_000_000, allow_inf_nan=False)
+    confirmation: Literal["INITIALIZE PAPER BOOK"]
 
 
 class DesktopSession:
@@ -50,6 +59,20 @@ def configure_desktop(app, assets: Path) -> None:
             "tasks_alive": bool(state._tasks) and all(not task.done() for task in state._tasks),
             "workspace": str(Path.cwd()),
         }
+
+    @app.post("/api/desktop/paper/initialize")
+    async def initialize_paper(body: PaperInitializeBody):
+        from app.core import blueprint as bp
+        from app.server.main import state
+        from app.execution.KrakenCliBridge import KrakenCliBridge
+        bridge = KrakenCliBridge(state.config, execution_mode=bp.ExecutionMode.KRAKEN_PAPER.value,
+                                 futures=body.book == "futures")
+        leaf = "paper/init" if body.book == "spot" else "futures/paper/init"
+        result = await asyncio.to_thread(bridge.run_leaf, leaf, f"--balance={body.balance:g}")
+        if not result.ok:
+            raise HTTPException(503, {"code": result.error_code,
+                                      "detail": result.stderr or result.stdout or "Paper book initialization failed"})
+        return {"ok": True, "mode": "paper", "book": body.book, "receipt": result.stdout}
 
     # Register LAST: unknown APIs must never become a successful SPA response.
     @app.get("/{path:path}", include_in_schema=False)

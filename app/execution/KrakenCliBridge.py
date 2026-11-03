@@ -510,7 +510,7 @@ ALLOWED_KRAKEN_SUBCOMMANDS = {
 ALLOWED_FLAGS_PREFIXES = (
     "--type=", "--price=", "--stop-price=", "--leverage=", "--client-order-id=",
     "--pair=", "--ordertype=", "--volume=", "--close-ordertype=", "--close-price=",
-    "--output=", "--since=", "--validate", "--price", "--type", "--leverage",
+    "--balance=", "--output=", "--since=", "--validate", "--price", "--type", "--leverage",
     "--client-order-id", "--reduce-only", "-o", "json",
 )
 

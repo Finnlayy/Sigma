@@ -50,3 +50,25 @@ def test_update_accepts_canonical_enum(tmp_path, monkeypatch):
     out = mgr.update("SIGMA_MARKET_SOURCE", "CCXT_WS")
     assert out["applied"] is True
     assert out["value"] == "ccxt_ws"
+
+
+def test_persistence_is_private_atomic_and_preserves_special_values(tmp_path, monkeypatch):
+    from dotenv import dotenv_values
+    import os
+    env = tmp_path / '.env'
+    manager = SettingsEnvManager(SigmaConfig(), env_file=str(env))
+    monkeypatch.delenv('SIGMA_WEBHOOK_SECRET', raising=False)
+    manager.update('SIGMA_WEBHOOK_SECRET', 'abc #private"value')
+    assert dotenv_values(env, interpolate=False)['SIGMA_WEBHOOK_SECRET'] == 'abc #private"value'
+    assert os.stat(env).st_mode & 0o777 == 0o600
+    with pytest.raises(SettingValidationError):
+        manager.update('SIGMA_WEBHOOK_SECRET', 'safe\nSIGMA_LIVE_TRADING=1')
+
+
+def test_persistence_failure_is_not_reported_as_hot_reload(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setenv('ALPHA_BASE_BUDGET_USD', '50')
+    manager = SettingsEnvManager(SigmaConfig(), env_file=str(tmp_path / 'missing' / '.env'))
+    with pytest.raises(ValueError, match='could not be saved'):
+        manager.update('ALPHA_BASE_BUDGET_USD', '80')
+    assert os.environ['ALPHA_BASE_BUDGET_USD'] == '50'

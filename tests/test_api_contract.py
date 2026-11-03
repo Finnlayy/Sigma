@@ -793,3 +793,18 @@ def test_queue_matrices_groups_trades_by_strategy_and_mode(client):
     assert "qm_paper" not in {s["strategyId"] for s in body["live"]["strategies"]}
     assert "qm_open" not in {t["id"] for t in prow["trades"]}
     assert body["paper"]["activeWorkers"] >= 1
+
+
+def test_import_tv_result_csv_without_a_live_mcp_adapter(client, monkeypatch):
+    import app.server.main as main
+    monkeypatch.setattr(main.state, 'tv_backtest', None)
+    csv = ('Trade #,Type,Date/Time,Signal,Price USD,Position size (qty),Net P&L USD\n'
+           '1,Entry long,2024-06-01 10:00,long,100,1,0\n'
+           '1,Exit long,2024-06-01 14:00,long,110,1,9.8\n')
+    response = client.post('/api/backtest/run', json={'resultCsv': csv, 'initialBalance': 10000})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['source'] == 'tradingview-csv'
+    assert result['summary']['totalTrades'] == 1
+    assert result['summary']['totalReturnUSD'] == pytest.approx(9.8)
+    assert client.post('/api/backtest/run', json={}).status_code == 503

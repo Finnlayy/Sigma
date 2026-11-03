@@ -41,6 +41,16 @@ und `GET /api/v1/blueprint` (Loops, M8-Alert-Matrix, API-Vertrag, geladene Confi
 
 No silent fallback to the local Alpha backtest engine.
 
+## Ubuntu desktop installer
+
+The existing command center now has a supervised Electron desktop package, with
+bundled Python/Core, real Redis, scraper, TradingView browser and Kraken CLI.
+See [desktop installation, build and prerequisites](docs/desktop/README.md) and
+[the integration audit](docs/desktop/AUDIT.md). The **Ubuntu desktop installers**
+GitHub Actions workflow produces `.deb` and `.AppImage` artifacts only after
+native build and smoke-test gates pass. Desktop mode is paper-only and never
+substitutes fake upstream connections.
+
 ## Quick Start
 
 ```bash

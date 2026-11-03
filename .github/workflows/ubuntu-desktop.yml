@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ubuntu-desktop-${{ github.ref }}
+  group: ubuntu-desktop-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   build:
@@ -40,7 +40,10 @@ jobs:
           npm run lint
           npm run test:desktop
       - name: Build bundled backend, browser, Redis, deb and AppImage
-        run: scripts/build-desktop.sh
+        run: |
+          mkdir -p build
+          set -o pipefail
+          scripts/build-desktop.sh 2>&1 | tee build/desktop-build.log
       - name: Real packaged Electron launch
         env:
           SIGMA_DESKTOP_SMOKE: '1'
@@ -49,6 +52,10 @@ jobs:
         run: |
           # Ubuntu runner has a real graphical session under Xvfb; never disable the Electron sandbox.
           timeout 240s xvfb-run -a release/linux-unpacked/sigma
+      - name: Existing UI end-to-end workflows against packaged services
+        env:
+          SIGMA_E2E_EXECUTABLE: ${{ github.workspace }}/release/linux-unpacked/sigma
+        run: timeout 300s xvfb-run -a npm run test:e2e
       - name: Installer metadata and offline desktop smoke
         run: |
           dpkg-deb --info release/*.deb
@@ -68,10 +75,22 @@ jobs:
             release/*.AppImage
             release/SHA256SUMS
           retention-days: 30
+      - name: Expose actionable failure details in check annotations
+        if: failure()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          log = Path('build/desktop-build.log')
+          if log.exists():
+              tail = '\n'.join(log.read_text(errors='replace').splitlines()[-70:])[-12000:]
+              print('::error title=Desktop build diagnostic::' + tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
+          PY
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: desktop-build-diagnostics
           path: |
+            build/desktop-build.log
             build/pyinstaller/**/warn-*.txt
             ~/.config/SIGMA/runtime/data/logs/
+            test-results/

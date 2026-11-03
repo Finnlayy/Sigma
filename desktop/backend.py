@@ -33,7 +33,7 @@ def prepare_workspace(workspace: Path) -> None:
         (workspace / "data" / directory).mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chdir(workspace)
     from dotenv import load_dotenv
-    load_dotenv(workspace / ".env", override=False)
+    load_dotenv(workspace / ".env", override=False, interpolate=False)
     # Packaging is paper-only, regardless of a saved configuration or shell env.
     os.environ.update({
         "SIGMA_DESKTOP": "1", "SIGMA_LIVE_TRADING": "0",
@@ -61,6 +61,8 @@ def guard_parent(parent_pid: int) -> None:
             time.sleep(1)
             if os.getppid() != parent_pid:
                 os.killpg(os.getpgrp(), signal.SIGTERM)
+                time.sleep(20)
+                os.killpg(os.getpgrp(), signal.SIGKILL)
                 return
     threading.Thread(target=watch, daemon=True, name="launcher-watchdog").start()
 

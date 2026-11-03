@@ -49,10 +49,10 @@ class Supervisor extends EventEmitter {
     } finally { fs.closeSync(fd); }
     const record = { service, child, exited: false };
     this.children.push(record);
-    child.once('error', error => { record.exited = true; record.error = error; this.emit('failure', service, error); });
+    child.once('error', error => { record.exited = true; record.error = error; if (!this.stopping && !this.starting) this.emit('failure', service, error); });
     child.once('exit', (code, signal) => {
       record.exited = true;
-      if (!this.stopping) this.emit('failure', service, new Error(`${service} exited (${code ?? signal}). See ${log}`));
+      if (!this.stopping && !this.starting) this.emit('failure', service, new Error(`${service} exited (${code ?? signal}). See ${log}`));
     });
     return record;
   }
@@ -68,6 +68,7 @@ class Supervisor extends EventEmitter {
   }
   async start() {
     this.stopping = false;
+    this.starting = true;
     fs.mkdirSync(this.workspace, { recursive: true, mode: 0o700 });
     fs.chmodSync(this.workspace, 0o700);
     const redisPort = await freePort();
@@ -126,6 +127,7 @@ class Supervisor extends EventEmitter {
       this.monitor.unref();
       return this.origin;
     } catch (error) { await this.stop(); throw error; }
+    finally { this.starting = false; }
   }
   halt(reason) {
     const signals = path.join(this.workspace, 'data/signals');
