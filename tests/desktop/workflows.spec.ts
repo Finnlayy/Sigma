@@ -55,6 +55,22 @@ test('existing navigation, CSV results, Settings, persistence and paper-only gua
     expect(['init', 'error']).toContain(marketSocket.type); // Offline error is honest; a failed handshake is not.
     expect(marketSocket.channels).toContain('market:candles:BTC/USD');
 
+    const operator = await window.evaluate(async () => {
+      const blocked = await fetch('/api/v1/auth/passkey/challenge');
+      const authorized = await fetch('/api/desktop/operator/authorize', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'AUTHORIZE PAPER OPERATOR' }),
+      });
+      const result = await authorized.json();
+      // No TV session exists in this clean workspace: 503 means operator auth passed,
+      // while the real external operation correctly remains unavailable.
+      const attach = await fetch('/api/v1/alerts/driver/attach', {
+        method: 'POST', headers: { 'X-Sigma-Settings-Token': result.settingsToken },
+      });
+      return { blocked: blocked.status, mode: result.mode, attach: attach.status };
+    });
+    expect(operator).toEqual({ blocked: 503, mode: 'desktop-session', attach: 503 });
+
     const guard = await window.evaluate(async () => {
       const live = await fetch('/api/kraken/toggle-mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paperTrading: false }) });
       const fake = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'SIGMA_TV_MCP_URL', value: 'fake' }) });

@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 
+class OperatorAuthorizeBody(BaseModel):
+    confirmation: Literal["AUTHORIZE PAPER OPERATOR"]
+
+
 class PaperInitializeBody(BaseModel):
     book: Literal["spot", "futures"]
     balance: float = Field(gt=0, le=1_000_000_000, allow_inf_nan=False)
@@ -37,6 +41,11 @@ class DesktopSession:
                                 "headers": [(b"content-type", b"application/json")]})
                     await send({"type": "http.response.body", "body": b'{"detail":"Desktop session required"}'})
                 return
+        if scope["type"] == "http" and scope.get("path", "").startswith("/api/v1/auth/passkey/"):
+            await send({"type": "http.response.start", "status": 503,
+                        "headers": [(b"content-type", b"application/json")]})
+            await send({"type": "http.response.body", "body": b'{"detail":"Passkey verification is not enabled in this desktop profile. Use explicit local desktop-session authorization; no degraded biometric success is accepted."}'})
+            return
         async def secured_send(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
@@ -71,6 +80,17 @@ def configure_desktop(app, assets: Path) -> None:
             "tasks_alive": bool(state._tasks) and all(not task.done() for task in state._tasks),
             "workspace": str(Path.cwd()),
         }
+
+    @app.post("/api/desktop/operator/authorize")
+    async def authorize_operator(body: OperatorAuthorizeBody):
+        from app.server.main import state
+        if state.passkey is None:
+            raise HTTPException(503, "Operator token signer unavailable")
+        # The trusted local desktop session is the identity boundary, NOT a simulated passkey.
+        # Reuse the existing real HMAC token signer/validator; never override operator auth.
+        return {"mode": "desktop-session", "paper_only": True,
+                "settingsToken": state.passkey._issue_settings_token("desktop-local@localhost"),
+                "expiresIn": state.passkey.config.settings_token_ttl_seconds}
 
     @app.post("/api/desktop/paper/initialize")
     async def initialize_paper(body: PaperInitializeBody):

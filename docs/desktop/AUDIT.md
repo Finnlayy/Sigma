@@ -33,11 +33,11 @@ Fetched all remote heads without switching branches. [Branch inventory](branch-i
 ## Verification so far
 
 - Baseline: 912 passed, 1 skipped, 1 failed (quote-style assertion). Existing TypeScript check and production Vite build pass.
-- Final local regression: 928 passed, 1 skipped; 6 Node supervisor/frontend regression tests pass; TypeScript and production Vite build pass.
+- Final local regression: 929 passed, 1 skipped; 6 Node supervisor/frontend regression tests pass; TypeScript and production Vite build pass.
 - Real local service smoke: compiled actual Redis, launched actual scraper/Core/queue, checked authenticated API + UI assets, unknown-route 404, live-mode denial, persistent Settings across complete restart, no orphan processes on shutdown. External upstreams intentionally offline, no fabricated connection success.
 - Actual frozen local service smoke passed after source-building a CPython shared library matching this sandbox’s static extension layout. Local graphical Electron download remains blocked at GitHub asset redirects.
 - Native Ubuntu CI [41637364967](https://github.com/Finnlayy/Sigma/actions/runs/41637364967) **passed**, producing `.deb`, AppImage and SHA256SUMS in artifact `SIGMA-Ubuntu-x64` (id `13232755343`). That first fully verified build is commit `ec94c93`. Frozen services, real official CLI paper-book initialization, sandboxed packaged Electron, genuine renderer workflows, `.deb` metadata and extracted AppImage launch all passed. Subsequent hardening goes through the same required pipeline; use the latest PR check/artifact for the final revision.
-- Literal frontend route audit: 126 API references, all matched to actual routes (199 bare-Core HTTP paths plus 2 desktop routes). A regression test enforces this static subset; it is not a claim that credential-dependent external workflows have been verified.
+- Literal frontend route audit: 127 API references, all matched to actual routes (199 bare-Core HTTP paths plus 3 desktop routes). A regression test enforces this static subset; it is not a claim that credential-dependent external workflows have been verified.
 
 The original suite skips the live CLI comparison unless `SIGMA_CLI_LIVE_SMOKE=1`; it is not silently treated as verified. The original suite has one existing skipped test and a Starlette/httpx deprecation warning. Vite retains its original large-bundle warning; code splitting is not required to package existing functionality. `npm audit fix` applied compatible fixes (including the original critical proxy-addr finding). Remaining major-version-only/tooling advisories are not a license to redesign dependencies. Renderer code is compiled; npm runtime dependencies are excluded from the native package.
 
@@ -79,3 +79,11 @@ calendar alignment; Core health is derived from task liveness rather than a
 constant. Existing ledger calculations and session aggregates are retained.
 Fonts are bundled from npm instead of requiring Google Fonts at runtime. The
 native workflow remains the final installer gate for these changes.
+
+
+The existing Passkey client could not authorize native operator actions, and its
+server has a legacy degraded-auth mode. Desktop does not pretend that is verified
+WebAuthn: those routes are blocked. Existing operator actions now request explicit
+local-session confirmation, then receive a real expiring HMAC token validated by
+the unchanged operator guard. No production auth override or fake authenticator is
+used; tests verify signature tampering and cross-origin requests are rejected.

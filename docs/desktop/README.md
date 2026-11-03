@@ -19,6 +19,7 @@ All existing strategy/math/backtest/paper/risk/orchestration modules remain in p
 
 - Desktop is **paper only**. Live mode, fake MCP, fake TV drivers and synthetic market fallback cannot be enabled through desktop Settings.
 - Missing credentials, network, session, models or endpoint configuration do not count as a live connection.
+- Operator actions use explicit confirmation of the private **local desktop session**, followed by an actual signed, expiring operator token. This is not advertised as biometric/passkey verification; the legacy degraded passkey routes are blocked in the desktop profile. Existing operator confirmation dialogs remain in place.
 - Every Core HTTP/WebSocket request requires a private launch token injected by Electron, not exposed to renderer JavaScript. Unknown API requests remain 404, not successful SPA HTML.
 - Electron uses a sandboxed, context-isolated renderer without Node integration. External web links open in the system browser. No installer disables Chromium's sandbox.
 - Unexpected service failure creates the existing `KILL_SWITCH` file, stops dependants and retries the stack at most three times. The halt is **not automatically cleared**. Health monitoring also detects dead Core tasks/job workers.

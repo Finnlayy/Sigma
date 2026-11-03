@@ -151,7 +151,7 @@ def test_all_literal_frontend_api_references_have_real_routes():
     import re
     from app.server.main import app
     root = Path(__file__).resolve().parents[1]
-    paths = set(app.openapi()['paths']) | {'/api/desktop/status', '/api/desktop/paper/initialize'}
+    paths = set(app.openapi()['paths']) | {'/api/desktop/status', '/api/desktop/paper/initialize', '/api/desktop/operator/authorize'}
     references = set()
     for file in (root / 'src').rglob('*.ts*'):
         for match in re.finditer(r'["\x27`](/api/[^"\x27`\s]*)', file.read_text()):
@@ -161,3 +161,27 @@ def test_all_literal_frontend_api_references_have_real_routes():
     missing = [path for path in references if not any(
         re.fullmatch(re.sub(r'\{[^}]+\}', r'[^/]+', route), path) for route in paths)]
     assert missing == []
+
+
+def test_desktop_operator_authorization_uses_real_signed_token_not_degraded_passkey(tmp_path, monkeypatch):
+    from app.server.main import state
+    from app.security.PasskeyAuthEngine import PasskeyAuthEngine
+    signer = PasskeyAuthEngine(config=SigmaConfig())
+    monkeypatch.setattr(state, 'passkey', signer)
+    monkeypatch.setenv('SIGMA_DESKTOP_TOKEN', TOKEN)
+    app = FastAPI()
+    configure_desktop(app, tmp_path)
+    headers = {'X-Sigma-Desktop': TOKEN}
+    with TestClient(app) as client:
+        endpoint = '/api/desktop/operator/authorize'
+        body = {'confirmation': 'AUTHORIZE PAPER OPERATOR'}
+        assert client.post(endpoint, json=body).status_code == 403
+        assert client.post(endpoint, headers=headers, json={}).status_code == 422
+        response = client.post(endpoint, headers=headers, json=body)
+        assert response.status_code == 200
+        result = response.json()
+        assert result['mode'] == 'desktop-session' and result['paper_only'] is True
+        assert signer.validate_settings_token(result['settingsToken'])['email'] == 'desktop-local@localhost'
+        assert signer.validate_settings_token(result['settingsToken'] + 'tampered') is None
+        assert client.get('/api/v1/auth/passkey/challenge', headers=headers).status_code == 503
+        assert client.post(endpoint, headers={**headers, 'Origin': 'https://untrusted.example'}, json=body).status_code == 403
