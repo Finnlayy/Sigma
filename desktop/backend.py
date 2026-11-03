@@ -42,6 +42,7 @@ def prepare_workspace(workspace: Path) -> None:
         "SIGMA_SCRAPER_VENDOR_PATH": str(resource_root() / "vendor/tradingview-scraper"),
         "SIGMA_DATA_DIR": str(workspace / "data"),
     })
+    os.environ.pop("PYTEST_CURRENT_TEST", None)
     os.environ["SIGMA_MARKET_SOURCE"] = "tv_scraper"
     os.environ.setdefault("SIGMA_TV_MCP_URL", "")
     # Keep CLI paper journals separate from any host Kraken installation/credentials.

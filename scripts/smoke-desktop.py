@@ -20,6 +20,7 @@ const { Supervisor } = require('./desktop/supervisor.cjs');
     workspace: process.env.SMOKE_WORKSPACE, resources: path.resolve('build'),
     python: process.env.SIGMA_SMOKE_FROZEN === '1' ? undefined : process.env.SMOKE_PYTHON,
     sourceRoot: process.cwd(),
+    backendExecutable: path.resolve("build/backend/sigma-backend/sigma-backend"),
   });
   const failures = [];
   supervisor.on('failure', (service, error) => failures.push(`${service}: ${error.message}`));
@@ -40,6 +41,15 @@ const { Supervisor } = require('./desktop/supervisor.cjs');
     const settings = await request('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'ALPHA_BASE_BUDGET_USD', value: '73' }) });
     if (!settings.ok) throw Error('Settings mutation failed: ' + await settings.text());
     if (!fs.readFileSync(path.join(supervisor.workspace, '.env'), 'utf8').includes('ALPHA_BASE_BUDGET_USD=73')) throw Error('Settings not persisted');
+    if (status.kraken_cli_available) {
+      for (const book of ['spot', 'futures']) {
+        const initialized = await request('/api/desktop/paper/initialize', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ book, balance: 10000, confirmation: 'INITIALIZE PAPER BOOK' }),
+        });
+        if (!initialized.ok) throw Error('Official CLI paper initialization failed: ' + await initialized.text());
+      }
+    }
     const children = supervisor.children.map(r => r.child.pid);
     await supervisor.stop();
     for (const pid of children) {

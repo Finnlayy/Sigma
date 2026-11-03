@@ -46,3 +46,10 @@ then failed during the combined freeze/package step. Sandbox outbound policy als
 blocks the Actions log-storage redirects; diagnostic tail annotations are now emitted
 through the GitHub Checks API so native build defects can be investigated honestly.
 No installer artifact was published by that failed run.
+
+The first frozen smoke launcher used the distribution directory rather than its
+executable (EACCES). The source/build-tree override is now explicit; installed
+resources retain the normal `backend/sigma-backend` layout. A local shared-library
+build of CPython enabled further freeze analysis, but its built-in extension layout
+differs from the sandbox Python; Ubuntu's setup-python distribution remains the
+supported native build environment.

@@ -18,18 +18,19 @@ async function freePort() {
 }
 
 class Supervisor extends EventEmitter {
-  constructor({ workspace, resources, python, sourceRoot }) {
+  constructor({ workspace, resources, python, sourceRoot, backendExecutable }) {
     super();
     this.workspace = workspace;
     this.resources = resources;
     this.python = python;
+    this.backendExecutable = backendExecutable;
     this.sourceRoot = sourceRoot;
     this.children = [];
     this.stopping = false;
     this.token = crypto.randomBytes(32).toString('hex');
   }
   launch(service, port, env) {
-    const executable = this.python || path.join(this.resources, 'backend/sigma-backend');
+    const executable = this.python || this.backendExecutable || path.join(this.resources, 'backend/sigma-backend');
     const prefix = this.python ? ['-m', 'desktop.backend'] : [];
     const args = [...prefix, '--service', service, '--workspace', this.workspace,
       '--port', String(port), '--parent-pid', String(process.pid)];

@@ -20,6 +20,7 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -546,8 +547,17 @@ def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int
             if not any(arg.startswith(prefix) for prefix in ALLOWED_FLAGS_PREFIXES):
                 return "", f"EGeneral:Invalid argument — unallowed flag {arg}", 1
     try:
+        child_env = None
+        if getattr(sys, "frozen", False):
+            child_env = dict(os.environ)
+            original = child_env.get("LD_LIBRARY_PATH_ORIG")
+            if original is None:
+                child_env.pop("LD_LIBRARY_PATH", None)
+            else:
+                child_env["LD_LIBRARY_PATH"] = original
         proc = subprocess.run(
             argv,
+            env=child_env,
             capture_output=True,
             text=True,
             encoding="utf-8",
