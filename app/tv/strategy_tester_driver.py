@@ -403,6 +403,8 @@ class PlaywrightStrategyTesterDriver:
 def get_driver(config: Optional[SigmaConfig] = None, *, prefer_fake: Optional[bool] = None):
     """FakeDriver ohne TV-Session, echter Driver sobald `tv_storage_state.json` existiert."""
     cfg = config or load_config()
+    if os.environ.get("SIGMA_DESKTOP") == "1":
+        return PlaywrightStrategyTesterDriver(cfg)
     if prefer_fake is None:
         prefer_fake = not os.path.exists(cfg.tv_storage_state_path)
     if prefer_fake:

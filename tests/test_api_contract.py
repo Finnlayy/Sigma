@@ -14,7 +14,7 @@ from app.core import blueprint as bp
 
 
 @pytest.fixture(scope="function")
-def client(tmp_path_factory):
+def client(tmp_path_factory, monkeypatch):
     import os
 
     tmp = tmp_path_factory.mktemp("sigma_api")
@@ -49,6 +49,11 @@ def client(tmp_path_factory):
                 pass
     except Exception:
         pass
+    # API contracts must not depend on the build host's memory pressure.
+    monkeypatch.setattr("app.core.memory_watchdog.read_memory_snapshot", lambda: {
+        "percent": 20.0, "source": "test", "rss_bytes": 0,
+        "budget_bytes": 4294967296, "cgroup": None, "host_percent": 20.0, "rss_percent": 20.0,
+    })
     original_snapshot = MacroContagionFeed.snapshot
     MacroContagionFeed.snapshot = lambda self: ContagionInputs()
     try:

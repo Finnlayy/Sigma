@@ -329,6 +329,10 @@ class AppState:
         except Exception as exc:
             logger.error("initial contagion refresh failed; entries stay blocked: %s", exc)
 
+        if os.environ.get("SIGMA_DESKTOP") == "1":
+            from app.tv.worker import get_tv_queue
+            get_tv_queue(cfg).start()
+
         self._seed_strategies()
         await self._register_m8_instances()
         self.m8.store = self.store
@@ -356,6 +360,15 @@ class AppState:
             self.tv_backtest = None
 
     async def shutdown(self) -> None:
+        import os
+        if os.environ.get("SIGMA_DESKTOP") == "1":
+            from app.tv.worker import get_tv_queue
+            from app.tv.chrome_login import close_tv_chrome
+            await asyncio.to_thread(get_tv_queue(self.config).stop, 10.0)
+            await asyncio.to_thread(close_tv_chrome)
+            if self.tv_backtest:
+                self.tv_backtest.close()
+                set_adapter(None)
         for t in self._tasks:
             try:
                 if not t.done():
@@ -1046,9 +1059,11 @@ def _portfolio_value(state: AppState, balances: Dict[str, float]) -> float:
 async def _lifespan(_app: FastAPI):
     await state.startup()
     _app.state.sigma = state
-    yield
-    await state.shutdown()
-    _app.state.sigma = None
+    try:
+        yield
+    finally:
+        await state.shutdown()
+        _app.state.sigma = None
 
 
 app = FastAPI(title="Projekt:Sigma — M8 Execution API",
@@ -1073,7 +1088,8 @@ async def sigma_health():
 
     kill = _os.path.exists(state.config.kill_switch_file)
     paused = _os.path.exists(state.config.pause_signal_file)
-    tv_worker_ok = _os.path.exists(state.config.tv_jobs_dir)
+    from app.tv.worker import get_tv_queue
+    tv_worker_ok = get_tv_queue(state.config).snapshot()["running"]
 
     # Loop C: echter Ping gegen das Sidecar (:8001), Ergebnis 5 s gecacht.
     scraper: dict = {"ok": False, "degraded": True}
@@ -1178,6 +1194,8 @@ class ToggleModeBody(BaseModel):
 
 @app.post("/api/kraken/toggle-mode")
 async def kraken_toggle_mode(body: ToggleModeBody):
+    if os.environ.get("SIGMA_DESKTOP") == "1" and not body.paperTrading:
+        raise HTTPException(403, "Desktop build is paper-only")
     state.is_paper_trading = bool(body.paperTrading)
     state.bus.log("info",
                   f"Modus → {'PAPER (L2)' if state.is_paper_trading else 'LIVE (L4)'}",

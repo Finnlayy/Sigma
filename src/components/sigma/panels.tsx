@@ -1,3 +1,4 @@
+import DesktopServicesPanel from "./DesktopServicesPanel";
 import { z } from "zod";
 /**
  * =========================================================
@@ -2566,6 +2567,7 @@ export function ResearchLabPanel_() {
 }
 
 export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
+  DesktopServicesPanel,
   VirtualBotDeck,
   PineStudio,
   MarketChart,
@@ -2616,6 +2618,7 @@ export const PANEL_REGISTRY: Record<string, React.ComponentType> = {
 };
 
 export const PANEL_TITLES: Record<string, string> = {
+  DesktopServicesPanel: "Desktop Services",
   VirtualBotDeck: "Bot Deck",
   PineStudio: "Pine Studio",
   MarketChart: "Market",

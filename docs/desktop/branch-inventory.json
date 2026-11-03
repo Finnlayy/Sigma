@@ -1,0 +1,1000 @@
+[
+  {
+    "branch": "origin/HEAD",
+    "tip": "cc6604bf4df16e11f92a104bb81006f848661c91",
+    "different_files": 0,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/arena/01a04af2-sigma",
+    "tip": "de11f6015c56514435aaa222ad2f1ad392f7a7ae",
+    "different_files": 7054,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a04fe7-sigma",
+    "tip": "ee2c821872961ff4d42f003e4f67af6e015171c0",
+    "different_files": 7012,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a0515d-sigma",
+    "tip": "b37101a037fe2b6547dffda51817d4c55ca1080f",
+    "different_files": 6991,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a052de-sigma",
+    "tip": "3bafdb4502d1c41e8f9d0dce4c9448f907699bf3",
+    "different_files": 6970,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a053a4-sigma",
+    "tip": "8fe14cd50aeef3fd9204ae8a2b24ecb91caa66e2",
+    "different_files": 6946,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a05af8-sigma",
+    "tip": "4fa808cc1869e463972b407531d24f69eea79e7a",
+    "different_files": 6950,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a05b46-sigma",
+    "tip": "7f0b8b2d9f5f275b87f45c4a00e0b8825aa8948d",
+    "different_files": 6955,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a05cad-sigma",
+    "tip": "7f0b8b2d9f5f275b87f45c4a00e0b8825aa8948d",
+    "different_files": 6955,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a05f15-sigma",
+    "tip": "5266992650740426d1fdb143a1d63e4918d13da7",
+    "different_files": 6954,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a09a75-sigma",
+    "tip": "9dd42a9f9b6427c2090161fa16a2a2de3599f1bd",
+    "different_files": 7216,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/arena/01a0c909-sigma",
+    "tip": "689dbf5e03b08146f1bed599fcc2480da48d5cde",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/arena/61eead8d-sigma",
+    "tip": "e9b61625658c80f8e107dce4b2f6c7dca2623654",
+    "different_files": 4384,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/bolt-memoize-filtering-kraken-ledgers-750903748966508381",
+    "tip": "964b70256585f68f276d155d3ad3dbe8d3eac209",
+    "different_files": 7216,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt-optimization-o-n-squared-react-8740805951909585083",
+    "tip": "124901d0afb86e457482cc568c893df7dd0a803d",
+    "different_files": 7012,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt-optimization-react-arrays-13525373777542501283",
+    "tip": "c79d35eb6f3282439dd6b9593a6aa513eda2e6a2",
+    "different_files": 7221,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt-optimize-process-log-filter-5339196821920525041",
+    "tip": "37fa95d433d3d2d8205b5c1b24cb1a654b551f15",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt-optimize-process-log-view-12667365349670015294",
+    "tip": "e3d53a3fdd22422bf8a8ca058ef746185d9de3a4",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt-perf-set-lookup-9552393704629899030",
+    "tip": "f5233b12aa2fb3439722728eaa068e0ccfc8219c",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt-processlogview-perf-17133603157476656483",
+    "tip": "c595bb5681e4735ac221b09d8e6c33a24db1cb45",
+    "different_files": 7221,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt/logs-trade-scan",
+    "tip": "9e8675502f831ab92c5e0f7d706fe055ed28e2c4",
+    "different_files": 7044,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt/memoize-strategy-card-18100630940630005421",
+    "tip": "8466076e1432815c2bd0f9b34154b95702bfcbad",
+    "different_files": 7221,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt/optimize-tv-chart-12699272424482079073",
+    "tip": "47e59402e69dd87564b5eb983418543c59e408b2",
+    "different_files": 6969,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/bolt/paper-pnl-sql-sum",
+    "tip": "081756b6e6e0797e0939ac51b749a7cae9ac110f",
+    "different_files": 7017,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/fix-market-feed-redis-7509324935267076733",
+    "tip": "3e8c1107692fb39b58c3fbb77b56bc0b1a0bfc41",
+    "different_files": 76,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/fix/drop-duplicate-security-headers",
+    "tip": "07c0a35fe672487d3b9b3f1278687c1c1f411d85",
+    "different_files": 77,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/fix/nexus-sse-reconnect-11149941735624573339",
+    "tip": "f6245181b5da10c649ecbacebba654620fb7d930",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/fix/nexus-ui-socket-reconnect-13468954369436306549",
+    "tip": "4c47cc68b4a34241c49293c95885687a071007e6",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/fix/security-subprocess-validation-15732804806725665150",
+    "tip": "e4ef27a060d38300bf6c1466c503468cf263c7cb",
+    "different_files": 7057,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules-15457969590500202819-41740d1f",
+    "tip": "c87aed73d38f72655f471becf88ee7a5829ef080",
+    "different_files": 5465,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/jules-18222245139236184039-456dd205",
+    "tip": "4c952d8538f29363b15168a12a1f79e9b376e341",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/jules-5042593964790854207-378a0980",
+    "tip": "a5ef7610e18db0a78da33663757b3d632bfc4d1d",
+    "different_files": 7058,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules-6754809548685509552-a1d02cde",
+    "tip": "175102686b80a4a042568f3c152fafd14b510c46",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules-nexus-api-wiring-8982644404292061513",
+    "tip": "6e703f37bf0b6f6fe48b14c758005454092b1b9f",
+    "different_files": 5465,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/jules-palette-ux-improvements-13834009411631110611",
+    "tip": "99df7d1b4c92b79398bfdf3688dbc05af25b7000",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/jules-performance-optimization-sets-13235887671383962941",
+    "tip": "3795d1109474bcfa97ccec56a9ba7f2f0a048a84",
+    "different_files": 7221,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules/mp-01-hard-risk-guards",
+    "tip": "122f7bf31f07783b5b372cf98f3c6b97d66792aa",
+    "different_files": 6964,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules/mp-02-micro-dca-ladder",
+    "tip": "c76195a38bd5065cdc6e7be62830a619e79ec046",
+    "different_files": 6964,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules/mp-03-candle-regime-signals",
+    "tip": "de519559ef88f655ca6c09b2a998b64b2b456960",
+    "different_files": 6963,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules/mp-04-power-phasor-features",
+    "tip": "e964401519bf90aec2d4ff75cfe62e97b6d87e6f",
+    "different_files": 6960,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules/mp-05-hourly-gate-symbol-ranker",
+    "tip": "e475c5e5818b4228137ec0216edb8fc2f73ad314",
+    "different_files": 6960,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules/mp-execute",
+    "tip": "8d2d353c474e5fa4dca7612f25198c5c6f4d7134",
+    "different_files": 5497,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/jules/nexus-candle-channel-payload",
+    "tip": "bf0297ee65312067520a0bcf29ae8dc1f5a9a6ce",
+    "different_files": 84,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/jules/nexus-ws-reconnect-16303457871411904789",
+    "tip": "1b110ebacada5c3e74021adafe069940e9ac9298",
+    "different_files": 7221,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/main",
+    "tip": "cc6604bf4df16e11f92a104bb81006f848661c91",
+    "different_files": 0,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-exponential-backoff-fail-closed-13694237588918091317",
+    "tip": "94e86d4b32f8ea7e9467feb7ab95c3e547b2b4aa",
+    "different_files": 91,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-fix-redis-config-17446862727885221428",
+    "tip": "95f759b45082415a97f48a64ab4d5c13bf0c342e",
+    "different_files": 1,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-fix-system-health-sse-10244115168876586030",
+    "tip": "1c56cd2b5380bcb5398cfd452884cf60510d7c1c",
+    "different_files": 89,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-fix-websocket-log-stream-3875544600017622825",
+    "tip": "1ed794fab89677d2ad16216df8989769a39af2d8",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/nexus-fix-ws-market-feed-15899614816426587445",
+    "tip": "e40b8709e8e897df76d5aad42db0d698aad72f95",
+    "different_files": 4383,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-llm-fail-closed-17921397059735313689",
+    "tip": "12d417a9306e5469eab00474a9d51314f6b0c3c2",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-llm-ws-fix-3773057613357563765",
+    "tip": "d5166507491c6e0c391d4a207659a28029dea224",
+    "different_files": 4383,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-market-feed-reconnect-13382717101149177112",
+    "tip": "1217cd34469edc62e48074d2ba08e6f1a42304b7",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-marketchart-reconnect-fix-11314972654667032759",
+    "tip": "82f07ec3408153b82aec2cb82ac6731067cd281d",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-marketchart-schema-fix-3173055921209405913",
+    "tip": "d258b05aa02c80cc850d282ff7968cb768d598aa",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-marketchart-websocket-fix-15707354099011198610",
+    "tip": "4386b94e09ee7506136c6c4d175f7728f6cd95ab",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-redis-TypeError-fix-14146687136375932992",
+    "tip": "c11272e32b8ecebc5312fa8b4efbc82b9e104fdf",
+    "different_files": 76,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-redis-pubsub-fix-9298179974980369128",
+    "tip": "353a38c07847bce69e8d636a1b3959e2fb13a2a7",
+    "different_files": 76,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-silent-payload-failure-fix-6357054816084477178",
+    "tip": "13836a392db06738d7dddefeef9e9fea22f5f5bb",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-sse-backoff-306034546044449853",
+    "tip": "9d1c4a49fe16e8073f7ae695077c9dff497e3090",
+    "different_files": 89,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-system-health-sse-backoff-11743730408473911601",
+    "tip": "623e43d6c4f267059ee40640e35ae7fa248e55dd",
+    "different_files": 91,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-websocket-fix-8379986687120265281",
+    "tip": "fa754fc24d1eb5d79a39c5d9f736d88025cc9966",
+    "different_files": 7222,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/nexus-websocket-reconnect-3460753823946243959",
+    "tip": "599c5629048deb035ba425683a8813f6d56703a6",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-websocket-reconnect-fix-9471887797619453933",
+    "tip": "3fdaa9e112ffc46d92c738f4544da7ee0525c806",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/nexus-wiring-api-fix-1423061691116892232",
+    "tip": "cdafaf5ce311539bbb78fe7e94fba81b8717a04c",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-wiring-fix-15969360379147769664",
+    "tip": "d1c1b862d82a47e4be2dd63ca8f1d3e5fb4849d7",
+    "different_files": 5465,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-wiring-fix-8261473508273183631",
+    "tip": "53122f68d97e48c79b9705cf6d82a54e7e1d592f",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus-ws-reconnect-1022662823902334651",
+    "tip": "27db3b58c0c4f5b7a3ff64397664a6f15d8e08cc",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/nexus/fix-llmconsole-ws-fallback-7718785971645417942",
+    "tip": "895ba10b9b40fa8a7df92d8df136e9f31e93438d",
+    "different_files": 91,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus/llm-stream-fail-closed-16155435791616274943",
+    "tip": "955bf67f1b3a85fc116c84c9f0e10d039cf89d79",
+    "different_files": 88,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus/market-chart-websocket-reconnect-16449648851670261908",
+    "tip": "eff620cff910997801e2cf1342fa32ba6f67af29",
+    "different_files": 5466,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/nexus/websocket-wiring-fix-9326706395804569593",
+    "tip": "67a36ad0ce3fa82f8a4b6864dfe8c4cd682f0f89",
+    "different_files": 5465,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette-a11y-focus-visible-1191662350147605373",
+    "tip": "0116dd2cc8bd6f4245d24ca989c5feada6e75bef",
+    "different_files": 5538,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/palette-a11y-icon-buttons-2300020108684087588",
+    "tip": "12a74544ff65fe26244bad66c4fd8c3fbf5c3353",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/palette-add-aria-labels-strategy-card-14866887083165911481",
+    "tip": "6135735dd65517138343eca7fd704cba60b25338",
+    "different_files": 87,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette-aria-labels-13848369633885252317",
+    "tip": "4bed9817b3fbfff38034e5d2dd4581d6b84e1790",
+    "different_files": 86,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette-dock-aria-labels-8143549419776475434",
+    "tip": "1f16ac1f1c326c19ffd89b593ea70d971c5120b9",
+    "different_files": 89,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette-strategy-editor-a11y-16827040041851842632",
+    "tip": "21d470e61d1f74de9d1f0d7696dcd84a49657a68",
+    "different_files": 5462,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette-ux-accessibility-14291143422391853912",
+    "tip": "42cb90dbca87e493475c2007a3769687b90dc6e2",
+    "different_files": 86,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette-ux-improvement-13807283248418132230",
+    "tip": "ec9308f49d20b5d60d5170e6212c61537a0f6a48",
+    "different_files": 87,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette/a11y-tabs-metrics-1803236345504885523",
+    "tip": "7438ece45ef8acd0a671249f131691f57f28c6fc",
+    "different_files": 2,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette/add-aria-labels-7442038739683532188",
+    "tip": "3fe920e458c6158e84cf8877f738a2feae762065",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette/fix-processlogview-aria-17334518376189710208",
+    "tip": "860b7f45cf7fbfa2ac6591d3209d5a45240bef16",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/palette/terminal-panel-a11y-1387005645852993732",
+    "tip": "95b8712d34efc6fae5b79e778f7d89271f81abdc",
+    "different_files": 87,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/palette/terminal-panel-a11y-6543371685323761739",
+    "tip": "ae15135d6ce072e6c9377123b7aca3d5fdcd0d38",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/sentinel-fix-insecure-randomness-dock-17578873124299892719",
+    "tip": "3460a50ef717f9ac3d7d3d08cc477f896f0e6c7e",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-15205043055522368333",
+    "tip": "863511b54bbf3e0c848a07183168fbd5a3cbb082",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-15519268655776129964",
+    "tip": "9d10732d106577b092c2eb5bd6133a45ff818303",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-16013250629777661293",
+    "tip": "662c83b4080c0d4b01165b6ea23a3d3b96531959",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-16463493874797632723",
+    "tip": "b8c746642235a1a4d209cb7ee8b943fcc8df6a72",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-2166468069461721679",
+    "tip": "6f74a0e46132de3fecb80c8e0464a209b0624c86",
+    "different_files": 89,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-5137672248709170776",
+    "tip": "8e289b60055d5d03e504cb46ebcc601bcef54f24",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-8265720214318935291",
+    "tip": "b920e4480dc6d625151b964dba82750b23951956",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-security-headers-9305924505880562397",
+    "tip": "0c3155fcf8ce45613a042dbc1d32f8b0d3c50233",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel-xss-href-sanitization-16325340345107993275",
+    "tip": "3ba63fb65f45d36d1c8caa8198ee4bd86a04311b",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/sentinel/fix-target-blank-10551381392977884517",
+    "tip": "840d3124435c9e8a0951e2cfebd7740c2469347c",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/sentinel/missing-security-headers-5058803346473297472",
+    "tip": "986bc68621bbf47227c8205bbcddbe8fed6f30bb",
+    "different_files": 4383,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel/secure-randomness-17338575073207426626",
+    "tip": "94cd229e01c34b3dd4fe9be5a326248228b0db20",
+    "different_files": 89,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel/security-headers-5237038131276430636",
+    "tip": "fd16a5bf787c2073d017a95252ce17a1f604904f",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel/security-headers-5837285554950183684",
+    "tip": "e2d1605b6e0459ac9b0f6cfde682753b578555bc",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel/security-headers-8988167080790242946",
+    "tip": "741bd405cbe572b2fcca83bc8084c9345178b8f4",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/sentinel/security-headers-95097882089730759",
+    "tip": "73df3366b1dbb0fa096092fc8fb322ef631292bb",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-dark-glassmorphism-fix-9908042309008804255",
+    "tip": "943c70a29c8d7da6bcc1e4fddcc5803c5d7f4c41",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-dark-glassmorphism-market-panel-17266235414450523747",
+    "tip": "5811ac3f1a3c483a172715f1b28b2148e2690980",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-feedbadge-fix-2710728711687416173",
+    "tip": "7c1bf8f35db17771d8c8fc16b039a5cb6b99072f",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-feedbadge-typography-3877827992874713671",
+    "tip": "4f87d338baf2e4ff36f0abbbe778036be9aaf02b",
+    "different_files": 87,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-market-panel-glassmorphism-16192353216168119173",
+    "tip": "56884dc6c50db9d78ae448a969f42bc6a54ccfc0",
+    "different_files": 4383,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-market-panel-typography-5291230222446085293",
+    "tip": "3154d1a581e8f0bff964f431abd2996ecca5bc99",
+    "different_files": 4383,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-netron-glassmorphism-4704752274971287825",
+    "tip": "00713d61cd7ce62b79ad7a99558a24b454eddd65",
+    "different_files": 5465,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-stat-polish-6917509721460654676",
+    "tip": "1890deee160c1942de562287a5f3d7aee3207671",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-ui-polish-10194417460977799688",
+    "tip": "cd7324d71be080ebdbfb44670557b2267e99f598",
+    "different_files": 88,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-ui-polish-4221243362409360824",
+    "tip": "12d0cf892bc3fd7fc71fe2b918c27073c542fcc3",
+    "different_files": 5462,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-ui-polish-8625963143467892271",
+    "tip": "eea7c1629e0a5eef7cba1b9bd974ac93e4773ca7",
+    "different_files": 75,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-ui-polish-8646387879974669382",
+    "tip": "1d3ad006991a680de40c3a051c81935ee8e42dd9",
+    "different_files": 4383,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-ui-polish-feedbadge-tabular-nums-1055125498057450450",
+    "tip": "970fc2aa984b102e6083dca88378bcbdeeb28013",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter-ui-polish-queue-matrix-7299300993342230817",
+    "tip": "eeedb2f570a70d48af883a019ae2c9a75743dfaa",
+    "different_files": 84,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter/market-panel-dark-glassmorphism-17223480049855599435",
+    "tip": "b55c73e1e2b5faa993b084f171cc11b227cc51e7",
+    "different_files": 90,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter/market-panel-dark-glassmorphism-5783221975379756776",
+    "tip": "096231dd115ca77917a273ac7aebae052d2338bc",
+    "different_files": 4383,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/specter/resizable-matrix-modal-9092055349419023564",
+    "tip": "27b62a4628cab2a6eb2c31b454d5e52c3f48bf70",
+    "different_files": 76,
+    "desktop_files": [
+      "package.json"
+    ]
+  },
+  {
+    "branch": "origin/specter/strategy-card-dark-glassmorphism-3283728277703093970",
+    "tip": "eaa03196a81e66f01abef25df4a142f154f88127",
+    "different_files": 5463,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/vortex-animation-optimization-2380446658354774462",
+    "tip": "d593caf497497fd9ca4856c254c58da202e5e096",
+    "different_files": 7221,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/vortex-optimize-strategy-card-4315745579835485235",
+    "tip": "77c84907ef51aadd269cffeab4bceda47345b360",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/vortex-render-opt-12106830449043684942",
+    "tip": "9dea441b96a891d1205cf5bf13f97eefed36920c",
+    "different_files": 7221,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/vortex/animation-rendering-optimization-15789759478729981528",
+    "tip": "cb12a1f4f4605d7b10e589e2505bd4c1e5f623fc",
+    "different_files": 7222,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  },
+  {
+    "branch": "origin/vortex/gpu-animation-optimization-12014176997853170378",
+    "tip": "e53f4c5d5683052054e310e52dfcb3a53bd65b66",
+    "different_files": 76,
+    "desktop_files": []
+  },
+  {
+    "branch": "origin/vortex/gpu-progress-bar-animation-8084631112558076829",
+    "tip": "ebd9b2fe7a11a6ffae884f9278195cfd86e1ec02",
+    "different_files": 7223,
+    "desktop_files": [
+      "claude-desktop_1.52386.6_amd64.deb.part-00",
+      "claude-desktop_1.52386.6_amd64.deb.part-01",
+      "package.json",
+      "scripts/reassemble-claude-desktop-deb.sh"
+    ]
+  }
+]

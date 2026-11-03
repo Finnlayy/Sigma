@@ -38,7 +38,9 @@ async def get_redis(config: AlphaConfig, force_reconnect: bool = False):
         await client.ping()
         _global_client = client
         _is_fake = False
-        logger.info("Redis connected (real) at %s", config.redis_url)
+        from urllib.parse import urlsplit
+        endpoint = urlsplit(config.redis_url)
+        logger.info("Redis connected (real) at %s:%s", endpoint.hostname, endpoint.port)
         return client
     except Exception as exc:
         if not config.allow_fakeredis:

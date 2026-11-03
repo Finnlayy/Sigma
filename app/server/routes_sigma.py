@@ -1091,7 +1091,7 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
     candle_channel = f"market:candles:{symbol}"
     exec_channel = "alpha:executions:live"
     try:
-        candles, meta = client.fetch_ohlc_with_meta(symbol, interval, 300)
+        candles, meta = await asyncio.to_thread(client.fetch_ohlc_with_meta, symbol, interval, 300)
         await websocket.send_text(_json.dumps({
             "type": "init",
             "symbol": symbol,
@@ -1110,7 +1110,7 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
     pubsub = None
     try:
         from app.core.redis_client import get_redis
-        redis = await get_redis()
+        redis = await get_redis(load_config())
         if redis is not None:
             pubsub = redis.pubsub()
             await pubsub.subscribe(candle_channel, exec_channel)
@@ -1147,7 +1147,7 @@ async def market_feed_ws(websocket: WebSocket, symbol: str, interval: int = 15):
             else:
                 await asyncio.sleep(5.0)
                 try:
-                    candles, meta = client.fetch_ohlc_with_meta(symbol, interval, 100)
+                    candles, meta = await asyncio.to_thread(client.fetch_ohlc_with_meta, symbol, interval, 100)
                     await websocket.send_text(_json.dumps({
                         "type": "candles",
                         "symbol": symbol,

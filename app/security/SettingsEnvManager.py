@@ -98,7 +98,7 @@ SETTING_SPECS: Dict[str, Dict[str, Any]] = {
         "hint": "Fee-Hurdle-Multiplikator, z. B. 2.5. Bereich: 0–50.",
     },
     "ALPHA_MARKET_SOURCE": {
-        "kind": "enum", "allowed": ["synthetic", "ccxt_ws"],
+        "kind": "enum", "allowed": ["synthetic", "ccxt_ws", "tv_scraper"],
         "format": "synthetic | ccxt_ws",
         "hint": "Nur diese Werte: synthetic (Sandbox-Feed) oder ccxt_ws (Live-Stream).",
     },
@@ -118,7 +118,7 @@ SETTING_SPECS: Dict[str, Dict[str, Any]] = {
         "hint": "0 = Paper, 1 = Live. Keine anderen Werte (nicht true/yes).",
     },
     "SIGMA_MARKET_SOURCE": {
-        "kind": "enum", "allowed": ["synthetic", "ccxt_ws"],
+        "kind": "enum", "allowed": ["synthetic", "ccxt_ws", "tv_scraper"],
         "format": "synthetic | ccxt_ws",
         "hint": "Nur diese Werte: synthetic oder ccxt_ws.",
     },
@@ -370,6 +370,13 @@ class SettingsEnvManager:
     def update(self, key: str, value: str) -> Dict[str, Any]:
         if key not in WRITABLE:
             raise ValueError(f"Key '{key}' ist nicht für die UI freigegeben.")
+        if os.environ.get("SIGMA_DESKTOP") == "1":
+            if key == "SIGMA_LIVE_TRADING" and str(value).strip() != "0":
+                raise ValueError("Desktop build is paper-only")
+            if key in ("SIGMA_MARKET_SOURCE", "ALPHA_MARKET_SOURCE") and value != "tv_scraper":
+                raise ValueError("Desktop requires tv_scraper; synthetic/unfinished feeds are disabled")
+            if key == "SIGMA_TV_MCP_URL" and value.strip().lower() in ("fake", "mock", "test://fake"):
+                raise ValueError("Desktop requires a real TradingView MCP URL")
         validate_setting(key, value)
         value = _canonicalize(key, value)
         os.environ[key] = str(value)

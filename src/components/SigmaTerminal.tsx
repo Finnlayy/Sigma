@@ -194,7 +194,7 @@ const PRESET_LAYOUTS: Record<
   CONFIG: {
     type: "row",
     children: [
-      set(55, ["SettingsPanel"]),
+      set(55, ["SettingsPanel", "DesktopServicesPanel"]),
       row(45, [set(50, ["DeadmanSwitchPanel"]), set(50, ["RiskGauges"])]),
     ],
   },

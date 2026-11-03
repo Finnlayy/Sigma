@@ -113,6 +113,9 @@ def _resolve(kind: str, key: str, ttl_s: float, fetch, fallback) -> Dict[str, An
                 raise HTTPException(status_code=503, detail={
                     "code": "SCRAPER_UPSTREAM_UNAVAILABLE", "kind": kind, "error": str(exc)})
 
+    if not SETTINGS.allow_synthetic_fallback:
+        raise HTTPException(status_code=503, detail={
+            "code": "SCRAPER_UPSTREAM_UNAVAILABLE", "kind": kind, "error": "Offline; synthetic data disabled"})
     data = fallback()
     CACHE.set(key, {"source": SOURCE_SYNTHETIC, "data": data})
     return _envelope(data, SOURCE_SYNTHETIC, degraded=True)

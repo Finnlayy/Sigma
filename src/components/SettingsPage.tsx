@@ -32,11 +32,11 @@ type SaveFlash = {
 const GROUP_COPY: Record<string, { title: string; hint: string }> = {
   secrets: {
     title: "Secrets",
-    hint: "In diesem Build gibt es kein Secrets-Backend: /api/settings ist nicht implementiert, eingefügte Werte werden nicht gespeichert. Paper only — es werden keine Exchange-Keys benötigt (AGENTS.md).",
+    hint: "Werte werden lokal in der .env-Datei gespeichert. Paper-Trading benötigt keine Exchange-Keys. Secrets werden in der UI maskiert; schützen Sie Ihr Benutzerkonto und Ihre Datensicherung.",
   },
   runtime: {
     title: "Runtime",
-    hint: "Live bleibt aus, bis SIGMA_LIVE_TRADING=1. LLM-Tools ändern diese Keys nicht.",
+    hint: "Der Desktop-Build ist Paper-only. TradingView-Session und echte MCP-URL werden separat eingerichtet. LLM-Tools ändern diese Keys nicht.",
   },
   risk: {
     title: "Risk knobs",

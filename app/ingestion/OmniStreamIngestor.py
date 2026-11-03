@@ -68,7 +68,7 @@ class OmniStreamIngestor:
         self._tick_count = 0
         self._scraper_fail_logged = False
         self._scraper_last_poll: Dict[str, float] = {}
-        self.feed_source_effective = "synthetic"
+        self.feed_source_effective = "synthetic" if config.allow_synthetic else "unavailable"
 
     # ------------------------------------------------------------------- setup
     def attach(self, redis=None, store=None) -> None:
@@ -101,7 +101,12 @@ class OmniStreamIngestor:
                 self.feed_source_effective = "tv_scraper"
                 logger.info("Seeded %d 1m candles from scraper sidecar (:8001)", seeded)
                 return seeded
+            if not self.config.allow_synthetic:
+                self.feed_source_effective = "unavailable"
+                return 0
             logger.warning("Scraper seed empty — falling back to synthetic history.")
+        if not self.config.allow_synthetic:
+            return 0
         for symbol in self.config.market_symbols:
             # Idempotenz: nur Seed, wenn noch keine Historie existiert
             if self.store is not None and self.store._one(
@@ -155,7 +160,7 @@ class OmniStreamIngestor:
             # automatisch Synthetic-Fallback (siehe _ccxt_feed).
             if not await _ccxt_feed_available():
                 logger.warning("[MOCK] CCXT WS nicht erreichbar → Synthetic-Fallback aktiv.")
-        self.seed_history()
+        await asyncio.to_thread(self.seed_history)
         self._loop_task = asyncio.create_task(self._tick_loop())
         logger.info("OmniStream ingestor started (source=%s, tick=%.1fs)",
                     source, self.config.tick_interval_seconds)
@@ -165,6 +170,7 @@ class OmniStreamIngestor:
         task = getattr(self, "_loop_task", None)
         if task:
             task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def _tick_loop(self) -> None:
         tele = get_telemetry_center()
@@ -173,7 +179,9 @@ class OmniStreamIngestor:
             t_start = time.time()
             self._tick_count += 1
             for symbol in self.config.market_symbols:
-                tick = self._next_tick(symbol)
+                tick = await asyncio.to_thread(self._next_tick, symbol)
+                if tick is None:
+                    continue
                 self._apply_tick(symbol, tick)
                 if self.redis:
                     try:
@@ -217,20 +225,21 @@ class OmniStreamIngestor:
             if self.store is not None:
                 total += self.store.seed_ohlcv(symbol, 60, rows)
             self.prices[symbol] = candles[-1]["c"]
+            self.change24h[symbol] = (candles[-1]["c"] / candles[0]["c"] - 1) * 100
             self.high24h[symbol] = max(c["h"] for c in candles)
             self.low24h[symbol] = min(c["l"] for c in candles)
             self.volume24h[symbol] = sum(c["v"] for c in candles)
         return total
 
-    def _next_tick(self, symbol: str) -> Dict[str, Any]:
-        """Quelle laut `SIGMA_MARKET_SOURCE`; jeder Fehler degradiert auf synthetic."""
+    def _next_tick(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Desktop: no fabricated ticks during polling gaps or upstream failure."""
         if getattr(self.config, "market_source", "synthetic") != "tv_scraper":
-            return self._synthetic_tick(symbol)
+            return self._synthetic_tick(symbol) if self.config.allow_synthetic else None
 
         now = time.time()
         # Polling-Drossel: hoechstens alle 15 s pro Symbol gegen das Sidecar.
         if now - self._scraper_last_poll.get(symbol, 0.0) < 15.0:
-            return self._synthetic_tick(symbol)
+            return self._synthetic_tick(symbol) if self.config.allow_synthetic else None
         self._scraper_last_poll[symbol] = now
         try:
             from app.tv.scraper_client import ScraperUnavailable, get_scraper_client
@@ -240,13 +249,17 @@ class OmniStreamIngestor:
                 self.feed_source_effective = "tv_scraper"
                 self._scraper_fail_logged = False
                 last = candles[-1]
+                self.high24h[symbol] = max(c["h"] for c in candles)
+                self.low24h[symbol] = min(c["l"] for c in candles)
+                self.volume24h[symbol] = sum(c["v"] for c in candles)
+                self.change24h[symbol] = (last["c"] / candles[0]["c"] - 1) * 100
                 return {"price": last["c"], "ts": now, "volume": last["v"]}
         except Exception as exc:  # noqa: BLE001 - feed must never kill the loop
             if not self._scraper_fail_logged:
                 logger.warning("scraper tick failed (%s) — synthetic fallback active", exc)
                 self._scraper_fail_logged = True
-        self.feed_source_effective = "synthetic"
-        return self._synthetic_tick(symbol)
+        self.feed_source_effective = "synthetic" if self.config.allow_synthetic else "unavailable"
+        return self._synthetic_tick(symbol) if self.config.allow_synthetic else None
 
     def _synthetic_tick(self, symbol: str) -> Dict[str, Any]:
         rng = self._rng(symbol)
@@ -324,7 +337,10 @@ class OmniStreamIngestor:
 
         rows = []
         for symbol in self.config.market_symbols:
-            self._rng(symbol)
+            if self.config.allow_synthetic:
+                self._rng(symbol)
+            elif symbol not in self.prices or self.feed_source_effective == "unavailable":
+                continue
             price = self.prices[symbol]
             rows.append({
                 "pair": symbol,
@@ -338,7 +354,7 @@ class OmniStreamIngestor:
         return rows
 
     def last_price(self, symbol: str) -> float:
-        return self.prices.get(symbol, BASE_PRICES.get(symbol, 100.0))
+        return self.prices.get(symbol, BASE_PRICES.get(symbol, 100.0) if self.config.allow_synthetic else 0.0)
 
 
 def _ts_us(ts: float):

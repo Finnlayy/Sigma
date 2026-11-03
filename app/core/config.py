@@ -103,6 +103,7 @@ class SigmaConfig:
 
     # --- Ingestion / market ---------------------------------------------------------
     market_symbols: tuple = ("BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD")
+    allow_synthetic: bool = True
     market_source: str = "synthetic"
     tick_interval_seconds: float = 1.5
     candle_interval_sec: int = 60
@@ -274,6 +275,7 @@ class SigmaConfig:
                 "SIGMA_FEE_HURDLE_MULT",
                 _env_float("ALPHA_FEE_HURDLE_MULT", self.churn_fee_hurdle_multiple),
             )
+            self.allow_synthetic = _env_bool("SIGMA_ALLOW_SYNTHETIC", self.allow_synthetic)
             self.market_source = _env_first("SIGMA_MARKET_SOURCE", "ALPHA_MARKET_SOURCE", default=self.market_source)
             self.log_level = _env_first("SIGMA_LOG_LEVEL", "ALPHA_LOG_LEVEL", default=self.log_level)
             self.telegram_bot_token = _env("TELEGRAM_BOT_TOKEN", self.telegram_bot_token)
@@ -285,6 +287,10 @@ class SigmaConfig:
             # --- Blueprint L4 env matrix (§9 Env-Matrix) --------------------
             self.webhook_secret = _env(bp.WEBHOOK_SECRET_ENV, self.webhook_secret)
             self.live_trading = _env_bool("SIGMA_LIVE_TRADING", self.live_trading)
+            if _env_bool("SIGMA_DESKTOP", False):
+                self.live_trading = False
+                self.allow_synthetic = False
+                self.allow_fakeredis = False
             self.l4_config_path = _env("SIGMA_L4_CONFIG", self.l4_config_path)
             self.tv_scraper_url = _env("SIGMA_TV_SCRAPER_URL", self.tv_scraper_url)
             self.tv_scraper_timeout_s = _env_float("SIGMA_TV_SCRAPER_TIMEOUT_S", self.tv_scraper_timeout_s)

@@ -30,6 +30,7 @@ export default defineConfig(() => {
       port: 3000,
       allowedHosts: true as const,
       proxy: {
+        '/ws': { target: coreProxy, changeOrigin: true, ws: true },
         '/api': {
           target: coreProxy,
           changeOrigin: true,
@@ -42,6 +43,7 @@ export default defineConfig(() => {
       port: 3000,
       allowedHosts: true as const,
       proxy: {
+        '/ws': { target: coreProxy, changeOrigin: true, ws: true },
         '/api': {
           target: coreProxy,
           changeOrigin: true,

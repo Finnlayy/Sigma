@@ -37,3 +37,12 @@ dist/
 
 # MP-12 Backtest-Artefakte (Report-Exports), nie versionieren
 tests/backtest/results/
+
+# Desktop packaging and local verification
+.cache/
+build/
+release/
+artifacts/
+playwright-report/
+test-results/
+*.spec.tmp
