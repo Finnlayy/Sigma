@@ -816,3 +816,18 @@ def test_alert_driver_contract_is_real_status_and_mutations_are_gated(client):
     assert status.json()['connection_verified'] is False
     assert client.post('/api/v1/alerts/driver/attach').status_code == 403
     assert client.post('/api/v1/alerts/sync-m8').status_code == 403
+
+
+def test_calendar_month_contract_matches_real_selected_month(client):
+    result = client.get('/api/pnl/daily/combined_all?year=2024&month=2')
+    assert result.status_code == 200
+    data = result.json()
+    assert len(data['days']) == 29
+    assert data['days'][0]['date'] == '2024-02-01'
+    assert data['days'][0]['dayOfWeek'] == 4  # Sunday-zero UI grid
+    assert data['days'][-1]['date'] == '2024-02-29'
+    assert data['year'] == 2024 and data['month'] == 2
+    assert all(not day['isFuture'] for day in data['days'])
+    assert client.get('/api/pnl/daily/combined_all?year=2024&month=13').status_code == 422
+    assert client.get('/api/pnl/daily/combined_all?year=2024').status_code == 422
+    assert client.get('/api/pnl/daily/combined_all?days=0').status_code == 422

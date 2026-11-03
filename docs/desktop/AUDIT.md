@@ -33,7 +33,7 @@ Fetched all remote heads without switching branches. [Branch inventory](branch-i
 ## Verification so far
 
 - Baseline: 912 passed, 1 skipped, 1 failed (quote-style assertion). Existing TypeScript check and production Vite build pass.
-- Final local regression: 927 passed, 1 skipped; 4 Node supervisor tests pass; TypeScript and production Vite build pass.
+- Final local regression: 928 passed, 1 skipped; 6 Node supervisor/frontend regression tests pass; TypeScript and production Vite build pass.
 - Real local service smoke: compiled actual Redis, launched actual scraper/Core/queue, checked authenticated API + UI assets, unknown-route 404, live-mode denial, persistent Settings across complete restart, no orphan processes on shutdown. External upstreams intentionally offline, no fabricated connection success.
 - Actual frozen local service smoke passed after source-building a CPython shared library matching this sandbox’s static extension layout. Local graphical Electron download remains blocked at GitHub asset redirects.
 - Native Ubuntu CI [41637364967](https://github.com/Finnlayy/Sigma/actions/runs/41637364967) **passed**, producing `.deb`, AppImage and SHA256SUMS in artifact `SIGMA-Ubuntu-x64` (id `13232755343`). That first fully verified build is commit `ec94c93`. Frozen services, real official CLI paper-book initialization, sandboxed packaged Electron, genuine renderer workflows, `.deb` metadata and extracted AppImage launch all passed. Subsequent hardening goes through the same required pipeline; use the latest PR check/artifact for the final revision.
@@ -58,3 +58,24 @@ build of CPython initially had a different built-in extension layout. Rebuilding
 to match this sandbox allowed the **actual frozen service smoke to pass**. Ubuntu's
 setup-python distribution is the supported native build environment and has now
 produced and verified both installers.
+
+
+## Renderer integration regression and final hardening
+
+A later native UI gate exposed a timing-dependent React hook-order crash in the
+existing QueueMatrixPanel. It was reproduced locally with an actual headless
+Chromium binary and genuine managed services (no intercepted HTTP). Moving memo
+hooks out of the conditional render helper fixes loading and paper/live/dual view
+transitions. The native test now waits for actual matrix data and switches all
+three views, rather than navigating away before the bad async render can occur.
+The local browser navigation/dual-view pass is diagnostic browser evidence, **not**
+a substitute for the sandboxed packaged Electron gate.
+
+The hook audit also found an invalid async-loader hook in CalendarHeatmap's
+synthetic-history fallback. That false-success fallback is removed: ledger failure
+is explicitly unavailable and never labelled “Daemon Live.” The actual daily P&L
+API now honors the renderer's year/month selection, leap days and Sunday-zero
+calendar alignment; Core health is derived from task liveness rather than a
+constant. Existing ledger calculations and session aggregates are retained.
+Fonts are bundled from npm instead of requiring Google Fonts at runtime. The
+native workflow remains the final installer gate for these changes.

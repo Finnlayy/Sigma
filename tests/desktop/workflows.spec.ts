@@ -30,12 +30,30 @@ test('existing navigation, CSV results, Settings, persistence and paper-only gua
       await toggle.click();
       await expect(toggle).toHaveAttribute('data-state', 'on');
       await expect(window.getByText('Projekt:Sigma — Interface Interruption', { exact: true })).toHaveCount(0);
+      if (preset === 'OVERVIEW') {
+        // Wait for genuine async matrix data, then exercise both one- and two-matrix renders.
+        await expect(window.getByText('Queue Performance Matrices', { exact: true })).toBeVisible();
+        await expect(window.getByText('Compiling all-time queue performance matrix...', { exact: true })).toHaveCount(0);
+        await window.getByRole('button', { name: 'Dual Comparison', exact: true }).click();
+        await expect(window.getByText('L2 Paper Execution Queue Matrix', { exact: true })).toBeVisible();
+        await expect(window.getByText('L4 Live Execution Queue Matrix', { exact: true })).toBeVisible();
+        await window.getByRole('button', { name: 'L4 Live Queue Matrix', exact: true }).click();
+        await window.getByRole('button', { name: 'L2 Paper Queue Matrix', exact: true }).click();
+      }
     }
     await window.getByRole('radio', { name: 'CONFIG', exact: true }).click();
     await window.getByRole('tab', { name: /^Desktop Services/ }).click();
     await expect(window.getByText('Ubuntu Desktop · Paper only', { exact: true })).toBeVisible();
     await expect(window.getByText('persistent', { exact: true })).toBeVisible();
     await expect(window.getByText('Unavailable — set a real SIGMA_TV_MCP_URL', { exact: true })).toBeVisible();
+    const marketSocket = await window.evaluate(() => new Promise<{ type: string; channels?: string[] }>((resolve, reject) => {
+      const socket = new WebSocket(`ws://${location.host}/ws/market-feed/BTC%2FUSD?interval=15`);
+      const timer = setTimeout(() => { socket.close(); reject(new Error('Market WebSocket timed out')); }, 10_000);
+      socket.onmessage = event => { clearTimeout(timer); resolve(JSON.parse(event.data)); socket.close(); };
+      socket.onerror = () => { clearTimeout(timer); reject(new Error('Market WebSocket handshake failed')); };
+    }));
+    expect(['init', 'error']).toContain(marketSocket.type); // Offline error is honest; a failed handshake is not.
+    expect(marketSocket.channels).toContain('market:candles:BTC/USD');
 
     const guard = await window.evaluate(async () => {
       const live = await fetch('/api/kraken/toggle-mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paperTrading: false }) });

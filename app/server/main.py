@@ -20,7 +20,7 @@ import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -1838,7 +1838,9 @@ async def pnl_history(strategy_id: str):
 
 
 @app.get("/api/pnl/daily/{endpoint_id}")
-async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
+async def pnl_daily(endpoint_id: str, days: int = Query(90, ge=1, le=3660), strategies: str = "",
+                    year: Optional[int] = Query(None, ge=1970, le=2100),
+                    month: Optional[int] = Query(None, ge=1, le=12)):
     """DailyPnLHeatmapData — pro Strategie oder combined_all/paper/live/custom_multi."""
     st = state
     strategies_all = st.store.list_strategies()
@@ -1881,18 +1883,27 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
         d["losses"] += 1 if pnl <= 0 else 0
         d["vol"] += float(t.get("notional_usd") or 0.0)
 
-    today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+    if (year is None) != (month is None):
+        raise HTTPException(422, "year and month must be supplied together")
+    today_date = _dt.datetime.now(_dt.timezone.utc).date()
+    today = today_date.isoformat()
+    if year is not None:
+        import calendar
+        first = _dt.date(year, month, 1)
+        dates = [first + _dt.timedelta(days=i) for i in range(calendar.monthrange(year, month)[1])]
+    else:
+        dates = [today_date - _dt.timedelta(days=i) for i in range(days - 1, -1, -1)]
+    tasks_healthy = bool(st._tasks) and all(not task.done() for task in st._tasks)
     days_out = []
-    for i in range(int(days) - 1, -1, -1):
-        d = (today and _dt.datetime.strptime(today, "%Y-%m-%d")
-             - _dt.timedelta(days=int(days) - 1 - i)).strftime("%Y-%m-%d")
+    for date in dates:
+        d = date.isoformat()
         rec = by_day.get(d, {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0,
                              "vol": 0.0, "realized": 0.0})
         dt = _dt.datetime.strptime(d, "%Y-%m-%d")
         days_out.append({
             "date": d,
             "formattedDate": dt.strftime("%b %d, %Y"),
-            "dayOfWeek": dt.weekday(),
+            "dayOfWeek": (dt.weekday() + 1) % 7,
             "dayLabel": dt.strftime("%a"),
             "dayOfMonth": dt.day,
             "monthLabel": dt.strftime("%b"),
@@ -1905,18 +1916,19 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
             "winRate": round(rec["wins"] / rec["trades"] * 100.0, 1) if rec["trades"] else 0.0,
             "volumeUSD": round(rec["vol"], 2),
             "isToday": d == today,
+            "isFuture": date > today_date,
             "machineState": {
                 "automationLevel": autonomy.get("automationLevel"),
                 "executionMode": autonomy.get("activeLedgerMode"),
                 "engineStatus": "active" if st.telemetry.system.can_execute_orders else "halted",
                 "activeWorkersCount": sum(1 for s in strategies_all if s["status"] == "active"),
-                "daemonHealth": "HEALTHY",
+                "daemonHealth": "HEALTHY" if tasks_healthy else "DEGRADED (Core task unavailable)",
             },
         })
     active_days = [d for d in days_out if d["tradesCount"] > 0 or d["pnl"] != 0]
     green = sum(1 for d in active_days if d["pnl"] > 0)
     red = sum(1 for d in active_days if d["pnl"] < 0)
-    total30 = sum(d["pnl"] for d in days_out[-30:])
+    total30 = sum(d["pnl"] for d in (days_out if year is not None else days_out[-30:]))
     wins_pnl = sum(d["pnl"] for d in days_out if d["pnl"] > 0)
     loss_pnl = abs(sum(d["pnl"] for d in days_out if d["pnl"] < 0))
     return {
@@ -1925,6 +1937,10 @@ async def pnl_daily(endpoint_id: str, days: int = 90, strategies: str = ""):
         "assetPair": pair,
         "days": days_out,
         "total30DPnL": round(total30, 2),
+        "totalMonthPnL": round(sum(d["pnl"] for d in days_out), 2),
+        "year": year or today_date.year,
+        "month": month or today_date.month,
+        "monthLabel": dates[0].strftime("%b"),
         "greenDays": green,
         "redDays": red,
         "flatDays": max(0, len(active_days) - green - red),
