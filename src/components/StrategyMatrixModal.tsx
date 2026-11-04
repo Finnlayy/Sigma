@@ -237,10 +237,12 @@ export default function StrategyMatrixModal({
           </div>
 
           {/* Navigation Sub-Tabs */}
-          <div className="flex items-center space-x-1 px-5 pt-3 border-b border-zinc-800/80 bg-zinc-950/40">
+          <div role="tablist" aria-label="Matrix Navigation Tabs" className="flex items-center space-x-1 px-5 pt-3 border-b border-zinc-800/80 bg-zinc-950/40">
             <button
+              role="tab"
+              aria-selected={activeTab === "overview"}
               onClick={() => setActiveTab("overview")}
-              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors ${
+              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-t ${
                 activeTab === "overview"
                   ? "border-emerald-500 text-white"
                   : "border-transparent text-zinc-400 hover:text-zinc-200"
@@ -249,8 +251,10 @@ export default function StrategyMatrixModal({
               Matrix Telemetry &amp; Visuals
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === "trades"}
               onClick={() => setActiveTab("trades")}
-              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-t ${
                 activeTab === "trades"
                   ? "border-emerald-500 text-white"
                   : "border-transparent text-zinc-400 hover:text-zinc-200"
@@ -262,8 +266,10 @@ export default function StrategyMatrixModal({
               </span>
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === "config"}
               onClick={() => setActiveTab("config")}
-              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors ${
+              className={`px-3.5 py-2 text-xs font-mono font-semibold border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-t ${
                 activeTab === "config"
                   ? "border-emerald-500 text-white"
                   : "border-transparent text-zinc-400 hover:text-zinc-200"
