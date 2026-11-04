@@ -379,7 +379,7 @@ export default function KrakenLedgersPanel({
 
                           {/* Total Holdings */}
                           <td className="py-3 px-4 text-right">
-                            <span className="font-bold text-zinc-200">
+                            <span className="font-bold text-zinc-200 font-mono tabular-nums">
                               {asset.amount?.toLocaleString(undefined, {
                                 minimumFractionDigits: isFiat ? 2 : 4,
                                 maximumFractionDigits: isFiat ? 2 : 6,
@@ -392,7 +392,7 @@ export default function KrakenLedgersPanel({
 
                           {/* Available vs In Order */}
                           <td className="py-3 px-4 text-right text-[11px]">
-                            <div className="text-zinc-300">
+                            <div className="text-zinc-300 font-mono tabular-nums">
                               Avail:{" "}
                               {asset.available?.toLocaleString(undefined, {
                                 minimumFractionDigits: isFiat ? 2 : 4,
@@ -400,7 +400,7 @@ export default function KrakenLedgersPanel({
                               })}
                             </div>
                             {asset.inOrders > 0 && (
-                              <div className="text-[10px] text-amber-400">
+                              <div className="text-[10px] text-amber-400 font-mono tabular-nums">
                                 Locked: {asset.inOrders?.toLocaleString()}
                               </div>
                             )}
@@ -408,7 +408,7 @@ export default function KrakenLedgersPanel({
 
                           {/* Unit Price */}
                           <td className="py-3 px-4 text-right">
-                            <div className="font-semibold text-zinc-200">
+                            <div className="font-semibold text-zinc-200 font-mono tabular-nums">
                               $
                               {asset.unitPriceUSD?.toLocaleString(undefined, {
                                 minimumFractionDigits: isFiat ? 2 : 2,
@@ -434,7 +434,7 @@ export default function KrakenLedgersPanel({
 
                           {/* Total USD Value */}
                           <td className="py-3 px-4 text-right">
-                            <span className="font-bold text-white text-sm">
+                            <span className="font-bold text-white text-sm font-mono tabular-nums">
                               $
                               {asset.totalValueUSD?.toLocaleString(undefined, {
                                 minimumFractionDigits: 2,
@@ -446,7 +446,7 @@ export default function KrakenLedgersPanel({
                           {/* Portfolio Allocation Bar */}
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end space-x-2">
-                              <span className="text-xs font-semibold text-zinc-300">
+                              <span className="text-xs font-semibold text-zinc-300 font-mono tabular-nums">
                                 {asset.portfolioPercentage}%
                               </span>
                               <div className="w-16 bg-zinc-800 h-1.5 rounded-full overflow-hidden">
