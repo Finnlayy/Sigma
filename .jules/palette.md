@@ -15,3 +15,7 @@
 ## 2025-03-08 - Accessible Icon-Only Buttons in StrategyEditor
 **Learning:** The `StrategyEditor` component had icon-only buttons for critical actions (Delete Strategy, Move to Archives, Close Manifest Modal) lacking `aria-label`s, rendering them inaccessible to screen readers and difficult to identify for keyboard navigators. Although `title` was present for some, `aria-label` provides a more robust standard for screen readers.
 **Action:** Always verify that every interactive element using an icon-only approach includes a descriptive `aria-label` attribute describing its function, ensuring accessibility for all users.
+
+## 2024-11-03 - Custom Tab Selection Accessibility
+**Learning:** Custom tab interfaces built using standard `div` and `button` elements lack correct semantics. They are not identified as tabs by screen readers, and toggling them doesn't convey selected states. Keyboard focus visibility may also be obscured or absent.
+**Action:** Always wrap custom tab toggles in a `role="tablist"` container with an `aria-label`. Use `role="tab"` and `aria-selected` on the buttons themselves. Add `focus-visible:ring-2` to guarantee clear keyboard focus indication.
