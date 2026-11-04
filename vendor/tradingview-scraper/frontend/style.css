@@ -56,7 +56,7 @@ header p { color: var(--text-2); margin-top: .4rem; font-size: 1rem; }
 .mode-btn {
     background: transparent; border: 1px solid transparent; color: var(--text-2);
     padding: .55rem 1.2rem; border-radius: 8px; font-size: .85rem; font-weight: 600;
-    cursor: pointer; transition: all .25s; 
+    cursor: pointer; transition: color .25s, background-color .25s, border-color .25s, transform .25s, box-shadow .25s;
 }
 .mode-btn:hover { color: var(--text-1); background: rgba(255,255,255,.04); transform: none; box-shadow: none; }
 .mode-btn.active { color: var(--accent); background: rgba(56,189,248,.1); border-color: rgba(56,189,248,.2); }
@@ -85,7 +85,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px r
 button {
     background: var(--accent); color: #fff; border: none;
     padding: .6rem 1.5rem; border-radius: 8px; font-size: .9rem; font-weight: 600;
-    cursor: pointer; transition: all .2s; height: 38px;
+    cursor: pointer; transition: transform .2s, box-shadow .2s, background-color .2s, color .2s; height: 38px;
     display: inline-flex; align-items: center; justify-content: center; gap: .4rem; white-space: nowrap;
 }
 button:hover { background: var(--accent-h); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(56,189,248,.25); }
@@ -112,7 +112,7 @@ button:active { transform: translateY(0); }
 .tab-btn {
     background: transparent; color: var(--text-2); border: none;
     padding: .4rem .9rem; border-radius: 6px; font-weight: 600; font-size: .82rem;
-    cursor: pointer; transition: all .2s; height: auto;
+    cursor: pointer; transition: color .2s, background-color .2s; height: auto;
 }
 .tab-btn:hover { color: var(--text-1); background: rgba(255,255,255,.04); transform: none; box-shadow: none; }
 .tab-btn.active { color: var(--accent); background: rgba(56,189,248,.1); }
@@ -154,7 +154,7 @@ td.neg { color: var(--red); }
 .toast {
     position: fixed; bottom: 1.5rem; right: 1.5rem; padding: .8rem 1.5rem; border-radius: 8px;
     font-weight: 600; font-size: .85rem; transform: translateY(80px); opacity: 0;
-    transition: all .35s cubic-bezier(.68, -.55, .265, 1.55); z-index: 999;
+    transition: transform .35s cubic-bezier(.68, -.55, .265, 1.55), opacity .35s cubic-bezier(.68, -.55, .265, 1.55); z-index: 999;
 }
 .toast.show { transform: translateY(0); opacity: 1; }
 .toast.error { background: rgba(239,68,68,.92); border: 1px solid #f87171; }
