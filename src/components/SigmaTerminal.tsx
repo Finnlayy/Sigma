@@ -358,7 +358,7 @@ export default function SigmaTerminal() {
             {latencyMs != null ? `${latencyMs}ms` : '—'}
           </span>
           <span className="text-muted-foreground">
-            L{health?.blueprint?.autonomy_level ?? 4} · v{health?.blueprint?.blueprint_version ?? '1.2.0'}
+            L{health?.blueprint?.autonomy_level ?? 4} · v{health?.blueprint?.blueprint_version ?? '3.0'}
           </span>
         </div>
       </div>
