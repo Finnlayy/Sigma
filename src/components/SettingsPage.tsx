@@ -327,7 +327,7 @@ export default function SettingsPage({
                   type="button"
                   onClick={() => void save(row)}
                   disabled={busy === row.key}
-                  aria-label={`Save ${row.key}`}
+                  aria-label={`Save ${row.key}`} title={`Save ${row.key}`}
                   className={`px-3 py-1.5 rounded-lg text-xs font-mono flex items-center gap-1.5 disabled:opacity-50 transition-shadow ${flashClass(state?.tone)}`}
                 >
                   <Save className={`w-3.5 h-3.5 ${iconClass(state?.tone)}`} />
