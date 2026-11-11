@@ -27,6 +27,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core import blueprint as bp
 from app.scraper.cache import TTLCache, TokenBucket, cache_key
+from app.scraper.live_stream import preserve_root_logging
 from app.scraper.settings import get_settings
 from app.scraper import synthetic
 from app.scraper.vendor_bridge import VendorUnavailable, get_bridge
@@ -138,6 +139,7 @@ def health() -> Dict[str, Any]:
         "degraded": SETTINGS.offline or not vendor["importable"],
         "cache": {"entries": len(CACHE), **CACHE.stats.as_dict()},
         "rate_limit": BUCKET.snapshot(),
+        "streams": BRIDGE.streams.status(),
         "endpoints": dict(bp.SCRAPER_ENDPOINTS),
     }
 
@@ -180,7 +182,8 @@ def get_ohlcv(
     minutes = to_minutes(tf)
     key = cache_key("ohlcv", exchange, ticker, tf, count)
 
-    out = _resolve(
+    live = BRIDGE.live_ohlcv(exchange, ticker, tf, count)
+    out = _envelope(live, SOURCE_VENDOR, stream=True) if live else _resolve(
         "ohlcv", key, SETTINGS.ohlcv_ttl_s,
         fetch=lambda: BRIDGE.ohlcv(exchange, ticker, tf, count),
         fallback=lambda: synthetic.candles(exchange, ticker, minutes, count),
@@ -351,7 +354,8 @@ def _mount_vendor() -> bool:
         return False
     try:
         BRIDGE.ensure_path()
-        from api.main import app as vendor_app  # type: ignore
+        with preserve_root_logging():
+            from api.main import app as vendor_app  # type: ignore
 
         app.mount("/vendor", vendor_app)
         logger.info("vendor app mounted at /vendor")
@@ -362,6 +366,11 @@ def _mount_vendor() -> bool:
 
 
 VENDOR_MOUNTED = _mount_vendor()
+
+
+@app.on_event("shutdown")
+def _stop_streams() -> None:
+    BRIDGE.streams.stop_all()
 
 
 def run() -> None:  # pragma: no cover - CLI entry

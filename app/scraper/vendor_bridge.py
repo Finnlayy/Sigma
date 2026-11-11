@@ -17,6 +17,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.core import blueprint as bp
+from app.scraper.live_stream import StreamRegistry, preserve_root_logging
 from app.scraper.settings import ScraperSettings, get_settings
 
 logger = logging.getLogger("app.scraper.vendor")
@@ -39,6 +40,7 @@ class VendorBridge:
         self._failures = 0
         self._consecutive_failures = 0
         self._breaker_open_until = 0.0
+        self.streams = StreamRegistry(self.settings.vendor_path, self.settings.max_candles)
 
     # ------------------------------------------------------------- bootstrap
     def ensure_path(self) -> None:
@@ -51,12 +53,13 @@ class VendorBridge:
             return self._modules
         self.ensure_path()
         try:
-            from tradingview_scraper.symbols.fundamental_graphs import FundamentalGraphs
-            from tradingview_scraper.symbols.market_movers import MarketMovers
-            from tradingview_scraper.symbols.overview import Overview
-            from tradingview_scraper.symbols.screener import Screener
-            from tradingview_scraper.symbols.stream import Streamer
-            from tradingview_scraper.symbols.technicals import Indicators
+            with preserve_root_logging():  # Vendor setzt beim Import Root-Logging auf DEBUG
+                from tradingview_scraper.symbols.fundamental_graphs import FundamentalGraphs
+                from tradingview_scraper.symbols.market_movers import MarketMovers
+                from tradingview_scraper.symbols.overview import Overview
+                from tradingview_scraper.symbols.screener import Screener
+                from tradingview_scraper.symbols.stream import Streamer
+                from tradingview_scraper.symbols.technicals import Indicators
         except Exception as exc:  # pragma: no cover - depends on host deps
             self._import_error = f"{type(exc).__name__}: {exc}"
             raise VendorUnavailable(f"vendor import failed: {self._import_error}") from exc
@@ -94,6 +97,7 @@ class VendorBridge:
             "circuit_open": self.circuit_open,
             "circuit_reopens_in_s": max(0.0, round(self._breaker_open_until - time.time(), 1)),
             "consecutive_failures": self._consecutive_failures,
+            "live_stream": self.settings.live_stream and not self.settings.offline,
         }
 
     @property
@@ -140,12 +144,26 @@ class VendorBridge:
         raise VendorUnavailable(self._last_error or f"{label} failed")
 
     # ----------------------------------------------------------------- ohlcv
+    def live_ohlcv(self, exchange: str, ticker: str, timeframe: str,
+                   candles: int) -> Optional[List[Dict[str, Any]]]:
+        """Kerzen aus dem dauerhaften Live-Stream, None solange er (noch) keine hat."""
+        if self.settings.offline or not self.settings.live_stream or self.circuit_open:
+            return None
+        rows = self.streams.bars(exchange, ticker, timeframe, candles)
+        return normalize_candles(rows) if rows else None
+
     def ohlcv(self, exchange: str, ticker: str, timeframe: str, candles: int) -> List[Dict[str, Any]]:
+        if self.streams.is_invalid(exchange.upper(), ticker.upper()):
+            # Bekannt unbekanntes Symbol: kein Retry, kein Treffer auf den Circuit-Breaker.
+            raise VendorUnavailable(f"Invalid exchange:symbol '{exchange.upper()}:{ticker.upper()}'")
         mods = self._import()
         streamer_cls = mods["Streamer"]
 
         def _run() -> List[Dict[str, Any]]:
+            # export_result=True sammelt die Kerzen; nur das Schreiben einer
+            # JSON-Datei pro Abruf (export/) wird abgeschaltet.
             streamer = streamer_cls(export_result=True, export_type="json")
+            streamer._export = _no_export
             result = streamer.stream(
                 exchange=exchange.upper(), symbol=ticker.upper(),
                 timeframe=timeframe, numb_price_candles=candles,
@@ -194,6 +212,9 @@ class VendorBridge:
 
 
 # ------------------------------------------------------------------ helpers
+
+def _no_export(*_args: Any, **_kwargs: Any) -> None:
+    """Ersetzt `Streamer._export`: Kerzen landen im Sidecar-Cache, nicht in export/."""
 
 def _unwrap(payload: Any) -> Dict[str, Any]:
     if isinstance(payload, dict):

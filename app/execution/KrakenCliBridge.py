@@ -21,6 +21,7 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -515,6 +516,53 @@ ALLOWED_FLAGS_PREFIXES = (
     "--client-order-id", "--reduce-only", "-o", "json",
 )
 
+# Circuit breaker: when Kraken (Futures) is unreachable every CLI call hangs until
+# the timeout. After CLI_BREAKER_TRIP_COUNT slow failures in a row the venue is
+# skipped for CLI_BREAKER_OPEN_S and calls fail fast (fail-closed, same code as a
+# timeout). One probe after the window decides; any success closes it again.
+CLI_SLOW_FAILURE_S = 5.0
+CLI_BREAKER_TRIP_COUNT = 2
+CLI_BREAKER_OPEN_S = 30.0
+
+
+class _CliBreaker:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._slow_failures: Dict[str, int] = {}
+        self._open_until: Dict[str, float] = {}
+
+    @staticmethod
+    def venue(argv: List[str]) -> str:
+        return "futures" if len(argv) > 1 and argv[1] == "futures" else "spot"
+
+    def remaining(self, venue: str) -> float:
+        with self._lock:
+            return max(0.0, self._open_until.get(venue, 0.0) - time.monotonic())
+
+    def record(self, venue: str, code: int, elapsed_s: float) -> None:
+        with self._lock:
+            if code == 0:
+                self._slow_failures.pop(venue, None)
+                self._open_until.pop(venue, None)
+                return
+            if code != 124 and elapsed_s < CLI_SLOW_FAILURE_S:
+                return
+            count = self._slow_failures.get(venue, 0) + 1
+            self._slow_failures[venue] = count
+            if count >= CLI_BREAKER_TRIP_COUNT:
+                self._open_until[venue] = time.monotonic() + CLI_BREAKER_OPEN_S
+                logger.warning("kraken cli %s: %d slow failures, failing fast for %.0fs",
+                               venue, count, CLI_BREAKER_OPEN_S)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._slow_failures.clear()
+            self._open_until.clear()
+
+
+CLI_BREAKER = _CliBreaker()
+
+
 def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int]:
     if not argv:
         return "", "EGeneral:Invalid arguments — empty argv", 1
@@ -546,6 +594,11 @@ def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int
         if arg.startswith("--"):
             if not any(arg.startswith(prefix) for prefix in ALLOWED_FLAGS_PREFIXES):
                 return "", f"EGeneral:Invalid argument — unallowed flag {arg}", 1
+    venue = CLI_BREAKER.venue(argv)
+    wait_s = CLI_BREAKER.remaining(venue)
+    if wait_s > 0:
+        return "", f"EGeneral:Temporary lockout — Kraken {venue} unreachable, retry in {wait_s:.0f}s", 124
+    started = time.monotonic()
     try:
         child_env = None
         if getattr(sys, "frozen", False):
@@ -565,10 +618,12 @@ def _subprocess_runner(argv: List[str], timeout_s: float) -> tuple[str, str, int
             timeout=max(timeout_s, 10),
             shell=False,
         )
+        CLI_BREAKER.record(venue, proc.returncode, time.monotonic() - started)
         return proc.stdout, proc.stderr, proc.returncode
     except FileNotFoundError:
         return "", f"EGeneral:Invalid arguments — binary {argv[0]!r} not found", 127
     except subprocess.TimeoutExpired:
+        CLI_BREAKER.record(venue, 124, time.monotonic() - started)
         return "", "EGeneral:Temporary lockout — CLI timeout", 124
 
 

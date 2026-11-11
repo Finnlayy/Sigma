@@ -332,3 +332,61 @@ def test_blueprint_knows_both_scraper_entrypoints():
     assert bp.SCRAPER_SIGMA_ENTRY == "uvicorn app.scraper.main:app"
     assert any(proc.name == "sigma-tv-scraper" and proc.port == bp.PORT_SCRAPER
                for proc in bp.PROCESSES)
+
+
+def test_ohlcv_is_served_from_live_stream_when_available(client, monkeypatch):
+    from app.scraper import main as sidecar
+
+    bars = [{"index": 0, "timestamp": 1700000000, "open": 1.0, "high": 2.0, "low": 0.5,
+             "close": 1.5, "volume": 7.0}]
+    seen = []
+
+    def live(exchange, ticker, timeframe, candles):
+        seen.append((exchange, ticker, timeframe, candles))
+        return bars
+
+    monkeypatch.setattr(sidecar.BRIDGE, "live_ohlcv", live)
+    body = client.get("/api/ohlcv/KRAKEN/BTCUSD", params={"timeframe": "1h", "candles": 1}).json()
+    assert body["source"] == "tv_scraper" and body["stream"] is True
+    assert body.get("degraded", False) is False
+    assert body["ohlc"] == bars and body["total"] == 1 and body["timeframe"] == "1h"
+    assert seen == [("KRAKEN", "BTCUSD", "1h", 1)]
+
+
+def test_offline_bridge_never_starts_live_streams():
+    bridge = VendorBridge(ScraperSettings(offline=True))
+    assert bridge.live_ohlcv("KRAKEN", "BTCUSD", "1m", 10) is None
+    assert bridge.streams.status()["count"] == 0
+
+
+def test_one_shot_ohlcv_collects_candles_without_writing_export_files():
+    exports = []
+
+    class FakeStreamer:
+        def __init__(self, export_result=False, export_type="json"):
+            self.export_result = export_result
+
+        def _export(self, **kwargs):
+            exports.append(kwargs)
+
+        def stream(self, exchange, symbol, timeframe, numb_price_candles):
+            assert self.export_result is True          # only this mode returns collected candles
+            rows = [{"timestamp": 1700000060, "open": 2, "high": 3, "low": 1, "close": 2.5, "volume": 4},
+                    {"timestamp": 1700000000, "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 3}]
+            self._export(json_data=rows, symbol=symbol, data_category="ohlc")
+            return {"ohlc": rows, "indicator": {}}
+
+    bridge = VendorBridge(ScraperSettings(offline=False, max_retries=0))
+    bridge._modules = {"Streamer": FakeStreamer}
+    rows = bridge.ohlcv("KRAKEN", "BTCUSD", "1m", 2)
+    assert [r["timestamp"] for r in rows] == [1700000000, 1700000060]
+    assert rows[1]["close"] == 2.5
+    assert exports == []
+
+
+def test_known_invalid_symbol_fails_fast_without_tripping_breaker(monkeypatch):
+    bridge = VendorBridge(ScraperSettings(offline=False, max_retries=2, breaker_failures=1))
+    monkeypatch.setattr(bridge.streams, "is_invalid", lambda ex, t: (ex, t) == ("KRAKEN", "XBTUSD"))
+    with pytest.raises(VendorUnavailable, match="KRAKEN:XBTUSD"):
+        bridge.ohlcv("kraken", "xbtusd", "1h", 10)
+    assert bridge.status()["calls"] == 0 and bridge.circuit_open is False

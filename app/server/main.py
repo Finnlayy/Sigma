@@ -857,7 +857,9 @@ class AppState:
             pair = symbol.replace("/", "")
             if fut and not pair.startswith(("PF_", "PI_")):
                 pair = f"PF_{pair}"
-            spread_bps = float(fetch_spread_bps(
+            # Kraken CLI subprocess: keep it off the event loop.
+            spread_bps = float(await asyncio.to_thread(
+                fetch_spread_bps,
                 getattr(self, "paper_futures_bridge", None) or self.kraken_cli,
                 pair, futures=fut, default_bps=3.0,
             ))
@@ -1227,7 +1229,8 @@ async def market_data():
 
 
 @app.get("/api/logs")
-async def logs():
+def logs():
+    # Sync on purpose (threadpool): _paper_balances shells out to the Kraken CLI.
     st = state
     strategies = st.store.list_strategies()
     # Orders only need the latest 80 closed rows. Metrics / balances /
@@ -1964,7 +1967,8 @@ async def pnl_daily(endpoint_id: str, days: int = Query(90, ge=1, le=3660), stra
 # KRAKEN LEDGERS / POSITIONS / SYMBOLS
 # =====================================================================
 @app.get("/api/kraken/ledgers")
-async def kraken_ledgers():
+def kraken_ledgers():
+    # Sync on purpose (threadpool): balances and positions shell out to the Kraken CLI.
     st = state
     balances = st.live_kraken_balances if st.config.live_trading else _paper_balances(st)
     prices = _pair_prices(st)
@@ -2139,7 +2143,9 @@ async def kraken_sync_balance():
 
 
 @app.get("/api/kraken/positions/pro")
-async def kraken_positions_pro():
+def kraken_positions_pro():
+    # Sync on purpose: FastAPI runs it in the threadpool. The Kraken CLI calls
+    # below block for up to the CLI timeout when Kraken Futures is unreachable.
     from app.execution.kraken_futures_positions_sot import fetch_futures_positions
     from app.execution.kraken_paper_sot import fetch_paper_capital
 

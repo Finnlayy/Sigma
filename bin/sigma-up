@@ -162,7 +162,7 @@ else
 fi
 
 wait_http "http://127.0.0.1:8001/" || log "warning: scraper not answering yet"
-wait_http "http://127.0.0.1:8000/api/v1/health" || die "core did not become healthy"
+wait_http "http://127.0.0.1:8000/api/v1/health" 360 || die "core did not become healthy"
 if [[ "$FOREGROUND_UI" -eq 1 ]] && ! port_listening 3000; then
   log "backend stack ready; starting UI in this terminal"
   exec "$ROOT/node_modules/.bin/vite" --open

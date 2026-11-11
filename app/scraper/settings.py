@@ -74,6 +74,8 @@ class ScraperSettings:
         default_factory=lambda: _env_bool("SIGMA_SCRAPER_SYNTHETIC_FALLBACK", True))
     mount_vendor_app: bool = field(default_factory=lambda: _env_bool("SIGMA_SCRAPER_MOUNT_VENDOR", True))
     max_candles: int = field(default_factory=lambda: _env_int("SIGMA_SCRAPER_MAX_CANDLES", 5000))
+    # Dauerhafte WebSocket pro (Exchange, Ticker, Timeframe) statt Abruf je Request.
+    live_stream: bool = field(default_factory=lambda: _env_bool("SIGMA_SCRAPER_LIVE_STREAM", True))
 
     @property
     def cors_origins(self) -> List[str]:
@@ -96,6 +98,7 @@ class ScraperSettings:
             "offline": self.offline,
             "allow_synthetic_fallback": self.allow_synthetic_fallback,
             "max_candles": self.max_candles,
+            "live_stream": self.live_stream,
         }
 
 
