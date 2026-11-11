@@ -1033,7 +1033,7 @@ export function LLMConsole() {
         ws.onmessage = (ev) => {
           try {
             const msg = LlmMsgSchema.parse(JSON.parse(ev.data));
-            if (msg.content_chunk) append(String(msg.content_chunk).trimEnd());
+            if (typeof msg.content_chunk === "string") append(msg.content_chunk.trimEnd());
             if (msg.tool_result)
               append(JSON.stringify(msg.tool_result).slice(0, 800));
             if (msg.is_complete) {

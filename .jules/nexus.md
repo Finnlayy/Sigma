@@ -33,3 +33,6 @@
 ## 2024-10-28 - [IPC/API Integration Insight]
 **Learning:** The LLM stream WebSocket handler was falling back to rendering raw string payloads when JSON parsing or schema validation failed, violating the fail-closed philosophy and risking UI corruption.
 **Action:** Removed the raw string fallback from the `catch` block in `src/components/sigma/panels.tsx`. Always explicitly drop malformed payloads and only log the error to `console.error`.
+## 2026-11-11 - [IPC/API Integration Insight]
+**Learning:** LLM WebSocket stream failed to fail-closed on corrupted payloads, casting missing/corrupted strings manually which causes invalid UI rendering.
+**Action:** Strict schema parse handles drop, but `append(String(msg.content_chunk).trimEnd())` masks `undefined` values as string. Remove manual casts and enforce strict check before append.
