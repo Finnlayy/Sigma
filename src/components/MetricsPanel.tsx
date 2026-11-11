@@ -592,10 +592,12 @@ export default function MetricsPanel({
           </div>
 
           {/* Queue Tab Selector */}
-          <div className="flex items-center space-x-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-[10px]">
+          <div role="tablist" aria-label="Queue Types" className="flex items-center space-x-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-[10px]">
             <button
+              role="tab"
+              aria-selected={selectedQueueTab === "paper"}
               onClick={() => setSelectedQueueTab("paper")}
-              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 ${
+              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:z-10 relative ${
                 selectedQueueTab === "paper"
                   ? "bg-amber-950 text-amber-300 border border-amber-800/60"
                   : "text-zinc-400 hover:text-zinc-200"
@@ -605,8 +607,10 @@ export default function MetricsPanel({
               <span>L2 Paper Queue</span>
             </button>
             <button
+              role="tab"
+              aria-selected={selectedQueueTab === "live"}
               onClick={() => setSelectedQueueTab("live")}
-              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 ${
+              className={`px-2.5 py-1 rounded font-bold transition-colors flex items-center space-x-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:z-10 relative ${
                 selectedQueueTab === "live"
                   ? "bg-rose-950 text-rose-300 border border-rose-800/60"
                   : "text-zinc-400 hover:text-zinc-200"
@@ -1037,10 +1041,12 @@ export default function MetricsPanel({
         </div>
 
         {/* Ledger Sub-Tab Toggle */}
-        <div className="flex bg-zinc-950 p-0.5 rounded border border-zinc-800 text-[10px] font-mono mb-3">
+        <div role="tablist" aria-label="Wallet Account Types" className="flex bg-zinc-950 p-0.5 rounded border border-zinc-800 text-[10px] font-mono mb-3">
           <button
+            role="tab"
+            aria-selected={walletTab === "spot"}
             onClick={() => setWalletTab("spot")}
-            className={`flex-1 py-1 rounded transition-colors font-semibold flex items-center justify-center space-x-1 ${
+            className={`flex-1 py-1 rounded transition-colors font-semibold flex items-center justify-center space-x-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:z-10 relative ${
               walletTab === "spot"
                 ? "bg-zinc-800 text-emerald-300 shadow-sm"
                 : "text-zinc-400 hover:text-zinc-200"
@@ -1050,8 +1056,10 @@ export default function MetricsPanel({
             <span>Spot Balances</span>
           </button>
           <button
+            role="tab"
+            aria-selected={walletTab === "pro"}
             onClick={() => setWalletTab("pro")}
-            className={`flex-1 py-1 rounded transition-colors font-semibold flex items-center justify-center space-x-1 ${
+            className={`flex-1 py-1 rounded transition-colors font-semibold flex items-center justify-center space-x-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:z-10 relative ${
               walletTab === "pro"
                 ? "bg-zinc-800 text-purple-300 shadow-sm"
                 : "text-zinc-400 hover:text-zinc-200"
