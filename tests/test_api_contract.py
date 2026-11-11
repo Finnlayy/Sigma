@@ -476,9 +476,10 @@ def test_tv_library_list_and_import_is_idempotent_paper(client):
         tvlib.set_tv_library_driver_factory(None)
 
 
-def test_sync_balance_without_keys_is_empty(client, monkeypatch):
+def test_sync_balance_without_keys_is_empty(client, monkeypatch, tmp_path):
     monkeypatch.delenv("KRAKEN_API_KEY", raising=False)
     monkeypatch.delenv("KRAKEN_API_SECRET", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     import app.server.main as main
 
     main.state.has_credentials = True
